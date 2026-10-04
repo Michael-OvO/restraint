@@ -1,0 +1,45 @@
+[project]
+name = "honest-agents"
+version = "0.1.0"
+description = "RL training for agentic abstention and truthful completion reports (Harbor + TRL + OpenEnv)"
+readme = "README.md"
+authors = [
+    { name = "Michael.Wang", email = "keke060114@163.com" }
+]
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "harbor==0.23.0",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+train = [
+    "accelerate>=1.15.0",
+    "datasets>=5.0.1",
+    "deepspeed>=0.19.7 ; sys_platform == 'linux'",
+    "peft==0.21.2",
+    "trl==1.14.1",
+    "vllm==0.30.0 ; sys_platform == 'linux'",
+]
+openenv = [
+    "openenv==0.7.0",
+]
+eval = [
+    "openai>=1.60",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.uv]
+# openenv 0.7.0 (fastmcp/mcp>=1.24) and vllm 0.30.0 pin incompatible `mcp` versions. The OpenEnv server ships in its
+# own container, so the two extras never need to share an environment.
+conflicts = [[{ extra = "train" }, { extra = "openenv" }]]
