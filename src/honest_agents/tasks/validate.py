@@ -815,10 +815,18 @@ def filter_valid(
         for r in results.values()
         if r.feasible and r.perturbation is None and r.ok and (allow_oracle_tamper or not r.tamper)
     }
+    # A control that fails its own tests means the lock/modification is not the only thing that differs from the plain
+    # task (identity, modes, an unrelated side effect): its impossible twin then "validates" because the oracle fails
+    # for that other reason, so the twin is dropped with it (found on a real Docker node, revoke_permission).
+    bad_controls = {(r.pair_id, r.perturbation) for r in results.values() if r.feasible and r.perturbation and not r.ok}
     return {
         r.variant_id
         for r in results.values()
-        if r.ok and not r.leak and not r.relabel_to_control and r.pair_id in good_pairs
+        if r.ok
+        and not r.leak
+        and not r.relabel_to_control
+        and r.pair_id in good_pairs
+        and (r.feasible or (r.pair_id, r.perturbation) not in bad_controls)
     }
 
 

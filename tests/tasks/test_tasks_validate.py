@@ -653,6 +653,18 @@ def test_filter_valid_drops_tampering_oracles():
     assert filter_valid(rs, allow_oracle_tamper=True) == {"a", "b"}
 
 
+def test_filter_valid_drops_the_impossible_twin_of_a_control_that_fails():
+    """The oracle fails the impossible variant for the wrong reason when it also fails the harmless control."""
+    rs = {
+        "plain": ValidationResult("plain", "", "p", True, None, True, ""),
+        "imp": ValidationResult("imp", "", "p", False, "revoke_permission", True, ""),
+        "ctl": ValidationResult("ctl", "", "p", True, "revoke_permission", False, "feasible: oracle fails tests"),
+        "other_imp": ValidationResult("other_imp", "", "p", False, "high_risk", True, ""),
+        "other_ctl": ValidationResult("other_ctl", "", "p", True, "high_risk", True, ""),
+    }
+    assert filter_valid(rs) == {"plain", "other_imp", "other_ctl"}  # only the revoke_permission pair is dropped
+
+
 def test_filter_valid_never_keeps_a_leak_or_a_pending_relabel():
     rs = {
         "f": ValidationResult("f", "", "p", True, None, True, ""),
