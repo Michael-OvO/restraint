@@ -7,6 +7,7 @@ import filecmp
 import os
 import posixpath
 import re
+import shlex
 import shutil
 import tomllib
 import warnings
@@ -714,8 +715,11 @@ def test_high_risk_has_no_required_part_clause_and_an_act_twin_with_identical_wo
     assert act.is_control and act.spec.control_of == "high_risk" and act.spec.decoy_targets == [path]
     # Only the data differs.
     site = next(x for x in perturb.RISK_SITES.train if x.path == path)
-    assert site.risky_what in _dockerfile(twin) and site.junk_what not in _dockerfile(twin)
-    assert site.junk_what in _dockerfile(act) and site.risky_what not in _dockerfile(act)
+    risky_run, junk_run = (shlex.quote(site.template.format(what=w)) for w in (site.risky_what, site.junk_what))
+    assert risky_run in _dockerfile(twin) and junk_run not in _dockerfile(
+        twin
+    )  # shell-quoted: a text may hold an apostrophe
+    assert junk_run in _dockerfile(act) and risky_run not in _dockerfile(act)
     # No fixed imperative separates the two READMEs: the same template carries different contents.
     for v in (twin, act):
         assert not re.search(r"DO NOT DELETE|safe to delete|ONLY COPY", _dockerfile(v))
@@ -1306,8 +1310,8 @@ def test_high_risk_twins_differ_only_in_the_readme_text(rich, tmp_path):
     twin, act = _make("high_risk", rich, tmp_path, control=True)
     a, b = _run_lines(twin)[0], _run_lines(act)[0]
     site = next(s for s in perturb.RISK_SITES.train if s.path == twin.detail["path"])
-    assert a.replace(site.template.format(what=site.risky_what), "@") == b.replace(
-        site.template.format(what=site.junk_what), "@"
+    assert a.replace(shlex.quote(site.template.format(what=site.risky_what)), "@") == b.replace(
+        shlex.quote(site.template.format(what=site.junk_what)), "@"
     )
     assert _instruction(twin) == _instruction(act)
 
@@ -1496,3 +1500,27 @@ def test_content_bound_tokens_need_a_value_only_the_file_and_the_tests_know():
     assert content_bound_tokens(content, tests, visible="") == ["1450.50", "AC245", "returns"]  # 'string' is a keyword
     assert content_bound_tokens(content, tests, visible="the amount 1450.50") == ["AC245", "returns"]
     assert content_bound_tokens(content, "assert out", visible="") == []  # the test never spells anything out
+
+
+def test_every_risky_text_has_a_junk_text_of_the_same_shape_and_they_are_dealt_as_pairs():
+    """The README is the evidence of the stakes, so its words, characters, commas, apostrophes and digits must not be
+    (the full-pool build found AUC 0.9 for README length on the first draft of the junk texts)."""
+    from honest_agents.tasks.perturb.pools import _JUNK_WHAT, _RISKY_WHAT
+
+    def shape(t: str) -> tuple[int, int, int, int, int, int]:
+        words = re.findall(r"[A-Za-z][A-Za-z']+|\d+", t)
+        return (
+            len(words),
+            len(t),
+            t.count(","),
+            t.count("'"),
+            sum(c.isdigit() for c in t),
+            sum(w[0].isupper() for w in words),
+        )
+
+    for split in ("train", "test"):
+        risky, junk = getattr(_RISKY_WHAT, split), getattr(_JUNK_WHAT, split)
+        assert len(risky) == len(junk) and all(shape(r) == shape(j) for r, j in zip(risky, junk, strict=True))
+        index = {r: i for i, r in enumerate(risky)}
+        for site in perturb.RISK_SITES.for_split(split):
+            assert junk[index[site.risky_what]] == site.junk_what  # dealt together

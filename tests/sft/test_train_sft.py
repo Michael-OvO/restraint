@@ -25,6 +25,7 @@ def synthetic_bank(tmp_path: Path, variants: int = 24) -> Path:
                     passed=passed,
                     original={"status": "complete" if (i + j) % 3 else "incomplete"},
                     turns=[("ls", "in.txt")] if passed else NOT_FOUND,
+                    feasible=passed,  # a failed run on a feasible task has no blocker to name (hindsight withholds it)
                 )
             )
     return bank_dir(tmp_path, rows)

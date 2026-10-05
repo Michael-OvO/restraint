@@ -18,8 +18,10 @@ docs/design.md section 7 adds three stricter readings, all static:
 from honest_agents.tasks.analysis.boot import boot_dirs, exists_at_boot, oracle_touches, paths_overlap
 from honest_agents.tasks.analysis.cues import (
     DONOR_GROUPS,
+    ENFORCED_ENV_TEXT,
     ENFORCED_FEATURES,
     ExistenceLeakError,
+    attach_env_text,
     auc_score,
     best_rule_accuracy,
     check_existence,
@@ -29,19 +31,28 @@ from honest_agents.tasks.analysis.cues import (
     existence_check,
     existence_rows,
     existence_violations,
+    name_token_frac,
     name_tokens,
     subject_features,
+)
+from honest_agents.tasks.analysis.envtext import (
+    CARRIER_CHANNELS,
+    appended_text,
+    env_text_classifiers,
+    environment_text,
 )
 from honest_agents.tasks.analysis.facts import TaskFacts, build_inputs
 from honest_agents.tasks.analysis.filters import (
     content_bound_tokens,
     content_shape,
     example_paths,
+    guessable_tokens,
     has_scope_clause,
     is_dir_like,
     is_link_only,
     is_pass_through,
     operand_commands,
+    plausible_recreation,
     safe_boundaries,
     symlink_targets,
     token_overlap,
@@ -80,8 +91,10 @@ from honest_agents.tasks.analysis.script import (
 from honest_agents.tasks.analysis.tables import ESSENTIAL_BINARIES, SYSTEM_DIRS
 
 __all__ = [
+    "CARRIER_CHANNELS",
     "CONTENT_KINDS",
     "DONOR_GROUPS",
+    "ENFORCED_ENV_TEXT",
     "ENFORCED_FEATURES",
     "ESSENTIAL_BINARIES",
     "FILE_COPIED",
@@ -95,6 +108,8 @@ __all__ = [
     "TaskFacts",
     "analyse_dockerfile",
     "analyse_script",
+    "appended_text",
+    "attach_env_text",
     "auc_score",
     "best_rule_accuracy",
     "boot_dirs",
@@ -104,6 +119,8 @@ __all__ = [
     "content_shape",
     "cue_classifiers",
     "donor_group",
+    "env_text_classifiers",
+    "environment_text",
     "example_paths",
     "existence_auc",
     "existence_check",
@@ -111,6 +128,7 @@ __all__ = [
     "existence_violations",
     "exists_at_boot",
     "extract_paths",
+    "guessable_tokens",
     "has_scope_clause",
     "image_files",
     "interpreter_can_substitute",
@@ -124,6 +142,7 @@ __all__ = [
     "mandates_tool",
     "mentions_as_tool",
     "mentions_word",
+    "name_token_frac",
     "name_tokens",
     "network_hosts",
     "network_targets",
@@ -131,6 +150,7 @@ __all__ = [
     "operand_commands",
     "oracle_touches",
     "paths_overlap",
+    "plausible_recreation",
     "safe_boundaries",
     "strip_heredoc_bodies",
     "subject_features",

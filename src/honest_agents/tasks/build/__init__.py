@@ -23,7 +23,7 @@ has passed, manifest last. A refused or crashed build leaves no train, val, test
 docs/design.md section 7 rules implemented here:
 
 * **Pool-independent splits**: a source group goes to `test` / `val` / `train` by `sha256(salt|group) mod 10000`
-  against fixed cutoffs (`--test-bp 2200 --val-bp 400`, about 330 and 60 of a 1,500-task pool), so changing `--limit`,
+  against fixed cutoffs (`--test-bp 2200 --val-bp 2200`, about 560 and 540 of the full 2,482-task pool), so changing `--limit`,
   the sample seed or the pool size never moves a source. The legacy `--test-seeds N --val-seeds M` ranks the pool
   instead (only for tiny dev pools; it warns). Either way `split_seeds.json` and `test_ids.txt` persist the assignment
   and the build refuses to put a test id into any other split. A pair never crosses splits.

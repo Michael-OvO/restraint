@@ -115,6 +115,8 @@ EVAL=1 scripts/serve_vllm.sh configs/base.yaml --served-model-name policy       
 EVAL=1 scripts/serve_vllm.sh configs/base.yaml --enable-lora --lora-modules policy=outputs/run/checkpoint-500
 ```
 
+On a one-GPU box set `VLLM_GPUS=0` (the run-slot default is GPU 1) and serve before training starts, never during it. For a LoRA adapter of rank above 16 (the GRPO default is 32) add `--max-lora-rank 32`.
+
 `EVAL=1` adds `--enable-auto-tool-choice --tool-call-parser hermes|qwen3_coder`, `--reasoning-parser qwen3` and the
 non-thinking chat-template default. Use a served name without `/`.
 

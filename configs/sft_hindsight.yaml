@@ -35,7 +35,7 @@ data:
     drop_unseen_actions: true
 
 hindsight:                           # honest_agents.sft.hindsight.HindsightOptions
-  confidence: calibrated             # calibrated | omit. calibrated = held-out pass rate of the agent's original claim type
+  confidence: calibrated             # calibrated = held-out pass rate of the original claim type | neutral = 0.5 (tools require it)
   bin_width: 0.1
   min_bucket: 20
   clip: 0.05

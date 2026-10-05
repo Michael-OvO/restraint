@@ -2,74 +2,135 @@
 
 The first paid step, from the spending gate in [roadmap.md](roadmap.md). Everything that exists was tested on macOS with fakes;
 this runbook is the list of things only a Linux node with Docker (and for some, a GPU) can show, ordered by how likely each is to be
-wrong times how much money it wastes if it is. If an early item fails, stop: nothing after it means anything.
+wrong times how much money it wastes if it is. If an early step fails, stop: nothing after it means anything. Every command below was
+checked on the Mac only as far as it can run there (`tests/test_scripts.py` keeps the scripts, configs, modules, flags and links in this
+file honest); the GPU and Docker behaviour is unverified.
 
-Estimated cost of the whole stage: $300 to 500 (estimates, plus or minus a factor of three, until step time is measured). Continue
-to Stage 2 only if the gates in section 4 pass.
+Rough cost of the whole stage: **$200 to 400**, and that is an estimate with a factor of three either way ($70 to 1,200): step time and
+episode count are unmeasured. Basis: about 40 to 60 H100-hours at $2.5 to 3.5 (Phase 0 colocated and the pass@8 rollouts dominate), a few
+CPU-box hours, plus 30 to 50% for bring-up and reruns. Continue to Stage 2 only if the gates in section 4 pass.
 
-## 1. Split the rental
+## 1. Where each step runs
 
-Most of the risk is Docker-only, not GPU, so check it on the cheapest box first.
+| Step | Where | Why |
+|---|---|---|
+| Unit tests, dataset build without validation, SFT dry run, every `--dry-run` and `--print-limits` | this Mac | no Docker, no GPU |
+| Optional Docker smoke on the Mac | Colima or OrbStack (not installed; below) | finds path and compose mistakes early, proves nothing about x86 |
+| **Authoritative Docker checks** (`pytest -m docker`, audit set, oracle validation at scale) | the rented single H100 box (x86, Docker daemon, nftables) | same architecture as the task images |
+| Weight-sync check, base evaluation, Phase 0, SFT, short GRPO | the same H100 box, one GPU, colocated config | one rental, nothing idle |
 
-1. **A Docker host without a GPU** (a CPU VM with a real daemon, docker compose v2 and an nftables-capable kernel; not a container
-   pod, which has no daemon): section 3, checks 1, 3, 8, 12, 13 and the audit set. Cheap, and it can retire the biggest risk.
-2. **One H100 VM with Docker**: the weight-sync check, the smoke test, the base-model inference runs and the SFT stage (one training GPU,
-   no vLLM). The server layout needs two GPUs per run; with one GPU use `configs/colocate_1gpu.yaml` (vLLM inside the training process;
-   slower, tighter memory, startup probe off; never run, so Phase 0 on it is unverified).
-3. **A 4xH100 VM** (two run slots, see [design.md](design.md) section 8) only for Phase 0 at the real layout and for Stages 3 and 4.
+Rent one x86 VM with one H100 and a real Docker daemon (not a container pod). A 4xH100 VM is for Stages 2 to 4 only
+([design.md](design.md) section 8 describes the two run slots).
+
+**Optional local Docker on the Mac.** Not needed for Stage 1 and not installed by any script. If wanted: install Colima
+(`brew install colima docker docker-compose`) or OrbStack, then `colima start --arch aarch64 --cpu 8 --memory 16` and
+`export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` (OrbStack sets its own socket), and run
+`env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval pytest -m docker -k "not gpu"`. Arm64 caveats: the containers are
+`linux/arm64`, so an image or wheel that is x86 only fails or needs `DOCKER_DEFAULT_PLATFORM=linux/amd64` (emulated: slow, timing and
+timeout results meaningless); the nftables egress sidecar and the `/proc` and pids-limit checks depend on the VM kernel, which differs
+from the rented box's; Harbor's kernel probe may disable egress control silently. A pass here is a hint, a fail is worth reading, and
+neither replaces the checks on the H100 box.
 
 ## 2. Commands
 
-On a fresh Ubuntu VM:
+`R` is `env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval`; the scripts add it themselves. On the fresh VM:
 
 ```bash
 git clone <repo> && cd restraint            # or rsync this tree
-scripts/setup_node.sh --install-docker      # uv, Docker, nftables check, builds the verifier bundle; --pull-images DIR prebuilds images
+scripts/setup_node.sh --install-docker      # uv, Docker, nftables check, model weights, verifier bundle; --pull-images DIR prebuilds images
 uv pip install flash-linear-attention       # NOT done by setup_node.sh (it only warns). Qwen3.5 is ~20x slower without it. Not in uv.lock
 scripts/probe_node.sh                       # GPUs, Docker, compose v2, Harbor egress-control kernel support, capacity; fails loudly
-uv run pytest -m docker                     # the 21 tests marked docker or gpu; the docker ones are the first checklist
-
-# (a) Audit dataset, validated through our own environment code path. Docker only, no GPU.
-scripts/fetch_benchmarks.sh benchmarks
-VALIDATE=1 scripts/build_audit_set.sh data/audit
-#     Read data/audit/sheets/*.md, type ok|wrong|unsure on each "Verdict:" line, then:
-scripts/build_audit_set.sh --tally data/audit       # stop if variants are wrong or controls leak
-
-# (b) Weight sync with a non-zero adapter, before anything that learns
-scripts/sync_check.sh configs/qwen35_4b.yaml        # exit 0 = pass; writes outputs/sync_check/*.json
-scripts/sync_check.sh configs/qwen35_4b.yaml -- --tiny-adapter   # the second pass; may legitimately fail at lr 1e-5
-
-# (c) End-to-end smoke: 2 tasks of different length, 2 generations, 2 optimiser steps, a probe after step 1
-scripts/smoke_test.sh --train data/audit/tasks/<variant_a> --train data/audit/tasks/<variant_b> \
-    --val data/audit/tasks/<variant_c> --config configs/qwen35_4b.yaml
-
-# (d) Phase 0: the real trainer at learning rate 0 for 24 rounds; writes the trajectory bank and prints the gates
-scripts/phase0.sh configs/phase0_zero_lr.yaml model.name=Qwen/Qwen3.5-4B model.family=qwen3_5 \
-    data.train_file=data/audit/train.jsonl
-#     outputs/phase0/<run>/phase0_summary.json: gates, timing/*, trainer_decision_10_3, pool.work_vs_quit_gap, pool.safe_alphas.
-#     Exit 1 if a gate fails or was not measured.
-
-# (e) Base against allenai/tmax-4b on a held-out split (inference only; needs the full dataset's test split)
-VALIDATE=1 LIMIT=300 scripts/build_dataset.sh data
-scripts/h1_tmax_check.sh data/test.jsonl runs/h1_tmax
-
-# (f) Base-model honesty under our harness and a stock harness; needs the policy served
-EVAL=1 scripts/serve_vllm.sh configs/qwen35_4b.yaml --served-model-name policy &
-AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh data/test.jsonl runs/harbor
-MODEL=policy scripts/eval_heldout.sh data/test.jsonl runs/eval/base --n-samples 4 --concurrency 32 --train-config configs/qwen35_4b.yaml
+env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval pytest -m docker   # the docker-marked tests are the first checklist
 ```
 
-Order: do (a) and (b) first; neither needs a full training run and either failing makes (d) pointless. Phase 0 runs Qwen3-4B unless
-`model.name` and `model.family` are passed (the config inherits Qwen3-4B from `base.yaml`; the headline model is Qwen3.5-4B). If
-(d)'s importance ratio is not within 1% of 1, stop and read `sampling/*` before anything else.
-
-Before Stage 3, run the dedicated pass@8 measurement over the whole pool, because 24 steps of 8 prompts see only about 190 prompts of a
-roughly 1,100-seed train pool (the difficulty gate would see about 17%):
+**Step 1: Docker-only checks, no GPU used (stop here if any fails).**
 
 ```bash
-MODEL=policy scripts/eval_heldout.sh data/train_pool.jsonl runs/passk --n-samples 8 --bank-dir runs/passk/bank --train-config configs/base.yaml
-python -m honest_agents.tasks.difficulty --bank runs/passk/bank --out difficulty.json
+scripts/fetch_benchmarks.sh benchmarks                  # decontamination texts (TB2, TBLite, Agentic Abstention, AgentAbstain); the build refuses to run without them
+VALIDATE=1 scripts/build_audit_set.sh data/audit        # 20-30 sources, oracle-validated through our own environment code path
+#   Read data/audit/sheets/*.md, type ok|wrong|unsure on each "Verdict:" line, then:
+scripts/build_audit_set.sh --tally data/audit           # stop if variants are wrong or controls leak
+VALIDATE=1 scripts/build_dataset.sh data     # the full dataset, every variant oracle-validated (hours of CPU; gate: at least 95% validate as labelled)
 ```
+
+**Step 2: weight sync.** `scripts/sync_check.sh` runs a vLLM server and the trainer as two processes that exchange weights over NCCL, so
+they need two GPUs; NCCL refuses two ranks on one device. On a single H100 it cannot run as written, and the colocated engine's in-process
+sync is a different path that `sync_check.py` does not cover (change request in the roadmap). Until that exists, do the sync check on a
+2-GPU H100 VM for about an hour (a few dollars), before the first GRPO run (step 8), not before Phase 0:
+
+```bash
+scripts/sync_check.sh configs/qwen35_4b.yaml                      # exit 0 = pass; writes outputs/sync_check/*.json
+scripts/sync_check.sh configs/qwen35_4b.yaml -- --tiny-adapter    # the second pass; may legitimately fail at lr 1e-5
+```
+
+**Step 3: end-to-end smoke on one GPU.** `scripts/smoke_test.sh` also starts a vLLM server on the slot's second GPU, so on one GPU run
+the same trainer path as a two-round Phase 0 (a probe of the real model, template, tool-call parsing and sandbox loop; gates are not
+measured, so the exit status is 1 by design). On the 2-GPU VM of step 2 the full smoke can run instead:
+
+```bash
+scripts/phase0.sh configs/phase0_colocate.yaml model.name=Qwen/Qwen3.5-4B model.family=qwen3_5 grpo.max_steps=2 output_root=outputs/smoke_phase0
+scripts/smoke_test.sh --train data/audit/tasks/<variant_a> --train data/audit/tasks/<variant_b> \
+    --val data/audit/tasks/<variant_c> --config configs/qwen35_4b.yaml     # 2 GPUs only
+```
+
+**Step 4: base evaluation (inference only).** One GPU serves the policy while the sandboxes run on the CPU; stop the server (whole process group) before
+training. `VLLM_GPUS=0` is required on a one-GPU box (the slot default is GPU 1):
+
+```bash
+VLLM_GPUS=0 EVAL=1 setsid scripts/serve_vllm.sh configs/qwen35_4b.yaml --served-model-name policy > outputs/serve_base.log 2>&1 &
+SERVER=$!; until curl -sf localhost:8000/health >/dev/null; do sleep 5; done   # the evals do not wait for the server
+MODEL=policy scripts/eval_heldout.sh data/test.jsonl runs/eval/base --n-samples 4 --concurrency 32 \
+    --train-config configs/qwen35_4b.yaml --bank-dir runs/bank/eval_base
+#   runs/eval/base/metrics.json: abstain_recall, near_miss_false_refusal_rate (reported numbers, see section 4), report rate, task success
+AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh data/test.jsonl runs/harbor     # the same under a stock harness
+kill -TERM -- -$SERVER; sleep 20; nvidia-smi --query-gpu=memory.used --format=csv   # stop the server and its children; the GPU must be empty before training
+```
+
+Optional, only if the H1 direction check is wanted (two more inference runs): `scripts/h1_tmax_check.sh data/test.jsonl runs/h1_tmax`.
+
+**Step 5: Phase 0** (the real trainer at learning rate 0 for 24 rounds, one GPU, vLLM colocated; writes the trajectory bank and prints the
+gates). `configs/phase0_colocate.yaml` is `phase0_zero_lr.yaml` with the colocated engine; the headline model is passed explicitly:
+
+```bash
+scripts/phase0.sh configs/phase0_colocate.yaml model.name=Qwen/Qwen3.5-4B model.family=qwen3_5
+#   outputs/phase0/<run>/phase0_summary.json: gates, timing/*, trainer_decision_10_3, pool.mean_pass_rate_feasible, pool.work_vs_quit_gap,
+#   pool.safe_alphas. Exit 1 if a gate fails or was not measured. With 4 GPUs: configs/phase0_zero_lr.yaml (server layout) instead.
+```
+
+If the importance ratio is not within 1% of 1, stop and read `sampling/*` before anything else. Phase 0 sees only about 190 prompts of the
+roughly 1,100-seed train pool; the pool-wide pass@8 measurement (step 6) is what feeds best-of-N and the difficulty gate.
+
+**Step 6: banks for the supervised stages.** The hindsight stage reads the Phase 0 bank; best-of-N needs several rollouts per variant:
+
+```bash
+VLLM_GPUS=0 EVAL=1 setsid scripts/serve_vllm.sh configs/qwen35_4b.yaml --served-model-name policy > outputs/serve_base.log 2>&1 &
+SERVER=$!; until curl -sf localhost:8000/health >/dev/null; do sleep 5; done   # the evals do not wait for the server
+MODEL=policy scripts/eval_heldout.sh data/train_pool.jsonl runs/passk --n-samples 8 --bank-dir runs/passk/bank --train-config configs/qwen35_4b.yaml
+kill -TERM -- -$SERVER; sleep 20; nvidia-smi --query-gpu=memory.used --format=csv   # the GPU must be empty before training
+env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.tasks.difficulty --bank runs/passk/bank --out difficulty.json
+```
+
+**Step 7: hindsight SFT, then best-of-N** (one training GPU, no vLLM). Dry-run each first and read `<output_dir>/examples.jsonl` by eye:
+labels and rewritten reports are verified before any GPU time. The sft configs default to `outputs/phase0/bank`, which does not exist
+(Phase 0 writes `outputs/phase0/<run>/bank`), so pass the bank:
+
+```bash
+DRY_RUN=1 scripts/run_sft.sh configs/sft_hindsight.yaml data.bank=outputs/phase0/<run>/bank
+scripts/run_sft.sh configs/sft_hindsight.yaml data.bank=outputs/phase0/<run>/bank
+DRY_RUN=1 scripts/run_sft.sh configs/sft_bestofn.yaml data.bank=runs/passk/bank
+scripts/run_sft.sh configs/sft_bestofn.yaml data.bank=runs/passk/bank
+```
+
+Evaluate each adapter exactly as in step 4 (the evaluation gate, section 4; start and stop the server the same way): serve with
+`VLLM_GPUS=0 EVAL=1 setsid scripts/serve_vllm.sh configs/qwen35_4b.yaml --enable-lora --lora-modules policy=outputs/sft/<run>/final`
+(add `--max-lora-rank 32` for a GRPO adapter; the SFT adapter has rank 16), then `eval_heldout.sh` to `runs/eval/sft_hindsight` and
+`runs/eval/sft_bestofn`, and compare with `python -m honest_agents.eval.run_eval --compare runs/eval/base runs/eval/sft_hindsight runs/eval/sft_bestofn`.
+Sample a bank from the adapter and run `python -m honest_agents.sft.train_sft --spread <bank>` against the starting bank.
+
+**Step 8: one short GRPO run, only after the evaluation gate and the sync check.** Warm-started from the SFT adapter. The glue is not built
+(roadmap, "SFT, then GRPO"): until it exists this step cannot run, and a GRPO run from the base model is not a substitute. Shape once it
+exists: `scripts/run_slot.sh configs/honest_alpha0.25.yaml <colocate overrides> grpo.max_steps=50`, with `PHASE0_SUMMARY` pointing at
+step 5's summary so an unsafe alpha is refused (exit 4).
 
 ## 3. What to verify in Docker, ordered by risk
 
@@ -101,7 +162,7 @@ python -m honest_agents.tasks.difficulty --bank runs/passk/bank --out difficulty
    the oracle writes outside the handed-over workspace, `remove_tool` (no candidate on real seeds), Harbor allowlist enforcement for the
    `no_network` controls, the sticky-parent ancestor sealing, and the audit sheets (nobody has read them). The checks to run inside a
    container are in [data.md](data.md) section 6. Gate: at least 95% of variants validate as labelled; measure the real leak rate.
-9. **Phase 0 cannot measure the pool** (see the pass@8 run above).
+9. **Phase 0 cannot measure the pool** (see step 6, the pass@8 run).
 10. **Stock harnesses.** The report file reaching the artifacts directory, `terminus-2` trajectory files, `mini-swe-agent` reaching the endpoint
     from inside the container, and how well a 4B model follows `REPORT_FILE_INSTRUCTIONS`. Under a stock harness Harbor runs the task's own
     `test.sh`: no tamper, violation, evidence-replay or blocker verification. The `allenai/tmax-4b` serve flags are from its model card.
@@ -141,6 +202,22 @@ at under 5 points of verified-success loss; drop AgentAbstain even as a transfer
 
 Also measure here: the false-blame and decoy-blame rates (`honest/false_blame_rate`, `honest/control/decoy_blame_rate`) and the base-model
 honesty under our harness against a stock one (if they differ widely before any training, cross-harness claims need multi-harness training).
+
+**Reported numbers (not gates).** The owner reads these three before any training and nothing stops on them alone: the pool pass rate
+(`pool.mean_pass_rate_feasible` in `phase0_summary.json`), abstain recall (`abstain_recall`, and `abstain_strict_recall`) and the
+false-refusal rate on near-miss controls (`near_miss_false_refusal_rate`), both in `runs/eval/base/metrics.json` per family. A high base
+abstain recall with a low false-refusal rate means there is little to gain; the stop conditions above say what to do.
+
+**Evaluation gate before GRPO** (judgement values, fixed before the SFT runs; compare each SFT adapter with the base on `data/test.jsonl`
+under the same sampler): verified task success within 3 points of the base ([evaluation.md](evaluation.md) section 2), abstain recall
+up, near-miss false-refusal rate up by at most 5 points, report rate at least 70% and no-report share at most 5%, and the `--spread`
+reward spread not collapsed. If any fails, do not start GRPO: fix the SFT mixture (or stop). The decision is made on the test split only
+once; use `data/val.jsonl` while tuning.
+
+**Stop conditions, whole stage.** Stop and re-scope on: the verifier or the audit set failing in Docker (nothing trains); fewer than 95%
+of variants validating as labelled; a failed weight-sync check; Phase 0 importance ratio outside 1% or a failed gate; the three stop
+conditions above; an SFT adapter that fails the evaluation gate twice; or spend passing three times the estimate in the cost line at the
+top without a measured step time to justify more.
 
 Then Stage 2 is `scripts/run_pilot.sh configs/pilot.yaml` (use `SLOT=0 SHARD=0/2` and `SLOT=1 SHARD=1/2` for the two run slots), whose last
 line is `PILOT GO`, `PILOT NO-GO` or `PILOT INCONCLUSIVE`; run `scripts/sync_check.sh` first, because the pilot is the first run that learns.

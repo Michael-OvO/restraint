@@ -15,7 +15,7 @@ the regression and exploit tests exist and pass, and every config and script res
 | Environment, grader, hermetic verifier, budget | built, reviewed, not run in Docker | `env.py`, `grading.py`, `verifier/`, `harness.py` |
 | Data pipeline (hermetic conversion, operators with controls, validation, build, difficulty gate, audit) | built, reviewed, not run in Docker | `tasks/` |
 | `HonestGRPOTrainer`, entrypoint, configs, run scripts, stop rules, weight-sync check | built, GPU parts unverified | `trainer.py`, `train/`, `callbacks.py`, `sync_check.py`, `configs/`, `scripts/` |
-| Supervised stages (hindsight report SFT, best-of-N trajectory SFT) | built, CPU dry run only | `sft/`, `configs/sft_*.yaml`, `scripts/run_sft.sh` |
+| Supervised stages (hindsight report SFT, best-of-N trajectory SFT) | built, CPU dry run only; example labels (hindsight blockers and abstentions only on infeasible rows) must be read on a real bank, and best-of-N trains template-rendered calls rather than banked `completion_ids` | `sft/`, `configs/sft_*.yaml`, `scripts/run_sft.sh` |
 | Report-only pilot | built | `pilot/` |
 | Evaluation (held-out metrics, baselines, report-file protocol, external adapters) | built, external adapters unverified | `eval/` |
 | OpenEnv wrapper | built; its suite runs in a separate venv | `openenv_env/` |
@@ -33,9 +33,9 @@ to 3.5 per H100-hour; treat them as plus or minus a factor of three until Stage 
 | Stage | What | Cost | Continue only if |
 |---|---|---|---|
 | 0 | The fixes implemented and attacked locally (done) | $0 | all regression and exploit tests pass |
-| 1 | Node bring-up, audit dataset, zero-learning-rate run, base and Tmax inference ([node-runbook.md](node-runbook.md)) | about $300 to 500 | the Stage 1 gates below |
+| 1 | Docker checks and audit set on the rented H100 box, sync check, base evaluation, Phase 0, hindsight then best-of-N SFT, one short warm-started GRPO run ([node-runbook.md](node-runbook.md)) | about $200 to 400 (factor of three either way) | the Stage 1 gates and the evaluation gate below |
 | 2 | Report-only pilot on frozen trajectories | about $400 to 600 | claim rate moves with alpha and fabrication falls (`PILOT GO`) |
-| 2b | Optional: supervised stage on the Phase-0 bank (below) | not estimated; one GPU, hours | held-out entropy and reward spread survive (`--spread`) |
+| 2b | Part of Stage 1 now: supervised stage on the Phase-0 and pass@8 banks (below) | included above | evaluation gate and `--spread` |
 | 3 | Two short full runs: honest against outcome, same seeds and compute | about $300 to 600 | reporting improves and task success stays within the margin |
 | 4 | Seeds for both arms, then the alpha values the pilot supports | about $2 to 3k | |
 
@@ -65,12 +65,13 @@ a stop exits with status 3. Success is judged by the non-inferiority margin (3 p
 
 | Where | What | Needs |
 |---|---|---|
-| macOS (the dev machine) | all unit tests (`scripts/test.sh`), dataset build without validation, SFT and pilot dry runs, bank re-scoring, metric recomputation, the pilot stop-rule simulations, ruff | nothing |
-| A Docker host without a GPU | `pytest -m docker`, audit set and oracle validation, the container-level leak checks ([data.md](data.md) section 6), the OpenEnv image build | Linux, a real Docker daemon, compose v2, nftables |
-| One H100 VM with Docker | weight-sync check, smoke test, base-model inference runs (held-out, Tmax, stock harness), the SFT stage, and a Phase 0 on `configs/colocate_1gpu.yaml` if the server layout is not available (unverified) | the above plus one GPU |
-| 4xH100 VM with Docker | Phase 0 at the real layout, the pilot arms (one vLLM per arm), Stages 3 and 4 (two run slots) | 4 GPUs |
+| macOS (the dev machine) | all unit tests (`scripts/test.sh`), dataset build without validation, every `--dry-run`, SFT and pilot dry runs, bank re-scoring, metric recomputation, the pilot stop-rule simulations, ruff | nothing |
+| macOS, optional | a Docker smoke of `pytest -m docker` under Colima or OrbStack (arm64: a hint only; not installed, steps in [node-runbook.md](node-runbook.md) section 1) | a Docker daemon the owner installs |
+| **One rented H100 VM (x86) with Docker, authoritative** | `pytest -m docker`, audit set, oracle validation, container-level leak checks ([data.md](data.md) section 6); then, on its one GPU with the colocated config: base evaluation, Phase 0 (`configs/phase0_colocate.yaml`), pass@8 rollouts, both SFT stages, evaluation of the adapters, one short GRPO run | Linux, Docker daemon, compose v2, nftables, one GPU |
+| A 2-GPU VM, about an hour | weight-sync check and the full smoke test (they need a vLLM server on a second GPU; NCCL cannot pair two ranks on one device) | 2 GPUs |
+| 4xH100 VM with Docker | Phase 0 at the server layout, the pilot arms (one vLLM per arm), Stages 3 and 4 (two run slots) | 4 GPUs |
 
-Split the rental accordingly ([node-runbook.md](node-runbook.md) section 1): Docker-only risks come first and need no GPU.
+One rental first ([node-runbook.md](node-runbook.md) section 1): Docker-only risks come first and need no GPU, so check them before the GPU hours start.
 
 ## SFT, then GRPO
 
@@ -78,13 +79,13 @@ The plan the code supports (`sft/`, [design.md](design.md) section 9): a cheap s
 short GRPO run from its result. SFT on grader-verified honest trajectories is far cheaper than RL in the reference guide (1.5 to 6.5 hours
 against 32 to 46) and a baseline reviewers will expect.
 
-1. Phase 0 writes the bank (Stage 1). Run the pass@8 measurement over the whole pool for a bigger bank.
+1. Phase 0 writes the bank (Stage 1); the pass@8 run over the whole pool writes the bigger bank best-of-N needs. The sft configs default `data.bank` to `outputs/phase0/bank`, which Phase 0 does not write: pass `data.bank=outputs/phase0/<run>/bank`.
 2. `DRY_RUN=1 scripts/run_sft.sh configs/sft_hindsight.yaml` on the CPU, then read `<output_dir>/examples.jsonl`: the rewritten reports and
    labels are verified by eye before any GPU time (the gate: no paid training until labels are verified).
 3. Train: `scripts/run_sft.sh configs/sft_hindsight.yaml`, or `kind=combo` with `configs/sft_bestofn.yaml`.
 4. Sample a new bank with the SFT adapter and run `python -m honest_agents.sft.train_sft --spread <bank>`; compare with the starting bank. A
    collapsed spread means GRPO has nothing to learn from; stop.
-5. One short GRPO run from the SFT result.
+5. The evaluation gate of the node runbook (base against each adapter on the test split), then one short GRPO run from the SFT result.
 
 **Gap**: `train/` has no way to start from an adapter (`model.name` loads a base model, and `train_sft` saves a LoRA adapter to
 `<output_dir>/final`). Step 5 needs either a merge step that writes full weights and `model.name` pointing at them, or an `init_adapter`
@@ -95,17 +96,19 @@ option. Neither is written; do it before step 5, and re-run the weight-sync chec
 
 ### Local, no GPU
 - [ ] Owner decisions (below), in particular the held-out families and the dataset size.
-- [ ] The SFT warm-start glue (above) and its test.
+- [ ] The SFT warm-start glue (above) and its test; `sync_check.py` for the colocated engine (it needs a server and so a second GPU today); the sft configs' default `data.bank`.
 - [ ] Re-run the literature search before anything is written for submission (closest works so far: AWA-RL, PROVE, RefGRPO, Confessions,
   TruthRL, Bench2Robust, 2608.00301). Only abstracts were read for several of them.
 
-### Stage 1: node bring-up and measurement (about $300 to 500)
-Commands and checks: [node-runbook.md](node-runbook.md). In short: probe the node, `pytest -m docker`, audit set with hand review, sync check,
-smoke test, Phase 0 (step time by component, memory at the longest batch, report compliance, stop reasons, pass-count histogram, importance
-ratio, budget-exhaustion rate), the difficulty gate and the pool's pass rate and confidence AUROC (decides which alphas are safe),
-`work_vs_quit_gap` for lambda, inference-only baselines (base Qwen3.5-4B and `allenai/tmax-4b` on the held-out split for the H1 direction
-check, the neutral-prompt arm, the confidence-threshold sweep, base honesty under our and a stock harness, the base model on AgentAbstain's
-act side to see whether there is headroom).
+### Stage 1: one H100 box, in this order (about $200 to 400)
+Commands, gates and stop conditions: [node-runbook.md](node-runbook.md) (sections 2 and 4). Each step runs only if the previous one passed.
+- [ ] Docker: `pytest -m docker`, `scripts/fetch_benchmarks.sh`, audit set with hand review, full dataset with oracle validation (at least 95% validate).
+- [ ] Weight-sync check and smoke on a 2-GPU VM (a few dollars), or `sync_check.py` taught the colocated path (local list above).
+- [ ] Base evaluation on the test split (inference only): reported numbers are abstain recall and near-miss false-refusal rate, plus report rate, task success and the stock-harness run.
+- [ ] Phase 0 on `configs/phase0_colocate.yaml`: gates, step time by component, memory at the longest batch, pool pass rate (a reported number), importance ratio.
+- [ ] pass@8 rollouts over the train pool (the bank for best-of-N and the difficulty gate).
+- [ ] Hindsight SFT, then best-of-N SFT; evaluate each adapter against the base (the evaluation gate, runbook section 4).
+- [ ] One short GRPO run warm-started from the SFT adapter, only if the evaluation gate and the sync check passed and the warm-start glue exists.
 
 ### Stage 2: report-only pilot (about $400 to 600)
 - [ ] `scripts/sync_check.sh` with a non-zero adapter picks the sync mode.
@@ -143,12 +146,14 @@ needs a third GPU for the teacher (27B in bf16 is about 54 GB) and the two-runs-
 | Decision | Default now | Who |
 |---|---|---|
 | Held-out families | `conflicting_constraint` and `no_network` ([data.md](data.md) section 2); training sees high_risk, revoke_permission and remove_input | owner |
-| Dataset size | `LIMIT=1500` seeds: about 330 test and 60 val sources, the rest (about 1,100) train; a trade against test resolution | owner |
+| Dataset size | the whole pool: 2,482 seeds, 564 test, 536 val, 1,382 train source groups ([data.md](data.md) section 8); a trade against test resolution | owner |
 | `false_blame` | 0. At alpha 0 a false blame is then free; `min(0, alpha - 0.1)` recommended, not set | owner |
 | Group size | G=8 (4 to 64 times fewer episodes per step than any cited recipe). Decide after Stage 1 and the pilot | owner |
 | Headline model | Qwen3.5-4B after the smoke test; Qwen3-4B for bring-up | owner |
 | Checkpoint selection | validation task success alone (ignores honesty) | owner |
 | AgentAbstain judge budget (GPT-5.4) | needed only if the base model has headroom there | owner |
-| SFT stage | optional Stage 2b; warm-start glue not built | owner |
+| SFT stage | part of Stage 1, hindsight then best-of-N, evaluated before any GRPO; warm-start glue not built | owner |
+| Whether to train `no_network`, and whether to keep `conflicting_constraint` as a reported zero-shot family | `no_network` and `conflicting_constraint` stay held out and reported zero-shot with the construct-validity caveat | owner |
+| Validation split size (`VAL_BP`) | 2200 (536 val groups, 40 or more `remove_input` val rows); cutoffs and salt are not yet frozen, see [data.md](data.md) section 8. `probe.max_variants=100` samples only about 100 of the 974 val rows: raise it if the GPU cost is acceptable | owner |
 | Multi-harness honesty training | a later stage; needs TRL's `HarnessRolloutWorker` (on TRL main, not in 1.14.1) and an honesty reward that runs as a Harbor verifier | later |
 | GPU provider | a VM with Docker (not a container pod) | decided |

@@ -65,7 +65,7 @@ Details: [docs/data.md](docs/data.md).
 | Path | Purpose |
 |---|---|
 | `src/honest_agents/` | the package; every module is listed below |
-| `configs/` | training and SFT configs: `base`, `honest_alpha{0,0.1,0.25,0.4}`, `outcome`, `outcome_claimed`, `outcome_reflect`, `phase0_zero_lr`, `pilot`, `sft_hindsight`, `sft_bestofn`, `smoke`, `qwen35_4b`, `colocate_1gpu`, `accelerate/` |
+| `configs/` | training and SFT configs: `base`, `honest_alpha{0,0.1,0.25,0.4}`, `outcome`, `outcome_claimed`, `outcome_reflect`, `phase0_zero_lr`, `phase0_colocate`, `pilot`, `sft_hindsight`, `sft_bestofn`, `smoke`, `qwen35_4b`, `colocate_1gpu`, `accelerate/` |
 | `scripts/` | shell and Python entry points: node setup and probe, vLLM serving, run slots, sweeps, Phase 0, sync check, dataset build, evaluation, the test runner |
 | `tests/` | unit tests (fakes; no Docker or GPU) plus tests marked `docker` or `gpu`; `tests/sandbox_fakes.py` is the shared host-subprocess sandbox |
 | `docs/` | the documents above; `docs/archive/` holds the original proposal |
@@ -129,10 +129,14 @@ Check a run config without a GPU once a dataset exists: `python -m honest_agents
 
 ### Everything that costs money
 
-Not yet run. Follow the staged gate in [docs/roadmap.md](docs/roadmap.md) and the commands in [docs/node-runbook.md](docs/node-runbook.md):
-node setup and probe, `pytest -m docker`, the audit set, the weight-sync check, the smoke test, Phase 0 (`scripts/phase0.sh`), then the
+Not yet run. Follow the staged gate in [docs/roadmap.md](docs/roadmap.md) and the commands in [docs/node-runbook.md](docs/node-runbook.md).
+Stage 1 is one rented x86 H100 box with Docker: node setup and probe, `pytest -m docker`, the audit set, the base evaluation, Phase 0
+on one GPU (`scripts/phase0.sh configs/phase0_colocate.yaml`), then the supervised stages (`scripts/run_sft.sh`), each adapter evaluated
+against the base before one short GRPO run. The weight-sync check needs a second GPU (`scripts/sync_check.sh`). Later stages: the
 report-only pilot (`scripts/run_pilot.sh`), the paired runs (`scripts/run_pair.sh`) and the alpha sweep (`scripts/sweep_alpha.sh`).
-Evaluation commands are in [docs/evaluation.md](docs/evaluation.md).
+A local Docker daemon on the Mac (Colima or OrbStack) is optional and only a hint on arm64. Evaluation commands are in
+[docs/evaluation.md](docs/evaluation.md). `tests/test_scripts.py` keeps every command named in these documents runnable (scripts parse,
+configs dry-run, modules, flags and links exist).
 
 ## Licences of data sources
 

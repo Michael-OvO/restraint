@@ -4,12 +4,14 @@
 #   scripts/build_dataset.sh [OUT_DIR=data] [extra build args...]
 #
 # Env:
-#   LIMIT=1500           seed tasks sampled per source (empty = all). Splits are a fixed hash of the source id, so changing
+#   LIMIT=                seed tasks sampled per source (empty = all, the default: the whole pool builds in about 70 s and every
+#                        training family needs it for 40 validation rows; LIMIT=1500 samples). Splits are a fixed hash of the source id, so changing
 #                        LIMIT (or the pool) never moves a source between train, val and test.
 #   SOURCES="endless-terminals"   first dataset is Endless Terminals only, converted to the hermetic pytest verifier
 #   BENCH_DIR=benchmarks  eval benchmarks to deduplicate against: REQUIRED, the build fails without it. Run
 #                         scripts/fetch_benchmarks.sh first (pinned commits). I_KNOW_NO_BENCHMARK=1 skips it (tests only).
-#   TEST_BP=2200 VAL_BP=400   fixed split cutoffs in 1/10000 of the hash space (about 330 test and 60 val sources of 1,500)
+#   TEST_BP=2200 VAL_BP=2200  fixed split cutoffs in 1/10000 of the hash space (about 560 test and 540 val sources of the full
+#                         2,482-seed pool; they freeze with the salt at the first training run, docs/data.md section 6)
 #   TEST_SEEDS= VAL_SEEDS=    LEGACY: rank the current pool and hold out exactly this many (pool-dependent; dev only)
 #   SPLIT_SEEDS_FILE=     split_seeds.json of an earlier build (seed group -> split), reused when building into a fresh OUT
 #   TEST_IDS_FILE=        committed test_ids.txt (ids + sha256); default OUT/test_ids.txt. The build refuses any train,
@@ -36,11 +38,11 @@
 source "$(dirname "$0")/_common.sh"
 
 OUT="${1:-data}"; shift || true  # data/train.jsonl = configs/base.yaml data.train_file
-LIMIT="${LIMIT-1500}"
+LIMIT="${LIMIT-}"
 SOURCES="${SOURCES:-endless-terminals}"
 BENCH_DIR="${BENCH_DIR:-benchmarks}"
 TEST_BP="${TEST_BP:-2200}"
-VAL_BP="${VAL_BP:-400}"
+VAL_BP="${VAL_BP:-2200}"
 HELDOUT="${HELDOUT:-conflicting_constraint,no_network}"
 MIXTURE="${MIXTURE:-0.55,0.20,0.25}"
 VALIDATE="${VALIDATE:-auto}"

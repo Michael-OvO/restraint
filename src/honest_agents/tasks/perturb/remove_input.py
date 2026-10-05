@@ -12,6 +12,7 @@ from honest_agents.tasks.analysis import (
     TaskFacts,
     content_bound_tokens,
     content_shape,
+    guessable_tokens,
     is_ignored_path,
     is_link_only,
     is_pass_through,
@@ -46,7 +47,8 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
     and 4 lines, shares under half of its words with the instruction, is not a bare pointer or a symlink, and the
     oracle does more than move or copy it (the static form of the repair probe: recreate it empty, rerun the oracle).
     Last, the tests must depend on the file's content (`content_bound_tokens`): a value of it that they spell out and
-    that the instruction and the rest of the image do not show. Otherwise an agent can recreate a plausible file and
+    that the instruction and the rest of the image do not show, not even under another case, plural or number format
+    (`guessable_tokens`, the static plausible-recreation probe). Otherwise an agent can recreate a plausible file and
     pass, which makes the "impossible" label wrong (about a quarter of the variants before this rule).
     """
     written = set(facts.script.written)
@@ -83,8 +85,11 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
                 continue
             visible = "\n".join([facts.instruction, p, *(g.content or "" for q, g in files.items() if q != p)])
             py_tests = "\n".join(t.read_text(errors="replace") for t in facts.test_files)  # not test.sh's boilerplate
-            if not content_bound_tokens(f.content, py_tests, visible):
+            bound = content_bound_tokens(f.content, py_tests, visible)
+            if not bound:
                 continue  # the tests never depend on what the file held: a recreated file would pass
+            if len(guessable_tokens(bound, visible)) == len(bound):
+                continue  # every value they check can be rebuilt from the visible text (case, plural, a number's commas)
         out.append(p)
     return out
 

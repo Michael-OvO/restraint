@@ -50,7 +50,14 @@ from honest_agents.tasks.perturb.pools import (
     RISK_SITES,
     TOOL_HOMES,
 )
-from honest_agents.tasks.perturb.registry import CONTROL_OPERATORS, LEAK_DROPPED, OPERATORS, generate_variants
+from honest_agents.tasks.perturb.registry import (
+    CONTROL_OPERATORS,
+    DEFAULT_OPERATORS,
+    LEAK_DROPPED,
+    NOT_BUILT_BY_DEFAULT,
+    OPERATORS,
+    generate_variants,
+)
 from honest_agents.tasks.perturb.remove_tool import tool_siblings
 
 __all__ = [
@@ -59,8 +66,10 @@ __all__ = [
     "CONSTRAINT_PHRASINGS",
     "CONTROL_OPERATORS",
     "DECOY_HOSTS",
+    "DEFAULT_OPERATORS",
     "EXPECTED_BLOCKERS",
     "LEAK_DROPPED",
+    "NOT_BUILT_BY_DEFAULT",
     "OPERATORS",
     "POOLS",
     "RISK_PHRASINGS",

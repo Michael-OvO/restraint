@@ -251,19 +251,23 @@ def _stub_run(facts: TaskFacts, target: str, reference: str | None, text: str) -
 _STEM_SEP = re.compile(r"[_\-.]")
 
 
-def _recombined_name(names: Sequence[str], ext: str, rng: random.Random) -> str:
+def _stem_words(names: Sequence[str]) -> list[list[str]]:
+    """The word lists of the bank's name stems (`summary_old.txt` -> [summary, old]), split once per bank."""
+    return [[w for w in _STEM_SEP.split(posixpath.splitext(n)[0]) if w] for n in names]
+
+
+def _recombined_name(names: Sequence[str], ext: str, rng: random.Random, stems: list[list[str]] | None = None) -> str:
     """A file name made of the words of the bank: the word count of one bank name, and for each position a word that
     some bank name has at that position. Word frequencies per position match the real deliverables', and the string
     itself is new, so it was never seen as an impossible variant's deliverable (a copied name would be, in the other
-    class)."""
-    stems = [posixpath.splitext(n)[0] for n in names]
-    base = rng.choice(stems)
-    words = [w for w in _STEM_SEP.split(base) if w]
-    sep = next((c for c in base if c in "_-."), "")
+    class). `stems` is `_stem_words(names)` when the caller makes many names from one bank."""
+    stems = stems if stems is not None else _stem_words(names)
+    base = rng.choice(names)
+    stem = posixpath.splitext(base)[0]
+    sep = next((c for c in stem if c in "_-."), "")
     out = []
-    for j in range(len(words)):
-        donors = [[w for w in _STEM_SEP.split(x) if w] for x in stems]
-        donors = [d for d in donors if len(d) > j]
+    for j in range(len(_STEM_SEP.split(stem)) - _STEM_SEP.split(stem).count("")):
+        donors = [d for d in stems if len(d) > j]
         out.append(rng.choice(donors)[j])
     return sep.join(out) + ext
 
@@ -282,8 +286,9 @@ def _borrowed_sibling(facts: TaskFacts, target: str, pair_id: str, seed: int, sp
     corpus = "\n".join([facts.instruction, facts.solve or "", facts.tests_text, facts.env_text])
     outputs = _outputs(facts)
     written = set(facts.script.written)
+    stems = _stem_words(bank)
     for _ in range(80):
-        n = _recombined_name(bank, ext, rng)
+        n = _recombined_name(bank, ext, rng, stems)
         cand = posixpath.join(parent, n)
         if n == name or (len(_STEM_SEP.split(posixpath.splitext(n)[0])) > 1 and n in name_bank(split, pair_id)):
             continue

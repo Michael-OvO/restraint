@@ -45,6 +45,7 @@ from tests.tasks.synthetic import (
     RICH_SOLVE,
     RICH_TEST_PY,
     TASK_TOML,
+    plain_task,
     rich_task,
     write_task,
 )
@@ -157,6 +158,31 @@ def test_every_training_family_has_a_neutral_existence_cue(built):
     for fam, entry in cv.items():
         for name, e in entry.items():
             assert 0.4 <= e["auc"] <= 0.6, (fam, name, e)
+
+
+def test_the_planted_environment_text_of_every_training_family_is_neutral_except_its_carrier(built):
+    """Audit item 3: a twin and its control share one instruction, so the path-level gate is blind to the README, the lock
+    owner and mode and the planted files. The build classifies them (grouped CV, `analysis/envtext.py`): the README's
+    length and punctuation and every non-carrier channel must sit in [0.4, 0.6]; the carrier (what the README says, who owns
+    the lock) is the label itself and is reported, not gated."""
+    from honest_agents.tasks.analysis import CARRIER_CHANNELS, ENFORCED_ENV_TEXT
+
+    cue = json.loads((built / "manifest.json").read_text())["cue_metrics"]
+    seen = set()
+    for split in ("train", "val", "test"):
+        for fam in TRAINED:
+            cv = (cue[split].get(fam) or {}).get("cv", {})
+            for name, e in cv.items():
+                if name in ENFORCED_ENV_TEXT and min(e["n_infeasible"], e["n_control"]) >= 10:
+                    assert 0.4 <= e["auc"] <= 0.6, (split, fam, name, e)
+                    seen.add((fam, name))
+            for channel in CARRIER_CHANNELS[fam]:
+                if f"env:carrier_{channel}" in cv:
+                    seen.add((fam, f"carrier_{channel}"))
+    # the README of high_risk is judged by style, and the carriers of the other two are reported
+    assert {("high_risk", "env:style"), ("high_risk", "env:readme_words"), ("high_risk", "carrier_readme")} <= seen
+    assert ("revoke_permission", "carrier_lock") in seen
+    assert cue["test"]["high_risk"]["cv"]["env:carrier_readme"]["auc"] > 0.9  # the meaning of the README IS the label
 
 
 def test_held_out_families_have_their_cue_reported_not_enforced(built):
@@ -327,8 +353,13 @@ HELD_OUT_NAMES = tuple(sorted(HELDOUT))
 
 @pytest.mark.slow
 def test_the_held_out_families_follow_the_flag(tmp_path, pool):
+    """Behaviour change (audit item 4): training conflicting_constraint (held out only for no_network) is refused by the
+    enforced `name_token_frac` gate, whose AUC is 1.0 for the borrowed-name decoy; with the gate off the flag still works."""
+    with pytest.raises(ValueError, match="name_token_frac"):
+        _build(tmp_path / "refused", pool, "--heldout-families", "no_network")
+    assert not (tmp_path / "refused" / "manifest.json").exists()
     out = tmp_path / "data"
-    _build(out, pool, "--heldout-families", "no_network")
+    _build(out, pool, "--heldout-families", "no_network", "--no-enforce-cue-band")
     for name in ("train", "val", "train_pool"):
         assert all(r["family"] != "no_network" for r in _rows(out / f"{name}.jsonl"))
     assert {r["family"] for r in _rows(out / "train_pool.jsonl")} >= {"high_risk"}
@@ -437,16 +468,33 @@ def test_the_build_fails_on_an_empty_or_missing_benchmark_dir(tmp_path, pool):
             task_build.build(task_build.parse_args(_args(tmp_path, pool, "--benchmark-dir", str(bench))))
 
 
-def test_the_build_decontaminates_against_a_benchmark_text(tmp_path, pool):
+def test_the_build_decontaminates_against_a_benchmark_text(tmp_path):
+    seeds = _make_seeds(tmp_path / "seeds", 3)
+    plain_task(seeds / "other")  # a seed the benchmark does not contain
     bench = tmp_path / "bench" / "terminal-bench-2" / "t1"
     bench.mkdir(parents=True)
-    (bench / "instruction.md").write_text(RICH_INSTRUCTION)  # the same task text: every seed must be dropped
+    (bench / "instruction.md").write_text(RICH_INSTRUCTION)  # the same task text: every rich seed must be dropped
     manifest = task_build.build(
         task_build.parse_args(
-            [*_args(tmp_path, pool, "--benchmark-dir", str(tmp_path / "bench")), "--neardup-threshold", "0"]
+            [*_args(tmp_path, seeds, "--benchmark-dir", str(tmp_path / "bench")), "--neardup-threshold", "0"]
         )
     )
-    assert manifest["benchmark_overlap"]["checked"] and manifest["benchmark_overlap"]["n_dropped"] == N_SEEDS
+    assert manifest["benchmark_overlap"]["checked"] and manifest["benchmark_overlap"]["n_dropped"] == 3
+    assert manifest["n_seeds"] == 1
+
+
+def test_a_build_whose_seeds_are_all_benchmark_duplicates_fails_atomically(tmp_path, pool):
+    """Behaviour change (audit item 5): this used to write a manifest with `n_seeds: 0`; now no dataset file appears."""
+    bench = tmp_path / "bench" / "terminal-bench-2" / "t1"
+    bench.mkdir(parents=True)
+    (bench / "instruction.md").write_text(RICH_INSTRUCTION)
+    with pytest.raises(ValueError, match=rf"no seed tasks found.*{N_SEEDS} dropped as benchmark duplicates"):
+        task_build.build(
+            task_build.parse_args(
+                [*_args(tmp_path, pool, "--benchmark-dir", str(tmp_path / "bench")), "--neardup-threshold", "0"]
+            )
+        )
+    assert not (tmp_path / "data" / "manifest.json").exists() and not (tmp_path / "data" / "train.jsonl").exists()
 
 
 # ── 10. no insertion breaks a sentence or a list ─────────────────────────────────────────────────────────────────────

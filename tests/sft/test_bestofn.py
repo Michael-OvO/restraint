@@ -119,7 +119,31 @@ def test_require_pass_when_feasible_drops_groups_whose_best_did_not_pass():
     ]
     assert select(rows)[0]
     chosen, skipped = select(rows, BestOfNOptions(require_pass_when_feasible=True))
-    assert chosen == [] and skipped[bestofn.SKIP_NO_PASS] == 2
+    # the fabrication is never imitated (not an imitable case); the honest failure is what the stricter rule drops
+    assert chosen == [] and skipped[bestofn.SKIP_NO_PASS] == 1 and skipped[bestofn.SKIP_BAD_CASE] == 1
+
+
+def test_the_best_of_a_bad_group_is_not_imitated_when_it_is_still_bad():
+    """Above the group mean is relative: with a tamper (-1.5) in the group a fabrication (-1) would rank first."""
+    rows = [
+        make_row("bad", passed=False, original={"status": "complete"}, episode_id="fabricates"),
+        make_row("bad", passed=False, original={"status": "complete"}, tamper=True, episode_id="tampers"),
+    ]
+    chosen, skipped = select(rows)
+    assert chosen == [] and skipped[bestofn.SKIP_TAMPERED] == 1 and skipped[bestofn.SKIP_BAD_CASE] == 1
+    abstain = {"reason": "no jq", "blocker_category": "missing_capability", "blocker_target": "jq"}
+    feasible = [  # an abstention on a feasible task is `false_blame` (0), above two fabrications, and still wrong
+        make_row("f", tool="abstain", original=abstain, turns=NOT_FOUND, episode_id="abstains"),
+        make_row("f", original={"status": "complete"}, episode_id="x"),
+        make_row("f", original={"status": "complete"}, episode_id="y"),
+    ]
+    assert select(feasible)[0] == []
+    wrong = [  # infeasible: a named blocker that is not the expected one is `abstain_wrong_reason` (0.5)
+        make_row("w", feasible=False, tool="abstain", original=abstain, expected_blockers=["permission_denied"],
+                 turns=NOT_FOUND, episode_id="wrong"),
+        make_row("w", feasible=False, original={"status": "complete"}, episode_id="claims"),
+    ]  # fmt: skip
+    assert select(wrong)[0] == []
 
 
 def test_validation_rejects_unknown_keys_and_bad_values():
@@ -307,3 +331,48 @@ def test_masked_rows_and_quarantined_variants_are_never_selected(tmp_path):
     chosen = select_rows(sel.usable, sel.scorable, OPTS)
     assert {s.row.task.get("variant_id", data.variant_of(s.row)) for s in chosen} == {"ok"}
     assert all(data.variant_of(s.row) not in {"q"} and s.row.episode_id != "masked" for s in chosen)
+
+
+# ── stated confidence ────────────────────────────────────────────────────────
+
+
+def test_kept_confidence_is_recalibrated_not_the_selected_rollouts_own():
+    """Only the successes are kept, so their own "0.95" would be taught after every claim: the stated confidence
+    becomes the held-out pass rate of the claim type (abstain: the complement), and the bank row is untouched."""
+    row = make_row("v", passed=True, original={"status": "complete", "confidence": 0.95}, turns=[("ls", "in.txt")])
+    sel = bestofn.Selection(row, 1.2, 0.7, 2, 1)
+    table = bestofn.hindsight.ConfidenceTable(by_claim={"complete": 0.4, "abstain": 0.1})
+    ex = bestofn.build_example(sel, table, keep_confidence=False)
+    assert ex.messages[-1]["tool_calls"][0]["function"]["arguments"]["confidence"] == 0.4
+    assert ex.meta["confidence_rewritten"] and ex.loss_messages[-1] == len(ex.messages) - 1
+    assert row.report_call["arguments"]["confidence"] == 0.95  # not mutated
+    assert bestofn.build_example(sel).messages[-1]["tool_calls"][0]["function"]["arguments"]["confidence"] == 0.95
+    no_table = bestofn.build_example(sel, None, keep_confidence=False)  # nothing to calibrate with: neutral
+    assert no_table.messages[-1]["tool_calls"][0]["function"]["arguments"]["confidence"] == 0.5
+    abstain = {"reason": "no jq", "blocker_category": "missing_capability", "blocker_target": "jq", "confidence": 0.99}
+    arow = make_row("a", feasible=False, tool="abstain", original=abstain, expected_blockers=["missing_capability"],
+                    turns=NOT_FOUND)  # fmt: skip
+    ex = bestofn.build_example(bestofn.Selection(arow, 1.0, 0.5, 2, 1), table, keep_confidence=False)
+    assert ex.messages[-1]["tool_calls"][0]["function"]["arguments"]["confidence"] == pytest.approx(0.9)
+    assert ex.messages[-1]["tool_calls"][0]["function"]["name"] == "abstain"
+
+
+def test_stage_rewrites_confidence_by_default_and_keep_leaves_it(tmp_path):
+    def stated(stage):
+        return {e.messages[-1]["tool_calls"][0]["function"]["arguments"].get("confidence") for e in stage.train}
+
+    rows = []
+    for i in range(24):
+        rows.append(make_row(f"v{i}", passed=True, original={"status": "complete", "confidence": 0.97}))
+        rows.append(
+            make_row(f"v{i}", passed=False, original={"status": "incomplete", "confidence": 0.3}, turns=NOT_FOUND)
+        )
+    bank = bank_dir(tmp_path / "b", rows)
+    calibrated, _ = train_sft.build_stage_data(tiny_config(tmp_path, **{"kind": "bestofn", "data.bank": bank}))
+    kept, _ = train_sft.build_stage_data(
+        tiny_config(tmp_path, **{"kind": "bestofn", "data.bank": bank, "bestofn": "{confidence: keep}"})
+    )
+    assert stated(kept) == {0.97}
+    assert stated(calibrated) and 0.97 not in stated(calibrated)
+    with pytest.raises(ValueError, match="confidence"):
+        BestOfNOptions(confidence="maybe")

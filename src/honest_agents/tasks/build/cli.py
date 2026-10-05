@@ -19,6 +19,7 @@ from honest_agents.tasks.build.config import (
 from honest_agents.tasks.build.pipeline import build
 from honest_agents.tasks.build.reports import format_yield
 from honest_agents.tasks.perturb import (
+    DEFAULT_OPERATORS,
     OPERATORS,
 )
 
@@ -33,7 +34,7 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
     ap.add_argument("--seeds-dir", type=Path, help="Harbor task dirs for --sources local")
     ap.add_argument("--limit", type=int, help="max seed tasks per source (seeded sample)")
     ap.add_argument("--no-download", action="store_true", help="only use tasks already in --raw-dir")
-    ap.add_argument("--operators", nargs="+", default=list(OPERATORS), choices=list(OPERATORS))
+    ap.add_argument("--operators", nargs="+", default=list(DEFAULT_OPERATORS), choices=list(OPERATORS))
     ap.add_argument(
         "--heldout-families",
         default=",".join(DEFAULT_HELDOUT_FAMILIES),
@@ -45,7 +46,7 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
         default=DEFAULT_TEST_BP,
         help="test share of the split hash space, in 1/10000 (fixed cutoff: independent of the pool; default 2200)",
     )
-    ap.add_argument("--val-bp", type=int, default=DEFAULT_VAL_BP, help="validation share, in 1/10000 (default 400)")
+    ap.add_argument("--val-bp", type=int, default=DEFAULT_VAL_BP, help="validation share, in 1/10000 (default 2200)")
     ap.add_argument(
         "--test-seeds",
         type=int,

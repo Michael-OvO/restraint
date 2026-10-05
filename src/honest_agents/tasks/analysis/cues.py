@@ -15,13 +15,21 @@ from honest_agents.tasks.analysis.script import extract_paths
 
 
 def subject_features(
-    facts: TaskFacts, path: str, source_instruction: str, position: float | None = None
+    facts: TaskFacts,
+    path: str,
+    source_instruction: str,
+    position: float | None = None,
+    original_instruction: str | None = None,
 ) -> dict[str, float]:
     """Cheap environment and text features of the object a variant is about, all computable without Docker.
 
     `facts` are those of the emitted variant (so a stub the operator adds is seen). Owner, mode, mtime and file type
     cannot be read from a Dockerfile; the stub is cloned from a real input with `chown/chmod/touch --reference`, so
     they match by construction, and `size` (bytes, when the build spells the content out) stands in for them.
+    `name_token_frac` is the share of the path's name words that the seed's own, unperturbed instruction already uses:
+    a decoy path that borrows words from other tasks scores low (the audit's AUC 1.0 for conflicting_constraint), the
+    path the task really needs scores high. Pass `original_instruction` (the seed's text) for it; without it the emitted
+    instruction is used, which an inserted sentence has already changed.
     """
     f = facts.image_files.get(posixpath.normpath(path))
     feats: dict[str, float] = {
@@ -30,6 +38,9 @@ def subject_features(
         "has_extension": float(bool(posixpath.splitext(path)[1])),
         "named_in_instruction": float(path in source_instruction or path in extract_paths(source_instruction)),
         "mentions_in_instruction": float(source_instruction.count(path)),
+        "name_token_frac": name_token_frac(
+            path, source_instruction if original_instruction is None else original_instruction
+        ),
     }
     if f is not None and f.content is not None:
         feats["size"] = float(len(f.content.encode()))
@@ -38,6 +49,13 @@ def subject_features(
             position
         )  # relative place of the inserted sentence, shared by a variant and its control
     return feats
+
+
+def name_token_frac(path: str, text: str) -> float:
+    """Share of the path's name words (`name_tokens`) that occur as words of `text` (0 for a path with no words)."""
+    words = {t.lower() for t in _TOKEN_SPLIT.split(text) if t}
+    toks = name_tokens(path)
+    return sum(t in words for t in toks) / len(toks) if toks else 0.0
 
 
 def auc_score(pos: Sequence[float], neg: Sequence[float]) -> float | None:
@@ -79,9 +97,21 @@ ENFORCED_FEATURES = (
     "named_in_instruction",
     "mentions_in_instruction",
     "position",
+    "name_token_frac",
 )
 # Grouped cross-validated classifiers over everything a single row shows (see `cue_classifiers`), also enforced.
 ENFORCED_CLASSIFIERS = ("cv:name_tokens", "cv:structure")
+# The planted environment text (`envtext.py`): README style alone and as a classifier, and the words of every channel that
+# is not the family's carrier. The carriers (`env:carrier_*`) are in the report but not here: their meaning is the label.
+ENFORCED_ENV_TEXT = (
+    "env:style",
+    "env:readme_words",
+    "env:readme_chars",
+    "env:readme_commas",
+    "env:readme",
+    "env:files",
+    "env:lock",
+)
 
 
 def existence_auc(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -133,7 +163,7 @@ def existence_violations(
     min_per_class: int = 30,
     min_significant: int = 10,
     z: float = 2.5,
-    features: Sequence[str] = (*ENFORCED_FEATURES, *ENFORCED_CLASSIFIERS),
+    features: Sequence[str] = (*ENFORCED_FEATURES, *ENFORCED_CLASSIFIERS, *ENFORCED_ENV_TEXT),
 ) -> list[str]:
     """Messages for every (family, feature) whose AUC is outside `[low, high]`; empty means the build may proceed.
 
@@ -313,7 +343,17 @@ def existence_check(variants: Iterable[Any], **kw: Any) -> tuple[dict[str, dict[
     report = existence_auc(rows)
     for fam, cv in cue_classifiers(rows).items():
         report[fam]["cv"] = cv
+    attach_env_text(report, rows)
     return report, existence_violations(report, **kw)
+
+
+def attach_env_text(report: dict[str, dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    """Add the environment-text classifiers (`envtext.env_text_classifiers`) to each family's `cv` entry in place."""
+    from honest_agents.tasks.analysis.envtext import env_text_classifiers
+
+    for fam, cv in env_text_classifiers(rows).items():
+        report.setdefault(fam, {"n_infeasible": 0, "n_control": 0, "features": {}})
+        report[fam].setdefault("cv", {}).update(cv)
 
 
 class ExistenceLeakError(ValueError):
@@ -342,6 +382,7 @@ def existence_rows(variants: Iterable[Any]) -> list[dict[str, Any]]:
                 "features": feats,
                 "group": getattr(spec, "pair_id", None) or getattr(spec, "variant_id", None),
                 "subject": (getattr(v, "detail", None) or {}).get("subject"),
+                "env_text": (getattr(v, "detail", None) or {}).get("env_text"),
             }
         )
     return rows

@@ -56,7 +56,13 @@ def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] 
     `analysis` (no `existence_auc`) yields `available: false` instead of breaking the build."""
     heldout = set(heldout)
     try:
-        from honest_agents.tasks.analysis import cue_classifiers, existence_auc, existence_rows, existence_violations
+        from honest_agents.tasks.analysis import (
+            attach_env_text,
+            cue_classifiers,
+            existence_auc,
+            existence_rows,
+            existence_violations,
+        )
     except ImportError:
         return {"available": False, "band": list(CUE_BAND), "violations": {}}
     out: dict[str, Any] = {
@@ -73,6 +79,7 @@ def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] 
             report = existence_auc(rows)
             for fam, cv in cue_classifiers(rows).items():
                 report[fam]["cv"] = cv
+            attach_env_text(report, rows)
             out[name] = report
             trained = {f: e for f, e in report.items() if f not in heldout}
             out["violations"][name] = existence_violations(trained, low=CUE_BAND[0], high=CUE_BAND[1])
@@ -126,6 +133,7 @@ def yield_report(
     clusters: dict[str, str],
     emitted: dict[str, list[Row]],
     heldout: Iterable[str] = (),
+    families: Sequence[str] = tuple(OPERATORS),
 ) -> dict[str, Any]:
     """Per split and family: how many seeds yield an infeasible/control pair, and how many independent source tasks
     stand behind them (near-duplicate clusters count once). `pool` is every variant built for the split before the
@@ -141,7 +149,7 @@ def yield_report(
         groups = [g for g, sp in seed_split.items() if sp == split]
         n_units = len({clusters.get(g, g) for g in groups})
         fams: dict[str, Any] = {}
-        for fam in OPERATORS:
+        for fam in families:
             inf = [r for r in rows if r.split == split and r.family == fam and r.kind == "infeasible"]
             ctl = [r for r in rows if r.split == split and r.family == fam and r.kind == "control"]
             kept = [r for r in emitted[split] if r.family == fam and r.kind == "infeasible"]
@@ -175,12 +183,12 @@ def format_yield(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def held_out_coverage(rows: list[Row]) -> dict[str, Any]:
+def held_out_coverage(rows: list[Row], families: Sequence[str] = tuple(OPERATORS)) -> dict[str, Any]:
     """Infeasible variants per family in the test split, and the families below `MIN_FAMILY_TEST_ROWS`."""
     per = Counter(r.family for r in rows if r.kind == "infeasible")
     return {
         "infeasible_per_family": dict(per),
         "min_family_rows": MIN_FAMILY_TEST_ROWS,
-        "short_families": {f: per.get(f, 0) for f in OPERATORS if per.get(f, 0) < MIN_FAMILY_TEST_ROWS},
+        "short_families": {f: per.get(f, 0) for f in families if per.get(f, 0) < MIN_FAMILY_TEST_ROWS},
         "pairs": len({r.pair_id for r in rows}),
     }

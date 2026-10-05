@@ -41,7 +41,7 @@ from honest_agents.tasks.build import (
     split_bucket,
     write_test_ids,
 )
-from honest_agents.tasks.perturb import OPERATORS
+from honest_agents.tasks.perturb import DEFAULT_OPERATORS, NOT_BUILT_BY_DEFAULT, OPERATORS
 from honest_agents.tasks.sources import SeedTask
 from honest_agents.tasks.validate import ValidationResult
 from tests.tasks.synthetic import plain_task, rich_task, write_task
@@ -122,7 +122,7 @@ def test_build_end_to_end(tmp_path, seeds):
     assert len({r["pair_id"] for r in rows["val"]}) <= 3
     # test keeps every variant of its seeds: plain + (variant, control) per operator
     per_pair = Counter(r["pair_id"] for r in rows["test"])
-    assert all(n == (2 if p == "local/plain" else 1 + 2 * len(OPERATORS)) for p, n in per_pair.items())
+    assert all(n == (2 if p == "local/plain" else 1 + 2 * len(DEFAULT_OPERATORS)) for p, n in per_pair.items())
 
 
 def test_test_split_size_is_an_absolute_count_not_a_fraction(tmp_path, seeds):
@@ -249,10 +249,44 @@ def test_non_hermetic_seeds_are_dropped_unless_legacy_is_allowed(tmp_path):
 
 
 def test_build_refuses_legacy_seeds_by_default(tmp_path, seeds):
+    """Behaviour change (audit item 5): when the hermetic filter removes every seed the build fails atomically with the
+    counts, instead of writing a manifest with `n_seeds: 0`."""
     out = tmp_path / "out"
-    manifest = build(parse_args(["--out", str(out), "--sources", "local", "--seeds-dir", str(seeds), "--test-seeds", "0", "--i-know-no-benchmark", "--no-enforce-cue-band", "--neardup-threshold", "0",
-                                 "--val-seeds", "0"]))  # fmt: skip
-    assert manifest["n_not_hermetic"] == N_RICH + 2 and manifest["n_seeds"] == 0
+    with pytest.raises(ValueError, match=rf"no seed tasks found.*{N_RICH + 2} not graded by the hermetic verifier"):
+        build(parse_args(["--out", str(out), "--sources", "local", "--seeds-dir", str(seeds), "--test-seeds", "0", "--i-know-no-benchmark", "--no-enforce-cue-band", "--neardup-threshold", "0",
+                          "--val-seeds", "0"]))  # fmt: skip
+    assert (
+        not (out / "manifest.json").exists() and not (out / "train.jsonl").exists() and not list(out.glob(".*build*"))
+    )
+
+
+def test_build_where_decontamination_removes_every_seed_fails_atomically(tmp_path, seeds):
+    """The guard sits after the benchmark filter: a benchmark that contains every seed's instruction leaves nothing."""
+    bench = tmp_path / "bench"
+    for i, inst in enumerate(sorted(seeds.rglob("instruction.md"))):
+        d = bench / f"t{i}"
+        d.mkdir(parents=True)
+        (d / "instruction.md").write_text(inst.read_text())
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match=r"no seed tasks found.*dropped as benchmark duplicates"):
+        build(
+            parse_args(
+                [
+                    "--out",
+                    str(out),
+                    "--sources",
+                    "local",
+                    "--seeds-dir",
+                    str(seeds),
+                    "--benchmark-dir",
+                    str(bench),
+                    "--allow-legacy-verifier",
+                ]
+            )
+        )
+    assert (
+        not (out / "manifest.json").exists() and not (out / "train.jsonl").exists() and not list(out.glob(".*build*"))
+    )
 
 
 def test_build_with_no_seeds_found_is_an_error_not_an_empty_dataset(tmp_path):
@@ -589,6 +623,17 @@ def test_enforce_pairing_drops_orphans():
     assert len(enforce_pairing([(None, v) for v in (inf_a, inf_b)], require_controls=False)) == 2
 
 
+def test_remove_tool_is_registered_but_not_built_by_default():
+    """Behaviour change (full-pool build): remove_tool yields 1 variant in 2,482 Endless Terminals seeds (structural), so
+    it is out of the default operator list; it stays registered and selectable with --operators."""
+    assert NOT_BUILT_BY_DEFAULT == ("remove_tool",) and "remove_tool" in OPERATORS
+    assert "remove_tool" not in DEFAULT_OPERATORS and set(DEFAULT_OPERATORS) | set(NOT_BUILT_BY_DEFAULT) == set(
+        OPERATORS
+    )
+    assert parse_args(["--out", "x"]).operators == list(DEFAULT_OPERATORS)
+    assert "remove_tool" in parse_args(["--out", "x", "--operators", "remove_tool"]).operators
+
+
 def test_parse_args_defaults():
     cfg = parse_args(["--out", "x"])
     assert cfg.mixture == pytest.approx(DEFAULT_MIXTURE) and cfg.heldout_families == list(DEFAULT_HELDOUT_FAMILIES)
@@ -611,7 +656,7 @@ def test_hash_split_does_not_depend_on_the_pool():
     a, b, c = (assign_seed_splits(x) for x in (small, large, other))
     assert all(a[g] == b[g] for g in small) and all(c[g] == b[g] for g in other)  # not one source moves
     n = Counter(b.values())
-    assert 0.18 < n["test"] / len(ids) < 0.26 and 0.02 < n["val"] / len(ids) < 0.06  # 2200 / 400 of 10000
+    assert 0.18 < n["test"] / len(ids) < 0.26 and 0.18 < n["val"] / len(ids) < 0.26  # 2200 / 2200 of 10000
     assert all(0 <= split_bucket(g) < 10_000 for g in ids)
 
 
@@ -935,6 +980,24 @@ def test_a_held_out_family_with_a_cue_never_blocks_the_build_but_a_training_one_
         build(parse_args(bad))
 
 
+def test_a_cue_metric_that_crashed_fails_an_enforced_build_instead_of_passing_it(tmp_path, seeds, monkeypatch):
+    """`cue_metrics` swallows exceptions into `{"error": ...}` so a metric never breaks a build by itself; the enforced
+    gate must then refuse, or a crashing classifier would read as a clean family."""
+    from honest_agents.tasks import analysis
+
+    def boom(rows):
+        raise RuntimeError("classifier exploded")
+
+    monkeypatch.setattr(analysis, "cue_classifiers", boom)
+    enforced = [a for a in _args(tmp_path / "out", seeds) if a != "--no-enforce-cue-band"]
+    with pytest.raises(ValueError, match="classifier exploded"):
+        build(parse_args(enforced))
+    assert not (tmp_path / "out" / "manifest.json").exists()
+    assert build(parse_args(_args(tmp_path / "dev", seeds)))["cue_metrics"]["train"]["error"].endswith(
+        "exploded"
+    )  # dev: only recorded
+
+
 DATASET_FILES = ("train.jsonl", "val.jsonl", "test.jsonl", "train_pool.jsonl", "manifest.json")
 
 
@@ -992,7 +1055,7 @@ def test_the_manifest_reports_training_pairs_and_warns_about_a_thin_family(tmp_p
     with caplog.at_level("WARNING"):
         m = build(parse_args(_args(out, seeds)))
     t = m["training"]
-    assert set(t["families"]) == set(OPERATORS) - set(DEFAULT_HELDOUT_FAMILIES) and t["min_pairs"] == 40
+    assert set(t["families"]) == set(DEFAULT_OPERATORS) - set(DEFAULT_HELDOUT_FAMILIES) and t["min_pairs"] == 40
     train_inf = Counter(r["family"] for r in _rows(out)["train"] if r["kind"] == "infeasible")
     assert t["pairs_per_family"] == {f: train_inf.get(f, 0) for f in t["families"]}
     assert t["thin_families"] == {f: n for f, n in t["pairs_per_family"].items() if n < 40}
@@ -1008,7 +1071,7 @@ def test_the_manifest_reports_the_yield_per_family_and_the_independent_source_ta
     train = y["train"]
     assert train["seeds"] == m["seed_splits"]["train"] and train["source_tasks"] <= train["seeds"]
     fams = train["families"]
-    assert set(fams) == set(OPERATORS)
+    assert set(fams) == set(DEFAULT_OPERATORS)  # remove_tool is not built by default
     assert fams["high_risk"]["role"] == "train" and fams["conflicting_constraint"]["role"] == "held-out (test only)"
     pool = [json.loads(x) for x in (out / "train_pool.jsonl").read_text().splitlines()]
     for fam in ("high_risk", "revoke_permission"):

@@ -96,3 +96,22 @@ def test_near_duplicate_clusters_join_paraphrases_and_leave_distinct_tasks_alone
 def test_jaccard_pairs_is_exact_and_skips_boilerplate_shingles_only_for_candidates():
     sets = {"a": {1, 2, 3, 4}, "b": {3, 4, 5, 6}, "c": {9}}
     assert jaccard_pairs(sets, 0.3) == [("a", "b", 2 / 6)]
+
+
+def test_jaccard_pairs_matches_a_brute_force_search_with_and_without_high_frequency_shingles():
+    import random
+    from itertools import combinations
+
+    rng = random.Random(7)
+    vocab = list(range(400))
+    boiler = set(range(1000, 1060))  # in every document: above max_df, so only the exact intersection sees them
+    sets = {f"d{i:03d}": set(rng.sample(vocab, rng.randint(5, 40))) | (boiler if i % 3 else set()) for i in range(120)}
+    for threshold in (0.05, 0.2, 0.5):
+        got = {(a, b): j for a, b, j in jaccard_pairs(sets, threshold, max_df=30)}
+        want = {}
+        for a, b in combinations(sorted(sets), 2):
+            low = {h for h in sets[a] & sets[b] if h not in boiler}  # candidates need one shared low-frequency shingle
+            j = len(sets[a] & sets[b]) / len(sets[a] | sets[b])
+            if low and j >= threshold:
+                want[(a, b)] = j
+        assert got.keys() == want.keys() and all(abs(got[k] - want[k]) < 1e-12 for k in got)

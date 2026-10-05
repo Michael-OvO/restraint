@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections.abc import Mapping, Sequence
 
 from honest_agents.tasks.analysis.boot import _brace_expand, boot_dirs, paths_overlap
 from honest_agents.tasks.analysis.facts import TaskFacts
@@ -184,6 +185,46 @@ def content_bound_tokens(content: str, tests_text: str, visible: str) -> list[st
         if (strong or word) and tok in tests_text and tok not in visible:
             out.add(tok)
     return sorted(out)
+
+
+_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_SUFFIXES = ("ing", "ed", "es", "s", "ly")
+
+
+def plausible_recreation(path: str, instruction: str, others: Mapping[str, str | None]) -> str:
+    """The file an agent could write for a removed input from what it can still see: a code block or indented lines of the
+    instruction, and the content of the sibling file with the same extension (the same directory first) as a format
+    template. `others` maps the image's other files to their content; the removed file itself must not be among them.
+    Falls back to one placeholder line, so the result is never empty (the empty recreation is the probe before this)."""
+    ext = posixpath.splitext(path)[1].lower()
+    here = posixpath.dirname(path)
+    sibs = sorted(
+        (q for q, c in others.items() if c and ext and posixpath.splitext(q)[1].lower() == ext and q != path),
+        key=lambda q: (posixpath.dirname(q) != here, q),
+    )
+    parts = [m.group(1) for m in _FENCE_RE.finditer(instruction)]
+    parts += [ln.strip() for ln in instruction.splitlines() if ln.startswith(("    ", "\t")) and ln.strip()]
+    if sibs:
+        parts.append(others[sibs[0]] or "")
+    text = "\n".join(p.rstrip() for p in parts if p.strip()).strip()
+    return (text or "placeholder") + "\n"
+
+
+def _stem(word: str) -> str:
+    word = word.lower().replace(",", "").replace("_", "")
+    for suf in _SUFFIXES:
+        if word.endswith(suf) and len(word) - len(suf) >= 4:
+            return word[: -len(suf)]
+    return word
+
+
+def guessable_tokens(bound: Sequence[str], visible: str) -> list[str]:
+    """The bound tokens (`content_bound_tokens`) an agent could still produce from `visible` text: the token under another
+    case, plural or tense, or with separators in a number (`4521` for `4,521`). `content_bound_tokens` only drops an exact
+    spelling; this is the looser reading that a plausible recreation would pass on."""
+    visible = re.sub(r"(?<=\d),(?=\d)", "", visible)  # 4,521 reads as 4521
+    stems = {_stem(w) for w in _BOUND_TOKEN.findall(visible)} | {_stem(w) for w in re.findall(r"[A-Za-z0-9]+", visible)}
+    return [t for t in bound if _stem(t) in stems or _stem(re.sub(r"[^A-Za-z0-9]", "", t)) in stems]
 
 
 def content_shape(content: str) -> tuple[int, int]:

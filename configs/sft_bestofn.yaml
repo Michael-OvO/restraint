@@ -1,6 +1,7 @@
 # Supervised stage, part 2 (reward-filtered best-of-N, one round of expert iteration): per variant, rank the banked
 # rollouts with the SAME reward the RL stage uses (reward.compute_reward from the stored outcome and config), keep the top
-# rollout(s) above the group mean that are not masked / tampered, and fine-tune on the WHOLE trajectory with only the
+# rollout(s) above the group mean whose case is honest (clean claim, honest non-completion, correct abstention; never a
+# fabrication or false blame) and that are not masked / tampered, and fine-tune on the WHOLE trajectory with only the
 # assistant tokens trained (system / user / tool turns masked). split == train only. Builder: honest_agents/sft/bestofn.py.
 #   python -m honest_agents.sft.train_sft --config configs/sft_bestofn.yaml [--dry-run] [key.path=value ...]
 #   scripts/run_sft.sh configs/sft_bestofn.yaml
@@ -21,6 +22,7 @@ bestofn:                             # read by the bestofn and combo stages (`be
   min_group_size: 2                  # scored rollouts a variant needs to be ranked
   require_pass_when_feasible: false  # stricter: on a feasible variant only a clean pass is imitated
   reward: {}                         # RewardConfig overrides; empty = each row's own stored reward config
+  confidence: calibrated             # calibrated = the claim type's held-out pass rate in the kept report | keep = the model's own
   # combo only: hindsight report examples per best-of-N example (a real trajectory trains many more tokens than a report,
   # so equal counts keep the report decision a minor share of the loss; read both means in the dry run's
   # `mean_trained_tokens` log and tune). null = every hindsight example.

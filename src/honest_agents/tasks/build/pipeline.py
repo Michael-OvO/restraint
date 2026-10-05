@@ -71,7 +71,6 @@ from honest_agents.tasks.dedup import NearDupReport, near_duplicate_clusters
 from honest_agents.tasks.difficulty import DifficultyGate
 from honest_agents.tasks.perturb import (
     LEAK_DROPPED,
-    OPERATORS,
     deliverable_names,
     generate_variants,
     set_name_bank,
@@ -80,6 +79,7 @@ from honest_agents.tasks.sources import (
     SeedReject,
     SeedTask,
     license_record,
+    source_revisions,
 )
 
 log = logging.getLogger(__name__)
@@ -359,8 +359,11 @@ def _enforce_cue_gate(
     for name, ms in cue.get("watch", {}).items():
         for m in ms:
             log.warning("cue worth a look (not enforced) in %s: %s", name, m)
-    if cfg.enforce_cue_band and (bad or not cue["available"]):
-        raise ValueError(f"existence AUC outside {CUE_BAND}: {bad or 'analysis.existence_auc is not available'}")
+    errors = [f"{name}: {m['error']}" for name, m in cue.items() if isinstance(m, dict) and "error" in m]
+    if cfg.enforce_cue_band and (bad or errors or not cue["available"]):  # a metric that crashed is not a clean one
+        raise ValueError(
+            f"existence AUC outside {CUE_BAND}: {bad or errors or 'analysis.existence_auc is not available'}"
+        )
     return cue
 
 
@@ -387,11 +390,17 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
 
     rejected: list[SeedReject] = []
     seeds = collect_seeds(cfg, rejected)
-    if not seeds:  # a wrong --raw-dir (or a symlinked raw tree) must not look like a finished, empty build
-        raise ValueError(f"no seed tasks found (raw dir {cfg.raw_dir or cfg.out / 'raw'}, sources {cfg.sources})")
+    n_collected = len(seeds)
     seeds, dropped, benchmark_stats = dedup_seeds_report(cfg, seeds)
     write_jsonl(staged("dedup.jsonl"), dropped)
     seeds, not_hermetic = filter_hermetic(seeds, allow_legacy=cfg.allow_legacy_verifier)
+    if not seeds:  # checked after every filter: a wrong --raw-dir, a decontamination that removed everything or a pool
+        # the hermetic conversion refused must not look like a finished, empty build (no manifest, no dataset file)
+        raise ValueError(
+            f"no seed tasks found: {n_collected} collected from {cfg.sources} (raw dir {cfg.raw_dir or cfg.out / 'raw'}, "
+            f"{len(rejected)} refused on normalisation), {len(dropped)} dropped as benchmark duplicates, "
+            f"{len(not_hermetic)} not graded by the hermetic verifier"
+        )
 
     plan = _plan_splits(cfg, seeds, staged)
     leak_dropped_before = Counter(LEAK_DROPPED)
@@ -408,7 +417,7 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
     heldout = set(cfg.heldout_families)
     splits, splits_pool, n_difficulty_dropped = _select_split_rows(cfg, rows, plan.all_test, staged)
 
-    test_coverage = held_out_coverage(splits["test"])
+    test_coverage = held_out_coverage(splits["test"], cfg.operators)
     for fam, n in test_coverage["short_families"].items():
         log.warning(
             "test split has %d infeasible %s variants (< %d): report this family pooled or not at all",
@@ -417,7 +426,7 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
             MIN_FAMILY_TEST_ROWS,
         )
     cue = _enforce_cue_gate(cfg, variants, splits, heldout)
-    training = training_report(splits, [f for f in OPERATORS if f not in heldout], pool=splits_pool)
+    training = training_report(splits, [f for f in cfg.operators if f not in heldout], pool=splits_pool)
     for fam, n in training["thin_families"].items():
         log.warning(
             "training family %s has only %d pairs in train (< %d): its rate is too noisy to learn or report",
@@ -426,7 +435,7 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
             MIN_TRAIN_PAIRS,
         )
     neardup = plan.neardup
-    yields = yield_report(rows, plan.seed_split, neardup.clusters if neardup else {}, splits, heldout)
+    yields = yield_report(rows, plan.seed_split, neardup.clusters if neardup else {}, splits, heldout, cfg.operators)
     manifest = {
         "test_coverage": test_coverage,
         "training": training,
@@ -449,6 +458,7 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
         "cue_metrics": cue,
         "config": {k: _jsonable(v) for k, v in asdict(cfg).items()},
         "licenses": license_record({x.source: x.license for x in seeds}),
+        "source_revisions": source_revisions(cfg.sources, cfg.raw_dir or cfg.out / "raw"),
         "n_seeds": len(seeds),
         "n_dedup_dropped": len(dropped),
         "n_not_hermetic": len(not_hermetic),

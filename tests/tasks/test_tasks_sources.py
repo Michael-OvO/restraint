@@ -412,3 +412,103 @@ def test_local_seeds_get_the_same_leak_screen(tmp_path):
     rejected: list[sources.SeedReject] = []
     found = sources.local_seeds(tmp_path / "seeds", rejected=rejected)
     assert [s.task_id for s in found] == ["ok"] and "canary" in rejected[0].reason and ok.exists()
+
+
+# ── the whole-pool download is one shallow git clone ─────────────────────────────────────────────────────────────────
+
+
+def _git_dataset(root: Path) -> Path:
+    """A local git repository shaped like the Endless Terminals dataset: task dirs at the root, a trajectory per task."""
+    import subprocess
+
+    repo = root / "remote"
+    for name in ("task_000000_aaaa", "task_000001_bbbb"):
+        (repo / name / "solution").mkdir(parents=True)
+        (repo / name / "task.toml").write_text('version = "0.1"\n')
+        (repo / name / "instruction.md").write_text("Do the thing.\n")
+        (repo / name / "solution" / "solve.sh").write_text("true\n")
+        (repo / name / "solution" / "o3_summary.json").write_text("{}" * 1000)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "--quiet"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "--quiet", "-m", "x"], check=True)
+    return repo
+
+
+def test_a_pool_sized_download_uses_one_git_clone_and_drops_trajectories(tmp_path, monkeypatch):
+    repo = _git_dataset(tmp_path)
+    monkeypatch.setattr(sources, "_git_url", lambda repo_id: str(repo))
+    monkeypatch.setattr(sources, "_GIT_MIN_TASKS", 1)
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", None)  # the Hub API must not be touched
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    sources.download("endless-terminals", raw, ["task_000000_aaaa", "task_000001_bbbb", "task_000002_missing"])
+    assert (raw / "task_000000_aaaa" / "solution" / "solve.sh").read_text() == "true\n"
+    assert (raw / "task_000001_bbbb" / "instruction.md").exists()
+    assert not list(raw.rglob("*_summary.json")) and not (raw / "task_000002_missing").exists()
+    assert not [p for p in raw.iterdir() if p.name.startswith(".clone")]  # the temporary clone is gone
+    rev = (raw / ".revision").read_text().strip()
+    assert len(rev) == 40 and sources.source_revisions(["endless-terminals", "local"], raw.parent) == {
+        "endless-terminals": None,
+        "local": None,
+    }
+    assert sources.source_revisions(["raw"], tmp_path) == {"raw": rev}  # raw_root/<source>/.revision
+
+
+def test_a_failing_git_clone_falls_back_to_the_hub_api(tmp_path, monkeypatch):
+    monkeypatch.setattr(sources, "_git_url", lambda repo_id: str(tmp_path / "no-such-repo"))
+    monkeypatch.setattr(sources, "_GIT_MIN_TASKS", 1)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    fetched = []
+    fake = type("M", (), {"snapshot_download": staticmethod(lambda *a, **k: fetched.append(k["allow_patterns"]))})
+    monkeypatch.setitem(__import__("sys").modules, "huggingface_hub", fake)
+    sources.download("endless-terminals", raw, ["task_000000_aaaa"])
+    assert fetched == [["task_000000_aaaa/**"]]
+
+
+def _git_repo(root: Path, files: dict[str, str]) -> Path:
+    import subprocess
+
+    repo = root / "hub"
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo)]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "x"], check=True)
+    return repo
+
+
+def test_a_git_clone_download_copies_the_tasks_drops_junk_and_records_the_revision(tmp_path, monkeypatch):
+    repo = _git_repo(
+        tmp_path,
+        {
+            "t1/task.toml": "a",
+            "t1/instruction.md": "do",
+            "t1/x_summary.json": "{}",
+            "t2/task.toml": "b",
+            "other/f": "z",
+        },
+    )
+    monkeypatch.setattr(sources, "_git_url", lambda _repo_id: str(repo))
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    assert sources._download_git("org/ds", raw, ["t1", "t2", "absent"]) is True
+    assert (raw / "t1" / "instruction.md").read_text() == "do" and (raw / "t2" / "task.toml").exists()
+    assert not (raw / "t1" / "x_summary.json").exists() and not (raw / "other").exists()
+    assert not (raw / "absent").exists() and not list(raw.glob(".clone-*"))
+    assert len((raw / sources.REVISION_FILE).read_text().strip()) == 40
+    assert sources.source_revisions(["s"], tmp_path / "none") == {"s": None}
+
+
+def test_a_git_clone_holding_an_lfs_pointer_or_failing_falls_back_to_the_hub_api(tmp_path, monkeypatch):
+    pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:ab\nsize 9\n"
+    repo = _git_repo(tmp_path, {"t1/task.toml": "a", "t1/environment/data.bin": pointer})
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    monkeypatch.setattr(sources, "_git_url", lambda _repo_id: str(repo))
+    assert sources._download_git("org/ds", raw, ["t1"]) is False and not (raw / "t1").exists()
+    monkeypatch.setattr(sources, "_git_url", lambda _repo_id: str(tmp_path / "missing"))
+    assert sources._download_git("org/ds", raw, ["t1"]) is False

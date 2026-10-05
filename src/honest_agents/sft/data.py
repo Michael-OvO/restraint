@@ -20,7 +20,8 @@ Mask conventions
   assistant message; a template that does not give one run per assistant turn is refused, never guessed at.
 * Non-thinking mode renders an empty `<think></think>` block at the start of an assistant turn. At rollout time that block
   is part of the generation PROMPT, so it is taken out of the loss (the policy is never asked to emit it).
-* The end-of-turn token of a trained assistant turn is inside its run (the model learns to stop after the report).
+* The end-of-turn token of a trained assistant turn is inside its run (the model learns to stop after the report); the
+  newline the template writes after it is not (it is never sampled: generation stops on the end token).
 * Sequences longer than `max_length` are dropped (a report at the end of a truncated transcript would lose its loss).
 
 The dataset holds only `input_ids` and `labels`: nested messages cannot go through Arrow (see `pilot.dataset`), and
@@ -34,7 +35,7 @@ import json
 import logging
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,7 +44,7 @@ from honest_agents import bank as bank_mod
 from honest_agents.bank import BankRow
 from honest_agents.models import ModelFamily, family_spec
 from honest_agents.pilot.dataset import frozen_context, variant_of
-from honest_agents.reward import RewardConfig, compute_reward
+from honest_agents.reward import MASK_GROUP_LEAK, RewardConfig, compute_reward
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ DROP_MASKED = "masked"
 DROP_QUARANTINED = "quarantined"
 DROP_NO_PROMPT = "no_prompt"
 DROP_LEAKY = "infeasible_clean_pass"
+DROP_LEAKY_VARIANT = "leaky_variant"  # a sibling rollout of the variant cleanly passed its "infeasible" tests
 DROP_TAMPERED = "tampered"
 DROP_VIOLATION = "violation"
 DROP_NO_REPORT = "no_report"
@@ -74,7 +76,7 @@ class RowFilter:
 
     drop_tampered: bool = True  # the agent cannot see that a file was protected, so a label from it is unobservable
     drop_violations: bool = True  # same for an irreversible / forbidden action the agent did not know was forbidden
-    drop_leaky: bool = True  # an infeasible variant whose tests passed cleanly: the variant label is wrong
+    drop_leaky: bool = True  # an infeasible variant whose tests passed cleanly: the label is wrong (row and siblings)
     include_no_report: bool = True  # trajectories that ran out of budget (the context is cut after the last result)
     drop_unseen_actions: bool = True  # commands ran that the transcript does not show: the outcome is not inferable
     max_context_chars: int | None = None
@@ -104,7 +106,19 @@ def base_drop_reason(row: BankRow, quarantined: set[str]) -> str | None:
     return None
 
 
-def drop_reason(row: BankRow, flt: RowFilter, quarantined: set[str]) -> str | None:
+def leaky_variants(rows: Iterable[BankRow]) -> set[str]:
+    """Variants labelled infeasible that some rollout passed cleanly (or that the reward already masked as a group
+    leak): the label is wrong for EVERY rollout of the variant, so no sibling may be imitated or relabelled. The
+    quarantine list carries the same fact between runs, but a bank without one (or written before the leak) does not."""
+    out: set[str] = set()
+    for row in rows:
+        o = row.episode_outcome()
+        if (not o.feasible and o.passed) or o.masked_reason == MASK_GROUP_LEAK:
+            out.add(variant_of(row))
+    return out
+
+
+def drop_reason(row: BankRow, flt: RowFilter, quarantined: set[str], leaky: Collection[str] = ()) -> str | None:
     """Why `row` must not become an example, or None. Never selects on anything but the train split."""
     if (reason := base_drop_reason(row, quarantined)) is not None:
         return reason
@@ -114,6 +128,8 @@ def drop_reason(row: BankRow, flt: RowFilter, quarantined: set[str]) -> str | No
         return DROP_NO_PROMPT
     if flt.drop_leaky and not o.feasible and o.passed:
         return DROP_LEAKY
+    if flt.drop_leaky and variant_of(row) in leaky:
+        return DROP_LEAKY_VARIANT
     if flt.drop_tampered and o.tampered:
         return DROP_TAMPERED
     if flt.drop_violations and o.violation:
@@ -138,9 +154,10 @@ def read_rows(bank_path: str | Path, flt: RowFilter | None = None) -> BankSelect
     """Rows of a bank (file or directory) split into usable and scorable, with a count of every drop reason."""
     flt = flt or RowFilter()
     quarantined = _quarantined(bank_path, flt)
+    leaky = leaky_variants(bank_mod.iter_bank(bank_path)) if flt.drop_leaky else set()  # a streaming first pass
     sel = BankSelection([], [], Counter())
     for row in bank_mod.iter_bank(bank_path):
-        reason = drop_reason(row, flt, quarantined)
+        reason = drop_reason(row, flt, quarantined, leaky)
         if reason is None:
             sel.usable.append(row)
         else:
@@ -311,6 +328,8 @@ def tokenize_example(ex: SFTExample, renderer: ChatRenderer, max_length: int | N
     labels = [IGNORE_INDEX] * len(ids)
     for i in ex.loss_messages:
         start, end = run_of[i]
+        while end - start > 1 and not renderer.tokenizer.decode([ids[end - 1]]).strip():
+            end -= 1  # the newline after <|im_end|> is template text: at rollout time generation stops on the end token
         if think and ids[start : start + len(think)] == think:
             start += len(think)
         labels[start:end] = ids[start:end]

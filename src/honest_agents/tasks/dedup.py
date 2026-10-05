@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import re
 import zlib
-from collections import defaultdict
+from bisect import bisect_right
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -171,20 +172,35 @@ def jaccard_pairs(
     """
     ids = sorted(sets)
     max_df = max_df if max_df is not None else max(50, len(ids) // 20)
+    sizes = {i: len(sets[i]) for i in ids}
+    smallest = min(sizes.values(), default=0)
     index: dict[int, list[str]] = defaultdict(list)
     for i in ids:
         for h in sets[i]:
             index[h].append(i)
     out = []
     for a in ids:
-        cand: set[str] = set()
+        # Shared low-frequency shingles are counted straight off the postings; only the high-frequency ones (`high`) are
+        # left to an exact set intersection, and only for a pair whose Jaccard could still reach the threshold.
+        shared: Counter[str] = Counter()
+        high = 0
         for h in sets[a]:
             posting = index[h]
             if len(posting) <= max_df:
-                cand.update(b for b in posting if b > a)
-        for b in sorted(cand):
-            inter = len(sets[a] & sets[b])
-            j = inter / (len(sets[a]) + len(sets[b]) - inter) if inter else 0.0
+                shared.update(posting[bisect_right(posting, a) :])  # postings are in id order
+            else:
+                high += 1
+        la = sizes[a]
+        need = (
+            threshold * (la + smallest) / (1 + threshold) - high
+        )  # fewer shared low-frequency shingles cannot reach it
+        for b in sorted(b for b, c in shared.items() if c >= need):
+            lb = sizes[b]
+            best = min(shared[b] + high, la, lb)  # the intersection is at least shared[b] and at most this
+            if best / (la + lb - best) < threshold:
+                continue
+            inter = shared[b] if high == 0 else len(sets[a] & sets[b])
+            j = inter / (la + lb - inter)
             if j >= threshold:
                 out.append((a, b, j))
     return out

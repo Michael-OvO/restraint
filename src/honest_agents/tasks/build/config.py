@@ -10,6 +10,7 @@ from honest_agents.bank import (
     QUARANTINE_LEAK,
 )
 from honest_agents.tasks.perturb import (
+    DEFAULT_OPERATORS,
     OPERATORS,
 )
 
@@ -21,8 +22,15 @@ DEFAULT_HELDOUT_FAMILIES = ("conflicting_constraint", "no_network")
 MIN_TRAIN_PAIRS = 40  # a training family with fewer infeasible/control pairs in train is warned about in the manifest
 DEFAULT_TEST_SEEDS = 300  # At least 300 test pairs, so that every reported family has at least MIN_FAMILY_TEST_ROWS
 MIN_FAMILY_TEST_ROWS = 50  # Infeasible variants per reported family in the test split (fewer: pool or drop the family)
-DEFAULT_TEST_BP = 2200  # test share of the hash space in basis points: about 330 of a 1,500-task pool (the test split needs at least 300 pairs)
-DEFAULT_VAL_BP = 400  # about 60 of 1,500
+DEFAULT_TEST_BP = (
+    2200  # test share of the hash space in basis points: about 560 of the full 2,482-seed pool, 330 of 1,500
+)
+# Validation share, the same as the test share. On the full 2,482-seed Endless Terminals pool the old 400 gave 97 groups and
+# 16/17/7 infeasible rows for revoke_permission/high_risk/remove_input after the mixture (a probe on that is noise); 1200
+# gave 50/50/22; 2200 gives 536 groups and 88/89/42, the first cutoff that reaches 40 for remove_input (7% of seeds yield
+# one), while train keeps 1,382 groups and 230/231/104 pairs (above MIN_TRAIN_PAIRS). The salt and the cutoffs freeze at
+# the first training run (docs/data.md section 6); raising VAL_BP later only moves train sources into val.
+DEFAULT_VAL_BP = 2200
 SPLIT_SALT = "honest-agents-split-v1"
 BUCKETS = 10_000
 SPLIT_SEEDS_FILE = "split_seeds.json"
@@ -52,7 +60,7 @@ class BuildConfig:
     seeds_dir: Path | None = None  # for the "local" source: existing Harbor task dirs
     limit: int | None = None
     download: bool = True
-    operators: list[str] = field(default_factory=lambda: list(OPERATORS))
+    operators: list[str] = field(default_factory=lambda: list(DEFAULT_OPERATORS))
     heldout_families: list[str] = field(default_factory=lambda: list(DEFAULT_HELDOUT_FAMILIES))
     test_bp: int = DEFAULT_TEST_BP  # fixed hash cutoffs (basis points of [0, 10000)): pool-independent
     val_bp: int = DEFAULT_VAL_BP

@@ -11,6 +11,7 @@ import contextlib
 import dataclasses
 import importlib.util
 import json
+import shlex
 import shutil
 from pathlib import Path
 
@@ -387,11 +388,42 @@ def test_trivial_repair_is_flagged_for_relabelling(factory, tmp_path):
 
 
 def test_remove_input_that_really_needs_the_content_stays_infeasible(factory, tmp_path):
-    d, f = ri_task(tmp_path, "ri", "[ -s {f} ] || exit 1")  # an empty recreated file is not enough
+    d, f = ri_task(
+        tmp_path, "ri", "grep -q SECRET-TOKEN-42 {f} || exit 1"
+    )  # neither an empty nor a made-up file passes
     r = run(d)
     assert r.ok and not r.relabel_to_control and r.reason == "oracle fails"
     assert r.debug["repair_probe"]["tests_passed"] is False
+    assert r.debug["repair_probe_plausible"]["tests_passed"] is False
     assert f.exists()  # the probe really recreated the file (on the host, in this fake)
+    assert len(factory.created) == 1 + 3 + 2  # null check, 3 oracle runs, the empty probe, the plausible probe
+
+
+def test_a_plausible_non_empty_recreation_flags_the_variant_for_relabelling(factory, tmp_path):
+    """Behaviour change: an oracle that only needs the file to be non-empty passed the empty probe's check by failing, so
+    the old probe called it infeasible; the plausible-content probe shows a made-up file is enough."""
+    d, f = ri_task(tmp_path, "ri", "[ -s {f} ] || exit 1")
+    r = run(d)
+    assert not r.ok and r.relabel_to_control and not r.leak
+    assert r.reason == "remove_input: oracle passes once the removed path is recreated plausible (trivial repair)"
+    assert (
+        r.debug["repair_probe"]["tests_passed"] is False and r.debug["repair_probe_plausible"]["tests_passed"] is True
+    )
+    assert r.debug["repair_paths"] == [f"plausible:{f}"]
+    assert len(factory.created) == 1 + 3 + 2
+
+
+def test_plausible_repair_commands_use_the_variants_visible_text_and_never_the_removed_file(tmp_path):
+    d, f = ri_task(tmp_path, "ri", "true")
+    (d / "instruction.md").write_text("Count the rows.\n\n```\nid,total\n1,10\n```\n")
+    (d / "environment" / "Dockerfile").write_text(
+        f"FROM ubuntu\nRUN mkdir -p {f.parent} && printf 'SECRET-TOKEN-42\\n' > {f}\n"
+    )
+    [cmd] = repair_commands([f"plausible:{f}"], d)
+    assert "id,total" in cmd and "SECRET-TOKEN-42" not in cmd and cmd.endswith(f"> {shlex.quote(str(f))}")
+    assert repair_commands([f"plausible:{f}"]) == [
+        f"mkdir -p {shlex.quote(str(f.parent))} && : > {shlex.quote(str(f))}"
+    ]
 
 
 def test_remove_input_whose_oracle_recreates_the_input_is_a_leak_and_relabelled(factory, tmp_path):

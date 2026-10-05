@@ -944,7 +944,17 @@ def _tiny_policy():
     return Qwen3ForCausalLM(config)
 
 
-def _loss_stub(model, *, trim: bool, sort: bool, loss_type: str = "dapo", accumulation: int = 4, per_round: int = 4):
+def _loss_stub(
+    model,
+    *,
+    trim: bool,
+    sort: bool,
+    loss_type: str = "dapo",
+    accumulation: int = 4,
+    per_round: int = 4,
+    entropy_coef: float = 0.0,
+    top_entropy_quantile: float = 1.0,
+):
     from collections import defaultdict
 
     stub = object.__new__(HonestGRPOTrainer)
@@ -968,6 +978,7 @@ def _loss_stub(model, *, trim: bool, sort: bool, loss_type: str = "dapo", accumu
             is_main_process=True,
             gather=gather,
             reduce=lambda x, reduction="sum": x,
+            pad_across_processes=lambda x, dim=0, pad_index=0: x,
             sync_gradients=True,
         ),
         _metrics={"train": defaultdict(list), "eval": defaultdict(list)},
@@ -975,7 +986,9 @@ def _loss_stub(model, *, trim: bool, sort: bool, loss_type: str = "dapo", accumu
         temperature=1.0,
         use_liger_kernel=False,
         model_kwarg_keys={"logits_to_keep"},
-        top_entropy_quantile=1.0,
+        top_entropy_quantile=top_entropy_quantile,
+        entropy_coef=entropy_coef,
+        use_adaptive_entropy=False,
         off_policy_mask_threshold=None,
         importance_sampling_level="token",
         beta=0.0,
@@ -983,7 +996,7 @@ def _loss_stub(model, *, trim: bool, sort: bool, loss_type: str = "dapo", accumu
         epsilon_high=0.28,
         use_vllm=True,
         vllm_importance_sampling_correction=True,
-        _entropy_bonus_enabled=False,
+        _entropy_bonus_enabled=entropy_coef != 0.0,
         aux_loss_enabled=False,
         max_completion_length=16,
         top_k=0,
@@ -1096,6 +1109,31 @@ def test_padded_slots_fall_on_an_unequal_length_batch():
     assert stock / real > 1.5 > sorted_ / real  # the audit's 1.7-3.5x becomes close to 1
 
 
+def test_the_peak_micro_batch_never_exceeds_trls_and_shrinks_far_less_than_the_total():
+    """Memory is set by the largest chunk, not by the sum: trimming can only shrink a chunk's window, but on a
+    heavy-tailed round (one long row per chunk set) the peak falls by a quarter to a third while the padded total falls
+    to a third. Budget memory on the peak (synthetic round: 64 rows, micro-batch 2)."""
+    g = torch.Generator().manual_seed(0)
+    ratios = []
+    for _ in range(20):
+        rows, width_p, width_c = 64, 2048, 4096
+        pl = (torch.rand(rows, generator=g) * 1200 + 400).long()
+        cl = (torch.exp(torch.randn(rows, generator=g) * 0.7) * 600).long().clamp(30, width_c)
+        mask = torch.cat(
+            [
+                (torch.arange(width_p)[None] >= (width_p - pl)[:, None]).long(),
+                (torch.arange(width_c)[None] < cl[:, None]).long(),
+            ],
+            dim=1,
+        )
+        chunks = trainer_mod.plan_chunks(mask, width_c, 2)
+        peak = max(len(r) * (hi - lo) for r, lo, hi in chunks)
+        assert peak <= 2 * mask.size(1)
+        ratios.append((peak / (2 * mask.size(1)), trainer_mod.padded_slots(mask, chunks) / mask.numel()))
+    peak_ratio, total_ratio = (sum(r[i] for r in ratios) / len(ratios) for i in (0, 1))
+    assert total_ratio < 0.4 < peak_ratio < 0.9  # measured: peak 0.73, total 0.33
+
+
 def test_regrouping_keeps_every_row_once_and_orders_micro_batches_longest_first():
     round_ = _round(rows=8, seed=2)
     original = split_tensor_dict(dict(round_), 4)
@@ -1153,6 +1191,35 @@ def test_micro_batches_are_regrouped_only_where_the_loss_is_globally_normalised(
     assert stub._prepare_inputs({}) is stub._buffered_inputs[1]
 
 
+@pytest.mark.parametrize("term", [{"entropy_coef": 100.0}, {"top_entropy_quantile": 0.5}])
+def test_regrouping_would_change_the_per_micro_batch_entropy_terms(term):
+    """Why `_regroup_changes_loss` exists: the entropy bonus is a mean over the micro-batch's tokens and the top-entropy
+    filter a quantile of its entropies, so the same rows in other micro-batches give another loss. Trimming alone (the
+    micro-batches untouched) still gives TRL's value."""
+    model = _tiny_policy()
+    round_ = _round(seed=11)
+    stock = _round_loss_and_grads(_loss_stub(model, trim=False, sort=False, **term), model, round_)
+    trimmed = _round_loss_and_grads(_loss_stub(model, trim=True, sort=False, **term), model, round_)
+    regrouped = _round_loss_and_grads(_loss_stub(model, trim=True, sort=True, **term), model, round_)
+    assert stock[0] == pytest.approx(trimmed[0], rel=1e-5, abs=1e-6)
+    for name, grad in stock[1].items():
+        torch.testing.assert_close(trimmed[1][name], grad, rtol=1e-4, atol=1e-6, msg=name)
+    # random weights give near-uniform entropies, hence the large coefficient
+    assert abs(regrouped[0] - stock[0]) > 1e-5
+
+
+@pytest.mark.parametrize("term", [{"entropy_coef": 100.0}, {"top_entropy_quantile": 0.5}])
+def test_micro_batches_stay_in_trls_order_with_a_per_micro_batch_entropy_term(monkeypatch, term):
+    stub, unsorted, fake_prepare = _prepare_stub("dapo", 4, 4)
+    stub.__dict__.update(
+        _entropy_bonus_enabled=term.get("entropy_coef", 0.0) != 0.0,
+        top_entropy_quantile=term.get("top_entropy_quantile", 1.0),
+    )
+    monkeypatch.setattr(GRPOTrainer, "_prepare_inputs", fake_prepare)
+    stub._prepare_inputs({})
+    assert stub._buffered_inputs is unsorted
+
+
 def test_regrouping_can_be_switched_off(monkeypatch):
     stub, unsorted, fake_prepare = _prepare_stub("dapo", 4, 4, sort=False)
     monkeypatch.setattr(GRPOTrainer, "_prepare_inputs", fake_prepare)
@@ -1177,6 +1244,92 @@ def test_drift_metrics_count_loss_tokens_at_the_cap_and_outside_the_band():
     assert metrics[trainer_mod.METRIC_IS_OUT_OF_BAND] == [pytest.approx(4 / 6)]  # 3.0, 1.2, 0.9, 3.0
     stub._log_sampling_drift({**inputs, "importance_sampling_ratio": ratio[:, :1]})  # sequence-level: nothing to log
     assert len(metrics[trainer_mod.METRIC_IS_AT_CAP]) == 1
+
+
+def _agentic_round(rows=8, prompt_width=16, completion_width=24, seed=0, vocab=64):
+    """A round shaped like a multi-turn rollout batch: completions are alternating model turns and tool results
+    (tool_mask 0 inside the results), some rows were truncated (`mask_truncated_completions` zeroes their completion
+    mask) and `num_items_in_batch` is the true loss-token count, as TRL computes it."""
+    g = torch.Generator().manual_seed(seed)
+    prompt_lengths = torch.randint(2, prompt_width + 1, (rows,), generator=g)
+    completion_lengths = torch.randint(3, completion_width + 1, (rows,), generator=g)
+    prompt_lengths[seed % rows], completion_lengths[(seed + 1) % rows] = prompt_width, completion_width
+    prompt_mask = (torch.arange(prompt_width)[None] >= (prompt_width - prompt_lengths)[:, None]).long()
+    completion_mask = (torch.arange(completion_width)[None] < completion_lengths[:, None]).long()
+    tool_mask = torch.ones(rows, completion_width, dtype=torch.long)
+    for r in range(rows):  # one or two tool-result spans strictly inside the completion
+        n = int(completion_lengths[r])
+        for _ in range(int(torch.randint(1, 3, (1,), generator=g))):
+            a = int(torch.randint(1, max(2, n - 1), (1,), generator=g))
+            tool_mask[r, a : a + int(torch.randint(1, 5, (1,), generator=g))] = 0
+    completion_mask[torch.randperm(rows, generator=g)[:2]] = 0  # two truncated rollouts
+    loss_mask = completion_mask * tool_mask
+    return {
+        "prompt_ids": torch.randint(1, vocab, (rows, prompt_width), generator=g) * prompt_mask,
+        "prompt_mask": prompt_mask,
+        "completion_ids": torch.randint(1, vocab, (rows, completion_width), generator=g) * completion_mask,
+        "completion_mask": completion_mask,
+        "tool_mask": tool_mask,
+        "advantages": torch.randn(rows, generator=g),
+        "old_per_token_logps": -torch.rand(rows, completion_width, generator=g) * 3,
+        "ref_per_token_logps": -torch.rand(rows, completion_width, generator=g) * 3,
+        "importance_sampling_ratio": 0.5 + 3 * torch.rand(rows, completion_width, generator=g),
+        "num_items_in_batch": loss_mask.sum().float(),
+    }
+
+
+def _window_loss_and_grads(stub, model, rounds, micro: int):
+    """What one optimizer step sees: every micro-batch of every round in the window, losses and gradients summed."""
+    model.zero_grad()
+    total = 0.0
+    for round_ in rounds:
+        batches = split_tensor_dict(dict(round_), len(round_["advantages"]) // micro)
+        if stub.sort_micro_batches:
+            batches = trainer_mod.sort_micro_batches(batches)
+        for batch in batches:
+            loss = stub._compute_loss(model, batch)
+            loss.backward()
+            total += float(loss.detach())
+    return total, {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}
+
+
+@pytest.mark.parametrize("model_kind", ["qwen3", "qwen3_5_hybrid"])
+@pytest.mark.parametrize("level", ["token", "sequence"])
+def test_trimmed_sorted_loss_and_gradients_equal_trls_over_random_agentic_windows(model_kind, level):
+    """Several random batches with unequal lengths, tool-masked spans, truncated rows, the KL term, the vLLM importance
+    ratio, token and sequence level ratios, and an accumulation window of two generation rounds. The DAPO denominator
+    (`num_items_in_batch`) is the same scalar in both runs, and the summed loss is what the optimizer sees."""
+    if model_kind == "qwen3":
+        model, vocab = _tiny_policy(), 64
+    else:
+        model, vocab = _tiny_qwen35()[1], 64  # linear-attention layers: left padding must not leak into the state
+    model.eval()
+    for seed in (0, 1, 2):
+        rounds = [_agentic_round(seed=10 * seed + k, vocab=vocab) for k in (0, 1)]
+        kwargs = {"accumulation": 8, "per_round": 4}
+        stock_stub = _loss_stub(model, trim=False, sort=False, **kwargs)
+        new_stub = _loss_stub(model, trim=True, sort=True, **kwargs)
+        for stub in (stock_stub, new_stub):
+            stub.beta, stub.importance_sampling_level = 0.04, level
+        stock = _window_loss_and_grads(stock_stub, model, rounds, micro=2)
+        new = _window_loss_and_grads(new_stub, model, rounds, micro=2)
+        assert stock[0] == pytest.approx(new[0], rel=1e-4, abs=1e-6), (model_kind, level, seed)
+        assert stock[1].keys() == new[1].keys() and stock[1]
+        for name, grad in stock[1].items():  # float32 reordering: compare to each parameter's own gradient scale
+            scale = float(grad.abs().max())
+            assert float((new[1][name] - grad).abs().max()) <= 5e-4 * scale + 1e-9, (name, seed)
+        assert max(float(g.abs().max()) for g in stock[1].values()) > 1e-5
+
+
+def test_the_dapo_denominator_counts_the_same_tokens_before_and_after_regrouping():
+    """Regrouping moves rows between micro-batches, never between rounds: each micro-batch carries the round's one
+    `num_items_in_batch` and the masks of all micro-batches still add up to it (tool-masked and truncated rows out)."""
+    for seed in range(5):
+        round_ = _agentic_round(seed=seed)
+        batches = trainer_mod.sort_micro_batches(split_tensor_dict(dict(round_), 4))
+        counted = sum(int((b["completion_mask"] * b["tool_mask"]).sum()) for b in batches)
+        assert counted == int(round_["num_items_in_batch"]) > 0
+        assert all(b["num_items_in_batch"] == round_["num_items_in_batch"] for b in batches)
 
 
 # ── the real GRPOTrainer, end to end on CPU ────────────────────────────────

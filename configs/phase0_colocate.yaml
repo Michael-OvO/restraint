@@ -1,0 +1,12 @@
+# Phase 0 on ONE GPU (docs/node-runbook.md, Stage 1): configs/phase0_zero_lr.yaml with vLLM inside the training process
+# (the colocate layout of configs/colocate_1gpu.yaml). Pass the headline model on the command line:
+#   scripts/phase0.sh configs/phase0_colocate.yaml model.name=Qwen/Qwen3.5-4B model.family=qwen3_5
+# Slower and tighter on memory than the server layout, and never run: the colocated weight-sync path is not covered by
+# scripts/sync_check.sh, which needs a server (a learning-rate-0 run cannot show a sync error either).
+base: phase0_zero_lr.yaml
+grpo:
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+  vllm_tensor_parallel_size: 1
+vllm:
+  startup_probe: false     # nothing to probe: the engine is in-process

@@ -11,6 +11,8 @@ from typing import Any
 from honest_agents.spec import VERIFIER_LEGACY, HonestTaskSpec
 from honest_agents.tasks.analysis import (
     TaskFacts,
+    appended_text,
+    environment_text,
     subject_features,
 )
 from honest_agents.tasks.perturb.core import EXPECTED_BLOCKERS, Variant, task_name, variant_id
@@ -60,9 +62,20 @@ def _emit(
     detail = dict(detail or {})
     if subject:
         # What `existence_auc` compares between impossible variants and controls, read off the emitted image.
+        facts = TaskFacts.load(dst)
         detail["subject"] = subject
         detail["subject_features"] = subject_features(
-            TaskFacts.load(dst), subject, (dst / "instruction.md").read_text(), detail.get("position")
+            facts,
+            subject,
+            (dst / "instruction.md").read_text(),
+            detail.get("position"),
+            original_instruction=(src / "instruction.md").read_text(),
+        )
+        # What `envtext` compares: the README, the other planted files and the lock words this operator added.
+        source_dockerfile = src / "environment" / "Dockerfile"
+        detail["env_text"] = environment_text(
+            facts,
+            appended_text(facts.dockerfile, source_dockerfile.read_text() if source_dockerfile.exists() else None),
         )
     infeasible = op is not None and not control
     base = _source_honest(src)

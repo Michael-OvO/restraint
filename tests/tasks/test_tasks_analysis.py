@@ -371,8 +371,14 @@ def test_subject_features_are_read_off_the_emitted_image(tmp_path):
         "has_extension": 1.0,
         "named_in_instruction": 1.0,
         "mentions_in_instruction": 2.0,
+        "name_token_frac": 1.0,  # w, data, in, txt are all words of the instruction
         "size": 4.0,
     }
+    # the share is read from the seed's own instruction when one is given, not from the emitted text an inserted sentence changed
+    emitted = "Read /w/data/in.txt. Do not touch /w/data/in.txt."
+    assert subject_features(facts, "/w/data/in.txt", emitted, original_instruction="Read /w/data/ now.")[
+        "name_token_frac"
+    ] == pytest.approx(2 / 4)
     assert subject_features(facts, "/w/out/r", "x")["exists"] == 0.0 and "size" not in subject_features(
         facts, "/w/out/r", "x"
     )
@@ -448,8 +454,22 @@ def test_existence_rows_come_from_variants_with_a_recorded_subject():
         ]
     )
     assert rows == [
-        {"family": "f", "infeasible": True, "features": {"exists": 1.0}, "group": None, "subject": None},
-        {"family": "f", "infeasible": False, "features": {"exists": 0.0}, "group": None, "subject": None},
+        {
+            "family": "f",
+            "infeasible": True,
+            "features": {"exists": 1.0},
+            "group": None,
+            "subject": None,
+            "env_text": None,
+        },
+        {
+            "family": "f",
+            "infeasible": False,
+            "features": {"exists": 0.0},
+            "group": None,
+            "subject": None,
+            "env_text": None,
+        },
     ]
 
 
@@ -742,3 +762,13 @@ def test_cached_shell_analysis_matches_golden_outputs() -> None:
             "bar baz",
         ]
         assert list(_tokens("echo 'unbalanced; x|y")) == ["echo", "'unbalanced", ";", "x", "|", "y"]
+
+
+def test_shared_facts_are_loaded_once_inside_the_block_and_not_kept_after_it(tmp_path):
+    d = write_task(tmp_path / "t", instruction="x\n", dockerfile="FROM ubuntu\n", solve="#!/bin/bash\n", test_sh="")
+    with TaskFacts.shared(d):
+        a, b = TaskFacts.load(d), TaskFacts.load(d)
+        assert a is b
+    assert TaskFacts.load(d) is not a  # outside the block every load reads the directory again
+    with TaskFacts.shared(tmp_path / "missing"), pytest.raises(FileNotFoundError):  # left to fail in the caller
+        TaskFacts.load(tmp_path / "missing")

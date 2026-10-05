@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import posixpath
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -46,6 +49,9 @@ def build_inputs(env_dir: Path) -> list[Path]:
     return list(dict.fromkeys(out))
 
 
+_SHARED: dict[Path, TaskFacts] = {}  # task dir -> facts, only while a `TaskFacts.shared` block is open
+
+
 @dataclass
 class TaskFacts:
     """Everything the operators need about one source task."""
@@ -61,7 +67,23 @@ class TaskFacts:
     has_compose: bool
 
     @classmethod
+    @contextmanager
+    def shared(cls, task_dir: Path) -> Iterator[None]:
+        """Inside the block `TaskFacts.load(task_dir)` returns one object, so its lazily computed analyses (image files,
+        script, Dockerfile) are done once for all operators instead of once per operator and control. Only for a directory
+        nothing writes to meanwhile (a seed task): the facts are not refreshed. A directory that cannot be loaded is left
+        to fail in the operators, as before."""
+        with contextlib.suppress(Exception):  # an unloadable seed is reported by the operators themselves
+            _SHARED[task_dir] = cls.load(task_dir)
+        try:
+            yield
+        finally:
+            _SHARED.pop(task_dir, None)
+
+    @classmethod
     def load(cls, task_dir: Path) -> TaskFacts:
+        if (hit := _SHARED.get(task_dir)) is not None:
+            return hit
         from honest_agents.tasks.taskfs import read_task_toml
 
         cfg = read_task_toml(task_dir)

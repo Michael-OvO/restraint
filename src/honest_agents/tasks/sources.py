@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import shutil
@@ -158,6 +159,62 @@ def sample_ids(ids: list[str], limit: int | None, seed: int) -> list[str]:
     return sorted(random.Random(seed).sample(ids, limit))
 
 
+REVISION_FILE = ".revision"  # in a source's raw dir: the dataset git revision it was fetched at, when known
+# A pool this large is fetched with one shallow clone: the per-file Hub API rate-limits at about 20k requests.
+_GIT_MIN_TASKS = 300
+
+
+def _git_url(repo_id: str) -> str:
+    return f"https://huggingface.co/datasets/{repo_id}"
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    return path.read_bytes()[:40].startswith(b"version https://git-lfs.github.com/spec")
+
+
+def _download_git(repo_id: str, raw_dir: Path, todo: list[str]) -> bool:
+    """Fetch `todo` from one shallow `git clone` of the dataset repository (about 5 s for all 2,492 Endless Terminals tasks,
+    against many minutes of rate-limited per-file requests). Model trajectories and `.DS_Store` files are dropped, as in
+    the per-file path. Returns False, leaving `raw_dir` as it was, when git is missing or the clone fails, so the caller
+    falls back to the Hub API."""
+    import subprocess
+    import tempfile
+
+    if shutil.which("git") is None:
+        return False
+    with tempfile.TemporaryDirectory(prefix=".clone-", dir=raw_dir) as tmp:
+        clone = Path(tmp) / "repo"
+        try:
+            subprocess.run(
+                ["git", "clone", "--quiet", "--depth", "1", _git_url(repo_id), str(clone)],
+                check=True,
+                capture_output=True,
+                env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
+                timeout=1800,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            log.warning("git clone of %s failed (%s): falling back to the Hub API", repo_id, e)
+            return False
+        rev = subprocess.run(
+            ["git", "-C", str(clone), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        log.info("fetched %d tasks of %s from one git clone (revision %s)", len(todo), repo_id, rev or "unknown")
+        if rev:
+            (raw_dir / REVISION_FILE).write_text(rev + "\n")  # the manifest records which dataset revision was built
+        # GIT_LFS_SKIP_SMUDGE leaves a large file as a three-line pointer: a task holding one would be built from the pointer
+        # text. The Hub API path resolves it, so fall back to it rather than copy a corrupt task.
+        for t in todo:
+            for f in (clone / t).rglob("*") if (clone / t).is_dir() else ():
+                if f.is_file() and not f.is_symlink() and f.stat().st_size < 1024 and _is_lfs_pointer(f):
+                    log.warning("git clone of %s holds a Git LFS pointer (%s): falling back to the Hub API", repo_id, f)
+                    return False
+        junk = shutil.ignore_patterns("*_summary.json", ".DS_Store")
+        for t in todo:
+            if (clone / t / "task.toml").exists():
+                shutil.copytree(clone / t, raw_dir / t, ignore=junk, dirs_exist_ok=True, symlinks=True)
+    return True
+
+
 def download(source: str, raw_dir: Path, task_ids: list[str], *, chunk: int = 200) -> None:
     """Fetch only the given tasks into `raw_dir/<task_id>/` (skipping ones already present)."""
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -174,6 +231,8 @@ def download(source: str, raw_dir: Path, task_ids: list[str], *, chunk: int = 20
                 if not target.is_relative_to(raw_dir.resolve()):
                     raise ValueError(f"unsafe zip member {n}")
                 z.extract(n, raw_dir)
+        return
+    if len(todo) >= _GIT_MIN_TASKS and source != "seta-env" and _download_git(info.repo_id, raw_dir, todo):
         return
     from huggingface_hub import snapshot_download
 
@@ -424,6 +483,15 @@ def local_seeds(root: Path, *, source: str = "local", rejected: list[SeedReject]
             )
         )
     return seeds
+
+
+def source_revisions(sources: Iterable[str], raw_root: Path) -> dict[str, str | None]:
+    """Dataset git revision each registered source was fetched at (None: fetched file by file, or a local directory)."""
+    out: dict[str, str | None] = {}
+    for src in sources:
+        f = raw_root / src / REVISION_FILE
+        out[src] = f.read_text().strip() if f.is_file() else None
+    return out
 
 
 def unknown_license_sources(sources: Iterable[str]) -> list[str]:

@@ -2,8 +2,9 @@
 
 What the task dataset is made of, which families train, how many tasks stand behind each, under what licence the source data
 may be used, which leaks were found and how each was closed, and how to rebuild it. Code: `src/honest_agents/tasks/`; the build is
-`scripts/build_dataset.sh`. Everything here was measured without Docker or a GPU, on real Endless Terminals (ET) seeds from the
-local cache. Nothing has been oracle-validated yet (that needs Docker).
+`scripts/build_dataset.sh`. Everything here was measured without Docker or a GPU, on the full real Endless Terminals (ET) pool
+(2,492 tasks, 2,482 of them convertible; section 8 has the numbers and the build cost). Nothing has been oracle-validated yet
+(that needs Docker).
 
 ## 1. Sources and licences
 
@@ -11,7 +12,7 @@ The first dataset uses **Endless Terminals only**, converted to the hermetic pyt
 
 | source | data licence | where it was read | status |
 |---|---|---|---|
-| `endless-terminals` (`obiwan96/endless-terminals`) | MIT (generator code: Apache-2.0, `kanishkg/endless-terminals`) | dataset card front-matter (`license: mit` sits after the body, so the Hub API returns `None`); the tasks are LLM-generated, so the generating model's terms may apply too | in use |
+| `endless-terminals` (`obiwan96/endless-terminals`) | MIT (generator code: Apache-2.0, `kanishkg/endless-terminals`) | dataset card front-matter (`license: mit` sits after the body, so the Hub API returns `None`); the tasks are LLM-generated, so the generating model's terms may apply too | in use, the whole pool (2,492 tasks, 0.41 GB on the Hub of which 0.30 GB is model trajectories the build drops; 105 MB kept) |
 | `seta-env` (`camel-ai/SETA-Env`) | Apache-2.0 | dataset card, not re-read | **disabled**: its tasks carry Terminal-Bench canary GUIDs |
 | `tmax-15k` (`TMaxxx/TMax-15K-Harbor`) | unspecified on the re-upload (upstream `allenai/TMax-15K` is ODC-BY-1.0, contains Gemini outputs) | none | **refused** unless `--allow-unknown-license`; also disabled; no oracle solutions, so never a validated source |
 | AbstentionBench | CC BY-NC 4.0 | | evaluation only, not vendored |
@@ -33,30 +34,38 @@ makes the obstacle harmless, and records `decoy_targets`. Each infeasible varian
 | `high_risk` | an irreversible deletion, symmetric twins: identical wording, only the directory's contents differ (a README or the data itself) | train | no text cue |
 | `revoke_permission` | the lock sits in the image, the instruction is byte-identical; the lock is on the file's directory when the file is the only deliverable there, so `expected_targets` lists both the file and the directory (`perturb/revoke_permission._lock_targets`) | train | no text cue |
 | `remove_input` | a build-time input is deleted; filtered so a recreated input cannot pass (section 5) | train | no text cue |
-| `remove_tool` | a tool is removed (the instruction must mandate it and no interpreter may substitute) | train, but yields 0 variants on real seeds | the gates reject every ET task |
+| `remove_tool` | a tool is removed (the instruction must mandate it and no interpreter may substitute) | **not built by default** (`perturb.NOT_BUILT_BY_DEFAULT`; `--operators remove_tool` turns it on) | structural: 1 variant in 2,482 ET seeds (section 8) |
 | `conflicting_constraint` | the instruction forbids the path the task needs | **held out** (test only) | a lexical cue no template removes (section 4) |
 | `no_network` | the network is cut | **held out** (test only) | about 2 pairs per 150 seeds: too few to train or report |
 
 Yield, seeds that give at least one infeasible variant (each with a matched control), per 150 real ET seeds. "Before" is the
-register's pre-fix recount, "now" the current code on a 335-seed pool (74 test, 10 val, 251 train by the hash split;
-`python -m honest_agents.tasks.build ... --no-enforce-cue-band`, manifest key `yield`):
+register's pre-fix recount, "first pass" the code after the first leak fixes on 335 seeds, "full pool" the current code on all
+2,482 convertible seeds (`python -m honest_agents.tasks.build ...`, manifest key `yield`). On the full pool every near-duplicate
+cluster is a single seed (largest instruction 3-gram Jaccard between two seeds 0.076, threshold 0.1), so "independent source
+tasks" equals the seed count behind each family:
 
-| family | before the leak fixes | after the first fix pass | now (335 seeds) | seeds / independent source tasks now |
+| family | before the leak fixes | first pass (335 seeds) | full pool per 150 | seeds / independent source tasks, full pool |
 |---|---|---|---|---|
-| high_risk | 148 | 105 | 102.5 | 229 |
-| revoke_permission | 101 | 96 | 96.7 | 216 |
-| conflicting_constraint | 72 | 28 | 29.1 | 65 |
-| remove_input | 31 | 12 | 7.6 | 17 |
-| no_network | 1 | 1 | 1.8 | 4 |
-| remove_tool | 0 | 0 | 0.0 | 0 |
+| high_risk | 148 | 102.5 | 105.2 | 1,740 |
+| revoke_permission | 101 | 96.7 | 94.8 | 1,568 |
+| conflicting_constraint | 72 | 29.1 | 33.5 | 555 |
+| remove_input | 31 | 7.6 | 11.4 | 188 |
+| no_network | 1 | 1.8 | 2.5 | 41 |
+| remove_tool | 0 | 0.0 | 0.1 | 1 |
 
-About 85% of seeds (283 of 335) yield at least one trainable infeasible variant, almost all high_risk or revoke_permission. The
-manifest carries, per split and family, `yield.<split>.families.<family>` (`pool_infeasible`, `pool_controls`, `pool_source_tasks`,
-`pool_yield_per_150_seeds`, `emitted_pairs`, `emitted_source_tasks`) and `training.pairs_per_family` / `training.thin_families`
-(fewer than 40 pairs logs a warning: on the 335-seed pool remove_input has 14, so it needs a full 1,500-seed build before it can be
-reported alone). Controls are 1:1 at generation; about 80% of infeasible rows keep theirs after the mixture. Phrasing pools
-(8 train, 4 test) exist for `conflicting_constraint` and `high_risk`; the environment operators use name pools; `perturb.POOLS`
-partitions all of them between train and test.
+2,207 of 2,482 seeds (89%) yield at least one trainable infeasible variant (1,141 seeds yield two trainable families, 74 all
+three). The manifest carries, per split and family, `yield.<split>.families.<family>` (`pool_infeasible`, `pool_controls`,
+`pool_source_tasks`, `pool_yield_per_150_seeds`, `emitted_pairs`, `emitted_source_tasks`) and `training.pairs_per_family` /
+`training.thin_families` (fewer than 40 pairs logs a warning; on the full pool no training family is thin: remove_input has 104
+pairs in train). Controls are 1:1 at generation. Phrasing pools (8 train, 4 test) exist for `conflicting_constraint` and
+`high_risk`; the environment operators use name pools; `perturb.POOLS` partitions all of them between train and test.
+
+**Why `remove_tool` is out of the default list.** Every ET image is ubuntu plus python3 plus pytest, so a command in an
+oracle script (10,173 mentions over 2,482 seeds) is almost always an essential binary (9,264), absent from the image (418),
+installed by the oracle itself (2), or a non-essential tool that is present (489). Of the 489, 435 are not mandated by the
+instruction; of the 54 that are (mostly curl, rsync, make, sqlite3, ssh-keygen, jq), 38 can be replaced by python, 15 are used by
+the verifier, and one seed (`task_000000_b314bfef`, gpg) is left. That is a property of the source, not a threshold: a source
+whose images ship real tools could turn the operator on. The operator and its tests stay.
 
 **Held-out decision** (taken while the owner was away; revisit freely). The first plan held out `high_risk` and
 `revoke_permission` as clean mechanism-transfer tests. An independent verifier then re-measured the leak fixes on 170, 261 and 335
@@ -97,12 +106,15 @@ being tested.
 | structure logistic regression (depth, extension, mentions, position, size, name length), grouped CV | 0.74 | 0.46 |
 | mentions in instruction, AUC | 0.66 | 0.50 |
 | whole-instruction bag-of-words, source-grouped CV | 0.51 | 0.51 |
+| share of the path's name words found in the seed's own instruction (`name_token_frac`), full pool, 129 test pairs | 0.99 | 0.984 (reported while held out; enforced for any family that trains) |
 
 **Remaining, not removable:** the label is whether the forbidden path is the one the task requires, and a classifier given only the
 lines that mention the forbidden path reaches AUC 1.0 because the control's path is introduced as stale. That is the conflict itself
 in lexical form. Opener and tail pools (8 and 6 train, 3 and 2 test phrasings) keep any single template from being a marker, but the
 generator is the same for test, so this is a construct-validity limit to state next to any number. Decoy names are also longer and
 have more digits than deliverables (low severity; held out, not changed).
+Since `name_token_frac` is enforced, a build that trains `conflicting_constraint` (`HELDOUT=no_network`) is refused at AUC 0.98
+unless `NO_ENFORCE_CUE_BAND=1`: the family can only be reported zero-shot until its decoy stops borrowing words.
 
 ## 4. Leak register: status of every finding
 
@@ -120,10 +132,13 @@ are fixed locally; Docker-only checks are in section 6.
 | L6 | split guards accept rows with no split | **fixed**: `split == "train"` required in `train.check_rows`, the pilot and `difficulty.py` | `tests/test_data_flow.py::test_check_rows_train_requires_split_train`, `::test_pilot_refuses_non_train_and_missing_splits`, `::test_difficulty_counts_only_train_rows` |
 | L7 | eval-sourced quarantine entries change `test.jsonl` on rebuild | **fixed**: eval, test and openenv sources ignored by default | `bank.DEFAULT_IGNORED_SOURCES`; `tests/test_data_flow.py::test_eval_quarantine_entries_are_ignored_by_default` |
 | L8 | held-out families are described in the system prompt (a claim limit, not a leak) | **documented**: call them "held-out variants", run the neutral-prompt arm | [evaluation.md](evaluation.md) section 1, [proposal.md](proposal.md) section 7.1 |
+| L9 | the cue gate was blind to the environment text of the environment-only families (a twin and its control share one instruction, so every path feature is pair-identical): README wording and length, lock owner and mode | **fixed**: grouped-CV classifiers over the planted text are a hard gate for training families (section 4.1); the first full-pool build found a real shortcut, README length at AUC 0.91, and the junk texts were rewritten to match the risky ones | `tasks/analysis/envtext.py`, `tasks/perturb/pools.py` (`_JUNK_WHAT`, `_make_sites`), `tests/tasks/test_tasks_envtext.py`, `tests/test_data_leakage.py::test_the_planted_environment_text_of_every_training_family_is_neutral_except_its_carrier`, `tests/tasks/test_tasks_perturb.py::test_every_risky_text_has_a_junk_text_of_the_same_shape_and_they_are_dealt_as_pairs` |
+| L10 | the name-token-share feature (AUC 1.0 for a borrowed-name decoy) was not enforced | **fixed**: `name_token_frac` is in `ENFORCED_FEATURES`, computed against the seed's own instruction | `tasks/analysis/cues.py`; `tests/tasks/test_tasks_envtext.py::test_a_decoy_that_borrows_names_from_other_tasks_is_refused_for_a_training_family` |
+| L11 | the empty-build guard sat after the seed collection, so a build whose seeds were all removed by decontamination or the hermetic filter wrote a manifest with `n_seeds: 0`; a cue metric that crashed counted as clean | **fixed**: the guard is after both filters and names the counts; an enforced build fails on a crashed metric; both leave no dataset file | `tasks/build/pipeline.py`; `tests/tasks/test_tasks_build.py::test_build_refuses_legacy_seeds_by_default`, `::test_build_where_decontamination_removes_every_seed_fails_atomically`, `::test_a_cue_metric_that_crashed_fails_an_enforced_build_instead_of_passing_it` |
 | pairing | feasible rows came from unpaired sources | **fixed**: `balance_mixture(paired=True)` | manifest `pairing` |
 | quality | paragraph insertion broke sentences or lists in 51% of cc variants; remove_input targets under 40 characters; revoke locked all of `/home/user`; high_risk scope clauses | **fixed**, static only: 20 variants per family read by hand, none bad | `tests/tasks/test_tasks_perturb.py`, `tests/test_data_leakage.py::test_operators_insert_a_whole_paragraph_after_a_finished_one` |
 
-Smaller items, not fixed: the no-network sandbox still answers ICMP and DNS (fidelity only); the `remove_tool` control keeps the
+Smaller items, not fixed (the twin-structure numbers below are from the 335-seed pool; the full-pool values are in section 8): the no-network sandbox still answers ICMP and DNS (fidelity only); the `remove_tool` control keeps the
 `/etc/alternatives` link while the impossible variant deletes it (latent: no ET task yields a `remove_tool` variant; deleting it
 in the control would dangle symlinks the oracle needs, and the right fix needs a Docker run); Qwen3.5-4B post-dates ET and
 Terminal-Bench, so report deltas between arms only and add a Qwen3-4B control; the tmax-4b reference model may overlap the test set
@@ -132,6 +147,31 @@ sit at AUC 0.50 for the three training families in train and test, because the t
 against the plain feasible copy scores 0.70 to 0.76 (the perturbation marker is shared by both classes, so it carries no label), and a
 Dockerfile-diff classifier scores 0.94 to 1.00, which is the environment cue itself (what the agent must find by looking), not a
 text cue.
+
+### 4.1 Environment text (L9)
+
+The twins of `high_risk`, `revoke_permission` and `remove_input` differ only in the environment, which is the evidence the agent has
+to find by looking. So the words of the README, the owner and mode of a lock and the moved-aside file score AUC 1.0 in any
+classifier, by design (the manifest lists them as `env:carrier_readme`, `env:carrier_lock`, `env:carrier_files` and does not
+enforce them: `analysis.envtext.CARRIER_CHANNELS`). What must not separate the two sides is everything around the evidence. The
+build reads three channels off each emitted variant (the README-like files, the other planted files with their names, the
+`chown` and `chmod` words), classifies them with grouped cross-validation (folds are the donor groups, so a source, its twin and its
+control sit in one fold), and refuses the build when, for a training family, any of these leaves [0.4, 0.6]:
+
+| gated entry | what it is |
+|---|---|
+| `env:readme_words`, `env:readme_chars`, `env:readme_commas` | the README's length and punctuation, one feature each |
+| `env:style` | logistic regression over the README's words, characters, commas, digits, apostrophe and capitalised words |
+| `env:readme`, `env:files`, `env:lock` | naive Bayes over the words of a channel that is not the family's carrier |
+
+First full-pool run: `high_risk` failed with README length at AUC 0.91 (chars 0.86, style classifier 0.96; val and test alike). The
+risky texts ("the only copy of last night's production database backups") were longer and had more commas and apostrophes than the
+junk ones ("a transcoding cache"), so a policy could learn "long README, abstain" without reading it. The junk texts are now
+rewritten to match the risky text at the same index in word count, character count, commas, apostrophes and digits, and
+`_make_sites` deals them as pairs, so a twin's README and its control's have one shape (train and test pools; a unit test checks it).
+After the fix every gated entry sits at 0.50 in train, val and test on the full pool, while the carriers stay at 1.0. A gate on the
+env text cannot see what the parser does not model: `remove_input`'s moved file is not read from the Dockerfile (its carrier AUC is
+0.50 on the real pool), so that family's environment check is only that nothing else differs.
 
 ## 5. remove_input: recreatable inputs
 
@@ -144,24 +184,34 @@ Three layers stop that:
    what the file held: `analysis/filters.content_bound_tokens` needs a distinctive value of the file (a number of 3+ characters, or a
    6+ character word that is not a keyword) that the pytest files spell out and that neither the instruction nor any other file of the
    image shows. A test that recomputes its expectation from the file at run time has no such token, so the file is no candidate.
-2. **Repair probe** (`validate.py`, needs Docker): recreate the removed path empty and rerun the oracle; a pass relabels the variant as
-   a control (`relabel_to_control`). It does not try a plausible non-empty recreation; only a Docker run can show that.
+   The static plausible-recreation probe sits on top (`analysis/filters.guessable_tokens`): a candidate is dropped when every one of
+   those tokens can be rebuilt from the visible text under another case, plural or tense, or with the commas of a number
+   (`4521` for `4,521`).
+2. **Repair probes** (`validate.py`, need Docker): recreate the removed path empty and rerun the oracle; if that fails, recreate it with
+   plausible content (`analysis.plausible_recreation`: the code blocks and indented lines of the instruction plus a sibling file of
+   the same extension, never the removed file itself) and rerun it. A pass in either probe relabels the variant as a control
+   (`relabel_to_control`; the control's oracle then makes the same recreation, a `plausible:<path>` entry in `relabels.json`).
+   Validation results made before the plausible probe are not current and are re-run (`settings.repair_plausible`).
 3. **Hand audit**: `scripts/build_audit_set.sh` sheets show the test file names, what each test asserts (first 200 characters) and the
    oracle command, plus a checklist line per variant (`--no-show-tests` hides them). Audit every `remove_input` test row by hand.
 
 On the 335 cached seeds this cut candidates from 35 (28 seeds) to 19 (17 seeds), at the price of yield (12.5 to 7.6 per 150 seeds).
-One unsure case remains (`mock_opt_solver`). The remaining leak rate is unmeasured until a Docker run.
+One unsure case remains (`mock_opt_solver`). On the full pool (2,482 seeds) the static plausible-recreation probe changes little:
+candidates 213 to 212, impossible variants 189 to 188, so it flips 1 variant (0.5%) to a non-candidate; 17 further candidates have
+some but not all bound tokens guessable and stay. The real flip rate of the Docker probe, like the remaining leak rate, is
+unmeasured until a Docker run.
 
 ## 6. Rebuilding and checking
 
 ```bash
 scripts/fetch_benchmarks.sh benchmarks      # pinned commits of the benchmark texts to deduplicate against; mandatory
-LIMIT=1500 scripts/build_dataset.sh data    # seeds -> hermetic conversion -> variants -> validation (if Docker) -> splits
+scripts/build_dataset.sh data               # whole pool: git clone -> hermetic conversion -> variants -> validation (if Docker) -> splits
 ```
 
-`build_dataset.sh` is configured by environment variables (the header of the script lists them all): `LIMIT` (1500 seeds per source),
-`SOURCES`, `BENCH_DIR` (required; `I_KNOW_NO_BENCHMARK=1` is for tests only), `TEST_BP` / `VAL_BP` (2200 / 400 of 10,000: about 330 test
-and 60 val sources of 1,500), `HELDOUT` (`conflicting_constraint,no_network`), `MIXTURE` (`0.55,0.20,0.25`), `NEARDUP_THRESHOLD`,
+The whole pool builds in about 75 s on a laptop (the download is one shallow `git clone`, 5 s; section 8). `build_dataset.sh` is
+configured by environment variables (the header of the script lists them all): `LIMIT` (empty = the whole pool, the default; a number
+samples), `SOURCES`, `BENCH_DIR` (required; `I_KNOW_NO_BENCHMARK=1` is for tests only), `TEST_BP` / `VAL_BP` (2200 / 2200 of 10,000:
+564 test and 536 val sources of 2,482), `HELDOUT` (`conflicting_constraint,no_network`), `MIXTURE` (`0.55,0.20,0.25`), `NEARDUP_THRESHOLD`,
 `QUARANTINE_FILE`, `DIFFICULTY_JSON`, `VALIDATE` (`auto` = if `docker info` works), `NO_ENFORCE_CUE_BAND`, `ALLOW_UNKNOWN_LICENSE`.
 Output: `{train,val,test,train_pool}.jsonl`, `test_ids.txt`, `manifest.json` (yield, training pairs per family, cue metrics, licences,
 pairing), `tasks/`, `dedup.jsonl`, `seeds/<source>/_rejected.jsonl` (written when the hermetic conversion refused a seed).
@@ -172,8 +222,8 @@ pairing), `tasks/`, `dedup.jsonl`, `seeds/<source>/_rejected.jsonl` (written whe
 - **With Docker** the build runs five steps, all resumable: build, validate, rebuild (relabels harmless `remove_input` variants as
   controls, quarantines leaks), validate again, final rebuild. **Without Docker** it builds unvalidated and says so; re-run on the
   Linux node before training.
-- **Frozen after the first training run**: the salt (`--split-seed`) and the cutoffs. Copy `data/test_ids.txt` to
-  `configs/test_ids.txt` and commit it (`data/` is git-ignored); `build_dataset.sh` picks that file up automatically.
+- **Frozen after the first training run**: the salt (`--split-seed`, default 0) and the cutoffs (`TEST_BP=2200`, `VAL_BP=2200`).
+  Nothing has trained yet, so they are still free; the exact freeze command and the recommended values are in section 8.
 - **Format**: every instruction, the plain copy included, goes through `taskfs.normalise_instruction` (paragraphs separated by one
   blank line, one final newline), so formatting does not separate a perturbed row from a plain one.
 - **Audit set**: `VALIDATE=1 scripts/build_audit_set.sh data/audit` (20 to 30 sources, the training families plus controls), read the
@@ -188,9 +238,88 @@ twins right after boot (atime), and check that `test -e <forbidden path>` agrees
 
 ## 7. Open
 
-- Whether a plausible non-empty recreation passes a `remove_input` variant (the Docker repair probe only tries an empty one).
-- Whether `remove_tool` can yield anything on a source other than ET.
-- A full 1,500-seed build to size `remove_input` and to set the cue-gate band: with 50 to 60 pairs the 0.4 to 0.6 band is only about
-  two standard errors wide.
-- Whether to train `no_network` (owner decision, section 2).
-- The oracle-validation pass rate and the real leak rate: the audit-set gate is at least 95% of variants validating as labelled.
+- The Docker-only checks: oracle validation of every variant (the audit-set gate is at least 95% validating as labelled), the real
+  leak rate, and how many `remove_input` variants the empty and the plausible repair probes flip (the static probe flips 1 of 189).
+- Whether `remove_tool` can yield anything on a source other than ET (structural zero on ET, section 2).
+- Whether to train `no_network` (owner decision: 41 pairs in the whole pool, 21 in train, 15 in test; the two-family list
+  `HELDOUT=conflicting_constraint` trains it with about 21 pairs).
+- Whether to keep `conflicting_constraint` as a reported zero-shot family (owner decision, section 3: `name_token_frac` AUC 0.984,
+  129 test pairs); it stays held out and out of headline numbers.
+- The probe size: `probe.max_variants` is 100 in `configs/base.yaml`, a hash-chosen subset of `val.jsonl`, so only about 100 of
+  the 974 validation rows are probed per evaluation. The larger validation split pays off only if that is raised (a change request
+  to the config owner) or if checkpoint selection reads the whole file.
+- The test split has 42 impossible `remove_input` pairs and 15 `no_network` pairs (< 50, the reporting floor
+  `MIN_FAMILY_TEST_ROWS`): report them pooled or not at all.
+
+## 8. Full-pool build (2026-10-05)
+
+Source: `obiwan96/endless-terminals` at git revision `26ecf78458e7f756e4d06780d5fbf3dd78e91815` (the manifest records it as
+`source_revisions`), 2,492 task directories; 10 are refused by the hermetic conversion (the image does not install python3), leaving
+2,482 seeds. Benchmarks: `scripts/fetch_benchmarks.sh` at the pinned commits, 912 texts (terminal-bench-2 89, TBLite 100,
+agentic-abstention 197, agentabstain 526; the clones of the first two were missing from the earlier offline check, which saw
+197 texts). Decontamination against all of them: 0 seeds dropped at the 0.5 Jaccard threshold, maximum word 8-gram Jaccard 0.0038,
+49 of 2,482 seeds share any 8-gram with any benchmark text. The max overlap is recorded in `manifest.json` `benchmark_overlap`.
+
+**Before and after** on the same pool (`before` = the code at the start of this pass with `VAL_BP=400`, cue gate not enforced
+because it did not exist for the env text; `after` = this code with the defaults):
+
+| | before | after |
+|---|---|---|
+| seeds / train / val / test source groups | 2,482 / 1,821 / 97 / 564 | 2,482 / 1,382 / 536 / 564 |
+| training families (default) | remove_tool, remove_input, revoke_permission, high_risk | remove_input, revoke_permission, high_risk |
+| train pairs per family (remove_tool / remove_input / revoke / high_risk) | 1 / 140 / 302 / 302 | n/a / 104 / 230 / 231 |
+| val impossible rows (remove_input / revoke / high_risk) | 7 / 16 / 17 | 42 / 88 / 89 |
+| test impossible rows (remove_input / revoke / high_risk / cc / no_network) | 42 / 357 / 394 / 129 / 15 | unchanged |
+| rows train / val / test | 3,311 / 177 / 2,438 | 2,512 / 974 / 2,438 |
+| independent source clusters | 2,482 (no cluster at 0.1) | same |
+| cue gate, training families | passes (path features only) | passes, now incl. `name_token_frac` and the env text (first run failed: README length 0.91) |
+| empty build after a filter | writes `n_seeds: 0` | fails, no dataset file |
+| build wall time / peak RSS | 89 s / 497 MB | 71 s (70 s with the pool already cloned) / 497 MB |
+
+Where the time went (profile shares of a 70 s build): collecting and normalising the seeds about a quarter (`copytree` and the
+hermetic conversion), variants about 55% (each variant copies its task directory and Harbor loads it), near-duplicate clustering
+14 s before and 4 s after (the inverted
+index now counts shared shingles from the postings and only intersects pairs that can reach the threshold; the pairs are identical
+to the old search, a unit test compares against brute force), the rest I/O. Also in this pass: `TaskFacts.shared` analyses a seed
+once for all operators and controls, and `_recombined_name` splits the name bank once per task (conflicting_constraint, 9.5 s of
+a profile). The generated task directories are byte-identical to the build before those two changes.
+
+**Cue gate on the full pool (AUC, train / val / test; `n` is pairs):** every gated path feature, `cv:name_tokens`, `cv:structure`,
+`env:style`, `env:readme_*` and `env:files` is 0.50 for `high_risk`, `revoke_permission` and `remove_input` in train, val and
+test. The carriers are `env:carrier_readme` 1.00, `env:carrier_lock` 1.00, `env:carrier_files` 0.50
+(not parsed). Held-out: `conflicting_constraint` `name_token_frac` 0.984, `cv:name_tokens` 0.567, `cv:structure` 0.514,
+everything else 0.50; `no_network` has too few pairs to judge. The 335-seed failure (name-token AUC 0.634 on 52 pairs) was a pool
+artefact of a family that no longer trains.
+
+**Split cutoffs: final values and recommendation.** The split is a fixed hash of the source id, so the test set never moves with the
+pool. `TEST_BP` stays 2200 (564 test sources; every reported family has at least 42 impossible test rows except no_network).
+`VAL_BP` goes from 400 to 2200 because that is the smallest cutoff at which `remove_input` reaches 40 impossible validation rows
+(measured by simulating the real mixture on the full pool, matching the real builds for 400 and 1200):
+
+| `VAL_BP` | val groups | val impossible rows (revoke / high_risk / remove_input) | train groups | train pairs (revoke / high_risk / remove_input) |
+|---|---|---|---|---|
+| 400 | 97 | 16 / 17 / 7 | 1,821 | 303 / 303 / 139 |
+| 1200 | 297 | 50 / 50 / 22 | 1,621 | 269 / 270 / 124 |
+| 1500 | 377 | 62 / 62 / 30 | 1,541 | 257 / 257 / 116 |
+| 2000 | 492 | 83 / 83 / 35 | 1,426 | 236 / 236 / 111 |
+| **2200** | **536** | **88 / 89 / 42** | **1,382** | **230 / 231 / 104** |
+
+The cost is about a quarter of the train rows (the train mixture is capped by its plain feasible rows, so the surplus high_risk and
+revoke_permission pairs were unused anyway). The owner may prefer 1200 (about 300 groups, 50 impossible rows for two families, 22
+for remove_input). The recommendation is the whole pool (`LIMIT` empty: it costs 75 s and `LIMIT=1500` would give about 22
+remove_input validation pairs at these cutoffs), `TEST_BP=2200`, `VAL_BP=2200`, salt 0. **Not frozen: `configs/test_ids.txt`
+does not exist.** To freeze after the owner agrees (and before the first training run):
+
+```bash
+scripts/fetch_benchmarks.sh benchmarks
+scripts/build_dataset.sh data                       # on the Linux node with Docker this validates; locally it builds unvalidated
+cp data/test_ids.txt configs/test_ids.txt            # 564 ids and a sha256 line; later builds read it and never shrink it
+git add configs/test_ids.txt && git commit -m "Freeze the held-out test ids"
+```
+
+After that the salt and `TEST_BP` / `VAL_BP` must not change (raising `TEST_BP` moves already-trained sources into test unless that
+file is supplied; the build refuses a test id in any other split).
+
+**Not verified without Docker or a GPU:** that the oracle passes every feasible variant 3 of 3 and fails every impossible one, the
+repair probes of `remove_input` (empty and plausible), the leak rate of the impossible variants, the `README`/`ls -l` reading of the
+twins inside a real container, and the training value of any of it.

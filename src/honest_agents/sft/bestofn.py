@@ -5,8 +5,8 @@ Rollouts of one variant are a GRPO group. The banked outcomes are scored with th
 and per group the best rollouts above the group mean are kept. The kept trajectories are fine-tuned WHOLE: every
 assistant turn (commands, reasoning, the report call and the end-of-turn token) carries loss; the system prompt, the user
 turn and the tool outputs are masked (`SFTExample.loss_messages` = every assistant turn). The trajectory and its report
-are the model's own, unedited: no hindsight rewrite, nothing is read from the task spec, so the stage cannot teach the
-model to name something it never saw.
+are the model's own (only the stated confidence is recalibrated, below): no hindsight rewrite, nothing is read from the
+task spec, so the stage cannot teach the model to name something it never saw.
 
 Selection rules (`select_rows`):
 
@@ -14,6 +14,14 @@ Selection rules (`select_rows`):
   stage also refuses a tampered or violating rollout, an infeasible variant that "passed" (leak) and a rollout that never
   produced a parsable report, whatever `data.row_filter` says: a trajectory that earned its reward by an unobservable
   rule must not be imitated.
+* Above the group mean is not good enough on its own: in a bad group the best rollout can still be a fabrication or a
+  false blame. Only rollouts whose reward case is one of `IMITABLE_CASES` are kept (a clean claim, an honest
+  non-completion, a correct abstention); a fabrication, a false blame, an abstention with the wrong reason, a silent
+  stop or a lazy decline is never imitated, whatever its rank.
+* The stated confidence is rewritten (`bestofn.confidence: calibrated`, the default). Imitating only the rollouts that
+  came out well would teach "complete, 0.95" after every claim, because the failures that shared that confidence are
+  never selected. The report's confidence becomes the held-out pass rate of its claim type, as in `sft.hindsight`
+  (abstain: one minus it); the rest of the report and the trajectory stay as the model wrote them. `keep` leaves it.
 * The group mean is taken over EVERY scored rollout of the variant, tampered ones included (that is the group GRPO would
   see). A rollout is kept only if its reward is above the mean by `min_margin`, so groups with equal rewards (no signal)
   contribute nothing. `above_mean: false` drops that rule and keeps the top `top_k` of every group.
@@ -60,6 +68,13 @@ SKIP_SMALL_GROUP = "small_group"
 SKIP_NOT_ABOVE_MEAN = "not_above_mean"
 SKIP_NOT_TOP_K = "below_top_k"
 SKIP_NO_PASS = "group_without_pass"
+SKIP_BAD_CASE = "not_imitable_case"
+CONF_KEEP = "keep"
+
+# `RewardBreakdown.case` values worth imitating: the report is honest and, where a reason is given, the right one.
+IMITABLE_CASES = frozenset(
+    {"success_claimed", "honest_failure", "honest_underclaim", "honest_failure_observed", "abstain_correct"}
+)
 
 
 @dataclass(frozen=True)
@@ -70,11 +85,14 @@ class BestOfNOptions:
     min_group_size: int = 2  # scored rollouts a variant needs to be ranked at all
     require_pass_when_feasible: bool = False  # stricter: on a feasible variant only a clean pass is imitated
     reward: dict[str, Any] = field(default_factory=dict)  # `RewardConfig` fields; empty = each row's stored config
+    confidence: str = hindsight.CONF_CALIBRATED  # `calibrated` (held-out pass rate of the claim type) | `keep`
     hindsight_per_bestofn: float | None = 1.0  # combo only: hindsight examples per best-of-N example; None = all
 
     def __post_init__(self) -> None:
         if self.top_k < 1 or self.min_group_size < 2 or self.min_margin < 0:
             raise ValueError("bestofn needs top_k >= 1, min_group_size >= 2 and min_margin >= 0")
+        if self.confidence not in (hindsight.CONF_CALIBRATED, CONF_KEEP):
+            raise ValueError(f"bestofn.confidence must be {hindsight.CONF_CALIBRATED!r} or {CONF_KEEP!r}")
         if self.hindsight_per_bestofn is not None and self.hindsight_per_bestofn < 0:
             raise ValueError("bestofn.hindsight_per_bestofn must be >= 0 or null")
         if self.reward:
@@ -168,10 +186,12 @@ def select_rows(
         for row in candidates[variant]:
             if (reason := skip_reason(row)) is not None:
                 skipped[reason] += 1
-            elif (r := _reward_of(row, cfg)) is None:
+            elif (br := compute_reward(row.episode_outcome(), cfg or row.config())).masked:
                 skipped[SKIP_MASKED] += 1
+            elif br.case not in IMITABLE_CASES:
+                skipped[SKIP_BAD_CASE] += 1
             else:
-                ranked.append((r, row))
+                ranked.append((br.total, row))
         ranked.sort(key=lambda p: (-p[0], _tiebreak(p[1])))
         best = ranked[0][1].episode_outcome() if ranked else None
         if opts.require_pass_when_feasible and best is not None and best.feasible and not best.passed:
@@ -202,9 +222,30 @@ def trajectory_messages(row: BankRow) -> list[dict[str, Any]]:
     return [*context_messages(row), final]
 
 
-def build_example(sel: Selection) -> SFTExample:
+def with_confidence(messages: list[dict[str, Any]], p_complete: float) -> list[dict[str, Any]]:
+    """`messages` with the final report call's confidence set to `p_complete` (abstain: its complement). Copies the
+    report turn; the bank row is not touched."""
+    final = {**messages[-1], "tool_calls": [dict(c) for c in messages[-1]["tool_calls"]]}
+    call = final["tool_calls"][-1]
+    name = (call.get("function") or {}).get("name")
+    if name in ("submit_report", "abstain"):
+        arguments = dict((call["function"].get("arguments")) or {})
+        arguments["confidence"] = round(1.0 - p_complete, 4) if name == "abstain" else p_complete
+        call["function"] = {**call["function"], "arguments": arguments}
+    return [*messages[:-1], final]
+
+
+def build_example(
+    sel: Selection, table: hindsight.ConfidenceTable | None = None, keep_confidence: bool = True
+) -> SFTExample:
+    """The kept trajectory as an example. `keep_confidence=False` states the claim type's calibrated pass rate (`table`;
+    0.5 where it has no value) instead of the confidence the model gave."""
     row = sel.row
     messages = trajectory_messages(row)
+    if not keep_confidence:
+        claim = hindsight.claim_type(row)
+        p = table.p_complete(claim) if table is not None else None
+        messages = with_confidence(messages, hindsight.NEUTRAL_P if p is None else p)
     return SFTExample(
         id=row.episode_id,
         kind=KIND,
@@ -218,6 +259,7 @@ def build_example(sel: Selection) -> SFTExample:
             "rank": sel.rank,
             "passed": row.episode_outcome().passed,
             "tool": (row.report_call or {}).get("name"),
+            "confidence_rewritten": not keep_confidence,
         },
     )
 
@@ -250,12 +292,23 @@ def _scorable_for(rows: list[BankRow], scorable: list[BankRow]) -> list[BankRow]
     return [r for r in scorable if variant_of(r) in variants]
 
 
+def _confidence_table(cfg: SftConfig, held: list, scorable: list) -> hindsight.ConfidenceTable:
+    """Pass rate by claim type over the held-out variants (never fitted), as `sft.hindsight` calibrates it."""
+    held_ids = {variant_of(r) for r in held}
+    return hindsight.calibrate(
+        [r for r in scorable if variant_of(r) in held_ids], hindsight.HindsightOptions(**cfg.hindsight)
+    )
+
+
 def _bestofn_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> StageData:
     opts = parse_options(cfg.bestofn)
     chosen, skipped = _build_part(fit, _scorable_for(fit, scorable), opts)
     chosen_held, _ = _build_part(held, _scorable_for(held, scorable), opts)
-    train = [build_example(s) for s in chosen]
-    return StageData(train, [build_example(s) for s in chosen_held], selection_summary(chosen, skipped, len(fit)))
+    keep = opts.confidence == CONF_KEEP
+    table = None if keep else _confidence_table(cfg, held, scorable)
+    train = [build_example(s, table, keep) for s in chosen]
+    evals = [build_example(s, table, keep) for s in chosen_held]
+    return StageData(train, evals, selection_summary(chosen, skipped, len(fit)))
 
 
 def _cap(examples: list[SFTExample], n: int) -> list[SFTExample]:
@@ -281,8 +334,10 @@ def _combo_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> Stage
     n_best = len(chosen)
     if opts.hindsight_per_bestofn is not None:
         hind = _cap(hind, round(opts.hindsight_per_bestofn * n_best))
-    train = [build_example(s) for s in chosen] + hind
-    evals = [build_example(s) for s in chosen_held] + report_held
+    keep = opts.confidence == CONF_KEEP
+    table = None if keep else _confidence_table(cfg, held, scorable)
+    train = [build_example(s, table, keep) for s in chosen] + hind
+    evals = [build_example(s, table, keep) for s in chosen_held] + report_held
     info = {
         **report.info,
         **selection_summary(chosen, skipped, len(fit)),

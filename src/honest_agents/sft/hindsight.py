@@ -9,18 +9,24 @@ The rewrite may only use what the agent could have observed (the leak rules):
 * status: "complete" iff the graded outcome is a clean pass (`EpisodeOutcome.passed`); otherwise "incomplete", or
   "abstain" when the agent itself stopped with the `abstain` tool or an abstain status AND a blocker is named below;
 * a blocker is named only if (i) the cached blocker facts verify it (`bank.check_blocker_cached` == "true") AND (ii) its
-  object appears in the transcript's tool commands or tool outputs. Candidates are the blocker the agent itself reported
-  and the errors its tool outputs show ("jq: command not found", "Permission denied", "Could not resolve host");
-  anything else is category "other" with an empty target;
-* NOTHING is read from the task spec: not `expected_targets`, `expected_blockers`, `decoy_targets`, `perturbation`,
-  `family`, `is_control` or the feasible flag. The prompt text, the transcript and the outcome's pass / fail are all the
-  rewrite depends on, so an example never teaches the model to name something it cannot see;
+  object appears in the transcript's tool commands or tool outputs, AND (iii) the grader's outcome says the task is
+  infeasible. Candidates are the blocker the agent itself reported and the errors its tool outputs show ("jq: command
+  not found", "Permission denied", "Could not resolve host"); anything else is category "other" with an empty target.
+  (iii) is a deliberate, one-way use of the outcome: a feasible task has no true blocker, so an error the agent saw
+  there was its own typo or a decoy, and `compute_reward` pays naming it nothing more than saying nothing (a decoy or
+  an `abstain` status is `false_blame`, worse). The flag only ever WITHHOLDS a blocker or an abstention;
+* nothing else is read from the task spec: not `expected_targets`, `expected_blockers`, `decoy_targets`,
+  `perturbation`, `family` or `is_control`. The prompt text, the transcript and the outcome's pass / feasible flags are
+  all the rewrite depends on, so an example never teaches the model to name something it cannot see;
 * free text (`completed`, `incomplete`, `blocker_detail`, `reason`) is a fixed template plus, for a blocker, the
   transcript line that showed it. The original report message's own text is not reused;
 * confidence is a function of the agent's ORIGINAL claim type only (complete / incomplete / abstain / none), never of
   the outcome label: the held-out pass rate of that claim type, rounded to a bin. A confidence taken from the label
-  would be 1.0 on every "complete" target, which the model cannot know at decision time. `confidence: omit` drops it.
-  `submit_report` states P(task completed); `abstain` states P(task could NOT be completed) = 1 - that value.
+  would be 1.0 on every "complete" target, which the model cannot know at decision time. `confidence: neutral` writes
+  0.5 everywhere. The argument is never left out: both report tools REQUIRE `confidence`, so an example without it
+  would teach a call the tool rejects (the same holds for every other required argument: `build_example` checks the
+  report against `harness.tool_schemas`). `submit_report` states P(task completed); `abstain` states P(task could NOT
+  be completed) = 1 - that value.
 """
 
 from __future__ import annotations
@@ -38,7 +44,8 @@ from honest_agents.sft.data import SFTExample, context_messages, variant_of
 
 KIND = "hindsight"
 CONF_CALIBRATED = "calibrated"
-CONF_OMIT = "omit"
+CONF_NEUTRAL = "neutral"  # 0.5 for every report: the tools require a confidence, so it is never dropped
+NEUTRAL_P = 0.5
 CLAIM_TYPES = ("complete", "incomplete", "abstain", "none")
 SOURCE_AGENT = "agent_report"  # the blocker is the one the agent itself reported
 SOURCE_TRANSCRIPT = "transcript_error"  # the blocker comes from an error in a tool output
@@ -53,14 +60,14 @@ MAX_EVIDENCE_CHARS = 160
 
 @dataclass(frozen=True)
 class HindsightOptions:
-    confidence: str = CONF_CALIBRATED  # CONF_CALIBRATED | CONF_OMIT
+    confidence: str = CONF_CALIBRATED  # CONF_CALIBRATED | CONF_NEUTRAL
     bin_width: float = 0.1  # calibrated values are rounded to this grid
     min_bucket: int = 20  # held-out rows a claim type needs for its own value; fewer: the overall pass rate
     clip: float = 0.05  # stated confidences stay in [clip, 1 - clip]: a certain statement is never supervised
 
     def __post_init__(self) -> None:
-        if self.confidence not in (CONF_CALIBRATED, CONF_OMIT):
-            raise ValueError(f"confidence must be {CONF_CALIBRATED!r} or {CONF_OMIT!r}, got {self.confidence!r}")
+        if self.confidence not in (CONF_CALIBRATED, CONF_NEUTRAL):
+            raise ValueError(f"confidence must be {CONF_CALIBRATED!r} or {CONF_NEUTRAL!r}, got {self.confidence!r}")
         if not 0 < self.bin_width <= 0.5 or not 0 <= self.clip < 0.5:
             raise ValueError("bin_width must be in (0, 0.5] and clip in [0, 0.5)")
 
@@ -265,7 +272,7 @@ def calibrate(heldout: Iterable[BankRow], opts: HindsightOptions) -> ConfidenceT
     passed: Counter[str] = Counter()
     for row in heldout:
         o = row.episode_outcome()
-        if o.mask is not None:
+        if o.mask is not None or (not o.feasible and o.passed):  # a leaky "pass" is not a trustworthy label
             continue
         kind = claim_type(row)
         n[kind] += 1
@@ -300,6 +307,19 @@ class HindsightReport:
         }
 
 
+def check_arguments(tool: str, arguments: dict[str, Any]) -> None:
+    """Refuse a report the real tool would reject: every required argument present, and nothing the schema lacks."""
+    from honest_agents.harness import tool_schemas
+
+    schema = next(t["function"]["parameters"] for t in tool_schemas() if t["function"]["name"] == tool)
+    missing = set(schema["required"]) - set(arguments)
+    extra = set(arguments) - set(schema["properties"])
+    if missing or extra:
+        raise ValueError(
+            f"{tool} arguments do not match the tool schema: missing {sorted(missing)}, extra {sorted(extra)}"
+        )
+
+
 def hindsight_report(
     row: BankRow, table: ConfidenceTable | None = None, opts: HindsightOptions | None = None
 ) -> HindsightReport:
@@ -307,12 +327,13 @@ def hindsight_report(
     opts = opts or HindsightOptions()
     outcome = row.episode_outcome()
     transcript = transcript_of(context_messages(row))
-    blocker, source = pick_blocker(row, transcript)
+    # A feasible task has no true blocker (see the module docstring): withhold one, and with it the abstention.
+    blocker, source = (None, SOURCE_NONE) if outcome.feasible else pick_blocker(row, transcript)
     claim = claim_type(row)
     stopped_for_blocker = claim == "abstain" and blocker is not None
-    p_complete = None
-    if opts.confidence == CONF_CALIBRATED and table is not None:
-        p_complete = table.p_complete(claim)
+    p_complete = table.p_complete(claim) if opts.confidence == CONF_CALIBRATED and table is not None else None
+    if p_complete is None:
+        p_complete = NEUTRAL_P
 
     category = blocker.category if blocker else BlockerCategory.OTHER.value
     target = blocker.target if blocker else ""
@@ -344,8 +365,8 @@ def hindsight_report(
             "evidence_commands": [],
         }
         status, tool = Status.INCOMPLETE.value, "submit_report"
-    if p_complete is not None:
-        args["confidence"] = round(1.0 - p_complete, 4) if tool == "abstain" else p_complete
+    args["confidence"] = round(1.0 - p_complete, 4) if tool == "abstain" else p_complete
+    check_arguments(tool, args)
     return HindsightReport(tool, args, status, blocker, source)
 
 

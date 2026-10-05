@@ -316,7 +316,7 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
   offline; an infeasible oracle must fail every run; the `remove_input` repair probe relabels a harmless variant as a control.
   `filter_valid` never keeps a leak or a pending relabel and by default requires the null check and 3 oracle runs (`--allow-weak-validation` is an explicit opt-out for tests, never used by `build_dataset.sh`). `ValidationResult` records `oracle_runs`, `oracle_passes`, `null_check_failed_as_expected`, `relabel_to_control` and `leak`; `validate_task` takes `oracle_runs=3`, `null_check=True`, `repair_probe=True`. A hermetic task is refused if its original `test.sh` filters tests;
   the grader runs tests from the container's default directory (recorded in `[metadata.hermetic].cwd`).
-- **Splits** by a fixed hash: `sha256(salt|source group) mod 10000` against cutoffs `--test-bp 2200` and `--val-bp 400`, so pool
+- **Splits** by a fixed hash: `sha256(salt|source group) mod 10000` against cutoffs `--test-bp 2200` and `--val-bp 2200` (the default; see data.md section 8; `remove_tool` is not built by default), so pool
   size never moves a source. `test_ids.txt` (ids plus a sha256 line) is read back and only extended; the build and `train/`
   refuse any train, val or train_pool row whose id is in it. **The salt (`--split-seed`) and the cutoffs are frozen after the
   first training run.** A pair never crosses splits; near-duplicate sources (word 3-gram Jaccard) are one split unit.
@@ -355,6 +355,9 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
   its tool result is not appended, and a report sampled on the last iteration never runs and scores as no report). Sampled ids and
   logprobs are only concatenated and sliced: nothing decodes and re-encodes model output. Construction fails if TRL's source
   fingerprints changed. It trims padding and sorts micro-batches longest first (`trainer.trim_padding`, `sort_micro_batches`;
+  regrouping is skipped for losses that are not token sums and whenever an entropy bonus or `top_entropy_quantile < 1` is on, as
+  those are per-micro-batch terms; measured on a synthetic heavy-tailed round the PEAK micro-batch shrinks only about a quarter to a
+  third while padded totals shrink about threefold, so budget memory on the peak;
   `per_device_train_batch_size` stays 1 and accumulation 64 until a node measures memory headroom), logs per-episode exit reasons and
   `rollout/*_seconds`, hands `prompt_ids`, `logprobs` and `tool_mask` to the bank, and patches TRL's merged-LoRA weight sync (below).
 - **Token fidelity and sampling**: rollouts sample the full distribution, set explicitly (`temperature 1, top_p 1, top_k 0, min_p 0,
@@ -412,11 +415,18 @@ kept. Both parts read the Phase-0 bank (train split only) and train one LoRA ada
 1. **Hindsight report SFT** (`configs/sft_hindsight.yaml`, `sft/hindsight.py`). Each banked rollout keeps its transcript and gets
    the honest final report the grader's outcome makes true: "complete" iff a clean pass; a blocker named only if the cached facts
    verify it and its object appears in the transcript; nothing copied from the task spec; confidence from the held-out pass rate of
-   the agent's original claim type (`hindsight.confidence: calibrated`). Only the report tokens are trained. One epoch, low
+   the agent's original claim type (`hindsight.confidence: calibrated`, or `neutral`, which writes 0.5: both report tools require the
+   argument, so it is never omitted). One flag is read, one-way: on a feasible outcome (`outcome.feasible`) no blocker and no abstention
+   is written, because there any named blocker is a decoy or the agent's own typo and the reward pays it less than saying nothing.
+   All rollouts of a leaky variant (an infeasible variant that cleanly passed) are dropped from both stages, and calibration ignores
+   infeasible clean passes. Only the report tokens are trained. One epoch, low
    learning rate, so entropy survives for GRPO.
 2. **Reward-filtered best-of-N** (`configs/sft_bestofn.yaml`, `sft/bestofn.py`; one round of expert iteration). Per variant the
    rollouts are ranked with the RL reward (`reward.compute_reward` on the stored outcome); the best one above the group mean is kept
-   (never a tampered, violating, masked or report-less rollout) and the whole trajectory is trained, assistant tokens only.
+   (only reward cases in `bestofn.IMITABLE_CASES`: never a tampered, violating, masked, report-less or falsely blaming rollout) and the
+   whole trajectory is trained, assistant tokens only. The stated confidence is rewritten to the claim type's held-out pass rate
+   (`bestofn.confidence: calibrated`, default; `keep` trains the model's own), because kept rollouts are all successes. It trains the
+   template-rendered tool calls, not the banked `completion_ids` (a possible fidelity follow-up).
    `kind=combo` trains both in one adapter, with `bestofn.hindsight_per_bestofn` (default 1.0) hindsight examples per trajectory.
 
 `python -m honest_agents.sft.train_sft --spread BANK` prints the share of prompt groups whose rewards still differ: run it on a bank

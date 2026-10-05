@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from honest_agents.tasks.analysis import (
+    TaskFacts,
     label_leaks,
 )
 from honest_agents.tasks.perturb.conflicting_constraint import conflicting_constraint, conflicting_constraint_control
@@ -31,6 +32,11 @@ OPERATORS: dict[str, Operator] = {
     "conflicting_constraint": conflicting_constraint,
     "high_risk": high_risk,
 }
+# `remove_tool` is registered and tested but not built by default: on the full Endless Terminals pool (2,482 convertible
+# seeds) one seed gives a candidate, because every image is ubuntu + python3 + pytest, so a tool is either essential, one
+# python can stand in for, or used by the verifier (docs/data.md section 2). A source whose images ship real tools can
+# turn it on with `--operators`.
+NOT_BUILT_BY_DEFAULT = ("remove_tool",)
 CONTROL_OPERATORS: dict[str, ControlOperator] = {
     "remove_tool": remove_tool_control,
     "remove_input": remove_input_control,
@@ -39,6 +45,8 @@ CONTROL_OPERATORS: dict[str, ControlOperator] = {
     "conflicting_constraint": conflicting_constraint_control,
     "high_risk": high_risk_control,
 }
+
+DEFAULT_OPERATORS = tuple(n for n in OPERATORS if n not in NOT_BUILT_BY_DEFAULT)
 
 # Variants `generate_variants` dropped because an emitted file carried a label string, per operator; `tasks.build`
 # writes the delta of a build to manifest.json.
@@ -62,6 +70,21 @@ def generate_variants(
     An operator that crashes is logged and skipped. With `require_controls` (the default) an infeasible variant whose
     control cannot be built is dropped: a cue with no harmless counterpart is exactly what teaches "cue -> abstain".
     """
+    with TaskFacts.shared(src):  # the source is read-only here: analyse it once for every operator and control
+        return _generate(src, out_root, pair_id, operators, seed, include_feasible, split, controls, require_controls)
+
+
+def _generate(
+    src: Path,
+    out_root: Path,
+    pair_id: str,
+    operators: list[str] | None,
+    seed: int,
+    include_feasible: bool,
+    split: str,
+    controls: bool,
+    require_controls: bool,
+) -> list[Variant]:
     out: list[Variant] = []
     if include_feasible:
         try:

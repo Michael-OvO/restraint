@@ -35,7 +35,7 @@ Also here, because only the trainer knows them:
   depends only on relative positions, so the loss value and its gradients are unchanged up to float rounding
   (`tests/test_trainer_loop.py`). The micro-batches of a generation round are also regrouped by length, longest
   first, which is exact for the token-sum losses (dapo, cispo, vespo: one global normaliser) and is skipped for the
-  others;
+  others and whenever a per-micro-batch term is on (entropy bonus, top-entropy token filter);
 * sampler-trainer drift metrics TRL does not log (`sampling/importance_sampling_ratio/at_cap_share`, `outside_band_share`)
   and the padding ratios (`padding/*`).
 """
@@ -483,11 +483,18 @@ class HonestGRPOTrainer(GRPOTrainer):
         metrics[METRIC_PAD_STOCK].append(padded_slots(attention_mask) / real)
         metrics[METRIC_PAD_TRIMMED].append(padded_slots(attention_mask, chunks) / real)
 
+    def _regroup_changes_loss(self) -> bool:
+        """Terms of TRL's loss that are computed per micro-batch, so moving rows between micro-batches changes them:
+        the entropy bonus (a mean over the micro-batch's tokens) and the top-entropy token filter (a quantile of the
+        micro-batch's entropies). Neither is on by default; with either, rounds are left in TRL's order."""
+        return bool(getattr(self, "_entropy_bonus_enabled", False)) or float(self.top_entropy_quantile) < 1.0
+
     def _prepare_inputs(self, generation_batch):
         """TRL's `_prepare_inputs`; when it has just built a new round, regroup the round's micro-batches by length.
 
         A micro-batch of 2 then pairs rows of similar length instead of a random pair. Exact only where the loss has
-        one normaliser for the whole round (`_LOSS_NORMALISED_GLOBALLY`) and an optimizer step covers whole rounds.
+        one normaliser for the whole round (`_LOSS_NORMALISED_GLOBALLY`), an optimizer step covers whole rounds and no
+        per-micro-batch term is active (`_regroup_changes_loss`).
         """
         before = getattr(self, "_buffered_inputs", None)
         inputs = super()._prepare_inputs(generation_batch)
@@ -496,7 +503,7 @@ class HonestGRPOTrainer(GRPOTrainer):
             return inputs
         accumulation = int(self.args.gradient_accumulation_steps)
         per_round = int(self.args.steps_per_generation)
-        if self.loss_type not in _LOSS_NORMALISED_GLOBALLY or accumulation % per_round:
+        if self.loss_type not in _LOSS_NORMALISED_GLOBALLY or accumulation % per_round or self._regroup_changes_loss():
             return inputs
         self._buffered_inputs = sort_micro_batches(buffered)
         return self._buffered_inputs[self._step % per_round]
