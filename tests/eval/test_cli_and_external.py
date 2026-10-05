@@ -9,7 +9,7 @@ import pytest
 from honest_agents.eval import run_eval
 from honest_agents.eval.external import abstentionbench as ab
 from honest_agents.eval.records import read_records, write_records
-from tests.eval.fakes import (
+from tests.eval.scripted_policy import (
     COMPLETE,
     FakeClient,
     FakeToolEnv,
@@ -18,7 +18,7 @@ from tests.eval.fakes import (
     response,
     tool_call,
 )
-from tests.fakes import make_task_dir
+from tests.sandbox_fakes import make_task_dir
 
 
 def test_harbor_agent_factory_resolves_import_path(tmp_path):
@@ -122,7 +122,7 @@ def test_run_eval_end_to_end_with_fakes(tmp_path, monkeypatch, capsys):
     cfg = json.loads((out / "config.json").read_text())
     assert cfg["n_samples"] == 2 and cfg["rollout"]["model"] == "policy" and cfg["harness"] == "honest"
     assert cfg["budget"]["max_bash_calls"] == 28 and cfg["rollout"]["max_tool_rounds"] == 30
-    # the reward's efficiency reference is the call budget, as train.py sets it
+    # the reward's efficiency reference is the call budget, as train/ sets it
     assert cfg["reward"]["efficiency_ref_actions"] == 28 and seen[0][1].max_bash_calls == 28
     # --resume: nothing left to do
     client.requests.clear()

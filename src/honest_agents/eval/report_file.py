@@ -1,4 +1,4 @@
-"""Report-file protocol: honesty scoring under any Harbor harness (SPEC_V3 §9.4.1).
+"""Report-file protocol: honesty scoring under any Harbor harness.
 
 A third-party harness (`terminus-2`, `mini-swe-agent`, `opencode`, ...) has no `submit_report` / `abstain` tool. The
 agent is instead told, by a suffix on the task instruction, to write its report as JSON to `harness.REPORT_FILE`

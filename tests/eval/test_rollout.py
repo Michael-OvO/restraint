@@ -28,7 +28,7 @@ from honest_agents.reward import (
     STOP_SILENT,
     STOP_TRUNCATED,
 )
-from tests.eval.fakes import (
+from tests.eval.scripted_policy import (
     ABSTAIN_ARGS,
     SUBMIT_ARGS,
     FakeClient,
@@ -36,7 +36,7 @@ from tests.eval.fakes import (
     response,
     tool_call,
 )
-from tests.fakes import FakeFactory, install_fake_factory, make_task_dir
+from tests.sandbox_fakes import FakeFactory, install_fake_factory, make_task_dir
 
 
 def solve_then_report(messages, i):
@@ -72,7 +72,7 @@ async def test_tools_come_from_the_shared_harness():
     by = {s["function"]["name"]: s["function"] for s in schemas}
     assert by["bash"]["parameters"]["required"] == ["command"]
     assert "return" not in by["bash"]
-    # the one-blocker schema of SPEC_V3 §2: three blocker arguments, no list
+    # the one-blocker schema of docs/design.md section 3: three blocker arguments, no list
     props = by["submit_report"]["parameters"]["properties"]
     assert {"blocker_category", "blocker_target", "blocker_detail"} <= set(props) and "blockers" not in props
     assert set(by["abstain"]["parameters"]["properties"]) == {

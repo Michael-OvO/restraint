@@ -2,7 +2,7 @@
 
 A seed is a duplicate if its task name matches a benchmark task name, or its instruction is (near-)identical: word
 8-gram shingle Jaccard >= threshold. Benchmarks are read from a local dir of Harbor task dirs (`scripts/fetch_benchmarks.sh`
-writes one at pinned commits), so this step needs no network. The build refuses to run without it (SPEC_V3 section 4.1).
+writes one at pinned commits), so this step needs no network. The build refuses to run without it.
 
 Also here: the Terminal-Bench canary scan (a seed carrying the canary GUID is benchmark text and is rejected outright)
 and near-duplicate clustering of the seeds themselves, so that two paraphrases of one task never straddle train and test.

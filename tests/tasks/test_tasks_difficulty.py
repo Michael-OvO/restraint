@@ -1,4 +1,4 @@
-"""Difficulty gate from a Phase-0 bank (SPEC_V3 §4.8, INC-5, LV-9): 1-7 of 8 kept, zero-pass share capped, infeasible
+"""Difficulty gate from a Phase-0 bank (docs/design.md section 7): 1-7 of 8 kept, zero-pass share capped, infeasible
 leaks reported, alpha safety from the pool's mean pass rate."""
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def bank_row(
         masked_reason=masked,
     )
     task = {"variant_id": variant_id, "pair_id": pair_id, "kind": kind, "family": family, "spec": {}}
-    if split is not None:  # the dataset row's split column, which TRL hands to the environment (L6)
+    if split is not None:  # the dataset row's split column, which TRL hands to the environment
         task["split"] = split
     return make_row(prompt=[], completion=[], outcome=outcome, task=task)
 
@@ -164,7 +164,7 @@ def test_infeasible_leaks_are_reported_and_quarantined(tmp_path):
     [(0.3, 0.5, 0.07), (0.5, 0.5, 0.27), (0.7, 0.5, 0.60), (0.3, 0.75, 0.01), (0.5, 0.75, 0.07), (0.7, 0.75, 0.27)],
 )
 def test_claim_recall_reproduces_the_incentives_review(s, alpha, expected):
-    """INC-5: calibrated-optimal share of true successes claimed at d' = 1 (AUROC 0.76)."""
+    """Calibrated-optimal share of true successes claimed at d' = 1 (AUROC 0.76)."""
     assert claim_recall(s, alpha, 1.0) == pytest.approx(expected, abs=0.015)
 
 

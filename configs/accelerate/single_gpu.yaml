@@ -1,4 +1,4 @@
-# One training process per run (SPEC_V3 5.2); adapted from trl/accelerate_configs/single_gpu.yaml.
+# One training process per run (docs/design.md section 8); adapted from trl/accelerate_configs/single_gpu.yaml.
 # Each run owns one GPU (scripts/train.sh sets CUDA_VISIBLE_DEVICES from the run slot); vLLM has its own.
 compute_environment: LOCAL_MACHINE
 debug: false

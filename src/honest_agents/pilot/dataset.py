@@ -1,4 +1,4 @@
-"""Pilot dataset: one prompt per frozen trajectory (SPEC_V3 §6).
+"""Pilot dataset: one prompt per frozen trajectory.
 
     python -m honest_agents.pilot.dataset --bank outputs/phase0/bank --out data/pilot/pilot.jsonl
 
@@ -46,7 +46,7 @@ from honest_agents.pilot.env import BANK_ROW_COLUMN
 logger = logging.getLogger(__name__)
 
 KINDS = ("feasible", "control", "infeasible")
-DEFAULT_MIX = {"feasible": 0.55, "control": 0.20, "infeasible": 0.25}  # SPEC_V3 §4.5
+DEFAULT_MIX = {"feasible": 0.55, "control": 0.20, "infeasible": 0.25}  # docs/design.md section 7
 PROMPT_JSON_COLUMN = "prompt_json"
 # Bank-row fields the replay does not need. Dropping them keeps a pilot row small (token ids dominate a bank row).
 _HEAVY_FIELDS = (

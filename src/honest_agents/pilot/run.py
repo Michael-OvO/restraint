@@ -1,7 +1,7 @@
 """Report-only pilot sweep: `python -m honest_agents.pilot.run --config configs/pilot.yaml [key.path=value ...]`.
 
 One arm is one training run of the final report on frozen trajectories, for one (alpha, scale_rewards, seed). The sweep
-is alpha x scale_rewards {none, group} (SPEC_V3 §6, TDC cheapest staged plan, stage 2). Every arm of a seed sees the
+is alpha x scale_rewards {none, group} (docs/design.md section 10, docs/roadmap.md Stage 2). Every arm of a seed sees the
 same prompts in the same order (TRL's sampler is seeded) and the same LoRA initialisation, so arms differ only in the
 reward gap, which makes the comparison across alpha paired.
 
@@ -10,9 +10,9 @@ report: outcome, case, claim, reward), `curve.jsonl` (per-round rates and the re
 `final/`. `python -m honest_agents.pilot.analyze <output_root>` turns those into the stop rule and a go / no-go line;
 this command runs it after the last arm.
 
-Layout of a run: ONE training process (SPEC_V3 §5.2, §10.3), generation by a vLLM server, no sandbox, no Docker. Two
+Layout of a run: ONE training process, generation by a vLLM server, no sandbox, no Docker. Two
 arms run at the same time by launching two processes with `--shard 0/2` and `--shard 1/2` on two GPU pairs. The weight
-sync check (`scripts/sync_check.sh`, SPEC_V3 §10.1) must have passed first: this is the first run that learns.
+sync check (`scripts/sync_check.sh`, docs/design.md section 8) must have passed first: this is the first run that learns.
 
 `--dry-run` builds the dataset, the arm list and every `GRPOConfig` without loading a model, and prints the plan.
 """
@@ -157,7 +157,7 @@ class SweepSection:
 
 @dataclass
 class LaunchSection:
-    num_processes: int = 1  # SPEC_V3 §5.2: one training process per run
+    num_processes: int = 1  # docs/design.md section 8: one training process per run
     vllm_max_model_len: int | None = None  # the server's window, to check the longest context against
 
 
@@ -216,7 +216,7 @@ class PilotConfig:
         for a in self.sweep.alpha:
             RewardConfig(**{**self.reward.config, "alpha": float(a)})  # validates every cell's reward config now
         if self.launch.num_processes != 1:
-            raise ValueError("the pilot runs one training process per run (SPEC_V3 §5.2, §10.3)")
+            raise ValueError("the pilot runs one training process per run")
         analyze.StopRule.from_dict(self.analysis)
         dataset.BuildOptions(**_build_kwargs(self.data.build))
 
@@ -228,7 +228,7 @@ def load_pilot_config(path: str | Path, overrides: list[str] | None = None) -> P
 
 
 def _build_kwargs(build: dict[str, Any]) -> dict[str, Any]:
-    """`data.build` as `BuildOptions` keywords; `mix: default` is the SPEC_V3 §4.5 split."""
+    """`data.build` as `BuildOptions` keywords; `mix: default` is the docs/design.md section 7 split."""
     kwargs = dict(build)
     if kwargs.get("mix") in ("default", "none"):
         kwargs["mix"] = dict(dataset.DEFAULT_MIX) if kwargs["mix"] == "default" else None
@@ -368,7 +368,7 @@ def check_epochs(cfg: PilotConfig, rows: list[dict[str, Any]]) -> float | None:
 def check_context_window(rows: list[dict[str, Any]], tokenizer: Any, tool_schemas: list[dict], budget: int) -> int:
     """Render the longest contexts with the real tokenizer and tools; raise if one does not fit `budget` tokens.
 
-    TRL does not truncate prompts and vLLM rejects a request whose prompt plus `max_tokens` exceeds its window (TDC-2).
+    TRL does not truncate prompts and vLLM rejects a request whose prompt plus `max_tokens` exceeds its window.
     Returns the longest rendered length found.
     """
     longest = sorted(rows, key=lambda r: dataset._content_chars(r["prompt"]), reverse=True)[:CONTEXT_PROBE_ROWS]
@@ -405,7 +405,7 @@ def validate_grpo(cfg: PilotConfig) -> dict[str, Any]:
         raise ValueError("the pilot assumes multi_objective_aggregation='sum_then_normalize'")
     check_full_distribution_sampling(grpo)
     if grpo.get("use_vllm") and grpo.get("vllm_mode", "colocate") == "server" and cfg.launch.num_processes > 1:
-        raise ValueError("vLLM server mode with more than one training process mis-routes completions (TDC-1)")
+        raise ValueError("vLLM server mode with more than one training process mis-routes completions")
     prompts_per_round(grpo)
     return grpo
 
@@ -491,7 +491,7 @@ def arm_metadata(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], complet
 
 
 def break_even(cfg: PilotConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Go/no-go review VIS-M1: where blanket claiming stops paying.
+    """Where blanket claiming stops paying.
 
     With a claim at p(2 + lambda) - 1 against a decline at alpha + lambda p, a policy that claims everything earns more
     than one that never claims only if the mean pass rate exceeds (1 + alpha) / 2. Above that threshold the error-penalised
@@ -548,7 +548,7 @@ def run_arm(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], resume: bool
     os.environ.setdefault("TRL_EXPERIMENTAL_SILENCE", "1")
     world = int(os.environ.get("WORLD_SIZE", "1"))
     if world != 1:
-        raise RuntimeError(f"WORLD_SIZE={world}: the pilot runs one training process (SPEC_V3 §5.2)")
+        raise RuntimeError(f"WORLD_SIZE={world}: the pilot runs one training process")
     family = resolve_family(cfg)
     if family_spec(family).needs_flash_linear_attention and not flash_linear_attention_available():
         msg = "flash-linear-attention (`fla`) is not installed; Qwen3.5 falls back to slow torch code"
@@ -647,7 +647,7 @@ def _expected_names(cfg: PilotConfig, args: argparse.Namespace) -> list[str] | N
     return None if args.allow_partial else [a.name for a in expand_arms(cfg)]
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="honest_agents.pilot.run", description=__doc__.split("\n\n")[0])
     ap.add_argument("--config", required=True, help="pilot YAML (may use `base:` inheritance)")
     ap.add_argument(
@@ -702,7 +702,45 @@ def main(argv: list[str] | None = None) -> int:
         nargs="*",
         help="dotted overrides, e.g. sweep.alpha=[0,0.5] grpo.max_steps=2",
     )
-    args = ap.parse_intermixed_args(argv)
+    return ap
+
+
+def _print_limits(cfg: PilotConfig) -> None:
+    """The vLLM window and ports as JSON, the same keys as `honest_agents.train --print-limits`."""
+    window = cfg.launch.vllm_max_model_len
+    if window is None:
+        raise SystemExit("launch.vllm_max_model_len is not set: the server window must be explicit for the pilot")
+    print(
+        json.dumps(
+            {
+                "max_model_len": int(window),
+                "turn_max_tokens": cfg.grpo.get("generation_kwargs", {}).get("max_tokens"),
+                "max_completion_length": cfg.grpo.get("max_completion_length"),
+                "server_url": cfg.grpo.get("vllm_server_base_url"),
+                "group_port": cfg.grpo.get("vllm_group_port", 51216),
+            }
+        )
+    )
+
+
+def _run_arms(cfg: PilotConfig, arms: list[Arm], rows: list[dict[str, Any]], args: argparse.Namespace) -> list[str]:
+    """Train each arm that is not already completed; returns the names of the arms that failed."""
+    failed: list[str] = []
+    for arm in arms:
+        if arm_done(cfg, arm) and not args.force:
+            logger.info("%s: already completed, skipping (--force to rerun)", arm.name)
+            continue
+        logger.info("=== arm %s", arm.name)
+        try:
+            run_arm(cfg, arm, rows, resume=args.resume)
+        except Exception:
+            logger.exception("arm %s failed", arm.name)
+            failed.append(arm.name)
+    return failed
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_intermixed_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     cfg = load_pilot_config(args.config, args.overrides)
@@ -713,20 +751,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(a.name for a in select_arms(expand_arms(cfg), args.arm, args.shard)))
         return 0
     if args.print_limits:
-        window = cfg.launch.vllm_max_model_len
-        if window is None:
-            raise SystemExit("launch.vllm_max_model_len is not set: the server window must be explicit for the pilot")
-        print(
-            json.dumps(
-                {
-                    "max_model_len": int(window),
-                    "turn_max_tokens": cfg.grpo.get("generation_kwargs", {}).get("max_tokens"),
-                    "max_completion_length": cfg.grpo.get("max_completion_length"),
-                    "server_url": cfg.grpo.get("vllm_server_base_url"),
-                    "group_port": cfg.grpo.get("vllm_group_port", 51216),
-                }
-            )
-        )
+        _print_limits(cfg)
         return 0
     if args.analyze_only:
         verdict = analyze.analyse(

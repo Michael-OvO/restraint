@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Analyse a report-only pilot and print the go / no-go line (SPEC_V3 §6, §8 stage 2). No GPU, no Docker.
+# Analyse a report-only pilot and print the go / no-go line (docs/design.md section 10, docs/roadmap.md Stage 2). No GPU, no Docker.
 #   scripts/pilot_report.sh [OUTPUT_ROOT=outputs/pilot] [CONFIG=configs/pilot.yaml] [extra analyze args...]
 # Writes <OUTPUT_ROOT>/analysis.json and <OUTPUT_ROOT>/curves.csv. Exit status: 0 GO, 1 NO-GO, 2 INCONCLUSIVE.
 set -euo pipefail

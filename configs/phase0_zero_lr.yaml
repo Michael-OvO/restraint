@@ -1,4 +1,4 @@
-# Phase 0 (SPEC_V3 5.7, 8 stage 1): the real trainer and rollout path at learning rate 0 for 24 rounds.
+# Phase 0 (docs/design.md section 8, docs/node-runbook.md section 4): the real trainer and rollout path at learning rate 0 for 24 rounds.
 # Measures step time by component, per-group pass counts, report compliance, stop reasons and the importance-sampling
 # ratio (gate: mean within ~1% of 1), and writes the trajectory bank the report-only pilot trains on. The policy does
 # not change, so every number is the base model under the training sampler. Stop rules only warn.

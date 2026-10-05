@@ -69,7 +69,7 @@ check_alpha() {
 }
 
 # Run slots. A 4-GPU node runs two concurrent runs, each with ONE training GPU and ONE vLLM GPU (TRL slices gathered
-# completions per rank, so a run may not span two training processes; SPEC_V3 5.2). Slot s owns GPUs 2s (training) and
+# completions per rank, so a run may not span two training processes; docs/design.md section 8). Slot s owns GPUs 2s (training) and
 # 2s+1 (vLLM), vLLM port 8000+s and NCCL weight-transfer port 51216+s. Any of the variables may be set to override.
 slot_env() {
   local s="${SLOT:-0}"
@@ -78,7 +78,7 @@ slot_env() {
   : "${VLLM_GPUS:=$((2 * s + 1))}"
   : "${VLLM_PORT:=$((8000 + s))}"
   : "${GROUP_PORT:=$((51216 + s))}"
-  if [[ "$TRAIN_GPUS" == *,* ]]; then echo "TRAIN_GPUS=$TRAIN_GPUS: one training GPU per run (SPEC_V3 5.2)" >&2; return 1; fi
+  if [[ "$TRAIN_GPUS" == *,* ]]; then echo "TRAIN_GPUS=$TRAIN_GPUS: one training GPU per run (docs/design.md section 8)" >&2; return 1; fi
   export SLOT="$s" TRAIN_GPUS VLLM_GPUS VLLM_PORT GROUP_PORT
 }
 # slot_overrides: the config overrides that point a run at its slot's server and rendezvous port (one per line).

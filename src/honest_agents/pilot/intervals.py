@@ -1,4 +1,4 @@
-"""Cluster-bootstrap intervals for the pilot stop rule (audit2 SP5).
+"""Cluster-bootstrap intervals for the pilot stop rule.
 
 The unit of resampling is the distinct prompt, not the episode: the G generations of one prompt share one outcome, so
 episodes are not independent and counting them overstates the data eight-fold. With several training seeds per cell
@@ -30,7 +30,6 @@ COLUMNS = (
     "has_report",
 )
 _COL = {name: i for i, name in enumerate(COLUMNS)}
-METRICS = ("fabrication", "claim_rate", "discrimination", "report_rate")
 MIN_FINITE = 0.9  # an interval is reported only if the metric is defined in this share of the draws
 
 

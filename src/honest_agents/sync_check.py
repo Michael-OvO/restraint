@@ -1,4 +1,4 @@
-"""Weight-sync check: does vLLM serve the policy the trainer is training? (SPEC_V3 section 10.1, 10.2.)
+"""Weight-sync check: does vLLM serve the policy the trainer is training? (docs/design.md section 8.)
 
 A zero-learning-rate run cannot answer this, because the adapter delta is zero and the merged weights equal the base
 weights whatever the sync does. TRL 1.14.1 merges the LoRA adapter, yields the merged parameters to vLLM's weight
@@ -22,7 +22,7 @@ What it does, against a running generation server (`scripts/serve_vllm.sh`) and 
    merged with the clone patch if it passes, adapter-only sync if only that passes, float32 serving or Qwen3-4B if
    neither passes on Qwen3.5.
 
-**Tiny-adapter mode** (`--tiny-adapter`, audit T3 / sync item). The default adapter (std 0.01) is 20-60x larger than
+**Tiny-adapter mode** (`--tiny-adapter`). The default adapter (std 0.01) is 20-60x larger than
 what the first optimizer steps produce, so a sync that loses small deltas still passes it. A bf16 merge adds the delta
 to a weight that is already bf16: a delta below half the weight's spacing (about 3e-5 for a weight of 0.02) rounds
 away entirely. Tiny mode sets B to std 1e-5, the size of one Adam step at the training learning rate, and asks what
@@ -50,7 +50,7 @@ from typing import Any
 
 logger = logging.getLogger("honest_agents.sync_check")
 
-RATIO_TOLERANCE = 0.01  # mean importance ratio within 1% of 1 (SPEC_V3 9.1.3, 10.1.2)
+RATIO_TOLERANCE = 0.01  # mean importance ratio within 1% of 1 (docs/design.md section 8)
 DEFAULT_GAP_SLACK = 1.10  # the adapter gap may exceed the base gap by this factor (numerical noise on both sides)
 GAP_ABS_TOLERANCE = 1e-4  # ... plus this much, so a base gap of exactly 0 (float32 on a CPU) is not an impossible bar
 MIN_EFFECT_OVER_FLOOR = 5.0  # the adapter must move trainer log-probs by this multiple of the numerical floor
@@ -183,7 +183,7 @@ def tiny_verdict(
 
 
 def recommend(results: dict[str, dict[str, Any]], family: str) -> str:
-    """Which sync mode to use, from the verdicts of the modes that were run (SPEC_V3 10.1.3)."""
+    """Which sync mode to use, from the verdicts of the modes that were run (docs/design.md section 8)."""
     if results.get("clone", {}).get("passed"):
         return "merged sync with the clone patch (HonestGRPOTrainer default)"
     if results.get("stock", {}).get("passed"):

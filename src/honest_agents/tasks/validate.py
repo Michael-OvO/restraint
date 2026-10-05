@@ -1,4 +1,4 @@
-"""Oracle validation of task variants through the training code path (`HonestHarborEnv`), SPEC_V3 section 4.2.
+"""Oracle validation of task variants through the training code path (`HonestHarborEnv`), docs/design.md section 7.
 
 Every check boots a fresh sandbox exactly as in training (resolved network policy, baseline manifests); the oracle
 `solution/solve.sh` runs as `[agent].user` under the agent-phase policy, a synthetic "complete" report is submitted, and
@@ -166,7 +166,7 @@ class ValidationResult:
     duration_sec: float = 0.0
     task_hash: str = ""  # content of the validated task dir; a regenerated variant must be re-validated
     debug: dict[str, Any] = field(default_factory=dict)
-    # SPEC_V3 section 4.2 (INTERFACES_V3 section 6)
+    # docs/design.md section 7
     oracle_runs: int = 0  # oracle episodes actually run (a failing task stops early)
     oracle_passes: int = 0  # of those, clean passes: tests passed, no violation, no tamper
     null_check_failed_as_expected: bool | None = None  # tests failed on the untouched env; None = not run / no tests
@@ -691,7 +691,7 @@ def filter_valid(
     `task_dirs` (variant id -> current dir), a result only counts if it was produced for the same task content.
     `require_null_check` drops results whose tests were never shown to fail on the untouched environment (a run with
     `--no-null-check`; `high_risk` runs no tests, so it is exempt), and `min_oracle_runs` drops results that ran the
-    oracle fewer times than the build requires (SPEC_V3 section 4.2 asks for 3 of 3; the two constraint operators are
+    oracle fewer times than the build requires (docs/design.md section 7 asks for 3 of 3; the two constraint operators are
     deterministic and run once).
     """
     if task_dirs is not None:

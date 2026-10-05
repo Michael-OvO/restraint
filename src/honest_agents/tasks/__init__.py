@@ -1,4 +1,4 @@
-"""Infeasible-task generation pipeline (proposal §4.4, SPEC_V3 §4).
+"""Infeasible-task generation pipeline (docs/design.md section 7).
 
 `sources` downloads feasible seed tasks and normalises them into hermetic Harbor task dirs, `perturb` derives
 infeasible-by-construction variants and their near-miss controls from them, `validate` proves each variant with the

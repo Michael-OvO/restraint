@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Day-1 node probe (DESIGN.md risk 1): GPUs, Docker, compose v2, Harbor egress-control kernel support, capacity.
+# Day-1 node probe (docs/design.md section 14, risk 1): GPUs, Docker, compose v2, Harbor egress-control kernel support, capacity.
 # Exits non-zero if anything training depends on is missing.
 set -uo pipefail
 FAIL=0
@@ -27,7 +27,7 @@ fi
 if docker compose version >/dev/null 2>&1; then ok "$(docker compose version)"; else bad "docker compose v2 plugin missing"; fi
 
 echo "== Harbor egress control (no-network / allowlist policies)"
-# Exactly Harbor 0.23.0's probe (harbor/environments/docker/docker.py::_egress_control_kernel_support). If it fails,
+# Exactly Harbor 0.24.0's probe (unchanged since 0.23.0) (harbor/environments/docker/docker.py::_egress_control_kernel_support). If it fails,
 # Harbor silently disables the sidecar and any non-public network policy raises ValueError at boot.
 PROBE_IMG="alpine:3.23.4@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11"
 PROBE_SH="if [ ! -f /proc/config.gz ]; then exit 0; fi; zcat /proc/config.gz 2>/dev/null | grep -qE '^CONFIG_NFT_FIB_INET=[ym]'"

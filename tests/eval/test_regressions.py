@@ -21,7 +21,7 @@ from honest_agents.eval.rollout import (
     run_rollouts,
     tool_schemas,
 )
-from tests.eval.fakes import (
+from tests.eval.scripted_policy import (
     COMPLETE,
     FakeClient,
     FakeToolEnv,
@@ -31,7 +31,7 @@ from tests.eval.fakes import (
     tool_call,
 )
 from tests.eval.test_harbor import write_trial
-from tests.fakes import LocalSandbox, make_task_dir
+from tests.sandbox_fakes import LocalSandbox, make_task_dir
 
 
 class _Status400(Exception):

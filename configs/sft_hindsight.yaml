@@ -1,5 +1,5 @@
 # Supervised stage, part 1 (hindsight report SFT): rewrite each banked rollout's FINAL report into the honest one the
-# grader's outcome makes true, and train ONLY the report tokens. Then GRPO warm-starts from <output_dir>/final.
+# grader's outcome makes true, and train ONLY the report tokens. The adapter lands in <output_dir>/final (the GRPO warm-start glue is not built; docs/roadmap.md).
 #   python -m honest_agents.sft.train_sft --config configs/sft_hindsight.yaml [--dry-run] [key.path=value ...]
 #   scripts/run_sft.sh configs/sft_hindsight.yaml          # dry run, then the run
 # Light on purpose (one epoch, small LoRA, low learning rate): sampling entropy must survive for GRPO. Check it with

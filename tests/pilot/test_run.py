@@ -37,7 +37,7 @@ def test_the_shipped_grpo_section_follows_the_spec():
     cfg = load_pilot_config(CONFIG)
     g = cfg.grpo
     assert "scale_rewards" not in g and "max_tool_calling_iterations" not in g  # the sweep and the pilot set them
-    assert g["vllm_importance_sampling_mode"] == "token_truncate" and g["save_total_limit"] is None  # SPEC_V3 §5.4
+    assert g["vllm_importance_sampling_mode"] == "token_truncate" and g["save_total_limit"] is None  # design.md 8
     assert (g["top_p"], g["top_k"], g["repetition_penalty"], g["temperature"]) == (
         1.0,
         0,

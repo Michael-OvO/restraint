@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SHARED = ("tests/conftest.py", "tests/fakes.py", "pyproject.toml", "uv.lock")
+SHARED = ("tests/conftest.py", "tests/sandbox_fakes.py", "pyproject.toml", "uv.lock")
 
 
 def changed_files() -> list[str]:
@@ -51,9 +51,15 @@ def imports_of(test: Path) -> set[str]:
 
 
 def related_tests(files: list[str]) -> list[str]:
-    if any(f in SHARED or (f.startswith("tests/") and Path(f).name in ("conftest.py", "fakes.py")) for f in files):
+    if any(
+        f in SHARED
+        or (f.startswith("tests/") and Path(f).name in ("conftest.py", "sandbox_fakes.py", "scripted_policy.py"))
+        for f in files
+    ):
         return ["tests"]
     modules = {m for f in files if (m := module_of(f))}
+    # a file of a package is also a change to the package's import surface (`honest_agents.train.rows` -> `.train`)
+    modules |= {m.rsplit(".", 1)[0] for m in modules if m.count(".") >= 2}
     stems = {m.rsplit(".", 1)[-1] for m in modules}
     chosen = {f for f in files if f.startswith("tests/") and Path(f).name.startswith("test_") and f.endswith(".py")}
     for test in sorted((ROOT / "tests").rglob("test_*.py")):

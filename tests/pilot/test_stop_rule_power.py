@@ -1,8 +1,8 @@
-"""The stop rule on simulated sweeps: false-GO rate with no effect, power for a real effect, and seed noise (audit2 SP5).
+"""The stop rule on simulated sweeps: false-GO rate with no effect, power for a real effect, and seed noise (finding SP5, docs/reviews.md).
 
 The sweeps come from `sim.schedule_sweep`: a calibrated threshold policy whose threshold moves from 0 (claim everything,
 all fabrication) to `effect` times the nominal (1 + alpha) / 2. Verdicts are computed on arms in memory, no disk. The
-rates printed by the slow test are the ones quoted in docs/EVAL.md.
+rates printed by the slow test are the ones quoted in docs/evaluation.md.
 """
 
 from __future__ import annotations

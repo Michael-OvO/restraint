@@ -1,4 +1,4 @@
-"""A small audited dataset for hand review (SPEC_V3 §4.9, LV-1: "audit 100 surviving variants by hand").
+"""A small audited dataset for hand review (docs/design.md section 7: audit about 100 surviving variants by hand).
 
     python -m honest_agents.tasks.audit --out data/audit --sources endless-terminals --n-sources 24 \\
         --families remove_input revoke_permission [--validation-jsonl data/validation.jsonl] [--no-show-tests]
@@ -8,7 +8,7 @@ Builds the variants of 20-30 source tasks for a few operator families (plain fea
 near-miss control per family), prefers sources to which every selected family applies, and writes
 
     <out>/tasks/<variant_id>/       the Harbor task dirs
-    <out>/train.jsonl               dataset rows (INTERFACES_V3 §6 columns), usable as `data.train_file` for bring-up
+    <out>/train.jsonl               dataset rows (docs/design.md section 3 columns), usable as `data.train_file` for bring-up
     <out>/sheets/<variant_id>.md    one audit sheet per variant: instruction diff, environment diff, the perturbed
                                     object, every label, the tests (file names, what each test asserts, the oracle
                                     command; `--no-show-tests` hides them), the validation result, a checklist and a
@@ -41,16 +41,16 @@ from honest_agents.tasks.build import (
     DEFAULT_VAL_BP,
     BuildConfig,
     Row,
-    _hash_key,
-    _row_dict,
-    _write_jsonl,
     collect_seeds,
     dedup_seeds,
     filter_hermetic,
+    hash_key,
     make_prompt,
     read_test_ids,
+    row_dict,
     split_bucket,
     split_for_bucket,
+    write_jsonl,
 )
 from honest_agents.tasks.perturb import OPERATORS, Variant, generate_variants
 from honest_agents.tasks.sources import SeedTask
@@ -59,7 +59,7 @@ from honest_agents.tasks.taskfs import read_task_toml
 log = logging.getLogger(__name__)
 
 KIND_ORDER = {"feasible": 0, "infeasible": 1, "control": 2}
-DEFAULT_FAMILIES = ("remove_input", "revoke_permission", "high_risk")  # the training families (build.py)
+DEFAULT_FAMILIES = ("remove_input", "revoke_permission", "high_risk")  # the training families (build/)
 TEST_ASSERT_CHARS = 200  # what each test asserts, cut here
 ORACLE_LINES = 30
 DEFAULT_N_SOURCES = 24
@@ -137,9 +137,7 @@ def select_sources(cfg: AuditConfig, seeds: list[SeedTask], tasks_root: Path) ->
     Falls back to sources with at least one family when too few qualify. Variants of sources that were examined but not
     selected are deleted again.
     """
-    ordered = sorted((s for s in seeds if s.has_solution), key=lambda s: _hash_key(cfg.seed, s.pair_id))[
-        :MAX_CANDIDATES
-    ]
+    ordered = sorted((s for s in seeds if s.has_solution), key=lambda s: hash_key(cfg.seed, s.pair_id))[:MAX_CANDIDATES]
     full: list[tuple[SeedTask, list[Variant]]] = []
     partial: list[tuple[SeedTask, list[Variant]]] = []
     for s in ordered:
@@ -447,10 +445,10 @@ def write_audit(cfg: AuditConfig) -> dict[str, Any]:
                     split="train",
                 )
             )
-    _write_jsonl(cfg.out / "train.jsonl", [_row_dict(r) for r in rows])
+    write_jsonl(cfg.out / "train.jsonl", [row_dict(r) for r in rows])
     for name in ("val", "test"):  # consumers expect all three files; the audit set is one training pool
-        _write_jsonl(cfg.out / f"{name}.jsonl", [])
-    _write_jsonl(cfg.out / "audit.jsonl", index)
+        write_jsonl(cfg.out / f"{name}.jsonl", [])
+    write_jsonl(cfg.out / "audit.jsonl", index)
     (cfg.out / "INDEX.md").write_text(render_index(index, cfg))
     summary = {
         "n_sources": len(chosen),

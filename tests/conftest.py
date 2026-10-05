@@ -13,7 +13,7 @@ import pytest
 
 from honest_agents import bank, grading, harness
 from honest_agents.verifier import runner as verifier_runner
-from tests.fakes import (
+from tests.sandbox_fakes import (
     REPORT_VAR,
     SCRATCH_VAR,
     TESTS_VAR,

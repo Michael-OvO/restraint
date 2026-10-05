@@ -1,4 +1,4 @@
-"""Difficulty gate from a Phase-0 trajectory bank (SPEC_V3 §4.8; INC-5, LV-9).
+"""Difficulty gate from a Phase-0 trajectory bank.
 
     python -m honest_agents.tasks.difficulty --bank runs/phase0/bank --out data/difficulty.json
 
@@ -6,12 +6,12 @@ Phase 0 (`configs/phase0_zero_lr.yaml`) runs the real trainer at learning rate 0
 the base policy on one variant, written to the trajectory bank. This module reads that bank and
 
 * **keeps feasible tasks with 1 to 7 passes of 8**: an all-pass group has no contrast and an all-fail group teaches
-  nothing about success. LV-9 adjustments: the filter applies to the **training split only**, a capped share
+  nothing about success. Adjustments: the filter applies to the **training split only**, a capped share
   (`zero_share`, default 15%) of 0-of-8 tasks stays because they are where honest reporting matters most, and the
   verdict is per source task (`pair_id`): the plain feasible variant decides, its controls and infeasible variants stay;
 * **measures the infeasible rows of the same run** and reports the leaks: variants whose tests pass cleanly although
-  they are labelled infeasible (a leak is the label being wrong, GR-7, LV-1), optionally appended to the quarantine list;
-* **reports which alpha values are safe for the pool's mean pass rate** (INC-5). A claim pays 2 + lambda on success and
+  they are labelled infeasible (a leak is the label being wrong), optionally appended to the quarantine list;
+* **reports which alpha values are safe for the pool's mean pass rate**. A claim pays 2 + lambda on success and
   -1 on failure while a non-claim pays alpha, so a calibrated policy claims iff its success probability exceeds
   `(1 + alpha) / 2`. If the pool's mean pass rate is below that break-even, blanket quitting wins in expectation and the
   policy learns it within a few steps (arXiv 2608.00301). For each alpha the table gives the break-even, whether the
@@ -53,8 +53,8 @@ DEFAULT_ROLLOUTS = 8
 DEFAULT_BAND = (1, 7)
 DEFAULT_ZERO_SHARE = 0.15
 DEFAULT_ALPHAS = (0.0, 0.1, 0.25, 0.4, 0.5, 0.75)
-MIN_RECALL = 0.30  # INC-5: run an alpha only if a calibrated policy would still claim about 30% of its true successes
-ASSUMED_AUROC = 0.76  # d' = 1: the benign case INC-5 simulates when confidence has not been measured
+MIN_RECALL = 0.30  # Run an alpha only if a calibrated policy would still claim about 30% of its true successes
+ASSUMED_AUROC = 0.76  # d' = 1: the benign case the simulation uses when confidence has not been measured
 MIN_AUROC_REPORTS = 40  # fewer scored reports than this and the AUROC is too noisy to use
 MIN_AUROC_PER_CLASS = 8
 _INFRA_MASKS = frozenset({MASK_BOOT_FAILURE, MASK_TOOLCHAIN, MASK_REWARD_ERROR})
@@ -105,7 +105,7 @@ class DifficultyReport:
     drop_pairs: dict[str, str] = field(default_factory=dict)  # pair_id -> status
     unmeasured_pairs: list[str] = field(default_factory=list)
     pair_status: dict[str, dict[str, Any]] = field(default_factory=dict)
-    non_train_rows_skipped: dict[str, int] = field(default_factory=dict)  # split -> rows ignored (L6)
+    non_train_rows_skipped: dict[str, int] = field(default_factory=dict)  # split -> rows ignored
 
     @property
     def safe_alphas(self) -> list[float]:
@@ -147,7 +147,7 @@ class MissingSplitError(ValueError):
 def variant_stats(rows: Iterable[BankRow], *, skipped: Counter[str] | None = None) -> dict[str, VariantStat]:
     """One `VariantStat` per variant: episodes, clean passes, passes that were claimed. Infra failures are not episodes.
 
-    Only `split == "train"` rows count (L6): the gate decides what the training split may use, so a validation or test
+    Only `split == "train"` rows count: the gate decides what the training split may use, so a validation or test
     row in a bank must not shape it. A row with no split column is an operator mistake (a bank not made from
     `train_pool.jsonl`) and raises `MissingSplitError`. Skipped non-train rows are tallied per split in `skipped`."""
     stats: dict[str, VariantStat] = {}
@@ -211,7 +211,7 @@ def auroc(pairs: Sequence[tuple[float, bool]]) -> float | None:
     return u / (len(pos) * len(neg))
 
 
-# ── alpha safety (INC-5) ─────────────────────────────────────────────────────
+# ── alpha safety ─────────────────────────────────────────────────────
 
 _NORM = NormalDist()
 
@@ -227,7 +227,7 @@ def claim_recall(success_rate: float, alpha: float, d: float) -> float:
 
     The policy claims when its posterior success probability exceeds `t = (1 + alpha) / 2`. With signal x ~ N(d, 1) on
     successes and N(0, 1) on failures the posterior exceeds `t` iff `x > d/2 + ln((1-s)/s * t/(1-t)) / d`, and recall
-    is the success-conditional mass above that point. Checked against INC-5: d' = 1, alpha = 0.5, s = 0.3 gives 7%.
+    is the success-conditional mass above that point. Worked example: d' = 1, alpha = 0.5, s = 0.3 gives 7%.
     """
     s = min(max(success_rate, 1e-9), 1 - 1e-9)
     t = (1 + alpha) / 2
@@ -421,7 +421,7 @@ def quarantine_entries(report: DifficultyReport, *, source: str = "phase0") -> l
     ]
 
 
-# ── consuming the gate (build.py) ────────────────────────────────────────────
+# ── consuming the gate (build/) ────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -436,7 +436,7 @@ class DifficultyGate:
         """Dropped tasks are out; kept and not-measured tasks stay (no evidence against them).
 
         With `strict` only tasks the Phase-0 run measured and kept are admitted. Phase 0 sees a sample of the pool, so a
-        task it never measured has no 1-7-of-8 verdict and may be exactly the all-pass or all-fail kind LV-9 removes.
+        task it never measured has no 1-7-of-8 verdict and may be exactly the all-pass or all-fail kind the filter removes.
         """
         if strict:
             return pair_id in self.keep

@@ -2,7 +2,7 @@
 #
 #   docker build -f docker/openenv/Dockerfile -t honest-agents-openenv .
 #
-# Not based on ghcr.io/huggingface/openenv-base: it ships Python 3.11 and Harbor 0.23 needs >= 3.12.
+# Not based on ghcr.io/huggingface/openenv-base: it ships Python 3.11 and Harbor 0.24 needs >= 3.12.
 # The server starts Harbor sandboxes, so it needs a Docker daemon. See "Running in a container" in
 # src/honest_agents/openenv_env/README.md for the docker.sock caveats. In short:
 #
@@ -15,7 +15,7 @@
 #
 # (task and trial dirs mounted at the SAME path as on the host.)
 #
-# The hermetic verifier (SPEC_V3 3.2) needs the vendored pure-Python pytest bundle. Build it once on the host with
+# The hermetic verifier (docs/design.md section 6) needs the vendored pure-Python pytest bundle. Build it once on the host with
 # `scripts/build_verifier_bundle.sh` (the command `honest_agents.verifier.ensure_bundle` names), then pass it as a named
 # context:
 #

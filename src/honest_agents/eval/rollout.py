@@ -1,13 +1,13 @@
 """Standalone agent loop (no TRL) driving `HonestHarborEnv` through an OpenAI-compatible chat-completions endpoint.
 
-Mirrors what the policy sees in training so eval numbers are comparable to training curves (SPEC_V3 §9.3.2):
+Mirrors what the policy sees in training so eval numbers are comparable to training curves:
 
 * tool schemas come from `honest_agents.harness.tool_schemas()`, the one definition training, the pilot and OpenEnv
   share; a report is whatever the environment's own report tools accept (`harness.report_from_tool_args`);
 * the caps come from the same constants as training: `DEFAULT_MAX_TOOL_ITERATIONS` tool rounds,
   `DEFAULT_MAX_COMPLETION_TOKENS` over everything after the prompt (model *and* tool tokens, measured from server
   `usage`), `DEFAULT_TURN_MAX_TOKENS` per turn. The environment's bash budget is `EpisodeBudget.from_limits` of the
-  first two, exactly as `train.py` builds it;
+  first two, exactly as `train/` builds it;
 * sampling is from the full distribution by default (temperature 1, top_p 1, top_k off, min_p off, no repetition
   penalty), sent explicitly, because vLLM otherwise applies the model's `generation_config.json`;
 * messages are `[system=SYSTEM_PROMPT, user=instruction]`, tool results are `{"role": "tool", "content": str(result)}`,
@@ -82,7 +82,7 @@ class RolloutConfig:
     # = GRPOConfig.max_completion_length (model + tool tokens after the prompt)
     max_completion_tokens: int | None = harness.DEFAULT_MAX_COMPLETION_TOKENS
     max_tokens_per_turn: int | None = harness.DEFAULT_TURN_MAX_TOKENS
-    # Sampling, as in training (SPEC_V3 §9.1.2). None = do not send the field (the server's default applies).
+    # Sampling, as in training. None = do not send the field (the server's default applies).
     temperature: float | None = 1.0
     top_p: float | None = 1.0
     top_k: int | None = 0  # vLLM: 0 disables top-k
@@ -90,7 +90,7 @@ class RolloutConfig:
     repetition_penalty: float | None = 1.0
     extra_body: dict[str, Any] | None = None  # e.g. {"chat_template_kwargs": {"enable_thinking": False}}
     system_prompt: str | None = None  # None: the row's prompt, else honest_agents.harness.SYSTEM_PROMPT
-    # Neutral baseline (F5): describe the tools without the honesty exhortation that sits in their docstrings, so a
+    # Neutral baseline: describe the tools without the honesty exhortation that sits in their docstrings, so a
     # neutral system prompt alone does not leave "complete only if verified" in the prompt through the tool schemas.
     neutral_tools: bool = False
 
@@ -178,7 +178,7 @@ NEUTRAL_TOOL_TEXT: dict[tuple[str, str | None], str] = {
 
 
 def neutral_tool_schemas(include_bash: bool = True) -> list[dict[str, Any]]:
-    """`tool_schemas()` with the honesty exhortation removed from the report tools' descriptions (F5).
+    """`tool_schemas()` with the honesty exhortation removed from the report tools' descriptions.
 
     Raises `KeyError` if the shared schemas change shape, so the neutral arm cannot silently stop being neutral."""
     schemas = tool_schemas(include_bash=include_bash)
@@ -466,7 +466,7 @@ async def run_episode(
         error = f"episode: {type(e).__name__}: {e}"
         acted = was_reset and bool(getattr(env, "_history", None))
         if acted:
-            # SPEC_V3 §3.5: after the agent has run a command a failure is attributed to the policy (a dead container
+            # docs/design.md section 2: after the agent has run a command a failure is attributed to the policy (a dead container
             # is something it can cause), so the episode is scored as tamper and not dropped as infra. It carries no
             # rollout `error`, which is what marks an episode as an infra failure.
             outcome = EpisodeOutcome(

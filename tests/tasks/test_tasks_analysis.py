@@ -158,7 +158,7 @@ def test_task_facts_outputs(tmp_path):
     assert not facts.created_in_env("/home/user/out/total.txt")
 
 
-# ── SPEC_V3 §4.4 helpers ─────────────────────────────────────────────────────
+# ── docs/design.md section 7 helpers ─────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -708,7 +708,9 @@ def test_donor_groups_partition_sources_stably():
 
 def test_cached_shell_analysis_matches_golden_outputs() -> None:
     """Golden outputs captured before `_tokens`, `boot_dirs` and `_removed_by_build` were memoised (speed pass)."""
-    from honest_agents.tasks.analysis import _removed_by_build, _tokens, boot_dirs
+    from honest_agents.tasks.analysis import boot_dirs
+    from honest_agents.tasks.analysis.boot import _removed_by_build
+    from honest_agents.tasks.analysis.script import _tokens
 
     df = (
         "FROM ubuntu\nWORKDIR /srv/app\nRUN mkdir -p /home/user/{data,out} && useradd -m bob \\\n"

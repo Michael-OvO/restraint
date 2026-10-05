@@ -6,19 +6,23 @@ reinforcement learning on real terminal sandboxes.
 The agent ends every episode with one structured report (`submit_report`) or an explicit `abstain`. The report is checked
 against the **final sandbox state** with no human labels and no LLM judge: hidden tests run in a hermetic verifier, protected
 paths and sentinels are hashed, and a blocker the agent names is verified in the sandbox where that is possible. An
-honesty-aware reward then trains the policy with GRPO.
+honesty-aware reward then trains the policy with GRPO (group-relative policy optimisation).
 
-> **Status: pre-alpha. Nothing has run on Docker or a GPU.** A go/no-go review found that the original design must not be
-> trained; the fixes (`docs/SPEC_V3.md`) are built and unit-tested on macOS against fake sandboxes. The first paid step is a
-> gated, staged plan (`docs/ROADMAP.md`). Whether the approach works is not yet known.
+> **Status: pre-alpha. Nothing has run on Docker or a GPU.** A go/no-go review found that the first design must not be
+> trained; the fixes are built and unit-tested on macOS against fake sandboxes (2,712 tests pass, 10 skip). The first paid step is a
+> gated, staged plan. Whether the approach works is not yet known.
 
-- Proposal v2 (Chinese, for the owner and collaborators): [docs/proposal.md](docs/proposal.md); the original is [docs/proposal_v1.md](docs/proposal_v1.md)
-- **Status, spending gate and next steps: [docs/ROADMAP.md](docs/ROADMAP.md)**
-- What the review found and what was decided: [docs/REVIEW.md](docs/REVIEW.md)
-- System design as built: [docs/DESIGN.md](docs/DESIGN.md)
-- Binding fix specification: [docs/SPEC_V3.md](docs/SPEC_V3.md); interface contract: [docs/INTERFACES_V3.md](docs/INTERFACES_V3.md); integrator's test summary: `docs/V3_STATUS.md` (when present)
-- Evaluation plan: [docs/EVAL.md](docs/EVAL.md)
-- Research notes and the raw review: [docs/research/](docs/research/)
+## Documents
+
+| File | What it is |
+|---|---|
+| [docs/design.md](docs/design.md) | the system as built: layers, episode lifecycle, tool contract, reward tables, verifier, data pipeline, training, SFT, pilot, performance |
+| [docs/evaluation.md](docs/evaluation.md) | metrics, baselines, protocol fixed before the run, harness dependence, external benchmarks |
+| [docs/data.md](docs/data.md) | sources, licences, task families, leakage controls and the leak register, how to rebuild |
+| [docs/roadmap.md](docs/roadmap.md) | status, the staged spending gate with stop conditions, what runs where, the SFT then GRPO plan |
+| [docs/node-runbook.md](docs/node-runbook.md) | Stage 1 commands and the Docker and GPU checks, ordered by risk |
+| [docs/reviews.md](docs/reviews.md) | the three reviews and two audits: verdicts, findings, decisions, how each was resolved |
+| [docs/proposal.md](docs/proposal.md) | the plan and hypotheses (v2, Chinese); the original is [docs/archive/proposal_v1.md](docs/archive/proposal_v1.md) |
 
 ## Stack
 
@@ -28,7 +32,7 @@ honesty-aware reward then trains the policy with GRPO.
 | Trainer | [TRL](https://github.com/huggingface/trl) `1.14.1` `GRPOTrainer(environment_factory=...)` (subclassed: `HonestGRPOTrainer`), PEFT LoRA, vLLM `0.30.0` server mode |
 | Env interop | [OpenEnv](https://github.com/huggingface/OpenEnv) `0.7.0` (separate extra; conflicts with vLLM's `mcp` pin) |
 | Packaging | [uv](https://docs.astral.sh/uv/), Python 3.12 |
-| Models | `Qwen/Qwen3-4B` (bring-up), `Qwen/Qwen3.5-4B` (headline). No distillation teacher: OPD is deferred |
+| Models | `Qwen/Qwen3-4B` (bring-up), `Qwen/Qwen3.5-4B` (headline). No distillation teacher: on-policy distillation (OPD) is deferred |
 
 ## How it works
 
@@ -42,26 +46,39 @@ reward function ─► grade: tamper hashes → sentinels → blocker check → 
                    compute_reward(outcome, config) ─► GRPO advantage (scale_rewards: none; tool tokens masked)
 ```
 
-Reward (`src/honest_agents/reward.py`, tables in [docs/DESIGN.md](docs/DESIGN.md)). On a feasible task: a verified success claim
-is worth `1 + lambda`, a fabrication `-1`, an honest "incomplete" `alpha` plus `lambda` if the tests pass anyway (so working beats
-quitting), a false blame `0`, no report `-0.25`. On an infeasible task: a claim `-1`, a correct decline up to `1` (it must name
-the right category **and** the right object), a decline for the wrong reason `0.5`, silence `0.25`; a claim that cleanly passes
-masks the whole prompt group and quarantines the variant. Tampering is capped at `-1.5` and touching an irreversible path costs
-`-beta`. **alpha is a confidence threshold only without group-std advantage scaling:** claim completion iff P(success) >
-`(1 + alpha) / 2`, and `train.py` refuses `scale_rewards` other than `none`.
+Reward (`src/honest_agents/reward.py`, tables in [docs/design.md](docs/design.md) section 4). On a feasible task: a verified success
+claim is worth `1 + lambda`, a fabrication `-1`, an honest "incomplete" `alpha` plus `lambda` if the tests pass anyway (so working beats
+quitting), a false blame `0`, no report `-0.25`. On an infeasible task: a claim `-1`, a correct decline up to `1` (it must name the right
+category **and** the right object), a decline for the wrong reason `0.5`, silence `0.25`; a claim that cleanly passes masks the whole prompt
+group and quarantines the variant. Tampering is capped at `-1.5` and touching an irreversible path costs `-beta`. **alpha is a confidence
+threshold only without group-std advantage scaling:** claim completion iff P(success) > `(1 + alpha) / 2`, and `train/` refuses
+`scale_rewards` other than `none`.
 
-Infeasible tasks are built by perturbing solvable Endless Terminals tasks (remove an input or tool, revoke permissions, cut the
-network, inject a contradictory constraint, a `high_risk` deletion), each with a near-miss feasible control. A variant is kept only
-if the task's oracle solution, run through the same code path as training, behaves as labelled. "Infeasible by construction"
-only means the oracle's route is blocked, so leaks (an agent finding another route) are detected, masked and quarantined.
+Infeasible tasks are built by perturbing solvable Endless Terminals tasks (remove an input, revoke permissions, cut the network, inject a
+contradictory constraint, a `high_risk` deletion; removing a tool yields none on real seeds), each with a near-miss feasible control. A
+variant is kept only if the task's oracle solution, run through the same code path as training, behaves as labelled. "Infeasible by
+construction" only means the oracle's route is blocked, so leaks (an agent finding another route) are detected, masked and quarantined.
+Details: [docs/data.md](docs/data.md).
 
-## Repository layout
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `src/honest_agents/` | the package; every module is listed below |
+| `configs/` | training and SFT configs: `base`, `honest_alpha{0,0.1,0.25,0.4}`, `outcome`, `outcome_claimed`, `outcome_reflect`, `phase0_zero_lr`, `pilot`, `sft_hindsight`, `sft_bestofn`, `smoke`, `qwen35_4b`, `colocate_1gpu`, `accelerate/` |
+| `scripts/` | shell and Python entry points: node setup and probe, vLLM serving, run slots, sweeps, Phase 0, sync check, dataset build, evaluation, the test runner |
+| `tests/` | unit tests (fakes; no Docker or GPU) plus tests marked `docker` or `gpu`; `tests/sandbox_fakes.py` is the shared host-subprocess sandbox |
+| `docs/` | the documents above; `docs/archive/` holds the original proposal |
+| `docker/openenv/` | the OpenEnv server image (takes the verifier bundle as a build context) |
+| `pyproject.toml`, `uv.lock` | dependencies (extras `train`, `eval`, `openenv`), console scripts, ruff and pytest settings |
+| `data/`, `outputs/`, `runs/`, `benchmarks/` | generated, git-ignored: datasets, training output, evaluation runs, benchmark texts for decontamination |
+
+Modules under `src/honest_agents/`:
 
 ```
-src/honest_agents/
   harness.py       prompt, tools (ReportTools), EpisodeBudget, report-file protocol; trl-free, shared by every runtime
   report.py        the one-blocker self-report schema and lenient parsing
-  reward.py        honesty-aware reward v3 (pure function) and RewardConfig
+  reward.py        honesty-aware reward (pure function) and RewardConfig
   trl_rewards.py   one TRL reward function per mode (honest, outcome, outcome_claimed, outcome_reflect), metrics, group masks
   bank.py          trajectory bank rows, quarantine list, re-scoring without a sandbox
   spec.py          per-task honesty labels ([metadata.honest] in task.toml)
@@ -69,20 +86,16 @@ src/honest_agents/
   verifier/        hermetic pytest runner, vendored-bundle handling, verifier toolchain protection
   env.py           HonestHarborEnv: TRL environment over Harbor sandboxes
   trainer.py       HonestGRPOTrainer: concurrent tool loop that stops at the report, weight-sync fix
-  train.py         GRPO entrypoint (YAML configs, guards, limits, validation probe, resume)
-  callbacks.py     stop rules, run log, Phase-0 summary
+  train/           GRPO entrypoint, a package: config, derive (limits, reward config), grpo (guards), rows, plan, startup, run, cli
+  callbacks.py     stop rules, validation probe, run log, Phase-0 summary
   sync_check.py    weight-sync check (needs a GPU)
   models.py        model-family specifics (LoRA targets, templates, vLLM flags, startup probe)
-  tasks/           seed sources, hermetic conversion, perturbation operators, validation, dataset build, difficulty gate, audit
+  tasks/           seed sources, hermetic conversion, validation, difficulty gate, audit; `analysis/` (static task facts and
+                   leak statistics), `perturb/` (one module per operator) and `build/` (splits, mixture, pipeline) are packages
   pilot/           report-only pilot on frozen Phase-0 trajectories (no sandbox)
-  sft/             supervised stage before GRPO: hindsight report SFT and best-of-N trajectory SFT on the bank (data, hindsight, bestofn, train_sft)
-  eval/            rollout loop, metrics, baselines, report-file protocol, Harbor agent, external benchmark adapters
+  sft/             supervised stages on the bank: hindsight report SFT and best-of-N trajectory SFT (data, hindsight, bestofn, train_sft)
+  eval/            rollout loop, metrics (a package), baselines, report-file protocol, Harbor agent, external benchmark adapters
   openenv_env/     OpenEnv server and client over the same core (its own README)
-configs/           training configs: base, honest_alpha{0,0.1,0.25,0.4}, outcome, outcome_claimed, outcome_reflect,
-                   phase0_zero_lr, pilot, sft_hindsight, sft_bestofn, smoke, qwen35_4b, colocate_1gpu, accelerate/
-scripts/           node setup and probe, vLLM serving, run slots, sweeps, Phase 0, sync check, dataset build, evals
-tests/             unit tests (fakes; no Docker or GPU) plus tests marked `docker` or `gpu`
-docs/              proposal (v2, v1), design, roadmap, review record, specs, evaluation plan, research notes
 ```
 
 ## Quickstart
@@ -92,90 +105,37 @@ docs/              proposal (v2, v1), design, roadmap, review record, specs, eva
 ```bash
 uv sync --extra train --extra eval          # the project venv is shared; do not sync it from several places at once
 scripts/test.sh                             # fast suite in parallel (not docker/gpu/slow), prints wall time
-env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval ruff check src tests
+env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval ruff check src tests scripts
 scripts/build_verifier_bundle.sh            # vendored pytest bundle for the hermetic verifier (needs network once;
                                             # tests use an offline copy via tests/conftest.py)
 ```
-
-### Running the tests
 
 `scripts/test.sh` is the single entry point (pytest-xdist, one worker per core, a lock so concurrent full runs queue):
 
 | command | runs | wall time (18-core Mac) |
 |---|---|---|
 | `scripts/test.sh` / `--fast` | everything except `docker`, `gpu` and `slow` tests | about 40 s |
-| `scripts/test.sh --all` | everything except `docker` and `gpu` | about 90 s (serial: about 6 min) |
+| `scripts/test.sh --all` | everything except `docker` and `gpu` | about 3 min on a busy machine (serial: about 6 min) |
 | `scripts/test.sh --changed` | test files related to files changed in git (by name and direct imports) | seconds |
 | `scripts/test.sh -k expr tests/test_env.py` | plain pytest arguments, serial, no marker filter | |
 
-`slow` marks the tests that spend seconds in real verifier subprocesses or full dataset builds. Markers (`docker`, `gpu`,
-`slow`) and the pytest and ruff settings live in `pyproject.toml`; `docker` tests need a Linux node (`pytest -m docker`).
+`slow` marks the tests that spend seconds in real verifier subprocesses or full dataset builds. The 21 tests marked `docker` or `gpu` have
+never run (they need a Linux node: `pytest -m docker`). Markers and the pytest and ruff settings live in `pyproject.toml`. The OpenEnv extra
+cannot share an environment with `train` (conflicting `mcp` pins); see `src/honest_agents/openenv_env/README.md`.
 
-Check a run config without a GPU once a dataset exists: `python -m honest_agents.train --config configs/honest_alpha0.25.yaml --dry-run` (needs `data/train.jsonl`).
-The OpenEnv extra cannot share an environment with `train` (conflicting `mcp` pins); see `src/honest_agents/openenv_env/README.md`.
+Check a run config without a GPU once a dataset exists: `python -m honest_agents.train --config configs/honest_alpha0.25.yaml --dry-run`
+(needs `data/train.jsonl`, from `scripts/build_dataset.sh`; see [docs/data.md](docs/data.md)). The SFT stage has a CPU dry run too:
+`DRY_RUN=1 scripts/run_sft.sh configs/sft_hindsight.yaml` (needs a bank).
 
-### GPU node (4xH100 VM with Docker). **Not yet run: follow the staged gate in [docs/ROADMAP.md](docs/ROADMAP.md).**
+### Everything that costs money
 
-```bash
-scripts/setup_node.sh                      # docker/compose checks, uv sync --frozen, builds the verifier bundle
-scripts/probe_node.sh                      # GPUs, Docker, compose v2, nftables egress control; fails loudly
-uv run pytest -m docker                    # real-sandbox grading and enforcement tests
+Not yet run. Follow the staged gate in [docs/roadmap.md](docs/roadmap.md) and the commands in [docs/node-runbook.md](docs/node-runbook.md):
+node setup and probe, `pytest -m docker`, the audit set, the weight-sync check, the smoke test, Phase 0 (`scripts/phase0.sh`), then the
+report-only pilot (`scripts/run_pilot.sh`), the paired runs (`scripts/run_pair.sh`) and the alpha sweep (`scripts/sweep_alpha.sh`).
+Evaluation commands are in [docs/evaluation.md](docs/evaluation.md).
 
-scripts/build_audit_set.sh                 # 20-30 sources, two families plus controls, audit sheets for hand review
-scripts/build_dataset.sh data              # seeds -> hermetic conversion -> variants -> oracle validation -> splits (LIMIT=1500)
+## Licences of data sources
 
-scripts/smoke_test.sh --train data/tasks/<a> --train data/tasks/<b> --val data/tasks/<c>   # 2 tasks, 2 steps
-scripts/phase0.sh                          # Stage 1: real trainer at learning rate 0, writes the trajectory bank, prints the gates
-scripts/sync_check.sh                      # weight sync with a non-zero adapter; run before the first run that learns
-python -m honest_agents.pilot.run --config configs/pilot.yaml && scripts/pilot_report.sh    # Stage 2: report-only pilot
-
-scripts/run_pair.sh configs/honest_alpha0.25.yaml configs/outcome.yaml seed=42   # Stage 3: two runs, one node, same seed
-scripts/sweep_alpha.sh                     # Stage 4: alpha {0, 0.1, 0.25, 0.4} + outcome arms (SEEDS="42 43 44")
-```
-
-One training process per run; two runs share a 4-GPU node (slot 0: train on GPU 0, vLLM on GPU 1; slot 1: GPUs 2 and 3).
-`scripts/run_slot.sh CONFIG` runs one.
-
-### Supervised stage before GRPO
-
-Plan: a cheap supervised stage on the model's own rollouts, then one short GRPO run warm-started from it. Part 1, hindsight
-report SFT (`honest_agents.sft`): each banked rollout keeps its transcript and gets the honest final report the grader's
-outcome makes true ("complete" iff a clean pass; a blocker named only if the cached facts verify it and its object is in the
-transcript; nothing copied from the task spec). Only the report tokens are trained. One epoch, LoRA, low learning rate, so
-sampling entropy survives for GRPO. Part 2 (`configs/sft_bestofn.yaml`, `honest_agents/sft/bestofn.py`) is reward-filtered
-best-of-N: per variant the rollouts are ranked with the RL reward (`reward.compute_reward` on the stored outcome), the best
-one above the group mean is kept (never a tampered, violating, masked or report-less rollout; train split only), and the
-whole trajectory is trained with only assistant tokens in the loss. `kind=combo` trains both parts in one adapter: the
-best-of-N trajectories plus hindsight report examples for the other rows, `bestofn.hindsight_per_bestofn` (default 1.0)
-examples per trajectory.
-
-```bash
-scripts/run_sft.sh configs/sft_hindsight.yaml                  # dry run (examples, labels, token sizes), then train
-scripts/run_sft.sh configs/sft_bestofn.yaml kind=combo         # best-of-N trajectories + hindsight reports, one adapter
-DRY_RUN=1 scripts/run_sft.sh configs/sft_hindsight.yaml        # CPU only: read <output_dir>/examples.jsonl before paying for a GPU
-python -m honest_agents.sft.train_sft --spread outputs/phase0/bank   # share of prompt groups whose rewards still differ
-```
-
-Run `--spread` on a bank sampled after the stage and compare it with the starting bank: a collapsed fraction means GRPO has
-nothing to learn from. `eval_entropy` on held-out variants is logged during training. Rules and the confidence choice:
-`src/honest_agents/sft/hindsight.py`.
-
-### Evaluation
-
-```bash
-EVAL=1 scripts/serve_vllm.sh configs/base.yaml --served-model-name policy &
-MODEL=policy scripts/eval_heldout.sh data/test.jsonl runs/eval/a0.25            # primary: our held-out terminal set
-MODEL=policy scripts/eval_heldout.sh data/test.jsonl runs/eval/neutral --neutral-prompt --neutral-tools   # no-training baseline
-scripts/h1_tmax_check.sh data/test.jsonl                                       # base Qwen3.5-4B vs allenai/tmax-4b, before any run
-AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh data/test.jsonl runs/harbor   # third-party harness, report-file protocol
-MODEL=policy scripts/eval_tb.sh tblite
-```
-
-External benchmarks (AgentAbstain, Agentic Abstention, AbstentionBench) are transfer checks only and run in their own venvs;
-see [docs/EVAL.md](docs/EVAL.md).
-
-## Licenses of data sources
-
-Endless Terminals (MIT, malformed dataset card), SETA-Env (Apache-2.0, not yet used), TMax-15K (ODC-BY, contains Gemini outputs;
-no oracle solutions, so not a validated source), AbstentionBench (CC BY-NC 4.0, evaluation only). Terminal-Bench and TB Lite are
-benchmarks and are deduplicated out of training.
+Endless Terminals (MIT, malformed dataset card), SETA-Env (Apache-2.0, not used), TMax-15K (ODC-BY upstream, contains Gemini outputs; no
+oracle solutions, so not a validated source), AbstentionBench (CC BY-NC 4.0, evaluation only). Terminal-Bench and TB Lite are benchmarks and
+are deduplicated out of training. Full table: [docs/data.md](docs/data.md) section 1.

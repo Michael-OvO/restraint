@@ -11,7 +11,7 @@ Outputs in `--out`:
   config.json         the exact rollout / reward configuration and the evaluation protocol (fixed before the run)
 
 Limits and sampling default to the training values (`honest_agents.harness`); `--train-config` reads them from a
-training YAML so a run with non-default caps is evaluated under the same caps (SPEC_V3 §9.3.2).
+training YAML so a run with non-default caps is evaluated under the same caps.
 
 Baselines without training:
   --system-prompt-file FILE / --neutral-prompt   replace the system prompt (the 2×2 of {base, trained} × {prompt})
@@ -127,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--neutral-prompt",
         action="store_true",
-        help=f"the shipped {NEUTRAL_PROMPT_FILE.name} and neutral tool descriptions (F5: the default tool docstrings "
+        help=f"the shipped {NEUTRAL_PROMPT_FILE.name} and neutral tool descriptions (the default tool docstrings "
         "repeat the honesty instruction)",
     )
     p.add_argument(
@@ -259,7 +259,7 @@ def resolve_configs(
     sampling: dict[str, Any] = {
         "temperature": _pick(args.temperature, grpo.get("temperature"), 1.0),
         "top_p": _pick(args.top_p, grpo.get("top_p"), gen.get("top_p"), 1.0),
-        # the rest of the full-distribution settings (SPEC_V3 §9.1.2), from the training config when it sets them
+        # the rest of the full-distribution settings, from the training config when it sets them
         "top_k": _pick(_UNSET, grpo.get("top_k"), 0),
         "min_p": _pick(_UNSET, grpo.get("min_p"), 0.0),
         "repetition_penalty": _pick(_UNSET, grpo.get("repetition_penalty"), 1.0),
@@ -299,7 +299,7 @@ def resolve_configs(
     budget = rollout_cfg.budget(**overrides)
     known = {f.name for f in dataclasses.fields(RewardConfig)}
     reward_kwargs = {k: v for k, v in ((train.get("reward") or {}).get("config") or {}).items() if k in known}
-    reward_kwargs.setdefault("efficiency_ref_actions", budget.max_bash_calls)  # as train.py sets it (SPEC_V3 §9.2.1)
+    reward_kwargs.setdefault("efficiency_ref_actions", budget.max_bash_calls)  # as train/ sets it
     if args.alpha is not _UNSET:
         reward_kwargs["alpha"] = args.alpha
     return rollout_cfg, RewardConfig(**reward_kwargs), budget
@@ -444,7 +444,7 @@ def _env_factory(args: argparse.Namespace, reward_cfg: RewardConfig, budget: Any
 
     if args.max_concurrent_boots:
         set_max_concurrent_boots(args.max_concurrent_boots)
-    # Evidence commands are replayed in evaluation only, after every check and test (SPEC_V3 §2). The test timeout is
+    # Evidence commands are replayed in evaluation only, after every check and test. The test timeout is
     # the training one when a training config is given: a slower verifier would turn passes into failures.
     grading_kwargs: dict[str, Any] = {"replay_evidence": not args.no_evidence_replay}
     tests_timeout = args.tests_timeout

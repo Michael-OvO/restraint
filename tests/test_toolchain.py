@@ -24,7 +24,7 @@ from honest_agents.grading import stop_background as real_stop_background
 from honest_agents.spec import HonestTaskSpec
 from honest_agents.verifier import toolchain
 from honest_agents.verifier.runner import VerifierInfraError
-from tests.fakes import LocalSandbox, fake_proc
+from tests.sandbox_fakes import LocalSandbox, fake_proc
 
 FAST = GradingConfig(tests_timeout_sec=60, evidence_timeout_sec=2, manifest_timeout_sec=60)
 PYSPEC = {"verifier": "pytest", "protected_paths": []}

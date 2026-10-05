@@ -346,7 +346,7 @@ def mixed_scenario() -> Scenario:
 @pytest.mark.parametrize("stop_at_report", [True, False])
 @pytest.mark.parametrize("workers", [None, 1, 3])
 def test_identical_to_trl_serial_loop_unequal_episodes(stop_at_report, workers, monkeypatch):
-    # Deliberately changed (L3): our loop shows the model a fixed error string where TRL's shows `str(e)`. This test is
+    # Deliberately changed: our loop shows the model a fixed error string where TRL's shows `str(e)`. This test is
     # about scheduling / masking equivalence, so the text is aligned here; the fixed strings have their own tests.
     monkeypatch.setattr(trainer_mod, "_tool_error_text", str)
     scenario = mixed_scenario()
@@ -721,7 +721,7 @@ def test_a_crashing_tool_does_not_abort_other_episodes_and_is_reported_to_the_mo
         {},
     )
     assert out[5] == 1
-    # deliberately changed (L3): the model gets a fixed string, never the exception text
+    # deliberately changed: the model gets a fixed string, never the exception text
     assert out[1][0][1]["content"] == str({"error": "[sandbox unavailable]"})
     assert "sandbox died" not in out[1][0][1]["content"]
     assert out[1][1][1]["content"] == "ran 'a' in env 1"
@@ -772,7 +772,7 @@ def test_rejects_multi_process_vllm_server_with_tools():
     "generation_kwargs", [None, {}, {"max_tokens": None}, {"max_tokens": 0}, {"max_tokens": 20000}]
 )
 def test_vllm_server_with_tools_requires_a_per_turn_cap(generation_kwargs):
-    """TDC-2: without `generation_kwargs.max_tokens` TRL asks the server for the whole budget on every turn."""
+    """Without `generation_kwargs.max_tokens` TRL asks the server for the whole budget on every turn."""
     t = object.__new__(HonestGRPOTrainer)
     t.use_vllm, t.vllm_mode, t.tools, t.max_completion_length = True, "server", [lambda: None], 16384
     t.accelerator = SimpleNamespace(num_processes=1)
@@ -827,7 +827,7 @@ def test_calculate_rewards_adds_token_kwargs_per_row(monkeypatch):
     assert "_rollout_tokens" not in t.__dict__
 
 
-# ── weight sync (SPEC_V3 §10.1) ────────────────────────────────────────────
+# ── weight sync (docs/design.md section 8) ────────────────────────────────────────────
 
 
 @dataclass

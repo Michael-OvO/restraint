@@ -1,7 +1,7 @@
 """`HonestSession`: one honest-agents episode over a Harbor sandbox, with no TRL (and no OpenEnv) dependency.
 
 The OpenEnv server cannot import `honest_agents.env` (it needs trl, whose training stack conflicts with openenv), so
-this module drives the same episode from the trl-free core, through the contract in `docs/INTERFACES_V3.md`:
+this module drives the same episode from the trl-free core, through the contract in `docs/design.md`:
 
 * budgets come from `harness.EpisodeBudget.from_limits`, built from the same two numbers as training;
 * reports are parsed by `harness.report_from_tool_args` (one blocker with a target) or read from the report file;
@@ -78,7 +78,7 @@ _MAX_FACT_PATHS = 64
 class SessionConfig:
     environment_type: str = "docker"
     enforce_network_policy: bool = True
-    # The same two numbers training and evaluation build their budget from (SPEC_V3 §9.3.2).
+    # The same two numbers training and evaluation build their budget from.
     max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     budget: EpisodeBudget | None = None  # None = `EpisodeBudget.from_limits` of the two numbers above
@@ -103,7 +103,7 @@ class GradeResult:
 
     @property
     def reward(self) -> float | None:
-        """None only when the episode is masked (SPEC_V3 §1): a boot or toolchain failure before the agent acted, or
+        """None only when the episode is masked: a boot or toolchain failure before the agent acted, or
         a leak. Everything the policy can cause is scored."""
         return self.breakdown.reward
 
@@ -176,11 +176,6 @@ class HonestSession:
     @property
     def chars_remaining(self) -> int:
         return self._meter.chars_left
-
-    @property
-    def budget_exhausted(self) -> str | None:
-        """The stop reason of the budget that is used up, if any (`bash` refuses to run from then on)."""
-        return self._meter.exhausted
 
     @property
     def stop_reason(self) -> str | None:
@@ -311,7 +306,7 @@ class HonestSession:
             )
 
     def _verifier_policy(self) -> Any:
-        """Network policy while grading. The hermetic verifier runs with the network off (SPEC_V3 §3.2); a legacy
+        """Network policy while grading. The hermetic verifier runs with the network off; a legacy
         `test.sh` keeps the task's own verifier-phase policy, because those scripts download their toolchain."""
         if self.spec is not None and self.spec.verifier == "pytest":
             from harbor.models.task.config import NetworkMode, NetworkPolicy
@@ -407,7 +402,7 @@ class HonestSession:
 
     def _failed_outcome(self, error: str, masked_reason: str | None = None) -> EpisodeOutcome:
         """Outcome of an episode that could not be graded. `compute_reward` masks it when the agent had not run a
-        command and scores it as tamper when it had (SPEC_V3 §3.5)."""
+        command and scores it as tamper when it had."""
         spec = self.spec
         return EpisodeOutcome(
             feasible=spec.feasible,
@@ -454,7 +449,7 @@ class HonestSession:
                 agent_user = self._task.config.agent.user
                 policy = self._plan.agent_phase if cfg.enforce_network_policy else None
                 if not self.report_submitted:
-                    # Harness-agnostic report channel (SPEC_V3 §9.4.1): the same schema as a JSON file.
+                    # Harness-agnostic report channel: the same schema as a JSON file.
                     self.report, self.report_error = await grading.read_report_file(self._env, agent_user=agent_user)
                     debug["report_source"] = "file" if self.report_submitted else None
                 else:
@@ -503,7 +498,7 @@ class HonestSession:
         debug["stop_reason"] = outcome.stop_reason
         try:
             breakdown = compute_reward(outcome, cfg.reward_config)
-        except Exception as e:  # noqa: BLE001 — a reward failure comes back as a value, never as an exception (§9.2.3)
+        except Exception as e:  # noqa: BLE001 — a reward failure comes back as a value, never as an exception
             debug["reward_error"] = f"{type(e).__name__}: {e}"
             outcome = dataclasses.replace(self._failed_outcome(f"reward: {e}"), masked_reason=MASK_REWARD_ERROR)
             breakdown = compute_reward(outcome, cfg.reward_config)
@@ -513,7 +508,7 @@ class HonestSession:
 
     def _quarantine(self, br: RewardBreakdown) -> None:
         """Append a variant labelled infeasible whose tests passed cleanly to the quarantine list, when one is
-        configured (`HONEST_QUARANTINE_FILE` / `HONEST_BANK_DIR`), so the next dataset build drops it (SPEC_V3 §4.7)."""
+        configured (`HONEST_QUARANTINE_FILE` / `HONEST_BANK_DIR`), so the next dataset build drops it."""
         if not (br.leak or br.unclaimed_pass_infeasible):
             return
         try:

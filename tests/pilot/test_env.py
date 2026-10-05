@@ -51,7 +51,7 @@ def fresh(row) -> ReplayEnv:
     return env
 
 
-# ── schema parity (SPEC_V3 §2, INTERFACES_V3 §2) ─────────────────────────────
+# ── schema parity (docs/design.md section 3) ─────────────────────────────
 
 
 def test_the_pilot_uses_the_harness_report_tools_not_a_copy():

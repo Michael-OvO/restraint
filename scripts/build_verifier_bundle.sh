@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the vendored pytest bundle the hermetic verifier uploads next to the tests (SPEC_V3 section 3.2).
+# Build the vendored pytest bundle the hermetic verifier uploads next to the tests (docs/design.md section 6).
 #
 #   scripts/build_verifier_bundle.sh [DEST]
 #

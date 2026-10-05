@@ -1,4 +1,4 @@
-"""Training config / model-family / guard tests (SPEC_V3 section 5, 9.1-9.3). Offline, no GPU, no Docker: models are tiny
+"""Training config / model-family / guard tests (docs/design.md section 8). Offline, no GPU, no Docker: models are tiny
 random-init configs on meta, datasets are task directories with a task.toml, the vLLM server is a function."""
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ import pytest
 
 from honest_agents import models, train, trl_rewards
 from honest_agents.models import ModelFamily
+from honest_agents.train import run as run_module
+from honest_agents.train import startup as startup_module
 
 REPO = Path(__file__).resolve().parents[1]
 # pilot and sft_ configs have their own schemas (tests/pilot and tests/sft load them)
@@ -128,7 +130,7 @@ def test_dry_run_builds(config: Path, data: SimpleNamespace):
 
 
 def test_every_epoch_gets_its_own_pair_order_and_rounds_stay_whole(data: SimpleNamespace):
-    """TRL replays a shuffle-less dataset in one order every epoch (TDC-10c): with several passes the dataset holds one
+    """TRL replays a shuffle-less dataset in one order every epoch: with several passes the dataset holds one
     independently shuffled pass per epoch, every round a whole number of pairs, and one pass is unchanged."""
     one = _plan(BASE, data, "grpo.max_steps=2")  # 2 rounds of 8 prompts = exactly one pass over the 16 rows
     assert one.data_counts["train"]["epochs"] == 1
@@ -330,10 +332,10 @@ def test_print_limits_is_what_the_server_script_uses(capsys):
 def test_world_size_must_match_launch(data: SimpleNamespace, monkeypatch):
     plan = _plan(BASE, data)
     monkeypatch.setenv("WORLD_SIZE", "1")
-    train._check_world_size(plan)
+    run_module._check_world_size(plan)
     monkeypatch.setenv("WORLD_SIZE", "2")
     with pytest.raises(RuntimeError, match="launch.num_processes"):
-        train._check_world_size(plan)
+        run_module._check_world_size(plan)
 
 
 # ── reward wiring: one function per run ──────────────────────────────────────
@@ -401,7 +403,7 @@ def test_invalid_configs(override: str, match: str, data: SimpleNamespace):
 
 @pytest.mark.parametrize("value", ["group", "true", "batch", "null"])
 def test_scale_rewards_other_than_none_is_rejected(value: str, data: SimpleNamespace):
-    """INC-1 / TDC-3: `group` divides alpha out; `batch` only approximates the threshold; TRL's default is `group`."""
+    """`group` divides alpha out; `batch` only approximates the threshold; TRL's default is `group`."""
     with pytest.raises(ValueError, match="scale_rewards"):
         _plan(BASE, data, f"grpo.scale_rewards={value}")
     for mode in ("honest", "outcome"):
@@ -423,13 +425,13 @@ def test_scale_rewards_unset_is_rejected_because_trl_defaults_to_group(tmp_path:
 
 
 def test_server_mode_with_several_training_processes_is_rejected(data: SimpleNamespace):
-    """TDC-1 / M1: TRL slices gathered completions by each rank's own live count inside the tool loop."""
-    with pytest.raises(ValueError, match="TDC-1"):
+    """TRL slices gathered completions by each rank's own live count inside the tool loop."""
+    with pytest.raises(ValueError, match="TRL slices the gathered completions"):
         _plan(BASE, data, "launch.num_processes=2")
     with pytest.raises(ValueError, match="one training process per run"):
         _plan(BASE, data, "launch.num_processes=2", "grpo.gradient_accumulation_steps=16")
     # sharded colocate has the same slicing
-    with pytest.raises(ValueError, match="TDC-1"):
+    with pytest.raises(ValueError, match="TRL slices the gathered completions"):
         _plan(BASE, data, "launch.num_processes=2", "grpo.vllm_mode=colocate", "grpo.vllm_tensor_parallel_size=2")
     # several processes with their own colocated engine, or without vLLM, are not the broken layout
     _plan(BASE, data, "launch.num_processes=2", "grpo.vllm_mode=colocate", "grpo.gradient_accumulation_steps=16")
@@ -756,7 +758,7 @@ def test_probe_fails_when_the_model_defaults_truncate_the_distribution():
 
 def test_startup_probe_runs_for_server_mode_only(data: SimpleNamespace, monkeypatch):
     calls = []
-    monkeypatch.setattr(train, "probe_vllm_server", lambda url, **kw: calls.append((url, kw)) or {"ok": True})
+    monkeypatch.setattr(startup_module, "probe_vllm_server", lambda url, **kw: calls.append((url, kw)) or {"ok": True})
     plan = _plan(BASE, data, "grpo.vllm_server_base_url=http://0.0.0.0:8001")
     assert train.startup_probe(plan) == {"ok": True}
     assert calls[0][0] == "http://127.0.0.1:8001" and calls[0][1]["required_max_model_len"] == 23552
@@ -765,7 +767,7 @@ def test_startup_probe_runs_for_server_mode_only(data: SimpleNamespace, monkeypa
     def refuse(url, **kw):
         raise models.VLLMProbeError("vLLM serves max_model_len=20480 but this run needs >= 23552")
 
-    monkeypatch.setattr(train, "probe_vllm_server", refuse)
+    monkeypatch.setattr(startup_module, "probe_vllm_server", refuse)
     with pytest.raises(RuntimeError, match="startup probe failed"):
         train.startup_probe(plan)
 
@@ -879,7 +881,7 @@ def test_prompt_budget_check_uses_the_real_prompt(data: SimpleNamespace, monkeyp
         train.check_prompt_budget(trainer, plan)
 
 
-# ── resume: the task order continues, it is not replayed (SPEC_V3 9.3.3) ────
+# ── resume: the task order continues, it is not replayed (docs/design.md section 8) ────
 
 
 def test_order_fingerprint_changes_with_order_seed_and_geometry(data: SimpleNamespace):
@@ -1152,7 +1154,7 @@ def test_server_window_comes_from_the_run_limits():
 
 def test_serve_script_matches_training_flags():
     """scripts/serve_vllm.sh must pass every flag TRL's weight sync / IS correction needs, and `--generation-config
-    vllm` (SPEC_V3 9.1.2), and take the window from the run's limits instead of a constant."""
+    vllm` (docs/design.md section 8), and take the window from the run's limits instead of a constant."""
     script = (REPO / "scripts" / "serve_vllm.sh").read_text()
     for flag in models.VLLM_TRAINING_SERVER_FLAGS:
         if flag.startswith("--"):
@@ -1207,7 +1209,10 @@ def stub_trainer(monkeypatch):
     monkeypatch.setattr(trainer_module, "HonestGRPOTrainer", _StubTrainer)
     for name in ("check_training_template", "check_tool_flow_template", "check_end_of_turn_token",
                  "check_prompt_budget", "_preflight_gpu", "check_lm_head_cast", "startup_probe"):  # fmt: skip
-        monkeypatch.setattr(train, name, lambda *a, **k: None)
+        # every module that imported the helper by name sees the stub
+        for module in (run_module, startup_module):
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, lambda *a, **k: None)
     return _StubTrainer
 
 
@@ -1370,7 +1375,7 @@ def test_trl_swap_on_real_tokenizer():
     assert models.template_name(ctu.get_training_chat_template(tok)) in models.family_spec("qwen3").training_templates
 
 
-# ── safe alpha (audit2 reward item 3): the claim threshold against the Phase-0 pool pass rate ──
+# ── safe alpha: the claim threshold against the Phase-0 pool pass rate ──
 
 
 def _summary(tmp_path: Path, rate: float | None, name: str = "phase0_summary.json") -> Path:

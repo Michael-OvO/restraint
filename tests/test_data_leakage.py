@@ -1,11 +1,11 @@
-"""Leak-register regression tests 3 to 7 and 10 (docs/research/leak-register.md): the training data itself.
+"""Leak-register regression tests 3 to 7 and 10 (docs/data.md): the training data itself.
 
 3. the existence cue of every TRAINING family is neutral (AUC and accuracy in [0.4, 0.6]); the held-out families'
    cues are reported with a caveat instead (deliberate design change after the leak verification, not a weakening),
 4. nothing the policy can reach in an emitted task names its label, copies a test or carries a canary,
 5. held-out families (conflicting_constraint, no_network) and their controls never reach train, val or train_pool; test
    holds both,
-6. a rebuild at another pool size leaves the test ids alone, and train.py refuses a test id,
+6. a rebuild at another pool size leaves the test ids alone, and train/ refuses a test id,
 7. the build fails without a benchmark directory,
 10. no inserted sentence breaks a sentence or a list.
 
@@ -37,6 +37,7 @@ from honest_agents.tasks.analysis import (
 )
 from honest_agents.tasks.dedup import CANARY_RE
 from honest_agents.tasks.perturb import generate_variants
+from honest_agents.train import rows as rows_module
 from tests.tasks.synthetic import (
     JQ_TEST_SH,
     RICH_DOCKERFILE,
@@ -49,7 +50,7 @@ from tests.tasks.synthetic import (
 )
 
 REPO = Path(__file__).resolve().parent.parent
-HELDOUT = {"conflicting_constraint", "no_network"}  # test-only by the leak verifier decision (build.py docstring)
+HELDOUT = {"conflicting_constraint", "no_network"}  # test-only by the leak verifier decision (build/ docstring)
 TRAINED = {"high_risk", "revoke_permission", "remove_input"}
 N_SEEDS = 72
 # What no file under environment/ may say about its own label (the seed's own lines are exempt: only additions count).
@@ -159,7 +160,7 @@ def test_every_training_family_has_a_neutral_existence_cue(built):
 
 
 def test_held_out_families_have_their_cue_reported_not_enforced(built):
-    """The cue of a test-only family is in the manifest with the construct-validity caveat (docs/research/leak-register.md
+    """The cue of a test-only family is in the manifest with the construct-validity caveat (docs/data.md
     6.1: the control's path is introduced as stale, a lexical cue no template change removes); a violation there is a
     log line, never a refused build, and the held-out numbers stay out of headline results."""
     cue = json.loads((built / "manifest.json").read_text())["cue_metrics"]
@@ -333,7 +334,7 @@ def test_the_held_out_families_follow_the_flag(tmp_path, pool):
     assert {r["family"] for r in _rows(out / "train_pool.jsonl")} >= {"high_risk"}
 
 
-# ── 6. test ids survive a rebuild at another pool size, and train.py refuses them ───────────────────────────────────────
+# ── 6. test ids survive a rebuild at another pool size, and train/ refuses them ───────────────────────────────────────
 
 
 def _test_ids(out: Path) -> set[str]:
@@ -402,8 +403,8 @@ def test_train_holdout_file_can_be_named_and_must_exist(built, tmp_path):
 
 
 def test_a_seta_variant_is_refused_through_its_parent_group():
-    assert train._source_group("seta-env/abc__b3") == "seta-env/abc"
-    assert train._source_group("endless-terminals/task_1") == "endless-terminals/task_1"
+    assert rows_module._source_group("seta-env/abc__b3") == "seta-env/abc"
+    assert rows_module._source_group("endless-terminals/task_1") == "endless-terminals/task_1"
 
 
 # ── 7. no benchmark directory, no build ───────────────────────────────────────────────────────────────────────────────

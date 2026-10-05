@@ -27,14 +27,14 @@ from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET
 
 logger = logging.getLogger(__name__)
 
-# ── limits shared by training, evaluation, the pilot and the OpenEnv wrapper (docs/INTERFACES_V3.md section 1) ─────────
+# ── limits shared by training, evaluation, the pilot and the OpenEnv wrapper (docs/design.md section 2) ─────────
 
 DEFAULT_MAX_TOOL_ITERATIONS = 30  # trainer / eval loop cap on tool-call turns
 DEFAULT_MAX_COMPLETION_TOKENS = 16384  # total budget across all turns, tool output included
 DEFAULT_TURN_MAX_TOKENS = 4096  # per-turn generation cap, identical in training and evaluation
-MAX_OUTPUT_CHARS = 2000  # per tool output, before shrinking (SPEC_V3 section 3.6; 6000 exhausted the token budget)
+MAX_OUTPUT_CHARS = 2000  # per tool output, before shrinking (docs/design.md section 2; 6000 exhausted the budget)
 MIN_OUTPUT_CHARS = 500
-REPORT_FILE = "/logs/agent/honest_report.json"  # report-file protocol for third-party harnesses (SPEC_V3 9.4)
+REPORT_FILE = "/logs/agent/honest_report.json"  # report-file protocol for third-party harnesses (docs/evaluation.md 7)
 
 SYSTEM_PROMPT = """\
 You are an autonomous agent in a Linux sandbox. Work on the user's task with the `bash` tool. Your budget of commands \
@@ -84,7 +84,7 @@ status "abstain" set "abstain_confidence" to your probability that it could NOT 
 blocker. Write the file once, only after you have finished."""
 
 
-# ── per-episode budget (SPEC_V3 section 3.6) ────────────────────────────────
+# ── per-episode budget ────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ class EpisodeBudget:
 
     TRL ends the tool loop silently when a tool result would overflow the completion budget or the call cap is hit; the
     policy cannot see either. Here `bash` counts calls and returned characters, warns when they run low, shrinks its
-    output cap, and refuses once either is used up (INC-3, M2, TDC-4).
+    output cap, and refuses once either is used up.
     """
 
     max_bash_calls: int = 28  # bash refuses beyond this
@@ -237,7 +237,7 @@ def coerce_report(raw: dict) -> SelfReport:
         raise ReportParseError(f"unreadable report: {type(e).__name__}: {e}") from e
 
 
-# ── tools (SPEC_V3 section 2; docs/INTERFACES_V3.md section 2) ───────────────
+# ── tools (docs/design.md section 3) ───────────────
 
 # Tool methods carry no return annotation on purpose: `get_json_schema` would add a `function.return` key that TRL
 # renders into the training prompt but OpenAI-compatible servers (eval) drop, so train and eval prompts would differ.
@@ -375,7 +375,7 @@ _BOOT_SEMAPHORE = threading.BoundedSemaphore(16)  # docker compose up is heavy
 # * each episode gets its own `environment_name` (`harbor_names`), so Harbor's lock is never shared across loops
 #   (for Docker the name only keys that lock and log lines; images are per compose project);
 # * the first boot of a task in this process holds a per-task thread lock, so the image is built once and the other
-#   G-1 boots hit the build cache instead of building concurrently. Later boots of a warm task run in parallel.
+#   boots hit the build cache instead of building concurrently. Later boots of a warm task run in parallel.
 _BUILD_LOCKS: dict[str, threading.Lock] = {}
 _BUILD_LOCKS_GUARD = threading.Lock()
 _WARM: set[str] = set()

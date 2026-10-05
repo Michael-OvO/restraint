@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Report-only pilot (SPEC_V3 6, section 8 stage 2) in one run slot: for every arm of the sweep, start this slot's vLLM
+# Report-only pilot (docs/design.md section 10, docs/roadmap.md Stage 2) in one run slot: for every arm of the sweep, start this slot's vLLM
 # server, train that arm against it, stop the server. One arm per server because each arm opens its own weight-sync
 # group (honest_agents.pilot.run warns about several arms in one process). Run scripts/sync_check.sh first: this is the
-# first run that learns (SPEC_V3 10.1.2).
+# first run that learns (docs/design.md section 8).
 #   SLOT=0 SHARD=0/2 scripts/run_pilot.sh [configs/pilot.yaml] [key.path=value ...]
 #   SLOT=1 SHARD=1/2 scripts/run_pilot.sh ...        # two shards use the two run slots of a 4-GPU node
 # Env: SLOT (0), SHARD (K/N, default all arms), RESUME=1, FORCE=1, VLLM_* (scripts/serve_vllm.sh).

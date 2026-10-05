@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "harbor==0.23.0",
+    "harbor==0.24.0",
     "pydantic>=2",
 ]
 
@@ -16,7 +16,6 @@ dependencies = [
 train = [
     "accelerate>=1.15.0",
     "datasets>=5.0.1",
-    "deepspeed>=0.19.7 ; sys_platform == 'linux'",
     "peft==0.21.2",
     "trl==1.14.1",
     "vllm==0.30.0 ; sys_platform == 'linux'",
@@ -39,7 +38,7 @@ honest-pilot-analyze = "honest_agents.pilot.analyze:main"
 honest-sync-check = "honest_agents.sync_check:main"
 
 [build-system]
-requires = ["uv_build>=0.11.32,<0.12.0"]
+requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]

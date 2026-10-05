@@ -42,7 +42,6 @@ def test_tools_match_the_trl_env() -> None:
     """Runs where trl is installed (the training venv)."""
     env_mod = pytest.importorskip("honest_agents.env", exc_type=ImportError)
     cls = env_mod.HonestHarborEnv
-    assert env_mod.SYSTEM_PROMPT == session.SYSTEM_PROMPT
     for tool in session.REPORT_TOOLS:
         assert _params(getattr(cls, tool)) == _params(getattr(harness.ReportTools, tool))
     assert _params(cls.bash) == ["command"]

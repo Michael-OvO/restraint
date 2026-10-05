@@ -19,7 +19,7 @@ HONEST_MARKER = "# honest-agents"
 
 # Endless Terminals ships the expected state next to the Dockerfile (`environment/task.json`, `test_initial_state.py`,
 # `container.def`). Harbor uses `environment/` as the docker build context, so anything left there is one `COPY` (or
-# one `COPY .`) away from being inside the image the agent can read. They are deleted on normalisation (L4).
+# one `COPY .`) away from being inside the image the agent can read. They are deleted on normalisation.
 ENV_SCRUB_FILES = ("task.json", "test_initial_state.py", "container.def")
 # Dockerfile COPY/ADD sources that put tests, expected output, solutions or task metadata into the image.
 _FORBIDDEN_SOURCE_RE = re.compile(
@@ -204,7 +204,7 @@ def append_dockerfile(task_dir: Path, tag: str, run_lines: list[str]) -> None:
     path = task_dir / "environment" / "Dockerfile"
     text = path.read_text()
     user = final_user(text)
-    # No label comment (L5): a Dockerfile is agent-visible if a COPY ever ships it, so `tag` is only for the caller's logs.
+    # No label comment: a Dockerfile is agent-visible if a COPY ever ships it, so `tag` is only for the caller's logs.
     block = [""]
     if user and user not in ("root", "0"):
         block.append("USER root")
@@ -212,11 +212,6 @@ def append_dockerfile(task_dir: Path, tag: str, run_lines: list[str]) -> None:
     if user and user not in ("root", "0"):
         block.append(f"USER {user}")
     path.write_text(text.rstrip("\n") + "\n" + "\n".join(block) + "\n")
-
-
-def append_instruction(task_dir: Path, text: str) -> None:
-    path = task_dir / "instruction.md"
-    path.write_text(path.read_text().rstrip() + "\n\n" + text.strip() + "\n")
 
 
 def _paragraphs(task_dir: Path) -> list[str]:
@@ -233,7 +228,7 @@ def insertion_points(task_dir: Path) -> list[int]:
 def insert_paragraph(task_dir: Path, text: str, position: int) -> int:
     """Insert `text` as its own paragraph so it becomes paragraph number `position` (0 = first).
 
-    A sentence that always sits last is a positional cue for the family it belongs to (LV-6), so operators draw the
+    A sentence that always sits last is a positional cue for the family it belongs to, so operators draw the
     position at random from `insertion_points`. A position inside a code fence moves to the next boundary. Returns the
     index used.
     """
@@ -255,11 +250,6 @@ def normalise_instruction(task_dir: Path) -> None:
     """
     paras = _paragraphs(task_dir)
     (task_dir / "instruction.md").write_text("\n\n".join(p.rstrip() for p in paras) + "\n")
-
-
-def prepend_instruction(task_dir: Path, text: str) -> None:
-    path = task_dir / "instruction.md"
-    path.write_text(text.strip() + "\n\n" + path.read_text().lstrip())
 
 
 def prepend_solve(task_dir: Path, lines: list[str]) -> None:

@@ -1,6 +1,6 @@
 """The two report tools the pilot exposes, taken from the shared harness so the schemas cannot drift.
 
-`honest_agents.harness.ReportTools` (docs/INTERFACES_V3.md §2) is the single definition of `submit_report` and
+`honest_agents.harness.ReportTools` (docs/design.md section 3) is the single definition of `submit_report` and
 `abstain` for every harness of ours; `ReplayEnv` inherits it. The pilot has no `bash`: the frozen transcript already
 holds every command that was run.
 """
@@ -14,7 +14,7 @@ from honest_agents import harness
 
 ReportTools = harness.ReportTools
 
-# Parameter names of the two tools, in order, as fixed by docs/SPEC_V3.md §2 and docs/INTERFACES_V3.md §2.
+# Parameter names of the two tools, in order, as fixed by docs/design.md section 3.
 CONTRACT_SIGNATURES: dict[str, tuple[str, ...]] = {
     "submit_report": (
         "status",

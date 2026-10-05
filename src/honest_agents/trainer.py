@@ -1,7 +1,7 @@
 """`HonestGRPOTrainer`: TRL's GRPO trainer with a batch-concurrent tool loop that stops at the report.
 
 A drop-in subclass of `trl.GRPOTrainer` (same constructor). It changes two things in the multi-turn rollout and
-nothing in the loss value (SPEC_V3 §5.5, §9.1; findings TDC-1, TDC-4, TDC-5, MV-1):
+nothing in the loss value (docs/design.md section 8):
 
 * **Tool calls run concurrently across the batch.** TRL 1.14.1 executes one rollout's tool calls after another on
   the main thread, so 64 episodes of `docker compose exec` are paid for serially. Every environment owns its own
@@ -26,9 +26,9 @@ Also here, because only the trainer knows them:
 * why each episode left the loop (`last_loop_exits`, the `loop_exit` completions column, `rollout/exit/<reason>`);
 * where the rollout's wall-clock went (`rollout/*_seconds`), so the slowest tool call is visible in the first hour;
 * the per-rollout `prompt_ids`, `logprobs` and `tool_mask`, handed to the reward function for the trajectory bank;
-* the merged-LoRA weight-sync fix (`clone_synced_params`, SPEC_V3 §10.1): the parameters TRL streams to vLLM are
+* the merged-LoRA weight-sync fix (`clone_synced_params`, docs/design.md section 8): the parameters TRL streams to vLLM are
   cloned before the adapter is un-merged;
-* **padding-free scoring** (audit T1): TRL pads every sequence of a generation batch to the batch-global longest
+* **padding-free scoring**: TRL pads every sequence of a generation batch to the batch-global longest
   (prompts on the left, completions on the right), so padded slots were 1.7-3.5x the real tokens. Every forward pass
   here (scoring the rollouts, and the loss) runs rows sorted by length, in chunks trimmed to their own longest row, and
   the results are scattered back to TRL's padded shape. Padded positions carry no attention and no loss, and RoPE
@@ -111,20 +111,7 @@ METRIC_SLOWEST_TOOL_TURN = "rollout/slowest_tool_turn_seconds"  # the slowest si
 METRIC_SLOWEST_EPISODE_TOOLS = "rollout/slowest_episode_tool_seconds"  # the largest per-episode total
 METRIC_TOOL_TURNS = "rollout/tool_turns"  # rounds of tool execution in this batch
 METRIC_REGENERATED = "rollout/regenerated_turns"  # turns sampled inside the loop, summed over episodes
-ROLLOUT_METRICS: tuple[str, ...] = (
-    METRIC_ROLLOUT_SECONDS,
-    METRIC_GENERATION_SECONDS,
-    METRIC_TOOL_SECONDS,
-    METRIC_SLOWEST_TOOL_TURN,
-    METRIC_SLOWEST_EPISODE_TOOLS,
-    METRIC_TOOL_TURNS,
-    METRIC_REGENERATED,
-    *(METRIC_EXIT_PREFIX + reason for reason in LOOP_EXITS),
-)
 
-# Per-rollout keyword arguments added to every reward function call (`trl_rewards` banks them, SPEC_V3 §9.1.5).
-# TRL already passes `completion_ids`.
-TOKEN_KWARGS: tuple[str, ...] = ("prompt_ids", "logprobs", "tool_mask")
 ENV_EXIT_HOOK = "_set_loop_exit"  # optional environment method: `_set_loop_exit(reason: str) -> None`
 
 # Metrics of the padding trimmer and of sampler-trainer drift. TRL already logs `sampling/importance_sampling_ratio/
@@ -134,7 +121,7 @@ METRIC_PAD_STOCK = "padding/stock_slots_per_token"  # token slots TRL's batch-gl
 METRIC_PAD_TRIMMED = "padding/trimmed_slots_per_token"  # token slots actually run / real tokens
 METRIC_IS_AT_CAP = "sampling/importance_sampling_ratio/at_cap_share"  # loss tokens whose ratio hit the truncation cap
 METRIC_IS_OUT_OF_BAND = "sampling/importance_sampling_ratio/outside_band_share"  # loss tokens with |ratio - 1| > band
-IS_BAND = 0.05  # the audit's drift band for the batch-mean ratio (audit T2), reused per token as a coarse share
+IS_BAND = 0.05  # the drift band for the batch-mean ratio, reused per token as a coarse share
 _LOSS_NORMALISED_GLOBALLY = frozenset(
     {"dapo", "cispo", "vespo"}
 )  # `num_items_in_batch` normaliser: regrouping is exact
@@ -249,7 +236,7 @@ def check_upstream() -> None:
 
 
 def clone_synced_params(vllm_generation: Any) -> None:
-    """Make `vllm_generation._iter_named_params` yield clones (SPEC_V3 §10.1).
+    """Make `vllm_generation._iter_named_params` yield clones.
 
     TRL merges the LoRA adapter, yields views of the merged weights and un-merges inside the same generator. vLLM's
     packed weight transfer copies the last chunk only after the generator is exhausted, by which time those views hold
@@ -304,7 +291,7 @@ class HonestGRPOTrainer(GRPOTrainer):
     * `max_tool_workers` (default None = one thread per active episode): cap on concurrent tool-calling threads.
     * `trim_padding`, `sort_micro_batches` (default True): the padding-free scoring described in the module docstring.
 
-    An environment "has reported" when its `_report` or `_report_error` is set (INTERFACES_V3 §3). A report tool call
+    An environment "has reported" when its `_report` or `_report_error` is set. A report tool call
     that failed before reaching the environment (bad arguments) therefore does not end the episode: the model sees
     the error and can report again.
 
@@ -315,8 +302,8 @@ class HonestGRPOTrainer(GRPOTrainer):
 
     stop_at_report: bool = True
     max_tool_workers: int | None = None
-    clone_synced_params: bool = True  # SPEC_V3 §10.1; set False before construction to reproduce stock TRL
-    trim_padding: bool = True  # run every forward in length-trimmed chunks (audit T1); False = TRL's padded layout
+    clone_synced_params: bool = True  # docs/design.md section 8; set False before construction to reproduce stock TRL
+    trim_padding: bool = True  # run every forward in length-trimmed chunks; False = TRL's padded layout
     sort_micro_batches: bool = True  # also regroup a generation round's micro-batches by length (token-sum losses only)
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -331,13 +318,13 @@ class HonestGRPOTrainer(GRPOTrainer):
     # ── guards ───────────────────────────────────────────────────────────────
 
     def _check_generation_layout(self) -> None:
-        """Reject layouts in which vLLM hands a rank the wrong completions (TDC-1, M1).
+        """Reject layouts in which vLLM hands a rank the wrong completions.
 
         In server mode, and in colocate mode with tensor parallelism, `VLLMGeneration.generate` gathers every rank's
         prompts and gives rank r the slice `[r * n_local, (r + 1) * n_local]`. Inside the tool loop each rank sends
         only its still-active episodes, so `n_local` differs between ranks from the second turn on and a rank
         receives completions sampled for another rank's contexts. One training process per run is the supported
-        layout (SPEC_V3 §5.2).
+        layout.
         """
         if not getattr(self, "use_vllm", False):
             return
@@ -353,12 +340,12 @@ class HonestGRPOTrainer(GRPOTrainer):
             )
 
     def _check_turn_cap(self) -> None:
-        """Require a per-turn `max_tokens` when a vLLM server is used with tools (TDC-2).
+        """Require a per-turn `max_tokens` when a vLLM server is used with tools.
 
         TRL asks the server for `max_tokens = max_completion_length` on every turn. vLLM's OpenAI route rejects a
         request whose prompt is longer than `max_model_len - max_tokens`, so with the whole episode budget as the cap
         the first continuation past `max_model_len - max_completion_length` tokens fails the step. A per-turn cap in
-        `generation_kwargs` overrides it. `train.py` sets and sizes it; this stops a hand-built config from missing it.
+        `generation_kwargs` overrides it. `train/` sets and sizes it; this stops a hand-built config from missing it.
         """
         if getattr(self, "vllm_mode", None) != "server" or not self.tools:
             return
@@ -444,7 +431,7 @@ class HonestGRPOTrainer(GRPOTrainer):
             ]
         return super()._calculate_rewards(inputs, prompts, completions, completion_ids_list)
 
-    # ── padding-free scoring (audit T1) ──────────────────────────────────────
+    # ── padding-free scoring ──────────────────────────────────────
 
     def _get_per_token_logps_and_entropies(
         self, model, input_ids, attention_mask, logits_to_keep, *args, batch_size=None, compute_aux_loss=False, **kwargs
@@ -536,7 +523,7 @@ class HonestGRPOTrainer(GRPOTrainer):
 
     @staticmethod
     def _episode_reported(environment: Any) -> bool:
-        """True once the environment has recorded its final report, parsed or not (INTERFACES_V3 §3)."""
+        """True once the environment has recorded its final report, parsed or not."""
         return (
             getattr(environment, "_report", None) is not None or getattr(environment, "_report_error", None) is not None
         )

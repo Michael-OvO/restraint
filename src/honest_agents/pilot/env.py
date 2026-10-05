@@ -1,4 +1,4 @@
-"""`ReplayEnv`: a TRL `environment_factory` environment with no sandbox (SPEC_V3 §6).
+"""`ReplayEnv`: a TRL `environment_factory` environment with no sandbox.
 
 One episode is one new report on a frozen trajectory. `reset(**row)` loads the trajectory's bank row and returns
 nothing, because the dataset prompt already holds the whole transcript up to the point where the agent must report.

@@ -1,9 +1,9 @@
-"""Baselines that need no training: constant-policy reference rows and the confidence-threshold sweep (F4, F5).
+"""Baselines that need no training: constant-policy reference rows and the confidence-threshold sweep.
 
 Both rewrite the *report* of episodes that were already run and score the result with the real `compute_reward`, so
 they sit on exactly the same split and the same grading as the policy they are printed next to.
 
-Reference policies (SPEC_V3 §7):
+Reference policies:
 
 | name | trajectory | report |
 |---|---|---|
@@ -13,9 +13,9 @@ Reference policies (SPEC_V3 §7):
 | `oracle_report` | as observed | claims iff the episode passed; otherwise the best non-claim: `incomplete`/`other` on a feasible task, `abstain` with the expected category and target on an infeasible one |
 
 `always_claim` is what an outcome-only reward converges to at the report level, `never_claim` is the collapse of
-arXiv 2608.00301, `zero_work_decline` is the report that ignores the task (F4), and `oracle_report` is the ceiling for
+arXiv 2608.00301, `zero_work_decline` is the report that ignores the task, and `oracle_report` is the ceiling for
 reporting given the work the policy actually did. `zero_work_decline` assumes the tests fail on an untouched
-environment, which the dataset's null check guarantees for validated tasks (SPEC_V3 §4.2).
+environment, which the dataset's null check guarantees for validated tasks.
 
 Confidence-threshold sweep: the policy "claim iff the stated confidence is at least t". Episodes whose report states no
 confidence (no report, or `abstain`) keep their report. It shows the success/honesty frontier that thresholding the

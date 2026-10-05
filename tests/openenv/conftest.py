@@ -1,6 +1,6 @@
 """Fixtures for the OpenEnv component: a task root with feasible/infeasible variants and a patched Harbor factory.
 
-Sandboxes are `tests.fakes.FakeHarborEnvironment` (host subprocesses), so the real Harbor `Task` parsing, network-plan
+Sandboxes are `tests.sandbox_fakes.FakeHarborEnvironment` (host subprocesses), so the real Harbor `Task` parsing, network-plan
 resolution and `honest_agents.grading` run end to end without Docker.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes import FakeFactory, install_fake_factory, make_task_dir
+from tests.sandbox_fakes import FakeFactory, install_fake_factory, make_task_dir
 
 # Sandbox-relative protected dir: hashing the host's /usr/bin on every test would be slow and meaningless.
 PROTECTED = 'protected_paths = ["bin"]'

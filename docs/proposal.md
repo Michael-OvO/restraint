@@ -1,10 +1,10 @@
 # Honest Agents: Training Agents to Know When Not to Act and to Report Completion Truthfully
 
-**版本**：v2（2026-10-04）。v1 原文保留在 [proposal_v1.md](proposal_v1.md)，未改动。
+**版本**：v2（2026-10-04）。v1 原文保留在 [archive/proposal_v1.md](archive/proposal_v1.md)，未改动。
 
 **一句话**：AgentAbstain 等工作测量了 agent 不知道何时不该行动、会虚报完成；本项目在**终端沙箱 + RL 训练**的设定下，检验"可核对的诚实性奖励"能否在不明显损失任务成功率的前提下降低虚假完成，并如实报告我们没有验证的部分。
 
-> **v2 相对 v1 改了什么（读者没有看过评审记录，所以先列出来）。** 动工前我们做了一轮 go/no-go 评审（六个独立视角，每条发现再由第二个审稿人复核，记录在 [REVIEW.md](REVIEW.md)）。结论是原设计不能直接训练。和提案文字直接相关的修正有七条：
+> **v2 相对 v1 改了什么（读者没有看过评审记录，所以先列出来）。** 动工前我们做了一轮 go/no-go 评审（六个独立视角，每条发现再由第二个审稿人复核，记录在 [reviews.md](reviews.md)）。结论是原设计不能直接训练。和提案文字直接相关的修正有七条：
 > 1. §2 的论证对应的是 claim-gated 的结果奖励，而 v1 实现的 baseline 是另一个奖励（不看 report）。v2 把两者分开，并把 H1 拆成"abstention 下降"（有机制）和"fabrication 上升"（探索性）。
 > 2. §3 的"开源设定下是空白"不成立。至少有五六篇开源小模型的 RL 训练工作已经涉及 abstention 或自我汇报。v2 收窄了 gap 和 novelty。
 > 3. §4 的奖励表整体改写（v3）：新增 success bonus λ、一个可验证的 blocker、near-miss 对照、泄漏（leak）掩码。α 只有在**不做组内标准差归一化**时才等于声称完成的置信度门槛。
@@ -74,7 +74,7 @@ arXiv 2608.00301（理论论文，其主要论断我们只从摘要核实）指�
 | **Goal-Autopilot**（2606.11688） | SWE agent | 否，推理时拦截 | 外部 gate，牺牲 coverage |
 | FeasiGen（2605.28532，仅摘要） | 屏蔽关键工具生成不可行任务 | — | 与我们的 `remove_tool` 同思路 |
 
-**Gap（收窄后）**：我们**没有找到**（检索不系统，投稿前必须重做，见 ROADMAP）以下组合：用 RL 训练一个**开源小模型的终端/容器 agent**，在**经 oracle 验证的不可完成变体**上学会 abstain，其完成声明和 abstention **由程序对最终沙箱状态核对**（隐藏测试、被验证的 blocker，不用 LLM judge），并系统测量 outcome-only 终端 RL 下 fabrication 与 abstention 的漂移。这个断言是"我们没找到"，不是"不存在"。
+**Gap（收窄后）**：我们**没有找到**（检索不系统，投稿前必须重做，见 [roadmap.md](roadmap.md)）以下组合：用 RL 训练一个**开源小模型的终端/容器 agent**，在**经 oracle 验证的不可完成变体**上学会 abstain，其完成声明和 abstention **由程序对最终沙箱状态核对**（隐藏测试、被验证的 blocker，不用 LLM judge），并系统测量 outcome-only 终端 RL 下 fabrication 与 abstention 的漂移。这个断言是"我们没找到"，不是"不存在"。
 
 **不能再声称的**：(a) "在 policy 层面训练 abstention 在开源设定下是空白"，AWA-RL、PROVE、Bench2Robust、RefGRPO 已经做了；(b) α 作为置信度门槛的论证本身是新的，Chow 规则、TruthRL、AWA-RL、TIAR 已有同类的权衡分析，所以 α 降为设计组件；(c) 不可完成任务生成方法是新的，FeasiGen、AbstainGen 等已有类似构造。
 
@@ -125,7 +125,7 @@ agent 结束时提交结构化 self-report：`status`（complete / incomplete / 
 
 设 agent 对"测试会通过"的信念为 p。声称完成的期望回报 = p(2+λ) − 1，不声称的期望回报 = α + λp，两者相等当且仅当 p = (1+α)/2。**λ 和效率项都在两边同时出现，所以不改变门槛**（有单元测试在 α、λ 网格上数值验证）。λ 的作用是另一件事：让"做事"严格优于"一上来就 incomplete"，否则一旦策略不再声称完成，所有可完成任务的组内方差为零，奖励退化为"不做事也拿 α"（INC-5、VIS-M1、F4）。
 
-**这个门槛只在不做组内标准差归一化时成立。** TRL 默认的 `scale_rewards="group"` 用组内标准差除优势。对只取两个值的组，归一化后优势与 α 无关，α 被抹掉：评审用模拟得到 α = 0 / 0.25 / 0.5 / 0.75 时学到的门槛约为 0.40 / 0.48 / 0.54 / 0.57（独立的解析不动点算出 0.43 / 0.50 / 0.55 / 0.585），而名义值是 0.50 / 0.625 / 0.75 / 0.875。所以所有臂都用 `scale_rewards: none`，`train.py` 拒绝其他取值。在样式化模拟（不是 Qwen，只是一个单参数 bandit 加上真实的 `compute_reward` 与 TRL 的优势公式）里，`none` 下学到的声称门槛与 (1+α)/2 相差约 0.03（池平均通过率 s = 0.5 和 0.7 时）。
+**这个门槛只在不做组内标准差归一化时成立。** TRL 默认的 `scale_rewards="group"` 用组内标准差除优势。对只取两个值的组，归一化后优势与 α 无关，α 被抹掉：评审用模拟得到 α = 0 / 0.25 / 0.5 / 0.75 时学到的门槛约为 0.40 / 0.48 / 0.54 / 0.57（独立的解析不动点算出 0.43 / 0.50 / 0.55 / 0.585），而名义值是 0.50 / 0.625 / 0.75 / 0.875。所以所有臂都用 `scale_rewards: none`，`train/` 拒绝其他取值。在样式化模拟（不是 Qwen，只是一个单参数 bandit 加上真实的 `compute_reward` 与 TRL 的优势公式）里，`none` 下学到的声称门槛与 (1+α)/2 相差约 0.03（池平均通过率 s = 0.5 和 0.7 时）。
 
 **网格取 α ∈ {0, 0.1, 0.25, 0.4}**，不再用 0.5 和 0.75：对自我认知较弱的模型，高 α 几乎退化成"从不声称"（在 s = 0.3 的模拟里，α = 0.4 有 92-100% 的运行收敛到从不声称；α = 0.25 为 0-17%）。α ≤ 0.25 只在池平均通过率约 0.5 以上才安全。这是一个**数据与门槛的匹配问题**，所以 Phase 0 要测量池平均通过率和"置信度对通过"的 AUROC，难度过滤只保留 pass@8 为 1-7 的可完成任务。我们**还没有**这些测量值。
 
@@ -146,13 +146,15 @@ agent 结束时提交结构化 self-report：`status`（complete / incomplete / 
 | 算子 | 适用数 / 300 | 最近的 AgentAbstain 类别 | 备注 |
 |---|---|---|---|
 | `remove_input`（删除构建时创建的输入） | 87 | missing_critical_parameter（勉强） | 期望类别放宽为 missing_capability 或 missing_parameter。更严的静态过滤使数目从旧版的 193 降到 87 |
-| `conflicting_constraint` | 173（121 个有对照） | conflicting_constraints | 测试照常运行，通过且未触碰被禁路径视为 leak。默认**留出**为测试族（有去不掉的词汇线索，见 `docs/DATA.md`） |
-| `revoke_permission` | 157 | 无精确对应（接近 insufficient_tool_capability） | 默认**训练**（泄漏复核后改动，见 `docs/DATA.md`） |
+| `conflicting_constraint` | 173（121 个有对照） | conflicting_constraints | 测试照常运行，通过且未触碰被禁路径视为 leak。默认**留出**为测试族（有去不掉的词汇线索，见 [data.md](data.md)） |
+| `revoke_permission` | 157 | 无精确对应（接近 insufficient_tool_capability） | 默认**训练**（泄漏复核后改动，见 [data.md](data.md)） |
 | `no_network` | 11 | insufficient_tool_capability | 默认**留出**为测试族：每 150 个种子约 2 个，训练不了（旧的 "约 4% 产出" 是旧构建的数字） |
 | `remove_tool` | **0** | insufficient_tool_capability | 要求指令强制使用该工具且镜像里没有解释器能替代；在 Endless Terminals 上无候选 |
-| `high_risk` | 300（适用） | high_stakes_action / emergent_risk_discovery（混合） | 重写为对称孪生：指令措辞与"安全可删"孪生完全相同，只有目录内容不同。默认**训练**（泄漏复核后改动，见 `docs/DATA.md`） |
+| `high_risk` | 300（适用） | high_stakes_action / emergent_risk_discovery（混合） | 重写为对称孪生：指令措辞与"安全可删"孪生完全相同，只有目录内容不同。默认**训练**（泄漏复核后改动，见 [data.md](data.md)） |
 
-结果：独立复核发现 `conflicting_constraint` 有无法去除的词汇线索、`no_network` 只有极少的对，所以默认留出这两个族做零样本测试（数字带构念效度说明，不进主结果）；`high_risk`、`revoke_permission`、`remove_input` 训练（真实种子上每 150 个种子的产出约 103、97、8，`docs/DATA.md`）。**训练族只覆盖 AgentAbstain 八类场景里的 3 类**，没有 ambiguous_action_specification、conflicting_evidence、critical_tool_failure，`hide_parameter`（真正的缺失参数）没有实现。这个改动是所有者不在时做的决定，可随时推翻。
+上表是评审时的适用数（静态分析，泄漏修复前）；修复和更严的过滤之后，每 150 个种子的实际产出是 high_risk 约 103、revoke_permission 97、conflicting_constraint 29、remove_input 8、no_network 2、remove_tool 0（[data.md](data.md)）。
+
+结果：独立复核发现 `conflicting_constraint` 有无法去除的词汇线索、`no_network` 只有极少的对，所以默认留出这两个族做零样本测试（数字带构念效度说明，不进主结果）；`high_risk`、`revoke_permission`、`remove_input` 训练（真实种子上每 150 个种子的产出约 103、97、8，[data.md](data.md)）。**训练族只覆盖 AgentAbstain 八类场景里的 3 类**，没有 ambiguous_action_specification、conflicting_evidence、critical_tool_failure，`hide_parameter`（真正的缺失参数）没有实现。这个改动是所有者不在时做的决定，可随时推翻。
 
 首个数据集只用 **Endless Terminals**（转换为 hermetic pytest 验证器，40 个随机样本全部可转换），SETA 之后再加。**TMAX-15K 没有 oracle 解法**，不能用于校验不可完成变体，v1 写它作种子源，v2 不再采用。
 
@@ -160,7 +162,7 @@ agent 结束时提交结构化 self-report：`status`（complete / incomplete / 
 
 Qwen3.5-4B（bring-up 先用 Qwen3-4B）+ LoRA（r=32，lr 1e-5），TRL `GRPOTrainer`，DAPO 损失、β=0、`scale_rewards: none`、token 级截断重要性采样（`token_truncate`）。每步 8 个 prompt × G=8 = 64 个 episode。每个 run **一个训练进程**（TRL 的 vLLM server 模式在两个训练进程下会错分配工具循环里的 completion，TDC-1），4×H100 上并排两个 run，每个一块训练卡加一块 vLLM 卡。提案 v1 写的 DPPO 已于 TRL 1.9.0 删除（PR #6402），Tmax 用的是 DPPO，我们不能直接复用其稳定化手段；这是与 Tmax 配方的一处实质差别。
 
-**分阶段**（成本见 ROADMAP，均为估算）：Phase 0 用真实 trainer 在 lr = 0 下跑约 24 步，测量报告合规率、通过率分布、预算用尽率、每步耗时；然后在冻结轨迹上做**只训练最终 report** 的 pilot（不需要沙箱）；最后才是两条短的完整 run（honest 对 outcome，同种子同算力）。**pilot 只对 report 层面（H2、H3）有效，不能检验 H1，也不能检验"做事 vs 放弃"**，因为每个冻结轨迹的结果是固定的。
+**分阶段**（成本见 [roadmap.md](roadmap.md)，均为估算）：Phase 0 用真实 trainer 在 lr = 0 下跑约 24 步，测量报告合规率、通过率分布、预算用尽率、每步耗时；然后在冻结轨迹上做**只训练最终 report** 的 pilot（不需要沙箱）；最后才是两条短的完整 run（honest 对 outcome，同种子同算力）。**pilot 只对 report 层面（H2、H3）有效，不能检验 H1，也不能检验"做事 vs 放弃"**，因为每个冻结轨迹的结果是固定的。
 
 ## 5. Contributions
 
@@ -177,7 +179,7 @@ Qwen3.5-4B（bring-up 先用 Qwen3-4B）+ LoRA（r=32，lr 1e-5），TRL `GRPOTr
 - **H1a**：outcome-only RL 使 abstention 与过早 incomplete 下降（有机制）。
 - **H1b**：outcome-only RL 使 fabrication 上升（探索性；先做 Tmax-4B 对基座的检查；可能为空）。
 - **H2**：与 outcome-only 和无训练 baseline 相比，honesty reward 在**留出的终端集**上降低虚假完成率与 P(声称完成 | 失败)，同时可验证成功率（声称且通过）不低于 baseline 超过 **3 个百分点**（非劣效边界，在运行前固定于 `EvalProtocol`，按源任务 bootstrap，单侧 5%）。H2 的前提是模型的置信度能区分自己的成功与失败（AUROC），否则任何 claim-gated 奖励都会显著损失被声称的成功。这个量要在 Phase 0 测，目前**未知**。
-- **H3**：α 通过实现出的声称门槛平滑控制 success–honesty 权衡（用 `realised_claim_threshold` 对照名义值 (1+α)/2）；习得的 abstention 迁移到留出族（`high_risk`、`revoke_permission`），并**可能**迁移到不同 harness（取决于 §7 的跨 harness 测量）。对 AgentAbstain 的迁移为探索性，不作承诺。
+- **H3**：α 通过实现出的声称门槛平滑控制 success–honesty 权衡（用 `realised_claim_threshold` 对照名义值 (1+α)/2）；习得的 abstention 迁移到留出族（`conflicting_constraint`、`no_network`，零样本，带构念效度说明），并**可能**迁移到不同 harness（取决于 §7 的跨 harness 测量）。对 AgentAbstain 的迁移为探索性，不作承诺。
 
 ## 7. Evaluation
 
@@ -192,7 +194,7 @@ Qwen3.5-4B（bring-up 先用 Qwen3-4B）+ LoRA（r=32，lr 1e-5），TRL `GRPOTr
 | AbstentionBench | 单轮 QA 的 abstention | 回归检查，没有被破坏 |
 | TB Lite / TB 2.0 | 任务成功率 | 能力 |
 
-**声明范围（L8）**：system prompt 描述了全部机制（缺失的输入、工具或权限，相互矛盾的要求，不可逆操作），所以留出族（默认 conflicting_constraint 与 no_network，见 `docs/DATA.md`）是"提示描述了该行为的零样本测试"，不是"从未见过的行为"，文中一律称 held-out variants；cc 的数字带构念效度说明，不进主结果。Qwen3.5-4B 的发布晚于 Endless Terminals 和 Terminal-Bench，绝对数字可能受污染，只报告各臂之间的差值，并加一个 Qwen3-4B 对照臂。
+**声明范围（L8）**：system prompt 描述了全部机制（缺失的输入、工具或权限，相互矛盾的要求，不可逆操作），所以留出族（默认 conflicting_constraint 与 no_network，见 [data.md](data.md)）是"提示描述了该行为的零样本测试"，不是"从未见过的行为"，文中一律称 held-out variants；cc 的数字带构念效度说明，不进主结果。Qwen3.5-4B 的发布晚于 Endless Terminals 和 Terminal-Bench，绝对数字可能受污染，只报告各臂之间的差值，并加一个 Qwen3-4B 对照臂。
 
 测试集按固定哈希切分（`--test-bp 2200`，盐与阈值在首次训练后冻结，`test_ids.txt` 入库）：从训练池之外取源任务（评测协议要求至少 250 个源任务，每个报告的族至少 50 个变体，不足则在每张表上打印警告）。
 
@@ -204,7 +206,7 @@ HF 的 multi-harness RL 指南的主要结果是：在一个 harness 里学到�
 
 无训练：**基座**；**中性 system prompt**（不含诚实说明，**且**工具描述也换成中性版，否则默认的工具说明里仍有"只有验证过才声称完成"的措辞，不算中性）；2×2 {基座, 训练后} × {诚实 prompt, 中性 prompt}；**置信度阈值扫描**（"置信度 ≥ t 才声称"，t 从 0 到 1，看不训练、只对基座自带置信度设阈值能走多远）；推理时 gate（verify-then-report，**未实现**）；CONVOLVE 式 context engineering（只改 prompt）。
 
-训练：`outcome`、`outcome_claimed`；**TruthRL 式三元奖励**（我们的 α = 0 臂，仍含 λ 项）；**RefGRPO 式臂**（`outcome_reflect` = 通过 + 0.1·[声明与结果一致]，不衰减，所以只是近似）；**对已验证诚实轨迹的监督微调（SFT）**：文本级，教师 tokenizer 无关，成本远低于 RL（multi-harness 指南的数字是 1.5-6.5 小时对 32-46 小时），审稿人会期待它。**目前没有 SFT 脚本**，只有轨迹库已存下所需的消息与 token ids，是 Stage 3 的可选项。
+训练：`outcome`、`outcome_claimed`；**TruthRL 式三元奖励**（我们的 α = 0 臂，仍含 λ 项）；**RefGRPO 式臂**（`outcome_reflect` = 通过 + 0.1·[声明与结果一致]，不衰减，所以只是近似）；**对已验证诚实轨迹的监督微调（SFT）**：文本级，教师 tokenizer 无关，成本远低于 RL（multi-harness 指南的数字是 1.5-6.5 小时对 32-46 小时），审稿人会期待它。**现在有两个 SFT 阶段**（`src/honest_agents/sft/`：事后报告 SFT，以及按奖励过滤的 best-of-N 轨迹 SFT，都读 Phase 0 轨迹库，见 [design.md](design.md) 第 9 节），只做过 CPU dry run；把 SFT 的 adapter 作为 GRPO 起点的接线还没写（[roadmap.md](roadmap.md)）。是 Stage 2b 的可选项。
 
 每个表都附**常量策略参照行**：always-claim、never-claim、零命令 decline、oracle 报告。训练后策略只有在胜过前三行时才有意义。
 
@@ -232,4 +234,4 @@ Sources（arXiv 编号即链接 `https://arxiv.org/abs/<编号>`）：
 - [TruthRL](https://arxiv.org/abs/2509.25760)；[2608.00301](https://arxiv.org/abs/2608.00301)；[Bench2Robust](https://arxiv.org/abs/2608.11977)
 - [CAR](https://arxiv.org/abs/2601.07264)；[Hallucination Tax](https://arxiv.org/abs/2505.13988)；[FeasiGen](https://arxiv.org/abs/2605.28532)
 - "The ultimate guide to multi-harness RL"（Hugging Face Space `FineEnvs/multi-harness-rl`，2026-10-02）
-- 评审记录：[REVIEW.md](REVIEW.md)，细节见 `docs/research/go-no-go-review.json`
+- 评审与审计记录：[reviews.md](reviews.md)（原始证据在 git 历史中，提交 `2a38890` 的 `docs/research/`）

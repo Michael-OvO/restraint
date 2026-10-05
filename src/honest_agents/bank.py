@@ -1,4 +1,4 @@
-"""Trajectory bank and quarantine list (SPEC_V3 §6, §4.7).
+"""Trajectory bank and quarantine list.
 
 The report-only pilot trains only the final report on frozen Phase-0 trajectories. A trajectory's outcome is fixed, so a
 new report can be scored without a sandbox, provided the row keeps everything the reward reads:
@@ -179,7 +179,7 @@ class BankRow(BaseModel):
     # Tool calls in the report turn that ran before the report (they are part of the outcome but not of `completion`).
     report_turn_extra_calls: int = 0
     n_completion_messages: int = 0  # length of the full completion, for audit
-    # Token-level record of the rollout as sampled (SPEC_V3 §9.1.5), when the trainer hands it over. The pilot
+    # Token-level record of the rollout as sampled, when the trainer hands it over. The pilot
     # re-renders its context from the messages above, so its contexts are not token-identical to the live loop.
     completion_ids: list[int] | None = None  # sampled token ids of the whole completion, tool results included
     prompt_ids: list[int] | None = None

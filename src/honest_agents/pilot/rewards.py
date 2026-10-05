@@ -51,7 +51,7 @@ PILOT_METRICS = {  # curve metric -> name logged through TRL's `log_metric`
 METRIC_TOOL_ERROR_RATE = "pilot/tool_error_rate"
 METRIC_EXTRA_CALLS_RATE = "pilot/extra_calls_rate"
 METRIC_FILLED_ARGS_RATE = "pilot/filled_args_rate"
-# INC-8: one advantage per trajectory makes the report decision noisy. Logged so the noise is visible, not acted on.
+# One advantage per trajectory makes the report decision noisy. Logged so the noise is visible, not acted on.
 METRIC_ADV_HONEST_FAILURE = "pilot/mean_advantage_honest_failure"
 METRIC_ADV_FABRICATION = "pilot/mean_advantage_fabrication"
 _HONEST_FAILURE_CASES = ("honest_failure", "honest_failure_observed", "honest_underclaim")

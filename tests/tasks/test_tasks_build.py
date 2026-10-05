@@ -1,5 +1,5 @@
 """Dataset build: columns, splits by absolute seed count, held-out families, pools per split, mixture, controls,
-quarantine, relabelling, difficulty gate and the hermetic filter (SPEC_V3 §4)."""
+quarantine, relabelling, difficulty gate and the hermetic filter (docs/design.md section 7)."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def test_build_end_to_end(tmp_path, seeds):
     pair_split: dict[str, set[str]] = defaultdict(set)
     for split, rs in rows.items():
         for r in rs:
-            assert set(r) == set(COLUMNS)  # exactly the INTERFACES_V3 §6 columns
+            assert set(r) == set(COLUMNS)  # exactly the docs/design.md section 3 columns
             assert r["split"] == split
             assert r["prompt"] == [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": ""}]
             spec = HonestTaskSpec.from_task_dir(r["task_dir"])
@@ -295,7 +295,7 @@ def test_validation_filter_drops_failed_variants_and_broken_pairs(tmp_path, seed
 
 @pytest.mark.slow
 def test_validation_without_null_check_or_three_oracle_runs_is_refused(tmp_path, seeds):
-    """SPEC_V3 §4.2: a zero-work claim must fail the tests and the oracle must pass 3 of 3, or the result does not count."""
+    """docs/design.md section 7: a zero-work claim must fail the tests and the oracle must pass 3 of 3, or the result does not count."""
     out = tmp_path / "out"
     build(parse_args(_one_build_args(out, seeds)))
     rows = _all_variant_rows(out)
@@ -420,7 +420,7 @@ def test_difficulty_gate_filters_the_train_split_only(tmp_path, seeds):
     rows = _rows(out2)
     assert not {r["pair_id"] for r in rows["train"]} & set(drop)
     assert manifest["n_difficulty_dropped"] > 0
-    assert test_pair in {r["pair_id"] for r in rows["test"]}  # test stays unfiltered (LV-9)
+    assert test_pair in {r["pair_id"] for r in rows["test"]}  # test stays unfiltered
 
 
 @pytest.mark.slow
@@ -861,7 +861,7 @@ def test_cue_watch_lists_unenforced_features_that_still_separate_the_kinds():
 
 @pytest.mark.parametrize("source", ["test", "openenv"])
 def test_held_out_and_openenv_quarantine_entries_leave_test_unchanged(tmp_path, seeds, source):
-    """Entries a test-split row or an OpenEnv episode wrote must not shape a rebuilt test.jsonl either (L7)."""
+    """Entries a test-split row or an OpenEnv episode wrote must not shape a rebuilt test.jsonl either."""
     clean = tmp_path / "clean"
     build(parse_args(_bp_args(clean, seeds)))
     test_rows = _rows(clean)["test"]
@@ -935,7 +935,7 @@ def _leftovers(out: Path) -> list[str]:
 
 def test_a_build_that_fails_a_gate_leaves_no_dataset_files(tmp_path, seeds, monkeypatch):
     """The cue gate used to fire after train.jsonl and test.jsonl were written, leaving them without a manifest."""
-    from honest_agents.tasks import build as build_mod
+    from honest_agents.tasks.build import pipeline as build_mod
 
     monkeypatch.setattr(
         build_mod,
@@ -951,7 +951,7 @@ def test_a_build_that_fails_a_gate_leaves_no_dataset_files(tmp_path, seeds, monk
 
 
 def test_a_crash_while_writing_leaves_no_dataset_files_and_a_retry_succeeds(tmp_path, seeds, monkeypatch):
-    from honest_agents.tasks import build as build_mod
+    from honest_agents.tasks.build import pipeline as build_mod
 
     def boom(*a, **k):
         raise RuntimeError("disk full")
@@ -967,7 +967,7 @@ def test_a_crash_while_writing_leaves_no_dataset_files_and_a_retry_succeeds(tmp_
 
 
 def test_a_failed_rebuild_keeps_the_previous_complete_dataset(tmp_path, seeds, monkeypatch):
-    from honest_agents.tasks import build as build_mod
+    from honest_agents.tasks.build import pipeline as build_mod
 
     out = tmp_path / "out"
     build(parse_args(_args(out, seeds)))

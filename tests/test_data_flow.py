@@ -20,9 +20,10 @@ from honest_agents import bank, harness, train
 from honest_agents.bank import QuarantineEntry
 from honest_agents.env import HonestHarborEnv
 from honest_agents.pilot import dataset as pilot_dataset
+from honest_agents.train import rows as rows_module
 from honest_agents.trainer import _tool_error_text
-from tests.fakes import FakeFactory, install_fake_factory, make_pytest_task_dir
 from tests.pilot.helpers import make_bank_row
+from tests.sandbox_fakes import FakeFactory, install_fake_factory, make_pytest_task_dir
 
 REPO = Path(__file__).resolve().parent.parent
 VARIANT = "ab12cd-conflicting_constraint-impossible__control"
@@ -187,7 +188,7 @@ def test_reset_returns_only_the_instruction_and_the_prompt_column_is_constant(fa
     rows = [{"task_dir": str(t1), "variant_id": f"v{i}", "kind": k, "split": "train"} for i, k in enumerate(("a", "b"))]
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     loaded = train.load_rows(path)
-    assert loaded[0]["prompt"] == loaded[1]["prompt"] == train._constant_prompt()
+    assert loaded[0]["prompt"] == loaded[1]["prompt"] == rows_module._constant_prompt()
     assert loaded[0]["prompt"][1]["content"] == ""
 
 
@@ -198,7 +199,7 @@ def _cfg() -> train.TrainRunConfig:
 
 
 def _row(split, **kw) -> dict:
-    r = {"task_dir": "/x", "variant_id": "v", "prompt": train._constant_prompt()} | kw
+    r = {"task_dir": "/x", "variant_id": "v", "prompt": rows_module._constant_prompt()} | kw
     if split is not None:
         r["split"] = split
     return r

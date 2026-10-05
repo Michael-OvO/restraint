@@ -47,7 +47,7 @@ class HostEnvironment(BaseEnvironment):
 
     @property
     def _path_env(self) -> dict[str, str]:
-        # read by tests.fakes.PASS_IF_HELLO, whose /logs/verifier is inside the script (not rewritable in `command`)
+        # read by tests.sandbox_fakes.PASS_IF_HELLO, whose /logs/verifier is inside the script (not rewritable in `command`)
         return {
             "HA_VERIFIER_DIR": str(self.root / "logs" / "verifier"),
             "HA_TESTS_DIR": str(self.root / "tests"),

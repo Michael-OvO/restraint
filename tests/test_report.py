@@ -89,7 +89,7 @@ def test_list_coercion(value, expected):
     assert parse_report({"status": "complete", "completed": value}).completed == expected
 
 
-# ── status normalisation (GR-8) ──────────────────────────────────────────
+# ── status normalisation ──────────────────────────────────────────
 
 
 @pytest.mark.parametrize(

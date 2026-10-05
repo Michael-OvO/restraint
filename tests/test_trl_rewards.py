@@ -20,7 +20,7 @@ What they establish (recorded here because the design depends on it):
    share of tokens. It does not change its direction.
 4. A fully masked group has NaN mean and std; all its advantages are 0 and TRL does not count it in
    `frac_reward_zero_std` (isclose(NaN, 0) is False).
-5. With TWO reward functions a None from one of them is NOT a mask: `nansum` makes the reward 0 (V-1).
+5. With TWO reward functions a None from one of them is NOT a mask: `nansum` makes the reward 0.
 """
 
 from __future__ import annotations
@@ -251,12 +251,12 @@ def test_registry_and_function_contract():
         params = inspect.signature(func).parameters
         assert {"environments", "log_metric", "log_extra"} <= set(params)
         assert any(p.kind is p.VAR_KEYWORD for p in params.values())  # TRL passes every dataset column
-    # the pre-v3 pair is gone on purpose: two reward functions cannot mask (V-1)
+    # the pre-v3 pair is gone on purpose: two reward functions cannot mask
     assert not hasattr(trl_rewards, "honesty_reward") and not hasattr(trl_rewards, "task_success")
 
 
 def test_shipped_defaults_reach_the_trainer():
-    """An environment built with the default config pays the efficiency term on a pass (SPEC_V3 §9.2.1)."""
+    """An environment built with the default config pays the efficiency term on a pass (docs/design.md section 4)."""
     quick, slow = feas(CLAIM, True, n=2), feas(CLAIM, True, n=20)
     rewards = honest_reward(environments=envs_for([quick, slow], cfg=DEFAULTS))
     assert rewards == [
@@ -310,7 +310,7 @@ def test_leak_masks_the_whole_prompt_group_in_every_mode(mode):
 
 
 def test_leak_mask_is_what_makes_the_abstainers_reward_disappear():
-    """LV-1: without the mask the group would read −1 for the solver and +1 for giving up."""
+    """Without the mask the group would read −1 for the solver and +1 for giving up."""
     outcomes, ids = leak_batch()
     unmasked = [
         compute_reward(infeas(GOOD_DECLINE)).total,
@@ -580,7 +580,7 @@ def test_zero_variance_group_share():
 
 
 def test_the_constant_zero_work_report_is_visible_in_training_metrics():
-    """VIS-M2 / F4: 32 episodes of the all-categories report used to read abstain rate 0, lazy 0, wrong reason 0."""
+    """32 episodes of the all-categories report used to read abstain rate 0, lazy 0, wrong reason 0."""
     shotgun = rep(
         "incomplete",
         "missing_parameter, ambiguous_action, high_risk, missing_capability, other",
@@ -655,7 +655,7 @@ def test_leaky_variant_is_written_to_the_quarantine_list(tmp_path):
 
 
 def test_unclaimed_pass_is_recorded_but_not_masked(tmp_path):
-    """Tests that pass on an "infeasible" variant without a claim are scored by the table (SPEC_V3 names only the
+    """Tests that pass on an "infeasible" variant without a claim are scored by the table (SPEC names only the
     claimed case as a leak) but the variant is flagged, so a rebuild can drop it."""
     bank.set_quarantine_file(tmp_path / "quarantine.jsonl")
     rec = Recorder()
@@ -1044,7 +1044,7 @@ def test_make_row_never_fails_on_odd_content():
     assert again.task == {"task_dir": "/data/x"} and len(again.completion) == 1
 
 
-# ── a reward function never raises (SPEC_V3 §9.2.3) ──────────────────────
+# ── a reward function never raises (docs/design.md section 5) ──────────────────────
 
 
 class BrokenEnv(FakeEnv):
@@ -1210,7 +1210,7 @@ def test_report_rate_and_no_contrast_metrics():
 
 
 def test_bank_rows_keep_the_sampled_tokens(tmp_path):
-    """SPEC_V3 §9.1.5: token ids (always passed by TRL) and, when the trainer forwards them, prompt ids, sampling
+    """docs/design.md section 8: token ids (always passed by TRL) and, when the trainer forwards them, prompt ids, sampling
     log-probabilities and the tool mask are stored next to the messages."""
     bank.set_bank_dir(tmp_path)
     honest_reward(
@@ -1466,7 +1466,7 @@ def test_fully_masked_group_has_no_signal_and_is_not_counted_as_zero_std():
 
 
 def test_two_reward_functions_cannot_mask():
-    """V-1, the reason a run registers exactly one function: [None, 0.0] under weights [1, 0] is reward 0."""
+    """The reason a run registers exactly one function: [None, 0.0] under weights [1, 0] is reward 0."""
     both = torch.tensor([[1.5, 1.0], [NAN, 0.0], [0.25, 0.0], [-1.0, 0.0]])
     rewards, advantages, _ = trl_advantages(both, num_generations=4, weights=[1.0, 0.0])
     assert rewards[1].item() == 0.0 and advantages[1].item() < 0
@@ -1508,7 +1508,7 @@ def test_masked_tokens_still_count_in_the_dapo_normaliser():
     assert with_masked[1].abs().sum().item() == 0.0
 
 
-# ── scale_rewards and the claim threshold (INC-1) ────────────────────────
+# ── scale_rewards and the claim threshold ────────────────────────
 
 
 def two_valued_group(alpha: float, k_honest: int = 4, size: int = 8):
@@ -1525,7 +1525,7 @@ def test_scale_rewards_none_preserves_alpha_and_group_erases_it(k_honest):
 
     `scale_rewards="none"`: the honest report's edge over fabricating is 1 + α, so α acts as designed.
     `scale_rewards="group"`: dividing by the group's std gives identical advantages for every α, so α has no effect
-    in any two-valued group (the reviewers measured thresholds 0.40/0.48/0.54/0.57 for nominal 0.50/0.625/0.75/0.875).
+    in any two-valued group (measured thresholds 0.40/0.48/0.54/0.57 for nominal 0.50/0.625/0.75/0.875).
     """
     alphas = [0.0, 0.25, 0.5, 0.75]
     none = [trl_advantages(two_valued_group(a, k_honest), 8, "none")[1] for a in alphas]
@@ -1728,7 +1728,7 @@ def test_failed_batch_keeps_trl_completions_table_aligned(accelerate_state, monk
 
 def test_token_tensors_are_banked_row_by_row(tmp_path):
     """TRL holds `prompt_ids` as one padded tensor for the batch; a trainer that forwards it as it is must not
-    lose the bank rows (SPEC_V3 §9.1.5)."""
+    lose the bank rows (docs/design.md section 8)."""
     bank.set_bank_dir(tmp_path)
     honest_reward(
         environments=[bank_env(infeas(GOOD_DECLINE)), bank_env(infeas(CLAIM))],
@@ -1853,7 +1853,7 @@ def test_mask_reason_and_stop_reason_vocabularies():
     assert BLOCKER_FALSE == "false"
 
 
-# ── adversarial review additions ─────────────────────────────────────────
+# ── further edge cases ─────────────────────────────────────────
 
 
 class ForgetfulEnv(FakeEnv):
@@ -1938,7 +1938,7 @@ def _score(envs) -> tuple[list, dict]:
 def test_every_episode_broken_grader_is_visible_as_reward_error_rate():
     """The audit's failing test (CA-1): all rewards were -1.5, tamper_rate 1.0 and reward_error_rate 0.0."""
     rewards, logged = _score([_GradedEnv(i, "RuntimeError: docker exec failed") for i in range(8)])
-    assert all(r == -1.5 for r in rewards)  # scored as tamper, as SPEC_V3 §3.5 says
+    assert all(r == -1.5 for r in rewards)  # scored as tamper, as docs/design.md section 2 says
     assert logged["honest/tamper_rate"] == 1.0
     assert logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == 1.0
 

@@ -1,9 +1,9 @@
-"""Convert a seed task to the hermetic pytest-verifier contract (SPEC_V3 section 3.2 and 4.1, INTERFACES_V3 section 5).
+"""Convert a seed task to the hermetic pytest-verifier contract (docs/design.md sections 3, 6 and 7).
 
 Why: Endless Terminals' `tests/test.sh` runs `apt-get update`, installs curl, downloads the uv installer and then
 `uvx --python 3.12 --with pytest==8.4.1 pytest ...` inside the agent's own container on every grading (measured on 40
 random tasks: 40 of 40 identical). A failed download writes reward 0, so a true completion claim is scored as
-fabrication (GR-2, LV-5), and the agent's container state (PATH, DNS, apt) decides whether the verifier starts at all.
+fabrication, and the agent's container state (PATH, DNS, apt) decides whether the verifier starts at all.
 The same 40 tasks ship `ubuntu:22.04` (python3 3.10, pytest pip-installed), and their `test_final_state.py` imports only
 the standard library and pytest, so nothing needs the network.
 
@@ -360,7 +360,7 @@ def hermetic_problems(task_dir: Path) -> list[str]:
 
 
 def is_hermetic(task_dir: Path) -> bool:
-    """True iff the task already meets the verifier contract (INTERFACES_V3 section 5)."""
+    """True iff the task already meets the verifier contract."""
     return not hermetic_problems(Path(task_dir))
 
 
@@ -372,7 +372,7 @@ def _render_test_sh(cwd: str) -> str:
         "#!/bin/bash\n"
         f"{HERMETIC_MARKER}. Offline: runs the pytest files in /tests with the image's own python3 and writes the reward\n"
         "# file other Harbor harnesses read. honest_agents' grader does not run this script: it uploads /tests fresh and\n"
-        "# runs the same files with a vendored pytest (SPEC_V3 section 3.2).\n"
+        "# runs the same files with a vendored pytest.\n"
         "mkdir -p /logs/verifier\n"
         f"cd {shlex.quote(cwd)} 2>/dev/null || cd /\n"
         "python3 -m pytest /tests -q -p no:cacheprovider --rootdir /tests --confcutdir /tests "

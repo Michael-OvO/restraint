@@ -1,4 +1,4 @@
-"""Weight-sync check (SPEC_V3 10.1, 10.2): the statistics, the verdict, the request format and, on CPU, the whole
+"""Weight-sync check (docs/design.md section 8): the statistics, the verdict, the request format and, on CPU, the whole
 procedure against TRL's real `_iter_named_params` and a simulated packed weight transfer.
 
 The simulation reproduces the probable TRL bug on a tiny model: the adapter is merged, parameters are yielded, and the
@@ -245,7 +245,7 @@ def test_set_adapter_scale_makes_the_adapter_nonzero_and_zeroes_it_again():
 
 
 def test_patched_sync_passes_and_stock_sync_is_caught():
-    """SPEC_V3 10.1.1: the final chunk of the stock path is read after the un-merge, so the server serves base values
+    """docs/design.md section 8: the final chunk of the stock path is read after the un-merge, so the server serves base values
     for those parameters; the check sees it as a log-probability gap, and the clone patch removes it."""
     trainer, fake = _peft_trainer()
     result = sc.run_check(

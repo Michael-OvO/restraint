@@ -1,4 +1,4 @@
-"""Hermetic pytest verifier (SPEC_V3 section 3.2): a vendored pure-Python pytest bundle plus a runner that executes it in
+"""Hermetic pytest verifier: a vendored pure-Python pytest bundle plus a runner that executes it in
 the sandbox with a scrubbed environment and returns the result through the host-captured exec stream.
 
 Names are imported lazily, so importing this package does not need the bundle.

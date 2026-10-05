@@ -339,7 +339,7 @@ def render_comparison(
     if len({tuple(m.get("harnesses") or []) for m in runs.values()}) > 1:
         lines += [
             "",
-            "Runs use different harnesses: differences mix policy and harness effects (SPEC_V3 §9.4).",
+            "Runs use different harnesses: differences mix policy and harness effects.",
         ]
     return "\n".join(lines) + "\n"
 

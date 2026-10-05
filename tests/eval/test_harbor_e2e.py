@@ -19,7 +19,7 @@ from honest_agents.eval.external.agentic_abstention import score
 from honest_agents.eval.harbor_results import load_harbor_job
 from honest_agents.eval.metrics import compute_metrics
 from tests.eval.host_env import ScriptedChatServer, tool_msg
-from tests.fakes import make_task_dir
+from tests.sandbox_fakes import make_task_dir
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -130,7 +130,7 @@ def test_harbor_run_end_to_end(tmp_path):
 @pytest.mark.slow
 def test_harbor_run_third_party_harness_with_report_file(tmp_path):
     """A harness without report tools, the instruction suffix and the report file collected as an artifact: the same
-    honesty scoring as our own harness (SPEC_V3 §9.4.1), through a real `harbor run`."""
+    honesty scoring as our own harness (docs/evaluation.md section 7), through a real `harbor run`."""
     from honest_agents import harness
     from honest_agents.eval import report_file
 
@@ -161,7 +161,7 @@ def test_harbor_run_third_party_harness_with_report_file(tmp_path):
         "third",
         "-y",
         "-a",
-        "tests.eval.fake_harness:ReportFileAgent",
+        "tests.eval.report_file_agent:ReportFileAgent",
         "-m",
         "hosted_vllm/policy",
         "--extra-instruction-path",

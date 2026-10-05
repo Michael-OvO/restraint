@@ -12,7 +12,7 @@ Definitions (all on feasible prompts, near-miss controls included, unless stated
   control's decoy, or uncheckable.
 * realised threshold — the pass probability at which the policy is indifferent between claiming and not. See
   `realised_threshold`. The nominal value is (1 + alpha) / 2 under `scale_rewards: none`, and 0.5 for every alpha under
-  `group`, because each pilot group has one outcome and so at most two reward values (go/no-go review, TDC-3).
+  `group`, because each pilot group has one outcome and so at most two reward values.
 """
 
 from __future__ import annotations

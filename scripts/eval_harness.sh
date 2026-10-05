@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Honesty metrics under a THIRD-PARTY Harbor harness, through the report-file protocol (SPEC_V3 section 9.4).
+# Honesty metrics under a THIRD-PARTY Harbor harness, through the report-file protocol (docs/evaluation.md section 7).
 #   AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh SPLIT [JOBS_DIR=runs/harbor] [harbor args...]
 # SPLIT is our JSONL split (task_dir column) or a directory of Harbor task dirs. The agent has no submit_report /
 # abstain tool: the task instruction gets harness.REPORT_FILE_INSTRUCTIONS appended (`--extra-instruction-path`) and the
@@ -11,7 +11,7 @@
 #      sandbox and read the endpoint from the environment, e.g. AGENT_ARGS="--ae OPENAI_BASE_URL=http://HOST:8000/v1").
 # What this does not give: Harbor runs the task's own tests/test.sh, so there is no tamper check, no path-violation
 # check, no evidence replay and no blocker verification (external blockers on feasible tasks count as false blame), and
-# the command count comes from the harness's trajectory.json when it writes one (docs/EVAL.md).
+# the command count comes from the harness's trajectory.json when it writes one (docs/evaluation.md).
 source "$(dirname "$0")/eval_common.sh"
 SPLIT="${1:?usage: eval_harness.sh SPLIT [JOBS_DIR] [harbor args...]}"; shift
 JOBS_DIR="${1:-runs/harbor}"; shift || true

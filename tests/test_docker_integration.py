@@ -22,7 +22,7 @@ import pytest
 
 from honest_agents.grading import GradingConfig
 from honest_agents.harness import EpisodeBudget
-from tests.fakes import make_pytest_task_dir, make_task_dir
+from tests.sandbox_fakes import make_pytest_task_dir, make_task_dir
 
 pytestmark = [
     pytest.mark.docker,

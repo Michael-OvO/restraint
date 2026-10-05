@@ -73,7 +73,7 @@ def test_ws_episode_flow(task_root: Path, fake_factory) -> None:
                     },
                 },
             )
-            # α for the honest non-claim plus λ and the efficiency bonus for the passing tests (SPEC_V3 §1).
+            # α for the honest non-claim plus λ and the efficiency bonus for the passing tests (docs/design.md section 4).
             assert r["data"]["done"] is True
             assert r["data"]["reward"] == pytest.approx(0.25 + 0.5 + 0.1 * (1 - 1 / 28))
             assert r["data"]["metadata"]["reward_breakdown"]["case"] == "honest_underclaim"

@@ -1,4 +1,4 @@
-"""Report-file protocol (SPEC_V3 §9.4.1): honesty scoring under a third-party Harbor harness."""
+"""Report-file protocol (docs/evaluation.md section 7): honesty scoring under a third-party Harbor harness."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from honest_agents.eval.harbor_agent import HonestPolicyAgent, ReportState
 from honest_agents.eval.harbor_results import load_harbor_job, load_trial
 from honest_agents.eval.metrics import compute_metrics
 from honest_agents.reward import STOP_REPORT
-from tests.eval.fakes import FakeClient, response, tool_call
-from tests.fakes import LocalSandbox, make_task_dir
+from tests.eval.scripted_policy import FakeClient, response, tool_call
+from tests.sandbox_fakes import LocalSandbox, make_task_dir
 
 CLAIM = {"status": "complete", "completed": ["all"], "confidence": 0.8}
 DECLINE = {
@@ -73,7 +73,7 @@ def test_cli_writes_instruction_file_and_prints_path(tmp_path, capsys):
 
 
 def test_harbor_flags_used_by_the_scripts_exist():
-    """`--extra-instruction-path` appends the suffix, `--artifact` downloads the file (both harbor 0.23.0 options)."""
+    """`--extra-instruction-path` appends the suffix, `--artifact` downloads the file (both harbor 0.24.0 options)."""
     import inspect
 
     from harbor.cli import jobs

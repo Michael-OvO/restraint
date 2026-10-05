@@ -1,4 +1,4 @@
-"""Evaluation harness (SPEC_V3 §7, §9.4): rollouts against a served policy, Harbor-run benchmarks under our harness or
+"""Evaluation harness: rollouts against a served policy, Harbor-run benchmarks under our harness or
 a third-party one (report-file protocol), metrics, baselines that need no training, and external adapters.
 
 `records`, `metrics`, `baselines`, `protocol` and `summary` only need the reward side of the core package. `rollout`,

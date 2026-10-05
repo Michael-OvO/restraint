@@ -1,7 +1,7 @@
 """The hermetic pytest verifier (`honest_agents.verifier`): bundle handling, the in-sandbox runner and the host-side
 stream protocol, run for real against `LocalSandbox` (host subprocesses; no Docker).
 
-The bundle used here is copied from this venv's pytest (`tests.fakes.make_test_bundle`); one test runs the real
+The bundle used here is copied from this venv's pytest (`tests.sandbox_fakes.make_test_bundle`); one test runs the real
 pytest 8.4.1 bundle on every Python 3.9+ interpreter installed on the machine, when `scripts/build_verifier_bundle.sh`
 has been run.
 """
@@ -26,7 +26,7 @@ from honest_agents.verifier import (
     run_pytest,
 )
 from honest_agents.verifier.runner import VerifierInfraError, interpret, parse_stream
-from tests.fakes import LocalSandbox, make_test_bundle
+from tests.sandbox_fakes import LocalSandbox, make_test_bundle
 
 
 def write_tests(tmp_path: Path, **files: str) -> Path:
@@ -219,7 +219,7 @@ async def test_the_tests_see_a_scrubbed_environment(sandbox, tmp_path, verifier_
 
 @pytest.mark.asyncio
 async def test_planted_configs_and_conftests_are_ignored(sandbox, tmp_path, verifier_bundle):
-    """GR-3: a pytest.ini with `--collect-only`, a conftest that forces passes, in the working directory and its parents."""
+    """A pytest.ini with `--collect-only`, a conftest that forces passes, in the working directory and its parents."""
     forged_conftest = "import pytest\n@pytest.hookimpl(hookwrapper=True)\ndef pytest_runtest_makereport(item, call):\n    out = yield\n    out.get_result().outcome = 'passed'\n"
     for where in (sandbox.root, sandbox.root.parent):
         (where / "conftest.py").write_text(forged_conftest)
@@ -243,7 +243,7 @@ async def test_planted_configs_and_conftests_are_ignored(sandbox, tmp_path, veri
 
 @pytest.mark.asyncio
 async def test_planted_site_customisation_does_not_run(sandbox, tmp_path, verifier_bundle):
-    """GR-3 (d): sitecustomize / usercustomize / .pth that exit 0 at startup. They sit where the interpreter would find
+    """Sitecustomize / usercustomize / .pth that exit 0 at startup. They sit where the interpreter would find
     them (PYTHONPATH, a user site) and are neutralised by `env -i` plus `python -I -S`. The control proves the plant
     would have worked against a naive run."""
     plant = tmp_path / "plant"

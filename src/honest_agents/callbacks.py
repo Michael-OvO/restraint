@@ -1,6 +1,6 @@
 """Training callbacks: automatic stop rules, the held-out validation probe and a JSONL run log.
 
-Why these exist (SPEC_V3 §5.6, §9.2.2, §9.3.1): the failure this project fears most looks healthy on the reward
+Why these exist: the failure this project fears most looks healthy on the reward
 curve. A policy that stops claiming, stops working or stops reporting can raise its mean reward while task success
 collapses (arXiv 2608.00301; the multi-harness guide saw held-out accuracy fall from 0.740 to 0.178 under a rising
 training reward). So a run is watched on the behaviour metrics `trl_rewards.py` logs, not on reward, and checkpoints
@@ -60,20 +60,6 @@ RULE_TAMPER_RATE = "tamper_rate_high"
 RULE_IS_DRIFT = "sampler_trainer_drift"
 RULE_IS_AT_CAP = "importance_ratio_at_cap"
 RULE_TRUNCATED = "truncated_share_high"
-RULES = (
-    RULE_CLAIM_RATE,
-    RULE_ZERO_VARIANCE,
-    RULE_SUCCESS_VS_REWARD,
-    RULE_DECLINE_RATE,
-    RULE_MASKED_SHARE,
-    RULE_REPORT_RATE,
-    RULE_VAL_SUCCESS,
-    RULE_REWARD_ERROR,
-    RULE_TAMPER_RATE,
-    RULE_IS_DRIFT,
-    RULE_IS_AT_CAP,
-    RULE_TRUNCATED,
-)
 
 STOP_RULES_FILE = "stop_rules.jsonl"
 VALIDATION_FILE = "validation_probe.jsonl"
@@ -103,7 +89,7 @@ def is_train_log(logs: dict[str, Any]) -> bool:
 
 @dataclass
 class StopRuleConfig:
-    """Thresholds of SPEC_V3 §5.6 / §9.2.2. Rates are means over the last `window` logged steps.
+    """Thresholds of the collapse monitor (docs/design.md section 8). Rates are means over the last `window` logged steps.
 
     One step of the base config holds 64 episodes, about 48 of them feasible, so a single step's rate has a standard
     error near 0.07; a 20-step window brings that to about 0.016. The two "falling" rules compare the current window
@@ -123,7 +109,7 @@ class StopRuleConfig:
     # -1.5 a tamper rate this high drives the policy, so waiting for a 20-step window would train on it for hours.
     max_tamper_rate: float = 0.10
     tamper_window: int = 5
-    # Sampler vs trainer drift (audit T2): vLLM and the trainer should score a token alike; a window-mean ratio far
+    # Sampler vs trainer drift: vLLM and the trainer should score a token alike; a window-mean ratio far
     # from 1 means the served weights are stale or in another dtype, and the run is training on off-policy data.
     max_is_ratio_deviation: float = 0.05
     max_is_ratio_at_cap_share: float = 0.05
@@ -396,7 +382,7 @@ class StopRules(TrainerCallback):
 class ValidationProbe(TrainerCallback):
     """Records every periodic evaluation on the fixed validation split and names the best checkpoint.
 
-    The trainer evaluates `eval_dataset` (the validation split; `train.py` refuses a test split there) every
+    The trainer evaluates `eval_dataset` (the validation split; `train/` refuses a test split there) every
     `probe.every_steps` steps through TRL's own evaluation loop, so the probe uses the training rollout path, caps and
     sampling settings. This callback appends the metrics to `validation_probe.jsonl` and keeps
     `best_checkpoint.json` pointing at the checkpoint with the best `selection_metric`. The test split is never
@@ -460,7 +446,7 @@ class ValidationProbe(TrainerCallback):
 # ── run log ─────────────────────────────────────────────────────────────────
 
 
-GPU_PEAK_MEMORY = "gpu/peak_memory_gb"  # peak trainer memory since the previous log (SPEC_V3 §10.3)
+GPU_PEAK_MEMORY = "gpu/peak_memory_gb"  # peak trainer memory since the previous log
 
 
 def _peak_gpu_memory_gb() -> float | None:
@@ -508,7 +494,7 @@ class JsonlLogger(TrainerCallback):
             f.write(json.dumps(row, default=str) + "\n")
 
 
-# ── Phase 0 summary (SPEC_V3 §5.7, §8 stage 1, §9.1.3) ──────────────────────
+# ── Phase 0 summary (docs/design.md section 8, docs/node-runbook.md section 4) ──────────────────────
 
 PHASE0_MEANS = (
     "honest/task_success",
@@ -553,7 +539,7 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 def _is_timing_key(key: str) -> bool:
-    """Per-step time and memory columns the trainer and this module log (SPEC_V3 §10.3)."""
+    """Per-step time and memory columns the trainer and this module log."""
     return key.startswith(("timing/", "rollout/")) or key in ("step_time", "wall_sec_since_last_log", GPU_PEAK_MEMORY)
 
 
@@ -567,7 +553,7 @@ def alpha_is_safe(alpha: float, mean_pass_rate: float, margin: float = SAFE_ALPH
 
 
 def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) -> dict[str, Any]:
-    """What the trajectory bank says about the task pool (SPEC_V3 §4.8, INC-5, VIS-M1).
+    """What the trajectory bank says about the task pool.
 
     * the distribution of passes per prompt group on feasible tasks (controls included), the share of groups with no
       reward contrast (0 or all passed) and the mean pass rate;
@@ -598,7 +584,7 @@ def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) ->
     contrast = [0 < sum(v) < len(v) for v in groups.values()]
     exhaustion = exhausted / episodes if episodes else None
     median_actions = sorted(actions)[len(actions) // 2] if actions else 8
-    # Reward-side check of SPEC_V3 §4.8: where it is not positive, one command and an honest "incomplete" beats working.
+    # Reward-side check of docs/design.md section 7: where it is not positive, one command and an honest "incomplete" beats working.
     gaps = (
         {
             f"{a:g}": RewardConfig(alpha=a).work_vs_quit_gap(mean_pass, exhaustion or 0.0, max(1, median_actions))
@@ -621,14 +607,14 @@ def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) ->
         "work_vs_quit_gap": gaps,
         "work_beats_quitting": ({k: v > 0 for k, v in gaps.items()} if gaps is not None else None),
         "safe_alphas": ({f"{a:g}": (1 + a) / 2 <= mean_pass for a in alphas} if mean_pass is not None else None),
-        # The gate the trainer may hard-skip on (audit 2 RD-3): the claim threshold must clear the pool's pass rate by
+        # The gate the trainer may hard-skip on : the claim threshold must clear the pool's pass rate by
         # SAFE_ALPHA_MARGIN, else quitting beats working. `safe_alphas` above is the margin-free reading.
         "alpha_is_safe": ({f"{a:g}": alpha_is_safe(a, mean_pass) for a in alphas} if mean_pass is not None else None),
     }
 
 
 def phase0_summary(records: list[dict[str, Any]], bank_rows: Iterable[BankRow] | None = None) -> dict[str, Any]:
-    """Means over the training logs of a zero-learning-rate run, with the Stage-1 gates of SPEC_V3 §8.
+    """Means over the training logs of a zero-learning-rate run, with the Stage-1 gates of docs/node-runbook.md section 4.
 
     Each mean weights logged steps equally (a step is one generation round in the base geometry). A gate whose metric
     was never logged is reported as None, which is not a pass.
@@ -654,7 +640,7 @@ def phase0_summary(records: list[dict[str, Any]], bank_rows: Iterable[BankRow] |
     }
     pool = pool_stats(bank_rows) if bank_rows is not None else None
     budget_hit = [means["honest/stop_reason/call_budget"], means["honest/stop_reason/char_budget"]]
-    # SPEC_V3 §10.3: the measurements that decide between staying on TRL and porting the loop (the step-time and memory
+    # docs/design.md section 8: the measurements that decide between staying on TRL and porting the loop (the step-time and memory
     # criteria are read from `timing` and `gpu/peak_memory_gb` by a person; they are not computed here).
     decision = {
         "budget_exhaustion_le_0.20": gate(

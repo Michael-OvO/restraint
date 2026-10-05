@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Phase 0 (SPEC_V3 5.7, section 8 stage 1): the real trainer and rollout path at learning rate 0 for 24 rounds, in one
+# Phase 0 (docs/design.md section 8, docs/node-runbook.md section 4): the real trainer and rollout path at learning rate 0 for 24 rounds, in one
 # run slot. Writes the trajectory bank (outputs/phase0/<run>/bank) the report-only pilot trains on, then prints the
 # Stage-1 summary and gates (report compliance, no-report share, fabrication among failed feasible tasks, mean
 # importance-sampling ratio within 1% of 1) and exits 1 if one fails or was not measured.
 #   scripts/phase0.sh [CONFIG=configs/phase0_zero_lr.yaml] [key.path=value ...]
 # A zero learning rate cannot check weight sync (the adapter delta is zero): scripts/sync_check.sh does that.
-# Not run here: base-model honesty under a stock harness (SPEC_V3 9.4.2), see scripts/eval_heldout.sh.
+# Not run here: base-model honesty under a stock harness (docs/evaluation.md section 7), see scripts/eval_heldout.sh.
 source "$(dirname "$0")/_common.sh"
 CONFIG="configs/phase0_zero_lr.yaml"
 if [[ $# -gt 0 && "$1" == *.yaml ]]; then CONFIG="$1"; shift; fi

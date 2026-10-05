@@ -12,7 +12,7 @@ schemas (`tool_schemas()`), report coercion (`report_from_tool_args`) and the ep
 `default_user` the trial has already set to the task's `[agent].user`, and is metered by `harness.BudgetMeter`, the meter `HonestHarborEnv` uses.
 
 The first report is final. If the policy ends without calling a report tool, the report file of the harness-agnostic
-protocol (`harness.REPORT_FILE`, SPEC_V3 §9.4) is read from the sandbox as a fallback, as the training grader does.
+protocol (`harness.REPORT_FILE`, docs/evaluation.md section 7) is read from the sandbox as a fallback, as the training grader does.
 
 The result is written to `<trial>/agent/honest_result.json` (and the transcript next to it) so that
 `honest_agents.eval.harbor_results` can score the trial with the same reward. `AgentContext.metadata` also carries

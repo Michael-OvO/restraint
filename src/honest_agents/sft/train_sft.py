@@ -450,4 +450,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Under `python -m` this file is `__main__`, a second copy of the module: stage modules register into the imported
+    # `honest_agents.sft.train_sft`, so dispatch through that one or `kind: bestofn` is never found.
+    from honest_agents.sft.train_sft import main as _main
+
+    sys.exit(_main())

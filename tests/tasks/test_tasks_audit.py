@@ -1,4 +1,4 @@
-"""Audit set (SPEC_V3 §4.9): a small dataset of two families plus controls, with one markdown sheet per variant."""
+"""Audit set (docs/design.md section 7): a small dataset of two families plus controls, with one markdown sheet per variant."""
 
 from __future__ import annotations
 
@@ -267,7 +267,7 @@ def test_the_default_audit_families_are_the_training_families():
 
 
 def test_sheets_show_the_tests_and_the_oracle_command(tmp_path, seeds):
-    """Without the tests a human cannot judge whether a variant is truly impossible (audit 2, data item c)."""
+    """Without the tests a human cannot judge whether a variant is truly impossible."""
     cfg = _cfg(tmp_path, seeds, n_sources=1)
     _write(cfg)
     sheets = {p.stem: p.read_text() for p in (cfg.out / "sheets").glob("*.md")}

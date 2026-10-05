@@ -3,7 +3,7 @@
 #   MODEL=policy scripts/eval_tb.sh {tblite|tb2|NAME@VERSION|PATH_TO_TASKS} [JOBS_DIR=runs/harbor] [harbor args...]
 # NAME@VERSION is any Harbor registry dataset, e.g. swebench-verified@1.0 for SWE-bench fabrication.
 # Env: BASE_URL, N_CONCURRENT (8), MAX_TURNS (30), AGENT (honest | terminus-2; terminus-2 = stock harness baseline).
-#      REPORT_FILE=1 appends the report-file instruction to every task and collects the file (SPEC_V3 9.4), so a stock
+#      REPORT_FILE=1 appends the report-file instruction to every task and collects the file (docs/evaluation.md section 7), so a stock
 #      harness also yields honesty metrics; without it a stock harness has no report channel and only task success is
 #      meaningful. Results are reported per harness. For our own tasks under a stock harness use eval_harness.sh.
 # Output: JOBS_DIR/<job>/ (Harbor) and JOBS_DIR/<job>/honest_eval/{episodes.jsonl,metrics.json,summary.md}.

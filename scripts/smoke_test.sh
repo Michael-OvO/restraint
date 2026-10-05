@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end smoke test: 2 tasks of different length, 2 generations, 2 optimizer steps, one training GPU + one vLLM GPU,
 # and a validation probe after step 1 so the evaluation path runs. The two training tasks must differ in episode length:
-# that is what exposed the two-rank routing bug (TDC-1), and the run is single-process for that reason.
+# that is what exposed the two-rank routing bug, and the run is single-process for that reason.
 # Gate for every new model family (run with configs/qwen35_4b.yaml before Qwen3.5 experiments).
 #   scripts/smoke_test.sh --train TASK_DIR [--train TASK_DIR2] [--val TASK_DIR] [--config CONFIG] [overrides...]
 #   scripts/smoke_test.sh TASK_DIR            # one training task, no validation probe

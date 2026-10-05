@@ -1,4 +1,4 @@
-"""Stop rules, the validation probe and the Phase-0 summary (SPEC_V3 5.6, 9.2.2, 9.3.1, 9.3.4). No GPU, no Docker.
+"""Stop rules, the validation probe and the Phase-0 summary (docs/design.md section 8). No GPU, no Docker.
 
 The rules are tested on synthetic log dictionaries carrying the metric names `trl_rewards.py` logs, and the probe
 wiring on a real (CPU, tiny random model) TRL run, so the `eval_` prefixing and the callback order are TRL's own.

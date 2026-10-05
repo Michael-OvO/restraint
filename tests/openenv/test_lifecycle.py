@@ -13,8 +13,8 @@ pytest.importorskip("openenv")
 
 from honest_agents.openenv_env.models import HonestAction
 from honest_agents.openenv_env.server.environment import HonestEnvironment
-from tests.fakes import FakeFactory, install_fake_factory
 from tests.openenv.conftest import seed as _seed
+from tests.sandbox_fakes import FakeFactory, install_fake_factory
 
 
 def _in_thread(fn):

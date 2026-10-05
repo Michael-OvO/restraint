@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weight-sync check (SPEC_V3 10.1.2): with a NON-ZERO adapter, do the log-probabilities vLLM assigns to a fixed set of
+# Weight-sync check (docs/design.md section 8): with a NON-ZERO adapter, do the log-probabilities vLLM assigns to a fixed set of
 # token sequences (prompt_logprobs, 2k-20k tokens) match the trainer's own after TRL's merged-LoRA sync? A zero-lr run
 # cannot tell (the delta is zero). Run it once before the report-only pilot, which is the first run that learns.
 #   scripts/sync_check.sh [CONFIG=configs/base.yaml] [key.path=value ...] [-- sync_check args]

@@ -8,3 +8,11 @@ runs/
 data/
 wandb/
 benchmarks/
+.DS_Store
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+*.log
+.env
+.claude/

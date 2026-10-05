@@ -11,10 +11,10 @@ Extends `trl.experimental.harbor.HarborEnv` with what honesty training needs and
 * **Harness**: `bash`, `submit_report`, `abstain` tools. The episode's claim is the first report submitted. The
   environment owns the budget (`harness.EpisodeBudget`): `bash` counts calls and returned characters, warns, shrinks its
   output and refuses once either is used up, so an episode ends with a report by choice; commands run under
-  `timeout -k`; the stop reason is recorded (SPEC_V3 §3.6-3.8).
+  `timeout -k`; the stop reason is recorded.
 * **Grading**: baseline manifests and the verifier toolchain self-check at reset (only a failure there masks the
   episode), `honest_agents.grading.grade` after the rollout, cached per episode. After the agent has acted, a grading
-  failure is scored as tamper, never masked (SPEC_V3 §3.5), and is counted as `honest/reward_error_rate` so a flaky
+  failure is scored as tamper, never masked, and is counted as `honest/reward_error_rate` so a flaky
   grader is visible; `grade` retries a transport error once, and a teardown failure never changes a grade.
 
 Prompt, tool-output format and report coercion live in the trl-free `honest_agents.harness`, shared with the OpenEnv
@@ -48,23 +48,18 @@ from honest_agents.grading import (
     resolve_config,
     snapshot,
 )
-from honest_agents.harness import (  # noqa: F401 — SYSTEM_PROMPT etc. re-exported for existing importers
+from honest_agents.harness import (
     BASH_DOC,
-    BLOCKER_CATEGORIES,
     EPISODE_OVER,
-    MAX_OUTPUT_CHARS,
     REPORT_DUPLICATE,
     REPORT_RECEIVED,
     SANDBOX_UNAVAILABLE,
-    SYSTEM_PROMPT,
     BudgetMeter,
     EpisodeBudget,
     ReportTools,
     coerce_report,
-    format_bash_output,
     harbor_names,
     read_instruction,
-    set_max_concurrent_boots,
     start_sandbox,
 )
 from honest_agents.report import ReportParseError, SelfReport
@@ -84,7 +79,6 @@ from honest_agents.spec import VERIFIER_PYTEST, HonestTaskSpec
 
 logger = logging.getLogger(__name__)
 
-_MAX_OUTPUT_CHARS = MAX_OUTPUT_CHARS  # back-compat alias
 _DEL_TIMEOUT_SEC = 30
 _STOP_TIMEOUT_SEC = 120  # `compose down` under 64 concurrent sandboxes is slow; a hang must not hold the batch
 _KILL_AFTER_SEC = 5  # `timeout -k`: SIGKILL this long after SIGTERM
@@ -92,7 +86,7 @@ _EXEC_SLACK_SEC = 15  # the host-side exec timeout is only a backstop behind `ti
 _TIMEOUT_CODES = (124, 137)  # GNU timeout: 124 = timed out, 137 = had to SIGKILL
 _ABS_PATH = re.compile(r"(?<![\w.~$])/[\w.+\-]+(?:/[\w.+\-]+)*")
 _MAX_FACT_PATHS = 40
-DEFAULT_PIDS_LIMIT = 1024  # fork-bomb guard (GR-11); Harbor's Docker backend sets only cpus and memory
+DEFAULT_PIDS_LIMIT = 1024  # fork-bomb guard; Harbor's Docker backend sets only cpus and memory
 _PIDS_COMPOSE = "services:\n  main:\n    pids_limit: {limit}\n"
 
 
@@ -125,10 +119,6 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         self._verifier_env: dict[str, str] | None = None
         self._use_timeout = True  # whether the image has a `timeout` that takes `-k` (probed at boot)
         self._clear_episode()
-
-    @property
-    def _command_timeout(self) -> int:  # back-compat read of the old attribute
-        return self._budget.command_timeout_sec
 
     def _clear_episode(self) -> None:
         self._history: list[dict[str, Any]] = []
@@ -205,7 +195,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
             return refused
         timeout = self._budget.command_timeout_sec
         # `timeout -k` kills the command inside the container; Harbor's own timeout only abandons the host-side client and
-        # leaves the process running (GR-11). The host-side one stays as a backstop.
+        # leaves the process running. The host-side one stays as a backstop.
         wrapped = (
             f"timeout -k {_KILL_AFTER_SEC} {timeout} bash -c {shlex.quote(command)}" if self._use_timeout else command
         )
@@ -255,7 +245,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         self._boot.result()  # re-raises boot errors into the tool call
 
     def _verifier_policy(self):
-        """Network policy while grading. The hermetic verifier runs with the network off (SPEC_V3 §3.2); a legacy
+        """Network policy while grading. The hermetic verifier runs with the network off; a legacy
         `test.sh` keeps the task's own verifier-phase policy, because those scripts download their toolchain."""
         if self._spec is not None and self._spec.verifier == VERIFIER_PYTEST:
             from harbor.models.task.config import NetworkMode, NetworkPolicy
@@ -324,7 +314,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
             baseline = await snapshot(self._env, self._spec, self._grading_config)
             await grading.self_check(self._env, self._spec, self._grading_config)
         except ToolchainError:
-            self._boot_mask = MASK_TOOLCHAIN  # nothing the agent did can cause this: masked (SPEC_V3 §3.3)
+            self._boot_mask = MASK_TOOLCHAIN  # nothing the agent did can cause this: masked
             raise
         if self._enforce_network:
             await self._env.set_network_policy(self._plan.agent_phase)
@@ -351,7 +341,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         return list(seen)[:_MAX_FACT_PATHS]
 
     def _failed_outcome(self, error: str, *, acted: bool, masked_reason: str | None = None) -> EpisodeOutcome:
-        """Outcome for a grading failure: a tamper verdict if the agent had acted (SPEC_V3 §3.5), else a mask."""
+        """Outcome for a grading failure: a tamper verdict if the agent had acted, else a mask."""
         spec = self._spec
         return EpisodeOutcome(
             feasible=spec.feasible,
@@ -375,12 +365,12 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         outcome, debug = await self._grade_outcome()
         debug["history"] = self._history
         debug["stop_reason"] = outcome.stop_reason
-        # The contract (INTERFACES_V3 §3) promises these keys on every episode, graded or not.
+        # The contract promises these keys on every episode, graded or not.
         debug.setdefault("test_log", "")
         debug.setdefault("blocker_facts", BlockerFacts().model_dump())
         try:
             breakdown = compute_reward(outcome, self._reward_config)
-        except Exception as e:  # noqa: BLE001 — a reward failure comes back as a value, never as an exception (§9.2.3)
+        except Exception as e:  # noqa: BLE001 — a reward failure comes back as a value, never as an exception
             debug["reward_error"] = f"{type(e).__name__}: {e}"
             outcome = self._failed_outcome(f"reward: {e}", acted=False, masked_reason=MASK_REWARD_ERROR)
             breakdown = compute_reward(outcome, self._reward_config)
@@ -437,7 +427,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         return outcome, debug
 
     async def _teardown(self) -> None:
-        """Stop the sandbox; a failure is logged and never reaches the reward (CA-2).
+        """Stop the sandbox; a failure is logged and never reaches the reward.
 
         A `compose down` error or timeout after a good grade would otherwise replace the computed outcome and score an
         honest verified success as tamper (-1.5). The worst a failed teardown can cost is a leaked container, which

@@ -2,7 +2,7 @@
 
 The honest-agents environment as an [OpenEnv](https://github.com/huggingface/OpenEnv) 0.7.0 server (`openenv` on
 PyPI, **not** `openenv-core`). It is for interop, release and evaluation, not for training. GRPO training uses
-`honest_agents.env.HonestHarborEnv` in-process (see `docs/DESIGN.md`, `docs/SPEC_V3.md`). Both run the same trl-free
+`honest_agents.env.HonestHarborEnv` in-process (see `docs/design.md`). Both run the same trl-free
 core (`harness`, `spec`, `report`, `grading`, `verifier`, `reward`), so an episode is graded and scored by the same
 code on either path.
 
@@ -109,8 +109,8 @@ docker run --rm -p 8000:8000 \
 ```
 
 The image is `python:3.12-slim` with the docker CLI and the compose plugin, not `openenv-base`. `openenv-base` ships
-Python 3.11, and Harbor 0.23 needs Python 3.12 or later. Every sandbox is a sibling container started on the host
-daemon through the mounted socket. Caveats (from `docs/research/`; inferred from Harbor's design and not yet tested
+Python 3.11, and Harbor 0.24 needs Python 3.12 or later. Every sandbox is a sibling container started on the host
+daemon through the mounted socket. Caveats (from the integration review in docs/reviews.md; inferred from Harbor's design and not yet tested
 end to end):
 
 1. **Bind-mount sources resolve on the host.** Harbor's docker backend shells out to `docker compose`, and any bind mount

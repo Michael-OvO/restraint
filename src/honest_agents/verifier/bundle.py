@@ -1,4 +1,4 @@
-"""The vendored pytest bundle the hermetic verifier runs (SPEC_V3 section 3.2).
+"""The vendored pytest bundle the hermetic verifier runs.
 
 Layout: `<bundle>/site/` holds pure-Python packages (pytest 8.4.1 and its dependencies); `<bundle>/BUNDLE.json` records
 what it was built from and the digest of `site/`. `scripts/build_verifier_bundle.sh` builds it into a cache directory
@@ -23,7 +23,6 @@ BUNDLE_ENV = "HONEST_VERIFIER_BUNDLE"
 BUNDLE_JSON = "BUNDLE.json"
 SITE_DIRNAME = "site"
 PYTEST_VERSION = "8.4.1"
-MIN_PYTHON = (3, 9)
 BUILD_COMMAND = "scripts/build_verifier_bundle.sh"
 
 

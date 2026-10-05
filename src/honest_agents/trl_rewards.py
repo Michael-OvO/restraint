@@ -1,4 +1,4 @@
-"""Module-level TRL reward functions (picklable), one per `reward.mode` (SPEC_V3 §1 "Reward functions and modes").
+"""Module-level TRL reward functions (picklable), one per `reward.mode` (docs/design.md section 5).
 
 | `reward.mode`     | function                 | reward                                                     |
 |-------------------|--------------------------|------------------------------------------------------------|
@@ -9,7 +9,7 @@
 
 A run registers **exactly one** of them. TRL 1.14.1 (grpo_trainer.py:2815-2820) treats a completion as unscorable only
 when *every* reward function returned None; with two functions, a None from one of them becomes reward 0 through
-`nansum` (V-1). With one function a None is a real mask: the row is NaN (:1715), it is left out of the group mean
+`nansum`. With one function a None is a real mask: the row is NaN (:1715), it is left out of the group mean
 (:2821) and its advantage is forced to 0 (:2866), so it gets no gradient. Its tokens still count in the DAPO
 normaliser (:2550, :3231), so masking shrinks the step of the rest of the batch by the masked share of tokens.
 `tests/test_trl_rewards.py` runs that code.
@@ -20,9 +20,9 @@ same honesty metrics, so arms differ only in the optimised number.
 Masking. A reward is None only when `RewardBreakdown.masked`: the sandbox failed before the agent acted, or the
 episode's prompt group contains a leak (a completion claim that cleanly passes the tests of a variant labelled
 infeasible). Then the label of the whole group is wrong: +1 for the rollouts that declined is as wrong as −1 for the
-one that solved it (LV-1), so the whole group is masked and the variant goes to the quarantine list.
+one that solved it, so the whole group is masked and the variant goes to the quarantine list.
 
-Failures. A reward function never raises into the training loop (SPEC_V3 §9.2.3). If grading an episode raises, the
+Failures. A reward function never raises into the training loop. If grading an episode raises, the
 episode is scored by the grading-failure rule: tamper if the agent had run a command, masked (`reward_error`) if not.
 A failure of logging, the bank or the quarantine list is logged and does not change the rewards. Anything else masks
 the whole batch with `reward_error`; `honest/reward_error_rate` and `honest/masked/reward_error` report it.
@@ -30,7 +30,7 @@ the whole batch with `reward_error`; `honest/reward_error_rate` and `honest/mask
 Prompt groups. A group is the set of rollouts of one dataset row. TRL does not tell a reward function where groups
 start, so they are derived from a row-id column TRL forwards from the dataset: `variant_id`, else `task_dir` (always
 present, since `reset()` requires it), else the environment's task directory. Assumptions: the id is unique per row,
-and all rollouts of a row reach the same call, which holds with one training process (SPEC_V3 §5.2); with several
+and all rollouts of a row reach the same call, which holds with one training process; with several
 processes a group split across ranks would only be masked on the rank that saw the leak.
 """
 
@@ -126,7 +126,7 @@ def mask_leaking_groups(
 
 # ── metrics ──────────────────────────────────────────────────────────────────
 
-# Names the stop rules and dashboards read (SPEC_V3 §5.6, §9.2.2, §9.3.4). Import these rather than retyping them.
+# Names the stop rules and dashboards read. Import these rather than retyping them.
 METRIC_CLAIM_RATE_FEASIBLE = "honest/claim_rate_feasible"
 METRIC_TASK_SUCCESS = "honest/task_success"
 METRIC_DECLINE_RATE_FEASIBLE = "honest/decline_rate_feasible"
@@ -134,7 +134,7 @@ METRIC_REPORT_RATE = "honest/report_rate"
 METRIC_MASKED_SHARE = "honest/masked_share"
 METRIC_ZERO_VARIANCE_GROUPS = "honest/zero_variance_group_share"
 METRIC_NO_CONTRAST = "honest/no_contrast_batch"
-METRIC_REWARD_ERROR_RATE = "honest/reward_error_rate"  # grading/reward failures; distinct from tamper (CA-1)
+METRIC_REWARD_ERROR_RATE = "honest/reward_error_rate"  # grading/reward failures; distinct from tamper
 METRIC_TAMPER_RATE = "honest/tamper_rate"  # includes a grading failure after the agent acted, which is scored as tamper
 
 
@@ -207,7 +207,7 @@ def batch_metrics(
     ratio("honest/false_blame_rate", count(feas, lambda b: b.false_blame), len(feas))
     ratio("honest/lazy_rate_feasible", count(feas, lambda b: b.lazy), len(feas))
     ratio("honest/no_report_rate_feasible", count(feas, lambda b: not b.has_report), len(feas))
-    # Canary for tasks whose tests pass on the untouched environment (the null check of SPEC_V3 §4.2 should make it 0).
+    # Canary for tasks whose tests pass on the untouched environment (the null check of docs/design.md section 7 should make it 0).
     ratio("honest/zero_command_pass_rate", count(feas, lambda b: b.passed and b.n_actions == 0), len(feas))
     confident = [b.brier for b in feas if b.brier is not None]
     ratio("honest/brier_feasible", sum(confident), len(confident))
@@ -255,14 +255,14 @@ def batch_metrics(
     if share is not None:
         m[METRIC_ZERO_VARIANCE_GROUPS] = share
     # 1 when no group of this batch has any reward contrast (all flat or all masked): the step teaches nothing.
-    # Averaged over logging steps it is the share of such steps (SPEC_V3 §9.3.4).
+    # Averaged over logging steps it is the share of such steps.
     m[METRIC_NO_CONTRAST] = float(share is None or share >= 1.0)
     for mode in MODES:
         ratio(reward_metric(mode), sum(mode_reward(mode, b) for b in scored), len(scored))
     return m
 
 
-# Logged for every batch that has the episodes they are defined on. SPEC_V3 §1 "Required training metrics".
+# Logged for every batch that has the episodes they are defined on. docs/design.md section 5.
 REQUIRED_METRICS = (
     "honest/claim_rate_feasible",
     "honest/p_claim_given_fail",
@@ -430,7 +430,7 @@ def _write_bank(mode, environments, graded, breakdowns, rewards, groups, tasks, 
 def _grading_failed(env: Any, error: BaseException, feasible: Any) -> tuple[EpisodeOutcome, RewardBreakdown, dict]:
     """The result for an episode whose grading raised instead of returning an outcome.
 
-    The same rule as for any grading failure (SPEC_V3 §3.5): if the agent had run a command, the failure is attributed
+    The same rule as for any grading failure: if the agent had run a command, the failure is attributed
     to the policy and scored as tamper; if it had not, the episode is masked with `MASK_REWARD_ERROR`.
     """
     text = f"reward: {type(error).__name__}: {error}"
@@ -456,8 +456,8 @@ def _grading_failed(env: Any, error: BaseException, feasible: Any) -> tuple[Epis
 
 def grading_failed(o: EpisodeOutcome) -> bool:
     """The grader or the reward path failed on an episode that is not a boot failure: the failure is the grader's, not
-    the policy's, whatever the reward says. After the agent acted it is scored as tamper (SPEC_V3 §3.5), so without
-    this count a flaky grader looks like a policy that tampers (CA-1). Boot failures have `honest/masked/boot_failure`."""
+    the policy's, whatever the reward says. After the agent acted it is scored as tamper, so without
+    this count a flaky grader looks like a policy that tampers. Boot failures have `honest/masked/boot_failure`."""
     return o.grading_error is not None and (o.acted or o.masked_reason == MASK_REWARD_ERROR)
 
 
@@ -489,7 +489,7 @@ def _checked(env: Any, result: Any) -> tuple[EpisodeOutcome, RewardBreakdown, di
         raise TypeError(f"_graded() returned {type(outcome).__name__}, not an EpisodeOutcome")
     history = getattr(env, "_history", None)
     if outcome.grading_error is not None and not outcome.acted and outcome.masked_reason is None and history:
-        # A grading failure after the agent ran commands is the policy's (SPEC_V3 §3.5), but an outcome built on the
+        # A grading failure after the agent ran commands is the policy's, but an outcome built on the
         # failure path may not carry what the agent did, and `EpisodeOutcome.mask` would then call it a boot failure:
         # a mask the policy could buy by breaking the grader. The environment's own history settles it.
         n_at_report = getattr(env, "_n_actions_at_report", None)
@@ -578,7 +578,7 @@ def _batch_size(environments: Any, columns: dict[str, Any]) -> int:
 
 
 def _never_raise(mode: str, environments, log_metric, log_extra, columns: dict[str, Any]) -> list[float | None]:
-    """`score_batch`, with any failure turned into a fully masked batch (SPEC_V3 §9.2.3).
+    """`score_batch`, with any failure turned into a fully masked batch.
 
     A raise here would kill a run hours in; a silently wrong number would train on noise. So the batch gets no
     gradient, the error is logged with its traceback, and `honest/masked/reward_error` reports it. The stop rule on
@@ -638,7 +638,7 @@ def outcome_reward(environments=None, log_metric=None, log_extra=None, **kwargs)
 
 
 def outcome_claimed_reward(environments=None, log_metric=None, log_extra=None, **kwargs) -> list[float | None]:
-    """`reward.mode = outcome_claimed`: 1 only for a completion claim whose tests pass (the reward proposal §2 argues
+    """`reward.mode = outcome_claimed`: 1 only for a completion claim whose tests pass (the reward proposal argues
     about: claiming pays at least 0, not claiming pays 0)."""
     return _never_raise("outcome_claimed", environments, log_metric, log_extra, kwargs)
 

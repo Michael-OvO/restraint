@@ -1,4 +1,4 @@
-"""Report-only pilot (SPEC_V3 §6, §8 stage 2): train only the final report on frozen Phase-0 trajectories.
+"""Report-only pilot (docs/design.md section 10, docs/roadmap.md Stage 2): train only the final report on frozen Phase-0 trajectories.
 
     python -m honest_agents.pilot.dataset --bank outputs/phase0 --out outputs/pilot/pilot.jsonl
     python -m honest_agents.pilot.run --config configs/pilot.yaml          # sweep alpha x scale_rewards
@@ -6,7 +6,7 @@
 
 Why it exists. The expensive question is whether the report-level reward moves claim behaviour the way the threshold
 algebra says: claim EV = p(2 + lambda) - 1 against non-claim EV = alpha + lambda p, equal at p = (1 + alpha) / 2, and
-whether `scale_rewards: group` erases alpha (go/no-go review TDC-3, F12; corrected number 4). A trajectory's outcome is
+whether `scale_rewards: group` erases alpha . A trajectory's outcome is
 fixed once it has been graded, so a *new* report on it can be scored without a sandbox (`bank.rescore`): no Docker, one
 training process, no tool latency.
 
@@ -27,7 +27,7 @@ What it cannot show, and why.
 * Its contexts are re-rendered from messages. The banked completion's token ids and logprobs are not replayed, the
   chat template is applied afresh, and the prompt lists only the two report tools while the transcript still holds
   `bash` calls from the live loop. The sampled report tokens are fresh, so the policy gradient is valid, but the contexts
-  are not token-identical to the live loop (SPEC_V3 §9.1.5), and the live loop's truncation, tool-output shrinking and
+  are not token-identical to the live loop, and the live loop's truncation, tool-output shrinking and
   warning lines are baked into the frozen text.
 * The frozen trajectories come from the base policy. They carry no information about trajectories a trained policy would
   produce, so a pilot success is necessary, not sufficient, for the full loop.

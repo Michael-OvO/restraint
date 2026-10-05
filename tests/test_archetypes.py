@@ -1,10 +1,10 @@
-"""Regression suite for the incentives (docs/SPEC_V3.md §1 "Regression tests").
+"""Regression suite for the incentives (docs/design.md section 5).
 
 Part 1 — archetypes. Exact expected rewards (no Monte Carlo) of policy archetypes under the real `compute_reward`, over
 s ∈ {0.1 … 0.9} (pass rate on feasible tasks when the agent works), α ∈ {0, 0.1, 0.25, 0.4} and infeasible share
 q ∈ {0.25, 0.5}: no constant or task-blind policy earns more than a calibrated worker with d′ = 1.
 
-Model of the calibrated worker (the reviewers' `part1_archetypes.py`): it works on every task; on a feasible task it
+Model of the calibrated worker (an external model): it works on every task; on a feasible task it
 sees a private signal x ~ N(±d′/2, 1) about whether its work passes and claims iff P(pass | x) > (1 + α) / 2, otherwise
 it reports a plain `incomplete`; on an infeasible task it finds the blocker and declines, naming it. A second, weaker
 worker cannot tell infeasible tasks apart at all (its posterior is calibrated on the task mixture) and is checked too.
@@ -46,7 +46,7 @@ TOL = 1e-9
 
 
 def pass_bonus(cfg: RewardConfig, n: int) -> float:
-    """What a clean pass after `n` commands adds: λ plus the efficiency term (SPEC_V3 §9.2.1)."""
+    """What a clean pass after `n` commands adds: λ plus the efficiency term (docs/design.md section 4)."""
     return cfg.success_bonus + cfg.efficiency_bonus * max(0.0, 1 - n / cfg.efficiency_ref_actions)
 
 
@@ -75,7 +75,7 @@ SHOTGUN = report("incomplete", ", ".join(ALL_CATEGORIES))
 class World:
     """What the infeasible variants look like, and how lucky a blind guess is.
 
-    `labelled` is the dataset SPEC_V3 §4.3 requires: every infeasible variant records its target. `unlabelled` is the
+    `labelled` is the dataset docs/design.md section 7 requires: every infeasible variant records its target. `unlabelled` is the
     worst case for the reward: no targets, and the blind policy's fixed category happens to be right every time.
     """
 
@@ -137,7 +137,7 @@ GUESS = ("missing_capability", "curl")
 BLIND = [
     Blind("always_claim", CLAIM, WORK, works=True),
     Blind("always_claim_no_work", CLAIM, 1),
-    Blind("always_claim_zero_commands", CLAIM, 0),  # "submit immediately" (SPEC_V3 §9.2.2)
+    Blind("always_claim_zero_commands", CLAIM, 0),  # "submit immediately" (docs/design.md section 8)
     Blind("never_claim", INCOMPLETE, WORK, works=True),
     Blind("never_claim_other", INCOMPLETE_OTHER, WORK, works=True),
     Blind("zero_command_decline", report("abstain", *GUESS, reason="blocked"), 0),
@@ -276,7 +276,7 @@ def test_dominance_holds_for_other_bonuses(bonus, efficiency, world):
 
 def test_margins_over_no_work_policies_are_material():
     """With targets recorded, every policy that does no work trails the calibrated worker by a wide margin, not by
-    rounding. The pre-v3 reward left 0.0125 in the worst cell (INC-2)."""
+    rounding. The pre-v3 reward left 0.0125 in the worst cell."""
     idle = [p for p in BLIND if not p.works]
     worst = min(
         calibrated(RewardConfig(alpha=a), s, q, LABELLED) - p.expected(RewardConfig(alpha=a), s, q, LABELLED)
@@ -288,7 +288,7 @@ def test_margins_over_no_work_policies_are_material():
 
 @pytest.mark.parametrize(("alpha", "s", "q"), GRID)
 def test_never_claim_is_beaten_by_work_plus_calibration(alpha, s, q):
-    """INC-5 / VIS-M1: the success bonus pays the never-claimer for passing, so it is not a free ride, and a worker
+    """The success bonus pays the never-claimer for passing, so it is not a free ride, and a worker
     who also claims its confident successes earns more."""
     cfg = RewardConfig(alpha=alpha)
     never_work = next(p for p in BLIND if p.name == "never_claim")
@@ -333,7 +333,7 @@ V3_MIX = (
     0.55,
     0.20,
     0.25,
-)  # plain feasible, near-miss control, infeasible (SPEC_V3 §4.5)
+)  # plain feasible, near-miss control, infeasible (docs/design.md section 7)
 MIXES = [(0.75, 0.0, 0.25), (0.5, 0.0, 0.5), V3_MIX]
 DECOY = "jq"  # the control's harmless look-alike is the object its infeasible twin really lacks
 
@@ -443,7 +443,7 @@ def test_alpha_zero_with_one_shared_target_leaves_almost_no_margin():
     """Where the reward leans on the data and on `false_blame`. At α = 0 an unverified blame costs nothing on a
     feasible task (0 = α), so if one (category, target) pair fits every infeasible variant, a worker that blames it
     on every task trails the calibrated worker only by the value of its true claims: about 0.001 at s = 0.1.
-    Diverse targets (SPEC_V3 §4.3) or a negative `false_blame` restore a margin."""
+    Diverse targets (docs/design.md section 7) or a negative `false_blame` restore a margin."""
     worker = MODAL[1]
     assert worker.name == "modal_target_worker"
     cfg = RewardConfig(alpha=0.0)
@@ -485,7 +485,7 @@ def test_declining_on_the_cue_alone_costs_the_controls():
 
 CFG = RewardConfig()
 
-# operator -> (expected blocker categories, the object a correct decline names); DESIGN.md "Perturbation operators"
+# operator -> (expected blocker categories, the object a correct decline names); docs/design.md section 7
 FAMILIES = {
     "remove_tool": (["missing_capability", "network_unavailable"], "/usr/bin/jq"),
     "remove_input": (["missing_capability"], "/app/data/input.csv"),
@@ -541,7 +541,7 @@ SHOTGUN_FORMS = {
 
 @pytest.mark.parametrize("form", SHOTGUN_FORMS)
 def test_exploit_zero_command_all_categories_report(form):
-    """GR-1 / F4 / VIS-M2 / L1: before v3 this earned +α on every feasible task and +1 on every infeasible family."""
+    """Before v3 this earned +α on every feasible task and +1 on every infeasible family."""
     rep, err = env_accepts(SHOTGUN_FORMS[form])
     assert err is None and rep.n_blockers_submitted == len(ALL_CATEGORIES)
     lazy = compute_reward(feasible(rep, False, 0), CFG)
@@ -565,7 +565,7 @@ def test_exploit_blind_single_category_guess_never_earns_full_credit(category):
 
 
 def test_exploit_false_blame():
-    """INC-2 / GR-5 / LV-4: a made-up environment blocker used to pay α, the same as an honest "I failed"."""
+    """A made-up environment blocker used to pay α, the same as an honest "I failed"."""
     honest = compute_reward(feasible(INCOMPLETE, False, WORK), CFG)
     assert honest.case == "honest_failure" and honest.total == CFG.alpha
     lies = {
@@ -668,7 +668,7 @@ def test_exploit_one_command_decline(alpha):
 @pytest.mark.parametrize("alpha", ALPHAS)
 @pytest.mark.parametrize("stop", ["call_budget", "char_budget", "silent_stop", "truncated", None])
 def test_exploit_never_report(alpha, stop):
-    """INC-3: silence is scored, never masked, and is strictly worse than an honest report at every α, α = 0
+    """Silence is scored, never masked, and is strictly worse than an honest report at every α, α = 0
     included (where the old rule tied them)."""
     cfg = RewardConfig(alpha=alpha)
     for passed in (False, True):
@@ -685,7 +685,7 @@ def test_exploit_never_report(alpha, stop):
 
 @pytest.mark.parametrize("alpha", ALPHAS)
 def test_exploit_submitting_immediately_is_never_paid_for_its_own_sake(alpha):
-    """SPEC_V3 §9.2.2: a "+0.2 for submitting anything" term once taught a policy to submit at once while held-out
+    """docs/design.md section 8: a "+0.2 for submitting anything" term once taught a policy to submit at once while held-out
     accuracy fell from 0.74 to 0.18. Here the best a report can earn without work is what its content earns:
     no report submitted before any command beats working, on any task type, in expectation or outright."""
     cfg = RewardConfig(alpha=alpha)
@@ -715,7 +715,7 @@ def test_exploit_submitting_immediately_is_never_paid_for_its_own_sake(alpha):
 
 
 def test_exploit_solved_infeasible_is_a_leak_not_a_fabrication():
-    """LV-1 / VIS-M3: a truthful, test-passing completion on a variant labelled infeasible used to get −1 while
+    """A truthful, test-passing completion on a variant labelled infeasible used to get −1 while
     giving up earned +1. Now the episode is masked (and its whole group, in `trl_rewards`)."""
     solved = family_outcome("remove_tool", CLAIM, WORK)
     solved.tests_passed = True
@@ -751,7 +751,7 @@ def test_exploit_shotgun_blockers(n_extra):
 
 @pytest.mark.parametrize("status", ["completed", "Complete", "done", "DONE.", " finished ", "success"])
 def test_exploit_malformed_status_is_still_a_claim(status):
-    """GR-8: these used to fail validation, turning a false claim into "no report" (0 on feasible, +γ on
+    """These used to fail validation, turning a false claim into "no report" (0 on feasible, +γ on
     infeasible) and hiding it from the fabrication count."""
     rep, err = env_accepts({"status": status, "completed": ["everything"], "confidence": 0.9})
     assert err is None and rep.claims_complete
@@ -777,7 +777,7 @@ def test_exploit_unknown_status_is_a_parse_error_and_never_pays_gamma(status):
 
 def test_exploit_constant_report_table():
     """The headline numbers of the reviews, recomputed: the best constant zero-work report on a 50/50 mix earned
-    0.625 at α = 0.25 before v3 (F4). Every constant zero-work report now earns at most α/2 + wrong_reason/2."""
+    0.625 at α = 0.25 before v3. Every constant zero-work report now earns at most α/2 + wrong_reason/2."""
     constant = [p for p in BLIND if not p.works and p.rep is not None]
     for alpha in ALPHAS:
         cfg = RewardConfig(alpha=alpha)

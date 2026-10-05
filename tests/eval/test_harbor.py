@@ -18,8 +18,8 @@ from honest_agents.eval.harbor_agent import (
 from honest_agents.eval.harbor_results import load_harbor_job
 from honest_agents.eval.rollout import tool_schemas
 from honest_agents.report import parse_report
-from tests.eval.fakes import ABSTAIN_ARGS, SUBMIT_ARGS, FakeClient, response, tool_call
-from tests.fakes import LocalSandbox, make_task_dir
+from tests.eval.scripted_policy import ABSTAIN_ARGS, SUBMIT_ARGS, FakeClient, response, tool_call
+from tests.sandbox_fakes import LocalSandbox, make_task_dir
 
 SUBMIT = {**SUBMIT_ARGS, "evidence_commands": ["test -f hello.txt"], "confidence": 0.8}
 ABSTAIN = ABSTAIN_ARGS

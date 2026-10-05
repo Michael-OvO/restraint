@@ -75,13 +75,9 @@ VLLM_TRAINING_SERVER_FLAGS: tuple[str, ...] = (
     "--generation-config",
     "vllm",
 )
+
+
 # Endpoints the trainer needs (weight transfer, prefix-cache reset) live behind vLLM's dev mode.
-VLLM_SERVER_ENV: dict[str, str] = {
-    "VLLM_SERVER_DEV_MODE": "1",
-    "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-}
-
-
 @dataclass(frozen=True)
 class FamilySpec:
     family: ModelFamily
@@ -252,7 +248,7 @@ def check_training_template(trainer: Any, family: ModelFamily | str, *, strict: 
     return name
 
 
-# ── sampling fidelity (SPEC_V3 §9.1) ────────────────────────────────────────
+# ── sampling fidelity ────────────────────────────────────────
 
 # What a policy-gradient rollout must be sampled with: the full distribution at the trainer's temperature. These are
 # the `trl.GRPOConfig` field names; trl 1.14.1 `VLLMClient.generate` sends every one of them in each request
@@ -287,7 +283,7 @@ def check_full_distribution_sampling(grpo: dict[str, Any]) -> None:
         if got is None or float(got) != float(want):
             raise ValueError(
                 f"grpo.{name}={got!r} truncates or reshapes the sampling distribution; training requires "
-                f"{name}={want!r} (SPEC_V3 9.1)"
+                f"{name}={want!r} (docs/design.md section 8)"
             )
     temperature = grpo.get("temperature", 1.0)
     if not isinstance(temperature, int | float) or temperature <= 0:
@@ -296,7 +292,7 @@ def check_full_distribution_sampling(grpo: dict[str, Any]) -> None:
     if extra:
         raise ValueError(
             f"grpo.generation_kwargs may only set the per-turn cap {sorted(GENERATION_KWARGS_ALLOWED)}; "
-            f"{sorted(extra)} would override the sampling parameters TRL sends (SPEC_V3 9.1)"
+            f"{sorted(extra)} would override the sampling parameters TRL sends (docs/design.md section 8)"
         )
 
 
@@ -304,8 +300,7 @@ def vllm_max_model_len(max_completion_length: int, turn_max_tokens: int, prompt_
     """Context window the generation server needs.
 
     Each tool-loop request carries prompt + transcript so far (at most `max_completion_length`, tool output included)
-    and asks for `turn_max_tokens` more; vLLM rejects a request whose input exceeds `max_model_len - max_tokens`
-    (TDC-2), and TRL's client raises on any non-200.
+    and asks for `turn_max_tokens` more; vLLM rejects a request whose input exceeds `max_model_len - max_tokens`, and TRL's client raises on any non-200.
     """
     return int(prompt_token_reserve) + int(max_completion_length) + int(turn_max_tokens)
 
@@ -338,7 +333,7 @@ def probe_vllm_server(
     prompt: str = "The following is a list of common Linux shell commands and what they do:\n",
     http: HttpFn | None = None,
 ) -> dict[str, Any]:
-    """Startup checks against the running generation server; raises `VLLMProbeError` (SPEC_V3 §5.3, §9.1.2).
+    """Startup checks against the running generation server; raises `VLLMProbeError`.
 
     1. `/v1/models` reports a context window of at least `required_max_model_len`.
     2. A completion sent exactly as TRL sends it returns `prompt_token_ids`, `token_ids` and per-token logprobs keyed
@@ -435,7 +430,7 @@ def probe_vllm_server(
     return result
 
 
-# ── chat template: prefix preservation on our tool flow (SPEC_V3 §9.1.4) ─────
+# ── chat template: prefix preservation on our tool flow ─────
 
 
 def _flow_ids(processing_class: Any, messages: list[dict], *, tools: Any, chat_template: str | None,
@@ -535,7 +530,7 @@ def check_tool_flow_template(trainer: Any, *, strict: bool = True) -> list[str]:
     return failures
 
 
-# ── chat template: the turn's end token is the tokenizer's EOS (audit T2) ─────
+# ── chat template: the turn's end token is the tokenizer's EOS ─────
 
 
 def end_of_turn_failures(

@@ -115,7 +115,7 @@ def plain_task(path: Path) -> Path:
     )
 
 
-# ── a task every operator applies to (SPEC_V3 §4.4 filters satisfied) ────────
+# ── a task every operator applies to (docs/design.md section 7 filters satisfied) ────────
 
 RICH_DOCKERFILE = """\
 FROM ubuntu:22.04

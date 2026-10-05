@@ -1,4 +1,4 @@
-# Base GRPO run (SPEC_V3 section 5): Qwen3-4B bring-up model, honesty reward (alpha=0.25).
+# Base GRPO run (docs/design.md section 8): Qwen3-4B bring-up model, honesty reward (alpha=0.25).
 # ONE training process per run. On a 4xH100 node two runs go side by side, one per "slot":
 #   slot 0: train on GPU 0, vLLM on GPU 1, port 8000, NCCL group port 51216
 #   slot 1: train on GPU 2, vLLM on GPU 3, port 8001, NCCL group port 51217
@@ -45,7 +45,7 @@ reward:
     alpha: 0.25
 
 launch:
-  num_processes: 1        # must stay 1 with a vLLM server (TDC-1); must match configs/accelerate/*.yaml
+  num_processes: 1        # must stay 1 with a vLLM server; must match configs/accelerate/*.yaml
 
 vllm:
   prompt_token_reserve: 3072   # system prompt + tool schemas + instruction; checked with the real tokenizer at start
@@ -59,7 +59,7 @@ probe:                  # periodic held-out probe, TRL's evaluation loop over a 
   on_start: true        # baseline probe of the untrained policy
   selection_metric: eval_honest/task_success
 
-stop:                   # callbacks.StopRuleConfig (SPEC_V3 5.6, 9.2.2)
+stop:                   # callbacks.StopRuleConfig (docs/design.md section 8)
   enabled: true
   action: stop          # stop | warn
   window: 20
@@ -89,7 +89,7 @@ trainer:
   sort_micro_batches: true # regroup a round's micro-batches by length, longest first (dapo only; no effect at batch 1)
 
 grpo:
-  # Loss (DESIGN.md "Training"): DAPO token-level aggregation, no KL / reference model, clip-higher.
+  # Loss (docs/design.md section 8): DAPO token-level aggregation, no KL / reference model, clip-higher.
   loss_type: dapo
   beta: 0.0
   # PPO clipping never binds here: a generation round is one optimizer step, so the policy that scores a token is the
@@ -98,7 +98,7 @@ grpo:
   # is sampler vs trainer: `sampling/importance_sampling_ratio/{mean,at_cap_share,outside_band_share}`.
   epsilon: 0.2
   epsilon_high: 0.28
-  scale_rewards: none               # group would erase alpha (INC-1); train.py rejects anything else
+  scale_rewards: none               # group would erase alpha; train/ rejects anything else
   mask_truncated_completions: true
   # Rollouts: 8 prompts x 8 generations = 64 episodes per generation round = one optimizer step
   # (per_device 1 x 1 process x gradient_accumulation_steps 64; steps_per_generation defaults to grad accum).
@@ -115,7 +115,7 @@ grpo:
   max_tool_calling_iterations: 30   # bash budget = this - 2
   generation_kwargs:
     max_tokens: 4096                # per-turn cap, identical in evaluation
-  # Sampling: the full distribution, set explicitly (SPEC_V3 9.1). TRL sends all of these on every request.
+  # Sampling: the full distribution, set explicitly (docs/design.md section 8). TRL sends all of these on every request.
   temperature: 1.0
   top_p: 1.0
   top_k: 0

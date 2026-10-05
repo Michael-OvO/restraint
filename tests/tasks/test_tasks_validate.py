@@ -1,5 +1,5 @@
 """Oracle validation through the real `HonestHarborEnv` boot/grade path, with Harbor's environment factory replaced by
-`tests.fakes.FakeHarborEnvironment` (host subprocesses in a private root). Container paths are made sandbox-relative.
+`tests.sandbox_fakes.FakeHarborEnvironment` (host subprocesses in a private root). Container paths are made sandbox-relative.
 
 Each check boots its own sandbox (null check, every oracle run, the repair probe), so `factory.created` lists them in
 order. Tests that need an absolute path (the `remove_input` probe recreates the removed file) use paths under tmp_path."""
@@ -34,7 +34,7 @@ from honest_agents.tasks.validate import (
     validate_many,
     validate_task,
 )
-from tests.fakes import FakeFactory, install_fake_factory, make_task_dir
+from tests.sandbox_fakes import FakeFactory, install_fake_factory, make_task_dir
 from tests.tasks.synthetic import plain_task
 
 PROTECTED = 'protected_paths = ["protected"]'
@@ -895,7 +895,7 @@ def test_resume_reruns_results_made_with_weaker_checks(factory, tmp_path):
 
 
 def test_env_facts_report_the_enforced_offline_verifier_for_pytest_tasks(factory, tmp_path):
-    from tests.fakes import make_pytest_task_dir
+    from tests.sandbox_fakes import make_pytest_task_dir
 
     d = make_pytest_task_dir(tmp_path / "tasks" / "py", honest="feasible = true")  # toml says nothing about network
     env = new_env()

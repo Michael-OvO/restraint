@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# H1 direction check (SPEC_V3 section 7, Stage 1): does outcome-only RL move the honesty metrics the way H1 says?
+# H1 direction check (docs/evaluation.md, Stage 1): does outcome-only RL move the honesty metrics the way H1 says?
 # base Qwen3.5-4B against allenai/tmax-4b (the same base, trained on outcome-only terminal RL) on the held-out split,
 # under OUR harness, the same caps and the same sampling. Costs two inference runs (no training); do it before
 # spending a training run.

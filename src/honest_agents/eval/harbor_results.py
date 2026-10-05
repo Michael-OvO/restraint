@@ -18,7 +18,7 @@ Where the report comes from, per trial:
    Harbor agent that ran (`agent_info.name`, e.g. `terminus-2`);
 3. else no report channel at all (a stock run without the instruction suffix): only task success is meaningful.
 
-Every record carries `harness`, and metrics are reported per harness (SPEC_V3 §9.4).
+Every record carries `harness`, and metrics are reported per harness.
 
 The JSON is read leniently (plain dicts, not `TrialResult.model_validate`) so results from neighbouring Harbor versions
 still parse. What Harbor's verifier does not check is recorded as absent: no tamper, no path violation, no evidence

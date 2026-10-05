@@ -203,11 +203,6 @@ def write_examples(examples: Iterable[SFTExample], path: str | Path) -> Path:
     return path
 
 
-def read_examples(path: str | Path) -> list[SFTExample]:
-    with open(path) as f:
-        return [SFTExample(**json.loads(line)) for line in f if line.strip()]
-
-
 # ── rendering and masks ──────────────────────────────────────────────────────
 
 

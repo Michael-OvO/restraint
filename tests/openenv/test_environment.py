@@ -16,8 +16,8 @@ from honest_agents.openenv_env.server.environment import (
     session_config_from_env,
 )
 from honest_agents.reward import RewardConfig
-from tests.fakes import FakeFactory, install_fake_factory
 from tests.openenv.conftest import MISSING_TOOL
+from tests.sandbox_fakes import FakeFactory, install_fake_factory
 
 CFG = RewardConfig()
 

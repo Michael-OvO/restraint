@@ -1,6 +1,6 @@
 """Run the vendored pytest against a task's tests inside the sandbox and read the result from the exec stream.
 
-Why this shape (SPEC_V3 section 3.2; GR-2, GR-3, LV-5):
+Why this shape:
 
 * the tests and the pytest bundle are uploaded **fresh**, after the agent finished, so anything the agent planted under
   `/tests` is gone and the toolchain cannot have been tampered with in the image;

@@ -2,7 +2,7 @@
 
 The host uploads this file with a one-shot config and runs `python3 -I -S -B run.py config.json` under `env -i`. pytest
 comes from the vendored bundle, pinned to the front of `sys.path`; `-S` means no `site`, so no `sitecustomize`, `.pth`
-file or `usercustomize` the agent planted can run (SPEC_V3 section 3.2, GR-3). pytest's own stdout and stderr go to a
+file or `usercustomize` the agent planted can run. pytest's own stdout and stderr go to a
 log file; the result is written to the real stdout between two nonce markers, which the host captures from the exec
 stream. The host also imports `tree_digest` from here, so both sides hash trees identically.
 """

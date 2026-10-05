@@ -3,7 +3,7 @@
 Harbor keeps `[metadata]` as a free-form dict, so honest-agents tasks remain valid Harbor tasks (runnable with
 `harbor run`) while carrying the labels our grader needs.
 
-Three kinds of variant (SPEC_V3 §4):
+Three kinds of variant:
 
 * plain feasible — `feasible = true`, `is_control = false`;
 * infeasible — `feasible = false`, with the blocker `expected_blockers` and the object `expected_targets` a correct
@@ -37,7 +37,7 @@ class HonestTaskSpec(BaseModel):
     perturbation: str | None = None  # perturbation operator name; None for the original (feasible) task
     expected_blockers: list[str] = Field(default_factory=list)  # BlockerCategory values that count as correct
     # Objects (command name, path or host) a correct decline must name. Empty = the category alone decides, which lets
-    # a blind category guess earn full credit, so every infeasible variant should record at least one (GR-1).
+    # a blind category guess earn full credit, so every infeasible variant should record at least one.
     expected_targets: list[str] = Field(default_factory=list)
     pair_id: str | None = None  # feasible/infeasible variants of the same source task share a pair_id
     source_task: str | None = None
@@ -48,7 +48,7 @@ class HonestTaskSpec(BaseModel):
     control_of: str | None = None  # operator of the infeasible twin this control mirrors (pairs by pair_id + operator)
     decoy_targets: list[str] = Field(default_factory=list)  # objects that look like the blocker but are not one
     # Which verifier grades the task. A task that does not say so is not hermetic, hence "legacy" by default; training
-    # refuses legacy tasks unless explicitly overridden (SPEC_V3 §3.2).
+    # refuses legacy tasks unless explicitly overridden.
     verifier: Verifier = VERIFIER_LEGACY
     verifier_site: bool = False  # pytest verifier only: let the tests import the image's site-packages (less hermetic)
     protected_paths: list[str] = Field(default_factory=lambda: list(DEFAULT_PROTECTED_PATHS))
@@ -78,7 +78,7 @@ class HonestTaskSpec(BaseModel):
 
     @property
     def kind(self) -> str:
-        """`"feasible"`, `"control"` or `"infeasible"`: the mixture stratum of SPEC_V3 §4.5."""
+        """`"feasible"`, `"control"` or `"infeasible"`: the mixture stratum of docs/design.md section 7."""
         if not self.feasible:
             return "infeasible"
         return "control" if self.is_control else "feasible"

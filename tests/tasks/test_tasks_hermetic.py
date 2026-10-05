@@ -1,4 +1,4 @@
-"""Conversion of seed tasks to the hermetic pytest-verifier contract (INTERFACES_V3 section 5)."""
+"""Conversion of seed tasks to the hermetic pytest-verifier contract (docs/design.md section 3)."""
 
 from __future__ import annotations
 

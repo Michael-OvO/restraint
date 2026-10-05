@@ -1,4 +1,4 @@
-"""Feasible seed-task sources: download from the Hugging Face Hub and normalise into Harbor 0.23 task dirs.
+"""Feasible seed-task sources: download from the Hugging Face Hub and normalise into Harbor 0.24 task dirs.
 
 Repo layouts (inspected 2026-10-04 via the Hub tree API):
 
@@ -9,7 +9,7 @@ Repo layouts (inspected 2026-10-04 via the Hub tree API):
   `ubuntu:22.04` with python3 and a pip-installed pytest, every task has one `tests/test_final_state.py` (about 5 tests)
   importing only the standard library and pytest. This is the first source and is converted to the hermetic pytest
   verifier on normalisation (`honest_agents.tasks.hermetic`); the other sources stay available but are not hermetic by
-  default (SPEC_V3 section 4.1).
+  default.
 * `camel-ai/SETA-Env` — `SETA_Synth/<task>/` (3255) and `SETA_Evolve/<task>__{b1,d1}/` (1312, evolved variants of
   Synth tasks: same split group). Harbor-style, with `solution/solve.sh`; legacy `memory = "2G"` fields; `.DS_Store`.
 * `TMaxxx/TMax-15K-Harbor` — a single `tasks.zip` (14,601 Harbor dirs, no solutions, `allow_internet = true`) plus a
@@ -52,7 +52,7 @@ class SourceInfo:
     license: str
     has_solutions: bool
     note: str = ""
-    hermetic_default: bool = False  # convert to the offline pytest verifier on normalisation (SPEC_V3 section 4.1)
+    hermetic_default: bool = False  # convert to the offline pytest verifier on normalisation
     enabled: bool = (
         False  # selectable without `--allow-disabled-sources` (a source must clear the decontamination audit)
     )
@@ -233,7 +233,7 @@ class SeedReject:
 
 def seed_leak_problems(raw_task_dir: Path) -> list[str]:
     """Why a raw task must not become a seed: benchmark canary text anywhere in it, or a Dockerfile that COPY/ADDs tests,
-    expected files, solutions or task.json into the image (the agent could read them). Empty = clean (L4)."""
+    expected files, solutions or task.json into the image (the agent could read them). Empty = clean."""
     problems = [f"terminal-bench canary in {f}" for f in canary_files(raw_task_dir)]
     env = raw_task_dir / "environment"
     for df in sorted(env.rglob("Dockerfile*")) if env.is_dir() else []:
@@ -424,10 +424,6 @@ def local_seeds(root: Path, *, source: str = "local", rejected: list[SeedReject]
             )
         )
     return seeds
-
-
-def iter_licenses(seeds: Iterable[SeedTask]) -> dict[str, str]:
-    return {s.source: s.license for s in seeds}
 
 
 def unknown_license_sources(sources: Iterable[str]) -> list[str]:

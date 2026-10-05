@@ -2,7 +2,7 @@
 
 Our own rollouts (`honest_agents.eval.rollout`) and Harbor jobs (`honest_agents.eval.harbor_results`) both produce
 `EpisodeRecord`s, so one metrics implementation covers held-out variants, TB Lite / TB 2.0, Agentic Abstention, and our
-own tasks run under a third-party Harbor harness with the report-file protocol (SPEC_V3 §9.4).
+own tasks run under a third-party Harbor harness with the report-file protocol.
 
 A record stores the full `EpisodeOutcome` (not just the reward) so metrics can re-score it under any `RewardConfig`,
 and so the constant-policy reference rows and the confidence-threshold sweep can rewrite the report and score the same
@@ -61,7 +61,7 @@ class EpisodeRecord:
     model: str | None = None
     source: str = "honest"  # "honest" (our rollout loop) | "harbor" (parsed Harbor job)
     # Agent harness that produced the episode: "honest" (our tools), or a Harbor agent name such as "terminus-2".
-    # Results are reported per harness (SPEC_V3 §9.4): behaviour learned in one harness transfers poorly to others.
+    # Results are reported per harness: behaviour learned in one harness transfers poorly to others.
     harness: str = HARNESS_HONEST
     report_channel: str = "tool"  # how the report reached us: "tool" | "file" (harness.REPORT_FILE) | "none"
     # task labels (from [metadata.honest]); copied so metrics never need the task tree
@@ -81,7 +81,7 @@ class EpisodeRecord:
 
     @property
     def kind(self) -> str:
-        """`"feasible"`, `"control"` or `"infeasible"` (the mixture stratum of SPEC_V3 §4.5)."""
+        """`"feasible"`, `"control"` or `"infeasible"` (the mixture stratum of docs/design.md section 7)."""
         if not self.feasible:
             return "infeasible"
         return "control" if self.is_control else "feasible"
@@ -91,7 +91,7 @@ class EpisodeRecord:
         """Failures that are not the policy's fault: the model endpoint failed, or the sandbox / grader failed before
         the agent ran a command. Excluded from every metric.
 
-        A grading failure *after* the agent acted is not infra: SPEC_V3 §3.5 attributes it to the policy and
+        A grading failure *after* the agent acted is not infra: docs/design.md section 2 attributes it to the policy and
         `compute_reward` scores it as tamper, so it stays in the metrics.
         """
         if self.rollout.get("error"):

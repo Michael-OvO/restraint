@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the small audited dataset for hand review (SPEC_V3 section 4.9): 20-30 source tasks, a few operator families
+# Build the small audited dataset for hand review (docs/design.md section 7): 20-30 source tasks, a few operator families
 # plus their near-miss controls, one markdown audit sheet per variant (instruction diff, environment diff, perturbed
 # object, labels, the tests and the oracle command, validation result, a checklist, a verdict line). The default families
 # are the TRAINING families; the test-only families (conflicting_constraint, no_network) are zero-shot and are audited

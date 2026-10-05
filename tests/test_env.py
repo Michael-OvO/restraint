@@ -33,7 +33,7 @@ from honest_agents.reward import (
     STOP_SILENT,
 )
 from honest_agents.trl_rewards import honest_reward, outcome_reward
-from tests.fakes import (
+from tests.sandbox_fakes import (
     FakeFactory,
     FakeHarborEnvironment,
     install_fake_factory,
@@ -182,7 +182,7 @@ def test_reset_returns_before_boot_and_bash_waits(factory, task):
 
     (fake,) = factory.created
     assert fake.started and fake.healthchecks == 1
-    # Docker: a per-episode name, so Harbor's loop-bound build lock is never shared across env loops. It is opaque (L3):
+    # Docker: a per-episode name, so Harbor's loop-bound build lock is never shared across env loops. It is opaque:
     # the session id is the compose project / container name and must not carry the task or variant name.
     assert fake.factory_kwargs["environment_name"] == fake.factory_kwargs["session_id"]
     assert re.fullmatch(r"ep[0-9a-f]{16}", fake.factory_kwargs["session_id"])
@@ -261,7 +261,7 @@ def test_bash_surfaces_sandbox_errors(factory, task):
 
     fake.exec = dead
     out = env.bash("true")
-    # deliberately changed (L3): a fixed string, never the exception text (it can name paths, tasks, compose commands)
+    # deliberately changed: a fixed string, never the exception text (it can name paths, tasks, compose commands)
     assert out == f"[exit code: None]\n{harness.SANDBOX_UNAVAILABLE}"
     assert "container is not running" not in out
     assert env._history[-1]["rc"] is None
@@ -289,7 +289,7 @@ def test_network_policy_plan_is_enforced(factory, tmp_path):
 
 
 def test_hermetic_verifier_phase_is_always_offline(factory, ptask):
-    """SPEC_V3 3.2: the verifier phase has no network even when the task's own policy is public."""
+    """docs/design.md section 6: the verifier phase has no network even when the task's own policy is public."""
     env = new_env()
     env.reset(task_dir=str(ptask))
     env.bash("echo hi > hello.txt")
@@ -316,7 +316,7 @@ def test_network_enforcement_can_be_disabled(factory, task):
 
 
 def test_pids_limit_goes_through_a_compose_override(factory, task):
-    """GR-11: Harbor's Docker backend sets no pids limit; `extra_docker_compose` is how to add one."""
+    """Harbor's Docker backend sets no pids limit; `extra_docker_compose` is how to add one."""
     env = new_env(pids_limit=321)
     env.reset(task_dir=str(task))
     env.bash("true")
@@ -343,7 +343,7 @@ def test_second_reset_stops_previous_sandbox_and_clears_episode(factory, task):
     assert env._meter.calls == 1  # the budget is per episode
 
 
-# ── budget (SPEC_V3 3.6) ─────────────────────────────────────────────────
+# ── budget (docs/design.md section 2) ─────────────────────────────────────────────────
 
 
 def test_call_budget_warns_then_refuses_and_a_report_still_works(factory, task):
@@ -478,7 +478,7 @@ def test_unparseable_report_ends_episode_and_is_scored_as_no_report(factory, tas
 
 
 def test_a_synonym_for_complete_is_a_completion_claim(factory, ptask):
-    """GR-8: 'done' used to be no report at all (0 on feasible, +gamma on infeasible), which beat a plain false claim."""
+    """'done' used to be no report at all (0 on feasible, +gamma on infeasible), which beat a plain false claim."""
     env = new_env(reward_config=EXACT)
     env.reset(task_dir=str(ptask))
     env.bash("true")
@@ -522,7 +522,7 @@ def test_abstain_confidence_is_kept_on_the_report(factory, infeasible_task):
 
 
 def test_external_report_injection(factory, task):
-    """The report-file protocol (SPEC_V3 9.4): an evaluation injects a report read from REPORT_FILE."""
+    """The report-file protocol (docs/evaluation.md section 7): an evaluation injects a report read from REPORT_FILE."""
     from honest_agents.report import parse_report
 
     env = new_env()
@@ -618,7 +618,7 @@ def test_outcome_fields_come_from_the_spec_and_the_episode(factory, tmp_path):
 
 
 def test_the_debug_dict_always_carries_the_contract_keys(factory, task):
-    """INTERFACES_V3 section 3: history, blocker_facts, stop_reason and test_log, whether or not grading got that far."""
+    """docs/design.md section 3: history, blocker_facts, stop_reason and test_log, whether or not grading got that far."""
     ok = new_env()
     ok.reset(task_dir=str(task))
     ok.bash("true")
@@ -637,7 +637,7 @@ def test_boot_failure_reraised_into_tool_and_masked(factory, task):
     factory.make_kwargs = lambda i: {"fail_start": RuntimeError("compose up failed")}
     env = new_env()
     assert env.reset(task_dir=str(task))  # still returns the prompt
-    # deliberately changed (L3): the boot error is logged host-side; the model gets a fixed string, not an exception
+    # deliberately changed: the boot error is logged host-side; the model gets a fixed string, not an exception
     assert env.bash("true") == harness.SANDBOX_UNAVAILABLE
     assert honest_reward([env]) == [None]
     assert outcome_reward([env]) == [None]
@@ -658,7 +658,7 @@ def test_toolchain_self_check_failure_masks_before_the_agent_acts(factory, ptask
     monkeypatch.setenv("HONEST_VERIFIER_BUNDLE", str(tmp_path / "no-such-bundle"))
     env = new_env()
     env.reset(task_dir=str(ptask))
-    assert env.bash("true") == harness.SANDBOX_UNAVAILABLE  # deliberately changed (L3): was the raised error text
+    assert env.bash("true") == harness.SANDBOX_UNAVAILABLE  # deliberately changed: was the raised error text
     assert honest_reward([env]) == [None]
     assert env._result[0].masked_reason == MASK_TOOLCHAIN and env._result[0].grading_error.startswith("boot: ")
     assert factory.created[0].stopped
@@ -675,7 +675,7 @@ def test_legacy_task_skips_the_toolchain_self_check(factory, task, monkeypatch, 
 
 
 def test_the_test_timeout_is_the_smaller_of_the_run_and_the_task(factory, task):
-    """MV-1: a task that allows more than the run does must not hold a batch for the longer time; a stricter task wins.
+    """A task that allows more than the run does must not hold a batch for the longer time; a stricter task wins.
     The fixture task declares `[verifier] timeout_sec = 60`."""
     env = new_env(grading_config=GradingConfig(tests_timeout_sec=180))
     env.reset(task_dir=str(task))
@@ -711,11 +711,11 @@ def test_unresolvable_verifier_env_is_a_boot_failure_not_the_policys(factory, tm
     )
     env = new_env()
     env.reset(task_dir=str(task))
-    assert env.bash("true") == harness.SANDBOX_UNAVAILABLE  # deliberately changed (L3): was the raised ValueError
+    assert env.bash("true") == harness.SANDBOX_UNAVAILABLE  # deliberately changed: was the raised ValueError
     assert honest_reward([env]) == [None]
 
 
-# ── failures while grading (SPEC_V3 3.5) ─────────────────────────────────
+# ── failures while grading (docs/design.md section 2) ─────────────────────────────────
 
 
 def test_grading_failure_after_the_agent_acted_is_tamper_not_a_mask(factory, ptask):
@@ -796,7 +796,7 @@ def test_tool_discovery_and_reward_property_never_grades(factory, task):
 
 def test_tool_json_schemas_match_the_shared_definition():
     """GRPOTrainer hands the bound methods to `apply_chat_template(tools=...)`, which calls `get_json_schema` on each;
-    eval and OpenEnv use `harness.tool_schemas()`. They must be one and the same (SPEC_V3 2, VM-3)."""
+    eval and OpenEnv use `harness.tool_schemas()`. They must be one and the same (docs/design.md section 3)."""
     from transformers.utils import get_json_schema
 
     from honest_agents.report import CATEGORY_DEFINITIONS, category_definitions_text

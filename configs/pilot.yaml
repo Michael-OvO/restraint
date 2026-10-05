@@ -1,8 +1,8 @@
-# Report-only pilot (SPEC_V3 §6, §8 stage 2): train only the final report on frozen Phase-0 trajectories.
+# Report-only pilot (docs/design.md section 10, docs/roadmap.md Stage 2): train only the final report on frozen Phase-0 trajectories.
 #   python -m honest_agents.pilot.run --config configs/pilot.yaml [--dry-run] [--shard 0/2] [key.path=value ...]
-# Sweep: alpha x scale_rewards {none, group} x 3 seeds. `none` is the target (SPEC_V3 §5.1); `group` is the ablation that
-# should erase alpha (go/no-go review TDC-3). One training process per run (SPEC_V3 §5.2), generation by a vLLM server on
-# its own GPU, no Docker, no sandbox. Run scripts/sync_check.sh first: this is the first run that learns (SPEC_V3 §10.1).
+# Sweep: alpha x scale_rewards {none, group} x 3 seeds. `none` is the target (docs/design.md section 8); `group` is the ablation that
+# should erase alpha. One training process per run (docs/design.md section 8), generation by a vLLM server on
+# its own GPU, no Docker, no sandbox. Run scripts/sync_check.sh first: this is the first run that learns (docs/design.md section 8).
 # Not a statement about effort or action-level abstention: see `honest_agents.pilot.__doc__`.
 seed: 42
 output_root: outputs/pilot
@@ -28,7 +28,7 @@ data:
   min_rows: 800                          # >= max_steps x prompts per round: every prompt is shown once
   max_epochs: 1.0                        # a repeated prompt has a fixed outcome and can be memorised (run.check_epochs)
   build:                                 # honest_agents.pilot.dataset.BuildOptions
-    mix: default                         # 55 / 20 / 25 feasible / control / infeasible (SPEC_V3 §4.5)
+    mix: default                         # 55 / 20 / 25 feasible / control / infeasible (docs/design.md section 7)
     include_no_report: true              # forced report turns: the budget-exhausted trajectories are where fabrication is
     max_per_variant: 8
     max_context_chars: 40000
@@ -41,13 +41,13 @@ reward:
 sweep:
   alpha: [0.0, 0.25, 0.5, 0.75]
   scale_rewards: [none, group]
-  seeds: [42, 43, 44]                    # 3 seeds: the verdict's intervals cover seed variance too (audit2 SP5); no sandbox, so cheap
+  seeds: [42, 43, 44]                    # 3 seeds: the verdict's intervals cover seed variance too (finding SP5, docs/reviews.md); no sandbox, so cheap
 
 launch:
   num_processes: 1
   vllm_max_model_len: 20480              # must equal the server's --max-model-len (scripts/serve_vllm.sh)
 
-analysis:                                # honest_agents.pilot.analyze.StopRule: the SPEC_V3 §6 stop rule
+analysis:                                # honest_agents.pilot.analyze.StopRule: the docs/design.md section 10 stop rule
   window_rounds: 10
   min_claim_spread: 0.10                 # smallest fall of the claim rate over the alpha range worth having (nominal about 0.3)
   min_fabrication_drop: 0.05
@@ -96,4 +96,4 @@ grpo:                                    # trl.GRPOConfig fields (validated at s
   report_to: none
   save_strategy: steps
   save_steps: 25
-  save_total_limit: null                 # keep every checkpoint (SPEC_V3 §5.4, §9.3.1)
+  save_total_limit: null                 # keep every checkpoint (docs/design.md section 8)

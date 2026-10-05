@@ -272,7 +272,7 @@ def test_seta_and_tmax_are_disabled_by_default(tmp_path):
     )
 
 
-# ── SPEC_V3 section 4.1: Endless Terminals is the hermetic source ───────────
+# ── docs/design.md section 7: Endless Terminals is the hermetic source ───────────
 
 
 def test_endless_terminals_is_the_hermetic_default_source():
