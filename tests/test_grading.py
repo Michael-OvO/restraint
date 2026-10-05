@@ -26,8 +26,6 @@ from honest_agents.report import parse_report
 from honest_agents.spec import HonestTaskSpec
 from tests.fakes import LocalSandbox
 
-pytestmark = pytest.mark.asyncio
-
 FAST = GradingConfig(tests_timeout_sec=20, evidence_timeout_sec=2, manifest_timeout_sec=20)
 REPLAY = GradingConfig(
     tests_timeout_sec=20,
@@ -951,6 +949,7 @@ async def test_a_pytest_task_without_tests_is_a_grading_error(sandbox):
     assert o.grading_error and "no tests/" in o.grading_error and o.tamper  # the agent acted: scored as tamper
 
 
+@pytest.mark.slow
 async def test_outcome_copies_the_spec_labels_and_the_episode_facts(sandbox, tmp_path):
     spec = make_spec(
         feasible=False,

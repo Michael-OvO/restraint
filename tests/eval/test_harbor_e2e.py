@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from honest_agents.eval.external.agentic_abstention import score
 from honest_agents.eval.harbor_results import load_harbor_job
 from honest_agents.eval.metrics import compute_metrics
@@ -51,6 +53,7 @@ def policy(req, i):
     )
 
 
+@pytest.mark.slow
 def test_harbor_run_end_to_end(tmp_path):
     tasks = tmp_path / "tasks"
     make_task_dir(tasks / "hello", honest='feasible = true\npair_id = "hello"')
@@ -124,6 +127,7 @@ def test_harbor_run_end_to_end(tmp_path):
     assert s["n_missing"] == 0 and s["timely_recall"] == 1.0 and s["control_false_positive_rate"] == 0.0
 
 
+@pytest.mark.slow
 def test_harbor_run_third_party_harness_with_report_file(tmp_path):
     """A harness without report tools, the instruction suffix and the report file collected as an artifact: the same
     honesty scoring as our own harness (SPEC_V3 §9.4.1), through a real `harbor run`."""

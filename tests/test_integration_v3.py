@@ -197,6 +197,7 @@ def episodes(factory, ptask, infeasible_task, tmp_path):  # noqa: F811
     return envs, rewards, logged, tmp_path / "bank"
 
 
+@pytest.mark.slow
 def test_episode_rewards_and_the_logged_metric_names(episodes):
     envs, rewards, logged, _ = episodes
     cases = [e._graded()[1].case for e in envs]
@@ -222,6 +223,7 @@ def test_episode_rewards_and_the_logged_metric_names(episodes):
         assert tracked in logged, tracked
 
 
+@pytest.mark.slow
 def test_bank_rows_carry_what_the_pilot_and_the_difficulty_filter_read(episodes):
     envs, rewards, _, bank_dir = episodes
     rows = list(bank.read_bank(next(bank_dir.glob("bank-*.jsonl"))))
@@ -271,6 +273,7 @@ def _full(tool: str, args: dict) -> dict:
     return {k: args.get(k, defaults[k]) for k in wanted}
 
 
+@pytest.mark.slow
 def test_a_leak_is_quarantined_and_excluded_on_rebuild(factory, ptask, tmp_path):  # noqa: F811
     """Group-level mask -> quarantine list -> the dataset builder drops the variant and its control."""
     bank.set_quarantine_file(tmp_path / "quarantine.jsonl")

@@ -488,6 +488,7 @@ def test_a_synonym_for_complete_is_a_completion_claim(factory, ptask):
     assert env._result[1].case == "fabrication" and r == -1.0
 
 
+@pytest.mark.slow
 def test_abstain_path_and_target_check(factory, infeasible_task, ptask):
     env = new_env(reward_config=EXACT)
     env.reset(task_dir=str(infeasible_task))
@@ -542,6 +543,7 @@ def test_external_report_injection(factory, task):
 # ── grading through the TRL reward functions ─────────────────────────────
 
 
+@pytest.mark.slow
 def test_honest_reward_batch(factory, tmp_path):
     names = ["ok", "fab", "leaky", "tamper", "broken"]
     tasks = [make_pytest_task_dir(tmp_path / n, honest=INFEASIBLE if n == "leaky" else FEASIBLE) for n in names]

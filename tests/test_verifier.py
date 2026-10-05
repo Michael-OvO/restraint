@@ -132,6 +132,7 @@ async def test_pass_fail_and_pass_fraction(sandbox, tmp_path, verifier_bundle):
     assert sorted(r.outcomes.values()) == ["failed", "passed"]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("body", "label"),
     [
@@ -158,6 +159,7 @@ async def test_only_a_clean_all_pass_run_is_a_pass(sandbox, tmp_path, verifier_b
     assert not r.tamper
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_a_timeout_is_a_failed_verdict_not_an_error(sandbox, tmp_path, verifier_bundle):
     tests = write_tests(tmp_path, test_a="import time\ndef test_hang(): time.sleep(30)\n")

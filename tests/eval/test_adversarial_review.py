@@ -294,6 +294,7 @@ def test_many_infra_errors_put_a_warning_on_the_table():
 # ── run_eval over the real HonestHarborEnv and the hermetic verifier (Docker-free sandbox) ──
 
 
+@pytest.mark.slow
 def test_run_eval_real_env_hermetic_grading_leak_quarantine_and_bank(tmp_path, monkeypatch, grading_paths):
     from honest_agents import bank
     from honest_agents.eval.records import read_records

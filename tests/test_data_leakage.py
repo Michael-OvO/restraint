@@ -130,6 +130,7 @@ def _emitted_variants(out: Path) -> list[SimpleNamespace]:
     return variants
 
 
+@pytest.mark.slow
 def test_every_family_has_a_neutral_existence_cue(built):
     manifest = json.loads((built / "manifest.json").read_text())["cue_metrics"]
     assert manifest["available"] and all(not v for v in manifest["violations"].values())  # the build enforced it
@@ -305,6 +306,7 @@ def test_held_out_families_and_controls_are_test_only(built):
 HELD_OUT_NAMES = tuple(sorted(HELDOUT))
 
 
+@pytest.mark.slow
 def test_the_held_out_families_follow_the_flag(tmp_path, pool):
     out = tmp_path / "data"
     _build(out, pool, "--heldout-families", "no_network")
@@ -335,6 +337,7 @@ def test_rebuild_at_a_different_pool_size_keeps_the_test_ids(tmp_path, pool, bui
     assert (built / "test_ids.txt").read_text().count("sha256") == 1
 
 
+@pytest.mark.slow
 def test_a_frozen_test_id_stays_in_test_and_a_tampered_file_is_refused(tmp_path, pool, built):
     ids = _test_ids(built)
     train_seed = next(f"local/rich-{i:03d}" for i in range(N_SEEDS) if f"local/rich-{i:03d}" not in ids)

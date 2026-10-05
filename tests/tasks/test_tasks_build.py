@@ -189,6 +189,7 @@ def test_test_seeds_use_test_pools_and_train_seeds_use_train_pools(tmp_path, see
     assert seen["train"] and seen["test"]
 
 
+@pytest.mark.slow
 def test_split_assignment_survives_a_growing_pool(tmp_path, seeds):
     out = tmp_path / "out"
     build(parse_args(_args(out, seeds)))
@@ -204,6 +205,7 @@ def test_split_assignment_survives_a_growing_pool(tmp_path, seeds):
     assert Counter(again.values())["test"] == 5
 
 
+@pytest.mark.slow
 def test_split_seeds_file_carries_the_assignment_into_a_fresh_out_dir(tmp_path, seeds):
     first = tmp_path / "out1"
     build(parse_args(_args(first, seeds)))
@@ -291,6 +293,7 @@ def test_validation_filter_drops_failed_variants_and_broken_pairs(tmp_path, seed
     assert any(r["pair_id"] == "local/rich-01" for r in kept)
 
 
+@pytest.mark.slow
 def test_validation_without_null_check_or_three_oracle_runs_is_refused(tmp_path, seeds):
     """SPEC_V3 §4.2: a zero-work claim must fail the tests and the oracle must pass 3 of 3, or the result does not count."""
     out = tmp_path / "out"
@@ -314,6 +317,7 @@ def _one_build_args(out, seeds, *extra):
     ]  # fmt: skip
 
 
+@pytest.mark.slow
 def test_relabel_to_control_replaces_the_variant_and_survives_rebuilds(tmp_path, seeds):
     out = tmp_path / "out"
     build(parse_args(_one_build_args(out, seeds)))
@@ -349,6 +353,7 @@ def test_relabel_to_control_replaces_the_variant_and_survives_rebuilds(tmp_path,
     assert again[0]["variant_id"] == twin["variant_id"] and again[0]["is_control"] is True
 
 
+@pytest.mark.slow
 def test_leaks_are_dropped_and_quarantined(tmp_path, seeds):
     out = tmp_path / "out"
     flags = _one_build_args(out, seeds)
@@ -375,6 +380,7 @@ def test_leaks_are_dropped_and_quarantined(tmp_path, seeds):
     assert not any(r["pair_id"] == leaky["pair_id"] and r["perturbation"] == "conflicting_constraint" for r in after)
 
 
+@pytest.mark.slow
 def test_quarantine_list_excludes_variants_and_their_controls_on_rebuild(tmp_path, seeds):
     out = tmp_path / "out"
     flags = _one_build_args(out, seeds)
@@ -417,6 +423,7 @@ def test_difficulty_gate_filters_the_train_split_only(tmp_path, seeds):
     assert test_pair in {r["pair_id"] for r in rows["test"]}  # test stays unfiltered (LV-9)
 
 
+@pytest.mark.slow
 def test_strict_difficulty_gate_keeps_only_measured_kept_pairs_and_the_pool_is_listed(tmp_path, seeds):
     out = tmp_path / "out"
     build(parse_args(_args(out, seeds, "--mixture", "0.34,0.33,0.33")))
@@ -642,6 +649,7 @@ def test_check_no_test_leak_refuses_a_test_id_outside_test():
         check_no_test_leak([grouped], {"p2"})
 
 
+@pytest.mark.slow
 def test_fresh_out_dir_and_a_bigger_pool_leave_the_test_ids_unchanged(tmp_path, seeds):
     first = tmp_path / "out1"
     build(parse_args(_bp_args(first, seeds)))
@@ -785,6 +793,7 @@ def test_disabled_sources_need_an_explicit_flag(tmp_path):
 # ── L7: quarantine entries found while evaluating do not change test.jsonl ───
 
 
+@pytest.mark.slow
 def test_eval_sourced_quarantine_entries_leave_test_unchanged_unless_asked(tmp_path, seeds):
     clean = tmp_path / "clean"
     build(parse_args(_bp_args(clean, seeds)))

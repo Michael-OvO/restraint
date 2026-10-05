@@ -24,6 +24,8 @@ All commands from `/Users/michael/Documents/Github/restraint`, prefix `env -u VI
 | `python -m honest_agents.pilot.run --config configs/pilot.yaml --dry-run` on a synthetic 1,200-row bank | builds 1,091 rows, 8 arms, 0.73 epochs |
 | End-to-end local dry run | synthetic seeds -> `tasks.build` -> `train --dry-run`; synthetic bank -> `pilot.run --dry-run`; `tasks.audit` and `--tally` on the same seeds |
 
+Run the suite with `scripts/test.sh` (`--fast` default, about 40 s; `--all`, about 90 s, adds the `slow` tests; both parallel). The counts above predate it.
+
 The 7 skips are legitimate: 4 OpenEnv modules (package not in the main venv, covered by the separate venv run above),
 real Endless Terminals samples (`HONEST_ET_SAMPLES`), the Hub download (`HONEST_NETWORK_TESTS`), and `prctl` (Linux
 only). No skip is waiting on another component. No test was deleted or weakened. The two `importorskip` guards in

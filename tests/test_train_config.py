@@ -864,6 +864,7 @@ def test_resume_refuses_a_changed_task_order(tmp_path: Path, data: SimpleNamespa
     train.check_resume_order(tmp_path / "fresh", changed, resuming=True)  # no file: warns, cannot verify
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("trainer_name", ["trl", "honest"])
 def test_resumed_run_continues_the_task_order(trainer_name: str, data: SimpleNamespace, tmp_path: Path):
     """A real (CPU, tiny random model) GRPO run under our geometry: stop at step 9, resume, and the prompts seen are
@@ -1092,6 +1093,7 @@ def test_a_slot_with_two_training_gpus_is_refused():
     assert r.returncode != 0 and "one training GPU" in r.stderr
 
 
+@pytest.mark.slow
 def test_server_window_comes_from_the_run_limits():
     limits = json.loads(bash("limits_json configs/base.yaml grpo.max_completion_length=32768"))
     assert limits["max_model_len"] == 3072 + 32768 + 4096

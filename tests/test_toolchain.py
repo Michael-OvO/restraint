@@ -26,8 +26,6 @@ from honest_agents.verifier import toolchain
 from honest_agents.verifier.runner import VerifierInfraError
 from tests.fakes import LocalSandbox, fake_proc
 
-pytestmark = pytest.mark.asyncio
-
 FAST = GradingConfig(tests_timeout_sec=60, evidence_timeout_sec=2, manifest_timeout_sec=60)
 PYSPEC = {"verifier": "pytest", "protected_paths": []}
 PASSING = "def test_a():\n    assert True\n"

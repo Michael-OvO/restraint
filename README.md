@@ -90,11 +90,25 @@ docs/              proposal (v2, v1), design, roadmap, review record, specs, eva
 
 ```bash
 uv sync --extra train --extra eval          # the project venv is shared; do not sync it from several places at once
-env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval pytest -m "not docker and not gpu"
+scripts/test.sh                             # fast suite in parallel (not docker/gpu/slow), prints wall time
 env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval ruff check src tests
 scripts/build_verifier_bundle.sh            # vendored pytest bundle for the hermetic verifier (needs network once;
                                             # tests use an offline copy via tests/conftest.py)
 ```
+
+### Running the tests
+
+`scripts/test.sh` is the single entry point (pytest-xdist, one worker per core, a lock so concurrent full runs queue):
+
+| command | runs | wall time (18-core Mac) |
+|---|---|---|
+| `scripts/test.sh` / `--fast` | everything except `docker`, `gpu` and `slow` tests | about 40 s |
+| `scripts/test.sh --all` | everything except `docker` and `gpu` | about 90 s (serial: about 6 min) |
+| `scripts/test.sh --changed` | test files related to files changed in git (by name and direct imports) | seconds |
+| `scripts/test.sh -k expr tests/test_env.py` | plain pytest arguments, serial, no marker filter | |
+
+`slow` marks the tests that spend seconds in real verifier subprocesses or full dataset builds. Markers (`docker`, `gpu`,
+`slow`) and the pytest and ruff settings live in `pyproject.toml`; `docker` tests need a Linux node (`pytest -m docker`).
 
 Check a run config without a GPU once a dataset exists: `python -m honest_agents.train --config configs/honest_alpha0.25.yaml --dry-run` (needs `data/train.jsonl`).
 The OpenEnv extra cannot share an environment with `train` (conflicting `mcp` pins); see `src/honest_agents/openenv_env/README.md`.

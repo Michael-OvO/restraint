@@ -149,6 +149,7 @@ def test_feasible_oracle_passes_three_of_three(factory, tmp_path):
     assert all(sb.stopped for sb in factory.created)  # every sandbox freed after grading
 
 
+@pytest.mark.slow
 def test_oracle_runs_is_configurable(factory, tmp_path):
     r = run(task(tmp_path, "feas", "feasible = true"), oracle_runs=1)
     assert r.ok and (r.oracle_runs, r.oracle_passes) == (1, 1) and len(factory.created) == 2
@@ -446,6 +447,7 @@ def test_relabel_to_control_rewrites_labels_and_oracle(factory, tmp_path):
     assert solve[0] == "#!/bin/bash" and any(": >" in line for line in solve[:4])
 
 
+@pytest.mark.slow
 def test_relabelled_control_validates_as_feasible(factory, tmp_path):
     d, f = ri_task(tmp_path, "ri", "[ -e {f} ] || exit 1")
     r = run(d)
@@ -514,6 +516,7 @@ def test_env_facts_report_the_verifier_network_and_sentinels(factory, tmp_path):
 HERMETIC_E2E = importlib.util.find_spec("honest_agents.verifier") is not None
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     not HERMETIC_E2E,
     reason="needs the hermetic verifier (honest_agents.verifier) from the grading component",
@@ -547,6 +550,7 @@ def test_hermetic_task_validates_through_the_pytest_verifier(factory, tmp_path):
 # ── batches and bookkeeping ─────────────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.slow
 def test_validate_many_resume_and_filter(factory, tmp_path):
     good = task(tmp_path, "p1__feasible", 'feasible = true\npair_id = "p1"')
     bad_inf = task(tmp_path, "p1__leaky", f'{INFEASIBLE}\npair_id = "p1"')  # leaky

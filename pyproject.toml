@@ -46,6 +46,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-xdist>=3.8",
     "ruff>=0.16.10",
 ]
 
@@ -56,3 +57,19 @@ conflicts = [[{ extra = "train" }, { extra = "openenv" }]]
 
 [tool.ruff]
 line-length = 120
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# auto: every `async def` test runs on an event loop without a per-module `pytestmark`.
+asyncio_mode = "auto"
+addopts = "--strict-markers"
+markers = [
+    "docker: needs a Docker daemon (Linux training node)",
+    "gpu: needs a CUDA GPU",
+    "slow: takes more than a few seconds (real verifier subprocesses, full dataset builds); run by `scripts/test.sh --all`",
+]
+filterwarnings = [
+    # tests/tasks/test_tasks_sources.py feeds the deprecated `memory` field on purpose (Harbor must see it unchanged)
+    "ignore:The 'memory' field is deprecated:DeprecationWarning",
+]

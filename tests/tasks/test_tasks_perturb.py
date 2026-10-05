@@ -1092,6 +1092,7 @@ def _seed_from_dockerfile(task_dir: Path, world: Path):
     return on_start
 
 
+@pytest.mark.slow
 def test_stub_and_absent_pairs_validate_as_labelled_on_the_fake_sandbox(tmp_path, monkeypatch, grading_paths):
     """Impossible variants (oracle violates the forbidden path) and their controls (oracle passes) in both pair kinds."""
     import asyncio

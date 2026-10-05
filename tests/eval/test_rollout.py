@@ -38,8 +38,6 @@ from tests.eval.fakes import (
 )
 from tests.fakes import FakeFactory, install_fake_factory, make_task_dir
 
-pytestmark = pytest.mark.asyncio
-
 
 def solve_then_report(messages, i):
     if i == 0:

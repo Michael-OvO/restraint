@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from honest_agents import grading, harness
+from honest_agents import bank, grading, harness
 from honest_agents.verifier import runner as verifier_runner
 from tests.fakes import (
     REPORT_VAR,
@@ -33,11 +33,6 @@ alarm $secs;
 waitpid($pid, 0);
 exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
 """
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "docker: needs a Docker daemon (Linux training node)")
-    config.addinivalue_line("markers", "gpu: needs a CUDA GPU")
 
 
 @pytest.fixture(scope="session")
@@ -101,6 +96,25 @@ def _cold_image_cache():
     harness._WARM.clear()
     yield
     harness._WARM.clear()
+
+
+@pytest.fixture(autouse=True)
+def _process_globals(monkeypatch: pytest.MonkeyPatch):
+    """Reset the module-level singletons a test may change, so results never depend on which tests share a worker.
+
+    pytest-xdist hands tests to workers in a different order than a serial run; without this the bank directory, the
+    boot semaphore and the build locks would leak from one test to the next. The bank variables are also dropped so an
+    operator's shell exports can never make a test write a real bank.
+    """
+    monkeypatch.delenv(bank.ENV_BANK_DIR, raising=False)
+    monkeypatch.delenv(bank.ENV_QUARANTINE_FILE, raising=False)
+    saved = harness.boot_semaphore()
+    bank.use_environment()
+    harness._BUILD_LOCKS.clear()
+    yield
+    bank.use_environment()
+    harness._BUILD_LOCKS.clear()
+    harness._BOOT_SEMAPHORE = saved
 
 
 # ── a private copy of the interpreter (hermetic-verifier toolchain tests) ───────────────────────────────────────
