@@ -25,8 +25,18 @@ openenv = [
     "openenv==0.7.0",
 ]
 eval = [
+    "numpy>=1.26",
     "openai>=1.60",
 ]
+
+[project.scripts]
+honest-train = "honest_agents.train:main"
+honest-eval = "honest_agents.eval.run_eval:main"
+honest-build-dataset = "honest_agents.tasks.build:main"
+honest-validate = "honest_agents.tasks.validate:main"
+honest-pilot = "honest_agents.pilot.run:main"
+honest-pilot-analyze = "honest_agents.pilot.analyze:main"
+honest-sync-check = "honest_agents.sync_check:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
@@ -43,3 +53,6 @@ dev = [
 # openenv 0.7.0 (fastmcp/mcp>=1.24) and vllm 0.30.0 pin incompatible `mcp` versions. The OpenEnv server ships in its
 # own container, so the two extras never need to share an environment.
 conflicts = [[{ extra = "train" }, { extra = "openenv" }]]
+
+[tool.ruff]
+line-length = 120

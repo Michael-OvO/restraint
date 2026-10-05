@@ -7,3 +7,4 @@ outputs/
 runs/
 data/
 wandb/
+benchmarks/

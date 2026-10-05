@@ -1,0 +1,33 @@
+# End-to-end smoke test (scripts/smoke_test.sh): 2 tasks of different length, 2 generations, 2 optimizer steps,
+# 1 training GPU + 1 vLLM GPU, a validation probe at step 1 so the evaluation path runs too.
+base: base.yaml
+output_root: outputs/smoke
+data:
+  train_file: data/smoke.jsonl
+  eval_file: data/smoke_val.jsonl
+  max_rows: 2
+  pair_batches: false
+env:
+  max_concurrent_boots: 2
+probe:
+  every_steps: 1
+  max_variants: 2
+  batch_size: 2
+  on_start: false
+stop:
+  action: warn
+grpo:
+  num_generations: 2
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 1
+  max_steps: 2
+  max_completion_length: 4096
+  max_tool_calling_iterations: 8
+  generation_kwargs:
+    max_tokens: 2048
+  warmup_steps: 0
+  vllm_server_timeout: 900
+  save_strategy: steps
+  save_steps: 1
+  log_completions: true
+  num_completions_to_print: 2

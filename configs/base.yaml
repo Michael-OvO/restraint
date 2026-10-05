@@ -1,0 +1,135 @@
+# Base GRPO run (SPEC_V3 section 5): Qwen3-4B bring-up model, honesty reward (alpha=0.25).
+# ONE training process per run. On a 4xH100 node two runs go side by side, one per "slot":
+#   slot 0: train on GPU 0, vLLM on GPU 1, port 8000, NCCL group port 51216
+#   slot 1: train on GPU 2, vLLM on GPU 3, port 8001, NCCL group port 51217
+# (scripts/run_slot.sh / run_pair.sh set the per-slot overrides; see scripts/_common.sh).
+# Every key under `grpo:` is a trl.GRPOConfig field (validated at startup). run_name/output_dir/seed/reward_weights/
+# model_init_kwargs, cast_lm_head_to_fp32 and the evaluation fields are derived from the other sections.
+seed: 42
+output_root: outputs
+
+model:
+  name: Qwen/Qwen3-4B
+  family: auto            # auto | qwen3 | qwen3_5
+  dtype: bfloat16
+  strict_template: true   # fail unless the rollout chat template is a known template AND prefix-preserving for our tool flow
+  require_fla: true       # Qwen3.5 only
+  cast_lm_head_to_fp32: false   # needs untied embeddings; checked against the model config at startup
+
+lora:
+  enabled: true
+  r: 32
+  alpha: 64
+  dropout: 0.0
+  target_modules: auto    # honest_agents.models.lora_target_modules(family)
+
+data:
+  train_file: data/train.jsonl
+  eval_file: data/val.jsonl   # fixed validation split for the periodic probe; never the test split
+  max_rows: null
+  pair_batches: true      # keep feasible/infeasible variants of a pair_id in the same prompt batch
+  allow_legacy_verifier: false   # tasks must say [metadata.honest] verifier = "pytest"
+  check_tasks: true
+  require_expected_targets: true
+
+env:
+  environment_type: docker
+  max_concurrent_boots: 16   # per training process
+  command_timeout_sec: 60    # timeout -k 5 <this> around every command
+  tests_timeout_sec: 180
+  enforce_network_policy: true
+
+reward:
+  mode: honest            # honest | outcome | outcome_claimed | outcome_reflect (one reward function, weight 1)
+  config:                 # honest_agents.reward.RewardConfig fields; efficiency_ref_actions is set from the call budget
+    alpha: 0.25
+
+launch:
+  num_processes: 1        # must stay 1 with a vLLM server (TDC-1); must match configs/accelerate/*.yaml
+
+vllm:
+  prompt_token_reserve: 3072   # system prompt + tool schemas + instruction; checked with the real tokenizer at start
+  max_model_len: null          # null = prompt reserve + max_completion_length + per-turn cap; asserted on the server
+  startup_probe: true          # fail at start if the server cannot return token ids / processed logprobs / full distribution
+
+probe:                  # periodic held-out probe, TRL's evaluation loop over a fixed subset of data.eval_file
+  every_steps: 50       # must be a multiple of grpo.save_steps: each probed step has a checkpoint
+  max_variants: 100
+  batch_size: 25
+  on_start: true        # baseline probe of the untrained policy
+  selection_metric: eval_honest/task_success
+
+stop:                   # callbacks.StopRuleConfig (SPEC_V3 5.6, 9.2.2)
+  enabled: true
+  action: stop          # stop | warn
+  window: 20
+  min_claim_rate_feasible: 0.05
+  max_zero_variance_group_share: 0.5
+  max_decline_rate_feasible: 0.8      # set from the Phase-0 measurement
+  max_masked_share: 0.15
+  max_reward_error_rate: 0.05         # a grader that keeps failing is scored as tamper, so watch it explicitly
+  task_success_drop: 0.10
+  report_rate_drop: 0.15
+  val_task_success_drop: 0.05
+  val_patience: 2
+
+bank:
+  enabled: false        # Phase 0 turns it on
+  dir: null             # default <output_dir>/bank
+  quarantine_file: null # default <output_dir>/quarantine.jsonl
+
+trainer:
+  max_tool_workers: null   # null = one thread per live episode
+
+grpo:
+  # Loss (DESIGN.md "Training"): DAPO token-level aggregation, no KL / reference model, clip-higher.
+  loss_type: dapo
+  beta: 0.0
+  epsilon: 0.2
+  epsilon_high: 0.28
+  scale_rewards: none               # group would erase alpha (INC-1); train.py rejects anything else
+  mask_truncated_completions: true
+  # Rollouts: 8 prompts x 8 generations = 64 episodes per generation round = one optimizer step
+  # (per_device 2 x 1 process x gradient_accumulation_steps 32; steps_per_generation defaults to grad accum).
+  # If 2 x ~20k tokens does not fit in memory, use per_device_train_batch_size 1 and gradient_accumulation_steps 64.
+  num_generations: 8
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 32
+  # Limits: the ONE place they live. EpisodeBudget (env), the efficiency reference and vLLM --max-model-len derive from these.
+  max_completion_length: 16384      # total budget across all turns, tool output included
+  max_tool_calling_iterations: 30   # bash budget = this - 2
+  generation_kwargs:
+    max_tokens: 4096                # per-turn cap, identical in evaluation
+  # Sampling: the full distribution, set explicitly (SPEC_V3 9.1). TRL sends all of these on every request.
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 0
+  min_p: 0.0
+  repetition_penalty: 1.0
+  # Optimisation (LoRA)
+  learning_rate: 1.0e-5
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 5
+  max_grad_norm: 1.0
+  max_steps: 300
+  gradient_checkpointing: true
+  bf16: true
+  # Generation via external vLLM server (scripts/serve_vllm.sh, which starts it with --generation-config vllm)
+  use_vllm: true
+  vllm_mode: server
+  vllm_server_base_url: http://127.0.0.1:8000
+  vllm_group_port: 51216
+  vllm_server_timeout: 1800
+  vllm_importance_sampling_correction: true   # server runs with --logprobs-mode processed_logprobs
+  vllm_importance_sampling_mode: token_truncate
+  vllm_importance_sampling_clip_max: 3.0
+  # Sandbox reset + grading can take minutes per step.
+  ddp_timeout: 10800
+  # Logging / checkpoints: every checkpoint is kept, the validation probe picks one afterwards.
+  logging_steps: 1
+  log_completions: true
+  num_completions_to_print: 0
+  report_to: none           # set grpo.report_to=wandb once wandb is installed on the node
+  save_strategy: steps
+  save_steps: 25
+  save_total_limit: null

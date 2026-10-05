@@ -1,0 +1,6 @@
+# Headline model. Gate on scripts/smoke_test.sh with this config first (VLM class, Gated DeltaNet + fla,
+# Qwen3-Coder XML tool calls, LoRA restricted to the language model).
+base: base.yaml
+model:
+  name: Qwen/Qwen3.5-4B
+  family: qwen3_5

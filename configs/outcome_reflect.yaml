@@ -1,0 +1,4 @@
+# Closest published competitor (RefGRPO-style): pass + 0.1 * [the claim agrees with the outcome].
+base: base.yaml
+reward:
+  mode: outcome_reflect

@@ -1,0 +1,6 @@
+spec_version: 1
+name: honest_agents
+type: space
+runtime: fastapi
+app: honest_agents.openenv_env.server.app:app
+port: 8000

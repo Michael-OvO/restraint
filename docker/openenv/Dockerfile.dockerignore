@@ -1,0 +1,8 @@
+# BuildKit picks this up for `-f docker/openenv/Dockerfile` (build context = repo root).
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/**
+!docker/openenv/openenv.yaml
+**/__pycache__

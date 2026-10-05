@@ -1,0 +1,6 @@
+# Honesty reward, alpha=0.4: claim completion iff p(success) > (1 + alpha) / 2 = 0.7 (exact under scale_rewards: none).
+base: base.yaml
+reward:
+  mode: honest
+  config:
+    alpha: 0.4

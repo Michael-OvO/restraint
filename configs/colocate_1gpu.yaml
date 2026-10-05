@@ -1,0 +1,9 @@
+# Single-GPU fallback: vLLM colocated inside the one training process (no server, no second GPU). Slower and tighter
+# on memory than the server layout; vllm_max_model_length is derived from the same limits.
+base: base.yaml
+grpo:
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+  vllm_tensor_parallel_size: 1
+vllm:
+  startup_probe: false     # nothing to probe: the engine is in-process

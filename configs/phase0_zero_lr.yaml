@@ -1,0 +1,22 @@
+# Phase 0 (SPEC_V3 5.7, 8 stage 1): the real trainer and rollout path at learning rate 0 for 24 rounds.
+# Measures step time by component, per-group pass counts, report compliance, stop reasons and the importance-sampling
+# ratio (gate: mean within ~1% of 1), and writes the trajectory bank the report-only pilot trains on. The policy does
+# not change, so every number is the base model under the training sampler. Stop rules only warn.
+base: base.yaml
+output_root: outputs/phase0
+seed: 42
+data:
+  train_file: data/train_pool.jsonl   # all train pairs before the difficulty gate and mixture, so pass@8 is measurable
+  eval_file: null          # no validation probe: nothing is learned
+bank:
+  enabled: true            # <output_dir>/bank/bank-<pid>.jsonl and quarantine.jsonl
+stop:
+  action: warn
+grpo:
+  learning_rate: 0.0
+  lr_scheduler_type: constant
+  warmup_steps: 0
+  max_steps: 24
+  save_strategy: "no"
+  save_steps: 25
+  log_completions: true

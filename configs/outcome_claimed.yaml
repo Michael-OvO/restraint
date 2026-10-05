@@ -1,0 +1,4 @@
+# The reward the proposal's section 2 describes: 1 if the report claims completion AND the tests pass, else 0.
+base: base.yaml
+reward:
+  mode: outcome_claimed

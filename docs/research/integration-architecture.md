@@ -126,7 +126,7 @@ Qwen3.5-4B specifics:
 - Disable padding-free packing.
 - Avoid Liger with the VLM class (TRL #6697 is still open).
 - Use non-thinking mode: `chat_template_kwargs={"enable_thinking": False}`.
-- Assert at startup that TRL's training-template auto-swap applied `qwen3_5_think_training.jinja`.
+- Assert at startup that the rollout template is a known stock-or-training template for the family (`honest_agents.models.check_training_template`). Verified on trl 1.14.1 with real tokenizers: the Qwen3.5 think/nothink templates are prefix-preserving, so TRL keeps them (no swap); hybrid Qwen3 (Qwen3-4B) is not, and TRL swaps it to `qwen3_training_chat_template`.
 - LoRA targets must be restricted to the language model and must cover both members of each vLLM-fused pair:
   `target_modules=r".*language_model.*\.(q_proj|k_proj|v_proj|o_proj|in_proj_qkv|in_proj_z|in_proj_b|in_proj_a|out_proj|gate_proj|up_proj|down_proj)"`.
 - vLLM: `--language-model-only` (plus `--enable-lora` only for AsyncGRPO).

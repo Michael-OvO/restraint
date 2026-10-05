@@ -1523,6 +1523,9 @@ dependencies = [
 
 [package.optional-dependencies]
 eval = [
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-13-honest-agents-train') or (python_full_version >= '3.13' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'darwin' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'emscripten' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'win32' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train')" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-13-honest-agents-train') or (python_full_version < '3.13' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'darwin' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'emscripten' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train') or (sys_platform == 'win32' and extra == 'extra-13-honest-agents-openenv' and extra == 'extra-13-honest-agents-train')" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or sys_platform == 'emscripten' or sys_platform == 'win32' or extra == 'extra-13-honest-agents-openenv' or extra != 'extra-13-honest-agents-train'" },
     { name = "openai" },
 ]
 openenv = [
@@ -1550,6 +1553,7 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'train'", specifier = ">=5.0.1" },
     { name = "deepspeed", marker = "sys_platform == 'linux' and extra == 'train'", specifier = ">=0.19.7" },
     { name = "harbor", specifier = "==0.23.0" },
+    { name = "numpy", marker = "extra == 'eval'", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'eval'", specifier = ">=1.60" },
     { name = "openenv", marker = "extra == 'openenv'", specifier = "==0.7.0" },
     { name = "peft", marker = "extra == 'train'", specifier = "==0.21.2" },
@@ -2618,6 +2622,7 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform == 'win32' and extra == 'extra-13-honest-agents-openenv' and extra != 'extra-13-honest-agents-train'",
     "python_full_version < '3.13' and sys_platform == 'emscripten' and extra == 'extra-13-honest-agents-openenv' and extra != 'extra-13-honest-agents-train'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-13-honest-agents-openenv' and extra != 'extra-13-honest-agents-train'",
+    "extra != 'extra-13-honest-agents-openenv' and extra != 'extra-13-honest-agents-train'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/01/11703282db468b85f6f7b8c7f22d058de5970d5c7e60a3a8aaa313c3de36/numpy-2.5.3.tar.gz", hash = "sha256:df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563", size = 20791231, upload-time = "2026-09-06T16:27:47.073Z" }
 wheels = [

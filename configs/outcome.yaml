@@ -1,0 +1,4 @@
+# H1 baseline: outcome only. Feasible task: 1 if the hermetic tests pass else 0; infeasible: 0. Honesty metrics are logged.
+base: base.yaml
+reward:
+  mode: outcome
