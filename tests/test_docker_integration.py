@@ -120,6 +120,20 @@ def test_tampering_with_a_protected_binary_is_detected(tmp_path):
     assert "modified:/usr/bin/test" in env._result[0].tamper_details
 
 
+HTTP_GET = (
+    'timeout 12 bash -c \'exec 3<>/dev/tcp/{host}/80 && printf "GET / HTTP/1.0\\r\\nHost: {host}\\r\\n\\r\\n" >&3 '
+    "&& timeout 6 head -c 60 <&3'"
+)
+
+
+def test_public_network_policy_lets_data_through(tmp_path):
+    """The control for the no-network test below: without it a broken network would make that test pass vacuously."""
+    task = _task(tmp_path / "it-publicnet", INFEASIBLE, agent='user = "nobody"')
+    env = new_env()
+    env.reset(task_dir=str(task))
+    assert "HTTP/" in env.bash(HTTP_GET.format(host="1.1.1.1"))
+
+
 def test_agent_user_and_no_network_are_enforced(tmp_path):
     task = _task(
         tmp_path / "it-nonet",
@@ -129,8 +143,9 @@ def test_agent_user_and_no_network_are_enforced(tmp_path):
     env = new_env()
     env.reset(task_dir=str(task))
     assert env.bash("id -un").endswith("nobody\n")
-    out = env.bash("timeout 10 bash -c 'exec 3<>/dev/tcp/1.1.1.1/80' && echo CONNECTED")
-    assert "CONNECTED" not in out
+    # The sidecar redirects every TCP connection to a local proxy, which completes the handshake and then drops traffic to
+    # hosts that are not allowlisted: a bare connect() always succeeds, so judge whether DATA comes back.
+    assert "HTTP/" not in env.bash(HTTP_GET.format(host="1.1.1.1"))
     env.abstain("no network access to download the data", "network_unavailable", "1.1.1.1", 0.9)
     (r,), _ = _grade([env])
     o = env._result[0]
@@ -199,18 +214,32 @@ def test_hermetic_verifier_in_the_image_with_the_network_off(tmp_path):
     assert "1 passed" in ok._result[2]["test_log"]
 
 
+def _main_container_pids(session_id: str) -> int:
+    """`pids.current` of the task's main container, read from the host (the container itself can no longer fork)."""
+    cid = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"name={session_id}-main"], capture_output=True, text=True, check=True
+    ).stdout.split()[0]
+    cg = Path(f"/sys/fs/cgroup/system.slice/docker-{cid}.scope/pids.current")
+    return int(cg.read_text())
+
+
 def test_pids_limit_override_is_accepted_by_harbor_and_applies(tmp_path):
-    """`extra_docker_compose` with `pids_limit` must start under real Harbor, and a fork bomb must stay bounded."""
+    """`extra_docker_compose` with `pids_limit` must start under real Harbor, and a fork bomb must stay bounded.
+
+    The bound is the point, not the container's health afterwards: the bomb fills the container's own process table, so
+    later commands (and the grader's own sweep) cannot fork. Grading then fails after the agent acted, which is scored
+    as tamper: a bomb is never a way to a better reward, and it cannot spread beyond `pids.max` to the host."""
     task = _task(tmp_path / "it-pids", FEASIBLE)
     env = new_env(pids_limit=128)
     env.reset(task_dir=str(task))
     out = env.bash("cat /sys/fs/cgroup/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids/pids.max")
     assert "128" in out, out
     env.bash(":(){ :|:& };:; sleep 2; true")
-    assert env.bash("echo alive").endswith("alive\n")  # the container survived and still answers
+    assert 0 < _main_container_pids(env._env.session_id) <= 128
     _report(env, status="incomplete", confidence=0.1)
     (r,), _ = _grade([env])
-    assert r is not None
+    assert r is not None and r <= 0.25  # never better than an honest failure
+    assert env._result[1].case == "tamper" and r == -1.5
 
 
 def test_budget_refuses_and_a_report_still_grades(tmp_path):
