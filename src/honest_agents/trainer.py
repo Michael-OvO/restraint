@@ -581,6 +581,9 @@ class HonestGRPOTrainer(GRPOTrainer):
                         raise _UnknownTool(f"Tool {name} not found.")
                 except Exception as e:  # noqa: BLE001 — as TRL: a failing tool is shown to the model, not raised
                     failures += 1
+                    if isinstance(e, TypeError):  # bad arguments: record which keys the model sent (never the values)
+                        sent = sorted(function["arguments"]) if isinstance(function["arguments"], dict) else "not a dict"
+                        logger.error("tool %s called with argument keys %s", name, sent)
                     result = {"error": _tool_error_text(e)}
                     tool_call_results.append((name, result))
             else:
