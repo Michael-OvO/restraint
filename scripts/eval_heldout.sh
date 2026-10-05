@@ -12,7 +12,7 @@
 # Re-score / compare afterwards without rollouts:
 #   uv run ... python -m honest_agents.eval.run_eval --out OUT_DIR --metrics-only --alpha 0.5
 #   uv run ... python -m honest_agents.eval.run_eval --compare runs/eval/a0 runs/eval/a0.25 runs/eval/outcome
-#   uv run ... python -m honest_agents.eval.run_eval --noninferiority runs/eval/a0.25 runs/eval/outcome  # margin 3 points
+#   uv run ... python -m honest_agents.eval.run_eval --noninferiority a0.25_s1,a0.25_s2 outcome_s1,outcome_s2   # run dirs; verified success; seeds comma separated
 source "$(dirname "$0")/eval_common.sh"
 SPLIT="${1:?usage: eval_heldout.sh SPLIT OUT_DIR [args...]}"; OUT="${2:?usage: eval_heldout.sh SPLIT OUT_DIR}"
 shift 2

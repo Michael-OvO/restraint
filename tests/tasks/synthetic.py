@@ -159,6 +159,7 @@ from pathlib import Path
 def test_summary():
     text = Path("/home/user/out/summary.txt").read_text()
     assert "codec=libx264" in text
+    assert "scene_02_market.mov" in text  # the tests hard-code what the inputs hold (remove_input needs that)
 
 
 def test_table():

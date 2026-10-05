@@ -1,7 +1,7 @@
 """`HonestGRPOTrainer`: TRL's GRPO trainer with a batch-concurrent tool loop that stops at the report.
 
 A drop-in subclass of `trl.GRPOTrainer` (same constructor). It changes two things in the multi-turn rollout and
-nothing in the loss (SPEC_V3 §5.5, §9.1; findings TDC-1, TDC-4, TDC-5, MV-1):
+nothing in the loss value (SPEC_V3 §5.5, §9.1; findings TDC-1, TDC-4, TDC-5, MV-1):
 
 * **Tool calls run concurrently across the batch.** TRL 1.14.1 executes one rollout's tool calls after another on
   the main thread, so 64 episodes of `docker compose exec` are paid for serially. Every environment owns its own
@@ -27,7 +27,17 @@ Also here, because only the trainer knows them:
 * where the rollout's wall-clock went (`rollout/*_seconds`), so the slowest tool call is visible in the first hour;
 * the per-rollout `prompt_ids`, `logprobs` and `tool_mask`, handed to the reward function for the trajectory bank;
 * the merged-LoRA weight-sync fix (`clone_synced_params`, SPEC_V3 §10.1): the parameters TRL streams to vLLM are
-  cloned before the adapter is un-merged.
+  cloned before the adapter is un-merged;
+* **padding-free scoring** (audit T1): TRL pads every sequence of a generation batch to the batch-global longest
+  (prompts on the left, completions on the right), so padded slots were 1.7-3.5x the real tokens. Every forward pass
+  here (scoring the rollouts, and the loss) runs rows sorted by length, in chunks trimmed to their own longest row, and
+  the results are scattered back to TRL's padded shape. Padded positions carry no attention and no loss, and RoPE
+  depends only on relative positions, so the loss value and its gradients are unchanged up to float rounding
+  (`tests/test_trainer_loop.py`). The micro-batches of a generation round are also regrouped by length, longest
+  first, which is exact for the token-sum losses (dapo, cispo, vespo: one global normaliser) and is skipped for the
+  others;
+* sampler-trainer drift metrics TRL does not log (`sampling/importance_sampling_ratio/at_cap_share`, `outside_band_share`)
+  and the padding ratios (`padding/*`).
 """
 
 from __future__ import annotations
@@ -45,7 +55,7 @@ from typing import Any
 import torch
 from trl import GRPOTrainer
 from trl.chat_template_utils import parse_response
-from trl.trainer.utils import split_pixel_values_by_grid, unsplit_pixel_values_by_grid
+from trl.trainer.utils import split_pixel_values_by_grid, split_tensor_dict, unsplit_pixel_values_by_grid
 
 from honest_agents.harness import SANDBOX_UNAVAILABLE
 from honest_agents.reward import (
@@ -81,6 +91,8 @@ UPSTREAM_FINGERPRINTS: dict[str, str] = {
     "_tool_call_loop": "acc9b1db6fed3d92f75e9068effc4d2042af71a6807537b9c3ce243c130138b7",
     "_generate": "1a491d69449de2fa291227f93ba3f2e4e673f9f3197d7b63a10a860414e52f57",
     "_calculate_rewards": "736ae29b083840b5da2638b55ad1258659c644589991fe6a494131354952efef",
+    # Not ported, but the padding trimmer calls it with sliced inputs and relies on its argument semantics.
+    "_get_per_token_logps_and_entropies": "dc17fee20840b7ebfc65648b3464f007f41dd846a472c7ae36a864c342e264c5",
 }
 
 # Why a rollout left the tool loop, as the trainer saw it. The values are `reward.STOP_REASONS`:
@@ -115,6 +127,90 @@ ROLLOUT_METRICS: tuple[str, ...] = (
 TOKEN_KWARGS: tuple[str, ...] = ("prompt_ids", "logprobs", "tool_mask")
 ENV_EXIT_HOOK = "_set_loop_exit"  # optional environment method: `_set_loop_exit(reason: str) -> None`
 
+# Metrics of the padding trimmer and of sampler-trainer drift. TRL already logs `sampling/importance_sampling_ratio/
+# {min,mean,max}`, `completions/clipped_ratio` (generations cut by the length limit) and `clip_ratio/*` (PPO clipping);
+# these are the ones it does not.
+METRIC_PAD_STOCK = "padding/stock_slots_per_token"  # token slots TRL's batch-global padding would run / real tokens
+METRIC_PAD_TRIMMED = "padding/trimmed_slots_per_token"  # token slots actually run / real tokens
+METRIC_IS_AT_CAP = "sampling/importance_sampling_ratio/at_cap_share"  # loss tokens whose ratio hit the truncation cap
+METRIC_IS_OUT_OF_BAND = "sampling/importance_sampling_ratio/outside_band_share"  # loss tokens with |ratio - 1| > band
+IS_BAND = 0.05  # the audit's drift band for the batch-mean ratio (audit T2), reused per token as a coarse share
+_LOSS_NORMALISED_GLOBALLY = frozenset(
+    {"dapo", "cispo", "vespo"}
+)  # `num_items_in_batch` normaliser: regrouping is exact
+
+
+def row_extents(attention_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per row, the first attended column and one past the last (0, 0 for a row with no attended token), on the CPU."""
+    attended = attention_mask.detach().cpu() != 0
+    width = attended.size(1)
+    has_any = attended.any(dim=1)
+    first = attended.int().argmax(dim=1)
+    end = width - attended.flip(1).int().argmax(dim=1)
+    return torch.where(has_any, first, 0), torch.where(has_any, end, 0)
+
+
+def plan_chunks(
+    attention_mask: torch.Tensor, logits_to_keep: int, batch_size: int | None = None, sort: bool = True
+) -> list[tuple[torch.Tensor, int, int]]:
+    """How to run a padded batch as forward passes of `batch_size` rows: `(rows, lo, hi)` per pass, columns `[lo, hi)`.
+
+    TRL's layout is `[left-padded prompt | right-padded completion]`, so the window of a chunk is from its earliest
+    attended token to its latest, and it always keeps at least one completion column (`logits_to_keep >= 1`). Sorting
+    puts the longest rows first (an out-of-memory error then shows up on the first chunk, not in the middle of a
+    step) and makes chunk-mates similar in length.
+    """
+    first, end = row_extents(attention_mask)
+    rows = attention_mask.size(0)
+    width = attention_mask.size(1)
+    order = torch.argsort(first - end, stable=True) if sort else torch.arange(rows)  # most attended tokens first
+    size = batch_size or rows
+    completion_start = width - logits_to_keep
+    chunks = []
+    for start in range(0, rows, size):
+        picked = order[start : start + size]
+        lo = int(first[picked].min())
+        hi = max(int(end[picked].max()), completion_start + 1)
+        chunks.append((picked, min(lo, completion_start), hi))
+    return chunks
+
+
+def padded_slots(attention_mask: torch.Tensor, chunks: list[tuple[torch.Tensor, int, int]] | None = None) -> int:
+    """Token positions a plan runs (rows x window per chunk); `None` is TRL's batch-global padding (one window)."""
+    if chunks is None:
+        return attention_mask.size(0) * attention_mask.size(1)
+    return sum(len(rows) * (hi - lo) for rows, lo, hi in chunks)
+
+
+def sort_micro_batches(batches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows of a generation round regrouped into the same number of micro-batches, longest first.
+
+    Returns the input unchanged when it holds anything but row-aligned tensors and scalars (multimodal lists).
+    """
+    if len(batches) < 2:
+        return batches
+    keys = batches[0].keys()
+    for batch in batches:
+        for value in batch.values():
+            if value is not None and not isinstance(value, torch.Tensor):
+                return batches
+    merged: dict[str, Any] = {}
+    for key in keys:
+        values = [b[key] for b in batches]
+        if any(v is None for v in values):
+            merged[key] = None
+        elif values[0].ndim == 0:
+            merged[key] = values[0]
+        else:
+            merged[key] = torch.cat(values, dim=0)
+    first, end = row_extents(torch.cat([merged["prompt_mask"], merged["completion_mask"]], dim=1))
+    order = torch.argsort(first - end, stable=True)
+    sorted_rows = {
+        key: (value if value is None or value.ndim == 0 else value[order.to(value.device)])
+        for key, value in merged.items()
+    }
+    return split_tensor_dict(sorted_rows, len(batches))
+
 
 def upstream_fingerprints() -> dict[str, str]:
     """sha256 of the installed TRL methods named in `UPSTREAM_FINGERPRINTS`."""
@@ -147,8 +243,8 @@ def check_upstream() -> None:
 
         raise RuntimeError(
             f"trl {trl.__version__}: GRPOTrainer.{', GRPOTrainer.'.join(changed)} differ from the trl 1.14.1 source "
-            "that honest_agents.trainer ports. Re-port `_tool_call_loop`, rerun tests/test_trainer_loop.py, then "
-            "update UPSTREAM_FINGERPRINTS."
+            "that honest_agents.trainer ports or wraps. Re-port `_tool_call_loop` (or re-check the padding trimmer "
+            "against the changed scoring code), rerun tests/test_trainer_loop.py, then update UPSTREAM_FINGERPRINTS."
         )
 
 
@@ -206,6 +302,7 @@ class HonestGRPOTrainer(GRPOTrainer):
     * `stop_at_report` (default True): an episode whose environment has recorded a report leaves the loop without
       another generation. False reproduces TRL's loop exactly (kept for the differential test).
     * `max_tool_workers` (default None = one thread per active episode): cap on concurrent tool-calling threads.
+    * `trim_padding`, `sort_micro_batches` (default True): the padding-free scoring described in the module docstring.
 
     An environment "has reported" when its `_report` or `_report_error` is set (INTERFACES_V3 §3). A report tool call
     that failed before reaching the environment (bad arguments) therefore does not end the episode: the model sees
@@ -219,6 +316,8 @@ class HonestGRPOTrainer(GRPOTrainer):
     stop_at_report: bool = True
     max_tool_workers: int | None = None
     clone_synced_params: bool = True  # SPEC_V3 §10.1; set False before construction to reproduce stock TRL
+    trim_padding: bool = True  # run every forward in length-trimmed chunks (audit T1); False = TRL's padded layout
+    sort_micro_batches: bool = True  # also regroup a generation round's micro-batches by length (token-sum losses only)
 
     def __init__(self, *args: Any, **kwargs: Any):
         check_upstream()
@@ -344,6 +443,94 @@ class HonestGRPOTrainer(GRPOTrainer):
                 {**row, **{key: _Tokens(values[i]) for key, values in extra.items()}} for i, row in enumerate(inputs)
             ]
         return super()._calculate_rewards(inputs, prompts, completions, completion_ids_list)
+
+    # ── padding-free scoring (audit T1) ──────────────────────────────────────
+
+    def _get_per_token_logps_and_entropies(
+        self, model, input_ids, attention_mask, logits_to_keep, *args, batch_size=None, compute_aux_loss=False, **kwargs
+    ):
+        """TRL's scoring on length-sorted chunks trimmed to their own window; same outputs, padded to TRL's shape.
+
+        Positions outside a row's attended span come back as 0 (TRL's are finite junk); every consumer masks them.
+        Multimodal inputs, the MoE auxiliary loss and `trim_padding = False` take TRL's path unchanged.
+        """
+        extras = {k: v for k, v in kwargs.items() if k != "compute_entropy" and v is not None}
+        if not self.trim_padding or compute_aux_loss or extras or input_ids.size(0) == 0:
+            return super()._get_per_token_logps_and_entropies(
+                model,
+                input_ids,
+                attention_mask,
+                logits_to_keep,
+                *args,
+                batch_size=batch_size,
+                compute_aux_loss=compute_aux_loss,
+                **kwargs,
+            )
+        chunks = plan_chunks(attention_mask, logits_to_keep, batch_size)
+        order = torch.cat([rows for rows, _, _ in chunks])
+        want_entropy = bool(kwargs.get("compute_entropy"))
+        logps, entropies = [], []
+        for rows, lo, hi in chunks:
+            index = rows.to(input_ids.device)
+            keep = hi - (input_ids.size(1) - logits_to_keep)  # completion columns inside the window: a prefix of them
+            chunk_logps, chunk_entropies, _ = super()._get_per_token_logps_and_entropies(
+                model,
+                input_ids[index, lo:hi],
+                attention_mask[index, lo:hi],
+                keep,
+                *args,
+                batch_size=None,
+                compute_aux_loss=False,
+                **kwargs,
+            )
+            logps.append(torch.nn.functional.pad(chunk_logps, (0, logits_to_keep - keep)))
+            if want_entropy:
+                entropies.append(torch.nn.functional.pad(chunk_entropies, (0, logits_to_keep - keep)))
+        undo = torch.argsort(order).to(input_ids.device)
+        self._log_padding(attention_mask, chunks)
+        return torch.cat(logps)[undo], (torch.cat(entropies)[undo] if want_entropy else None), None
+
+    def _log_padding(self, attention_mask: torch.Tensor, chunks: list[tuple[torch.Tensor, int, int]]) -> None:
+        real = max(1, int((attention_mask != 0).sum()))
+        metrics = self._metrics["train" if self.model.training else "eval"]
+        metrics[METRIC_PAD_STOCK].append(padded_slots(attention_mask) / real)
+        metrics[METRIC_PAD_TRIMMED].append(padded_slots(attention_mask, chunks) / real)
+
+    def _prepare_inputs(self, generation_batch):
+        """TRL's `_prepare_inputs`; when it has just built a new round, regroup the round's micro-batches by length.
+
+        A micro-batch of 2 then pairs rows of similar length instead of a random pair. Exact only where the loss has
+        one normaliser for the whole round (`_LOSS_NORMALISED_GLOBALLY`) and an optimizer step covers whole rounds.
+        """
+        before = getattr(self, "_buffered_inputs", None)
+        inputs = super()._prepare_inputs(generation_batch)
+        buffered = getattr(self, "_buffered_inputs", None)
+        if not (self.sort_micro_batches and self.model.training and buffered is not None and buffered is not before):
+            return inputs
+        accumulation = int(self.args.gradient_accumulation_steps)
+        per_round = int(self.args.steps_per_generation)
+        if self.loss_type not in _LOSS_NORMALISED_GLOBALLY or accumulation % per_round:
+            return inputs
+        self._buffered_inputs = sort_micro_batches(buffered)
+        return self._buffered_inputs[self._step % per_round]
+
+    def _compute_loss(self, model, inputs):
+        self._log_sampling_drift(inputs)
+        return super()._compute_loss(model, inputs)
+
+    def _log_sampling_drift(self, inputs: dict[str, Any]) -> None:
+        """Token shares of the vLLM importance ratio TRL does not log: at the truncation cap, and far from 1."""
+        ratio = inputs.get("importance_sampling_ratio")
+        if not self.model.training or ratio is None or ratio.ndim != 2 or ratio.size(1) == 1:
+            return
+        mask = (
+            inputs["completion_mask"] if "tool_mask" not in inputs else inputs["completion_mask"] * inputs["tool_mask"]
+        )
+        count = mask.sum().clamp(min=1)
+        cap = float(getattr(self.args, "vllm_importance_sampling_clip_max", float("inf")))
+        metrics = self._metrics["train"]
+        metrics[METRIC_IS_AT_CAP].append(((ratio >= cap - 1e-6) * mask).sum().div(count).item())
+        metrics[METRIC_IS_OUT_OF_BAND].append((((ratio - 1).abs() > IS_BAND) * mask).sum().div(count).item())
 
     # ── tool execution ───────────────────────────────────────────────────────
 

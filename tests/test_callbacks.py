@@ -58,6 +58,7 @@ def feed(stop: StopRules, logs: list[dict], start: int = 1) -> dict[int, list[st
 def test_rules_read_the_metric_names_trl_rewards_logs():
     """Never invent metric names: every tracked series is a constant `trl_rewards` exports and logs."""
     tracked = {name for name in StopRules()._tracked if name != callbacks.TRL_REWARD}
+    tracked -= set(callbacks.TRAINER_METRICS)  # logged by TRL and trainer.py, not by the reward function
     assert tracked <= set(trl_rewards.REQUIRED_METRICS) | {trl_rewards.METRIC_NO_CONTRAST}
     assert all(name.startswith("honest/") for name in tracked)
 
@@ -100,6 +101,33 @@ def test_masked_share_above_fifteen_percent_fires():
     fired = feed(rules(), [healthy(**{MASKED: 0.2})] * 5)
     assert fired[W] == [callbacks.RULE_MASKED_SHARE]
     assert feed(rules(), [healthy(**{MASKED: 0.15})] * 8) == {}
+
+
+TAMPER = trl_rewards.METRIC_TAMPER_RATE
+ERRORS = trl_rewards.METRIC_REWARD_ERROR_RATE
+
+
+def test_tamper_rate_fires_over_its_own_short_window():
+    """CA-1: a flaky grader is scored as tamper, so the tamper rule has to act within a few steps, not a full window."""
+    calm = healthy(**{TAMPER: 0.0})
+    fired = feed(rules(tamper_window=2), [calm] * 3 + [healthy(**{TAMPER: 0.15})] * 3)
+    assert 4 not in fired  # one spike is averaged with a calm step: 0.075
+    assert fired[5] == [callbacks.RULE_TAMPER_RATE]  # two bad steps complete the 2-step window; W = 4 would need more
+    assert feed(rules(tamper_window=2), [healthy(**{TAMPER: 0.1})] * 8) == {}  # at the ceiling does not fire
+    assert feed(rules(tamper_window=2), [calm] * 8) == {}
+
+
+def test_tamper_rate_window_is_five_steps_by_default():
+    stop = StopRules(StopRuleConfig(window=20), reward_mode="honest")
+    fired = feed(stop, [healthy(**{TAMPER: 0.0})] * 10 + [healthy(**{TAMPER: 0.5})] * 5)
+    assert fired[15] == [callbacks.RULE_TAMPER_RATE]  # five steps in, long before a 20-step window could judge it
+
+
+def test_error_rate_and_tamper_rate_are_separate_rules():
+    only_errors = feed(rules(), [healthy(**{ERRORS: 0.3})] * 5)
+    assert only_errors[W] == [callbacks.RULE_REWARD_ERROR]
+    only_tamper = feed(rules(), [healthy(**{TAMPER: 0.3})] * 5)  # default tamper window: 5 steps
+    assert only_tamper[5] == [callbacks.RULE_TAMPER_RATE]
 
 
 def test_a_single_bad_step_is_averaged_out():
@@ -210,7 +238,15 @@ def test_resume_replays_history_without_firing_and_keeps_watching():
 
 
 def test_config_validation():
-    for bad in ({"action": "pause"}, {"window": 0}, {"min_claim_rate_feasible": 1.5}, {"max_masked_share": -0.1}):
+    bad_configs = (
+        {"action": "pause"},
+        {"window": 0},
+        {"tamper_window": 0},
+        {"max_tamper_rate": 1.5},
+        {"min_claim_rate_feasible": 1.5},
+        {"max_masked_share": -0.1},
+    )
+    for bad in bad_configs:
         with pytest.raises(ValueError):
             StopRuleConfig(**bad)
     assert StopRuleConfig().min_claim_rate_feasible == 0.05
@@ -331,7 +367,8 @@ def test_periodic_probe_on_a_real_trl_run(tmp_path: Path):
     trainer = GRPOTrainer(
         model=str(model_dir), reward_funcs=reward, args=args, train_dataset=train_ds, eval_dataset=val_ds
     )
-    trainer.add_callback(StopRules(StopRuleConfig(window=2), "honest", output_dir=out))
+    # the tiny model cuts every rollout, so the truncation ceiling is lifted
+    trainer.add_callback(StopRules(StopRuleConfig(window=2, max_truncated_share=1.0), "honest", output_dir=out))
     trainer.add_callback(callbacks.JsonlLogger(out))
     trainer.add_callback(ValidationProbe(out, VAL))
     trainer.train()
@@ -416,6 +453,25 @@ def test_pool_stats_reports_which_alphas_are_safe():
     assert s["masked_share"] == pytest.approx(1 / 41)
 
 
+@pytest.mark.parametrize(
+    ("pass_rate", "expected"),
+    [
+        (0.5, {"0": False, "0.1": False, "0.25": False, "0.4": False}),  # (1 + 0) / 2 = 0.5 > 0.5 - 0.1
+        (0.62, {"0": True, "0.1": False, "0.25": False, "0.4": False}),  # 0.5 <= 0.52 < 0.55
+        (0.75, {"0": True, "0.1": True, "0.25": True, "0.4": False}),  # 0.625 <= 0.65 < 0.7
+        (0.9, {"0": True, "0.1": True, "0.25": True, "0.4": True}),
+    ],
+)
+def test_pool_stats_exposes_a_hard_skip_boolean_per_alpha(pass_rate, expected):
+    """The trainer may refuse to train an alpha whose claim threshold is not 0.1 below the pool's pass rate."""
+    n = 1000
+    rows = [_bank_row("g", i < pass_rate * n) for i in range(n)]
+    assert pool_stats(rows)["alpha_is_safe"] == expected
+    assert pool_stats([_bank_row("i", False, feasible=False)])["alpha_is_safe"] is None
+    for alpha in (0.0, 0.25):
+        assert callbacks.alpha_is_safe(alpha, pass_rate) == expected[f"{alpha:g}"]
+
+
 def test_phase0_cli_reads_the_log_and_the_bank(tmp_path: Path, capsys):
     from honest_agents.bank import append_rows
 
@@ -428,3 +484,25 @@ def test_phase0_cli_reads_the_log_and_the_bank(tmp_path: Path, capsys):
     assert printed["pool"]["mean_pass_rate_feasible"] == 0.5 and printed["all_gates_pass"] is True
     (out / callbacks.TRAIN_LOG_FILE).write_text("".join(json.dumps(r) + "\n" for r in _phase0_logs(**{REPORT: 0.1})))
     assert callbacks.main(["phase0", str(out)]) == 1
+
+
+def _drift_rules(config: callbacks.StopRuleConfig, logs: dict[str, float], steps: int = 4) -> list[str]:
+    rules = callbacks.StopRules(config)
+    fired: list[str] = []
+    for step in range(1, steps + 1):
+        fired = [t.rule for t in rules.observe(step, dict(logs))]
+    return fired
+
+
+def test_sampler_trainer_drift_rules_fire_only_outside_their_bands():
+    cfg = callbacks.StopRuleConfig(window=4)
+    assert _drift_rules(cfg, {callbacks.METRIC_IS_MEAN: 1.01, callbacks.METRIC_IS_AT_CAP: 0.01}) == []
+    assert callbacks.RULE_IS_DRIFT in _drift_rules(cfg, {callbacks.METRIC_IS_MEAN: 0.9})
+    assert callbacks.RULE_IS_DRIFT in _drift_rules(cfg, {callbacks.METRIC_IS_MEAN: 1.2})
+    assert callbacks.RULE_IS_AT_CAP in _drift_rules(cfg, {callbacks.METRIC_IS_AT_CAP: 0.2})
+
+
+def test_truncated_share_rule_uses_the_absolute_ceiling():
+    cfg = callbacks.StopRuleConfig(window=4)
+    assert _drift_rules(cfg, {callbacks.METRIC_TRUNCATED: 0.2}) == []
+    assert _drift_rules(cfg, {callbacks.METRIC_TRUNCATED: 0.5}) == [callbacks.RULE_TRUNCATED]

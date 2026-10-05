@@ -160,10 +160,12 @@ class FakeVLLM:
 
     LAST_CHUNK = 12  # parameters vLLM's packed producer reads only once the generator is exhausted
 
-    def __init__(self, base_model, trainer_model):
+    def __init__(self, base_model, trainer_model, server_dtype=None):
         from trl.generation.vllm_generation import VLLMGeneration
 
         self.server = copy.deepcopy(base_model).eval()
+        if server_dtype is not None:
+            self.server.to(server_dtype)
         self.vg = object.__new__(VLLMGeneration)
         self.vg.model = trainer_model
         self.vg._dist = SimpleNamespace(is_fsdp=False, gather_params=lambda params: contextlib.nullcontext())
@@ -196,16 +198,20 @@ class FakeVLLM:
         return {"choices": [{"prompt_logprobs": entries}]}
 
 
-def _peft_trainer():
+def _peft_trainer(server_dtype=None, bf16_weights=False):
+    """`bf16_weights`: base weights that are exactly representable in bfloat16, as a real checkpoint's are."""
+    import torch
     from peft import LoraConfig, get_peft_model
 
     base = _tiny()
+    if bf16_weights:
+        base.to(torch.bfloat16).to(torch.float32)
     model = get_peft_model(
         copy.deepcopy(base),
         LoraConfig(r=4, lora_alpha=8, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
                    task_type="CAUSAL_LM"),
     )  # fmt: skip
-    fake = FakeVLLM(base, model)
+    fake = FakeVLLM(base, model, server_dtype)
     trainer = SimpleNamespace(model=model, vllm_generation=fake.vg, temperature=1.0)
     return trainer, fake
 
@@ -276,3 +282,101 @@ def test_unknown_mode_is_refused():
     trainer, fake = _peft_trainer()
     with pytest.raises(ValueError, match="unknown sync mode"):
         sc.run_check(trainer, base_url="http://x", sequences=_sequences(1), modes=("adapter_only",), http=fake.http)
+
+
+# ── tiny-adapter mode: the fraction of an early-training delta that survives the bf16 merge ──
+
+
+def test_delta_survival_is_the_projection_of_the_served_change_onto_the_trainers():
+    before = [-1.0, -2.0, -3.0, -1.5]
+    after = [-0.9, -2.2, -3.0, -1.4]
+    assert sc.delta_survival(before, after, before, after) == pytest.approx(1.0)  # the server moved exactly as trained
+    assert sc.delta_survival(before, after, before, before) == pytest.approx(0.0)  # the delta rounded away
+    half = [b + (a - b) / 2 for b, a in zip(before, after, strict=True)]
+    assert sc.delta_survival(before, after, before, half) == pytest.approx(0.5)
+    assert sc.delta_survival(before, after, before, [None, *half[1:]]) == pytest.approx(
+        0.5
+    )  # skipped on all four sides
+    assert math.isnan(sc.delta_survival(before, before, before, before))  # the trainer did not move: no verdict
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "failing"),
+    [
+        ({"weight_survival": 0.3}, "delta_survives_merge_in_weights"),
+        ({"weight_survival": float("nan")}, "delta_survives_merge_in_weights"),
+        ({"served_moved": False}, "served_logprobs_moved"),
+        ({"effect": 0.0}, "adapter_moves_logprobs"),
+        ({"n_nan": 2}, "no_nan"),
+    ],
+)
+def test_tiny_verdict_names_the_failing_criterion(kwargs, failing):
+    good = {"weight_survival": 0.95, "served_moved": True, "effect": 1e-4, "n_nan": 0}
+    assert sc.tiny_verdict(**good)["passed"]
+    verdict = sc.tiny_verdict(**{**good, **kwargs})
+    assert verdict["passed"] is False and verdict["checks"][failing] is False
+
+
+def test_the_served_projection_is_information_not_a_criterion():
+    verdict = sc.tiny_verdict(weight_survival=0.9, served_moved=True, effect=1e-4, n_nan=0, served_survival=7.0)
+    assert verdict["passed"] and verdict["served_delta_survival"] == 7.0
+
+
+def test_weight_merge_survival_sees_a_bf16_merge_round_a_tiny_delta_away():
+    import torch
+
+    trainer, _ = _peft_trainer(bf16_weights=True)
+    model = trainer.model.to(torch.bfloat16)
+    sc.set_adapter_scale(model, sc.TINY_ADAPTER_SCALE)
+    tiny = sc.weight_merge_survival(model)
+    assert tiny["n_modules"] > 0 and tiny["dtype"] == "torch.bfloat16"
+    assert tiny["fraction"] < 0.25  # only the few weights near zero, where bf16 is fine-grained, take any of it
+    sc.set_adapter_scale(model, 0.05)  # the default check's adapter: far above the bf16 spacing
+    assert sc.weight_merge_survival(model)["fraction"] > 0.9
+
+
+def test_weight_merge_survival_follows_the_served_dtype():
+    import torch
+
+    trainer, _ = _peft_trainer(bf16_weights=True)  # float32 trainer weights, exactly representable in bfloat16
+    sc.set_adapter_scale(trainer.model, sc.TINY_ADAPTER_SCALE)
+    assert sc.weight_merge_survival(trainer.model)["fraction"] == pytest.approx(1.0, abs=1e-3)
+    assert sc.weight_merge_survival(trainer.model, torch.bfloat16)["fraction"] < 0.25  # lost on the way to the server
+
+
+def test_tiny_mode_catches_a_bf16_server_that_loses_the_early_delta():
+    """The default adapter passes this very setup (the existing tests); only the tiny one sees the rounding."""
+    import torch
+
+    trainer, fake = _peft_trainer(server_dtype=torch.bfloat16, bf16_weights=True)
+    result = sc.run_check(
+        trainer,
+        base_url="http://x",
+        sequences=_sequences(),
+        adapter_scale=0.05,  # tiny mode lowers this to TINY_ADAPTER_SCALE
+        http=fake.http,
+        tiny_adapter=True,
+        served_dtype=torch.bfloat16,
+    )
+    clone = result["modes"]["clone"]
+    assert result["adapter_scale"] == sc.TINY_ADAPTER_SCALE
+    assert clone["passed"] is False and result["passed"] is False
+    assert clone["checks"]["delta_survives_merge_in_weights"] is False and clone["weight_delta_survival"] < 0.25
+    assert clone["checks"]["adapter_moves_logprobs"] is True  # the trainer did move: the sync dropped most of it
+    assert "no mode passes" in result["recommendation"]
+
+
+def test_tiny_mode_passes_when_the_server_keeps_full_precision():
+    trainer, fake = _peft_trainer(bf16_weights=True)
+    result = sc.run_check(trainer, base_url="http://x", sequences=_sequences(), http=fake.http, tiny_adapter=True)
+    clone = result["modes"]["clone"]
+    assert clone["passed"] is True, clone
+    assert clone["weight_delta_survival"] == pytest.approx(1.0, abs=1e-3)
+    assert clone["served_delta_survival"] == pytest.approx(1.0, abs=0.05)  # exact when nothing is rounded
+
+
+def test_the_default_check_reports_the_weight_merge_but_does_not_judge_it():
+    trainer, fake = _peft_trainer()
+    result = sc.run_check(trainer, base_url="http://x", sequences=_sequences(), adapter_scale=0.05, http=fake.http)
+    assert result["adapter_scale"] == 0.05 and result["weight_merge"]["fraction"] == pytest.approx(1.0, abs=1e-3)
+    assert "weight_delta_survival" not in result["modes"]["clone"]

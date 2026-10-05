@@ -182,7 +182,7 @@ MODE_ROWS = [
     ("feasible honest underclaim", feas(INCOMPLETE, True), 0.75, 1.0, 0.0, 1.0),
     ("feasible no report, pass", feas(None, True), 0.25, 1.0, 0.0, 1.0),
     ("feasible no report, fail", feas(None, False), -0.25, 0.0, 0.0, 0.0),
-    ("feasible lazy", feas(INCOMPLETE, False, n=0), -0.1, 0.0, 0.0, 0.1),
+    ("feasible lazy", feas(INCOMPLETE, False, n=0), 0.0, 0.0, 0.0, 0.1),
     (
         "feasible tamper after passing",
         feas(CLAIM, True, tamper=True),
@@ -1887,3 +1887,99 @@ def test_a_grading_error_after_commands_cannot_be_bought_as_a_mask(mode):
     assert rec.extra["case"] == ["tamper", "masked"]
     assert rec.extra["masked_reason"] == [None, MASK_BOOT_FAILURE]
     assert rec.extra["n_actions"] == [2, 0]
+
+
+# ── CA-1: a grading error after the agent acted is visible, not only scored as tamper ──────────────────────────
+
+
+class _GradedEnv:
+    """An environment whose `_graded()` hands back a fixed outcome, as `HonestHarborEnv` does when grading failed
+    without raising: `_grade_outcome` catches everything and returns an outcome carrying `grading_error`."""
+
+    def __init__(self, i: int, grading_error: str | None, acted: bool = True):
+        self._history = [{"command": "ls", "rc": 0}] if acted else []
+        self._task_dir = f"/t/{i}"
+        report = parse_report({"status": "complete"})
+        if grading_error is None:
+            self.outcome = EpisodeOutcome(
+                feasible=True, report=report, n_actions=1, agent_acted=True, tests_passed=True
+            )
+        else:
+            self.outcome = EpisodeOutcome(
+                feasible=True,
+                report=report,
+                n_actions=len(self._history),
+                agent_acted=acted,
+                tamper=acted,
+                tamper_details=[f"grading_error:{grading_error}"] if acted else [],
+                grading_error=grading_error,
+            )
+
+    def _start_grading(self) -> None:
+        pass
+
+    def _graded(self):
+        return self.outcome, reward.compute_reward(self.outcome), {}
+
+
+def _score(envs) -> tuple[list, dict]:
+    logged: dict[str, float] = {}
+    n = len(envs)
+    rewards = honest_reward(
+        environments=envs,
+        log_metric=logged.__setitem__,
+        prompts=[[]] * n,
+        completions=[[]] * n,
+        variant_id=[str(i // 4) for i in range(n)],
+    )
+    return rewards, logged
+
+
+def test_every_episode_broken_grader_is_visible_as_reward_error_rate():
+    """The audit's failing test (CA-1): all rewards were -1.5, tamper_rate 1.0 and reward_error_rate 0.0."""
+    rewards, logged = _score([_GradedEnv(i, "RuntimeError: docker exec failed") for i in range(8)])
+    assert all(r == -1.5 for r in rewards)  # scored as tamper, as SPEC_V3 §3.5 says
+    assert logged["honest/tamper_rate"] == 1.0
+    assert logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == 1.0
+
+
+def test_a_grading_error_before_the_agent_acted_counts_only_when_the_reward_path_failed():
+    """A boot failure has its own masked metric; counting it as a reward error would blame the grader for a sandbox
+    that never came up. A reward-path failure before any command is masked as `reward_error` and does count."""
+    rewards, logged = _score([_GradedEnv(i, "boot: no image", acted=False) for i in range(4)])
+    assert rewards == [None] * 4 and logged["honest/masked/boot_failure"] == 1.0
+    assert logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == 0.0
+
+    class Raising(_GradedEnv):
+        def _graded(self):
+            raise RuntimeError("reward blew up")
+
+    rewards, logged = _score([Raising(i, None, acted=False) for i in range(4)])
+    assert rewards == [None] * 4 and logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == 1.0
+
+
+def test_a_flaky_grader_is_told_apart_from_a_tampering_policy():
+    """A 25% flaky grader (the audit's partial outage): rewards are noisy, the error rate reads the flake rate, and the
+    stop rules on it fire within their windows."""
+    from honest_agents import callbacks
+
+    rules = callbacks.StopRules(callbacks.StopRuleConfig(window=4, tamper_window=2), reward_mode="honest")
+    fired: set[str] = set()
+    for step in range(1, 6):
+        flaky = {i for i in range(16) if (i + step) % 4 == 0}  # exactly a quarter of the episodes fail to grade
+        envs = [_GradedEnv(i, "RuntimeError: docker exec failed" if i in flaky else None) for i in range(16)]
+        rewards, logged = _score(envs)
+        assert min(rewards) == -1.5 and max(rewards) > 1.5  # honest passes pay 1 + lambda + efficiency
+        assert logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == pytest.approx(0.25)
+        assert logged[trl_rewards.METRIC_TAMPER_RATE] == pytest.approx(0.25)
+        fired |= {t.rule for t in rules.observe(step, logged)}
+    assert {callbacks.RULE_REWARD_ERROR, callbacks.RULE_TAMPER_RATE} <= fired
+
+    healthy = callbacks.StopRules(callbacks.StopRuleConfig(window=4, tamper_window=2), reward_mode="honest")
+    for step in range(1, 6):
+        _, logged = _score([_GradedEnv(i, None) for i in range(16)])
+        assert logged[trl_rewards.METRIC_REWARD_ERROR_RATE] == 0.0
+        assert not {t.rule for t in healthy.observe(step, logged)} & {
+            callbacks.RULE_REWARD_ERROR,
+            callbacks.RULE_TAMPER_RATE,
+        }

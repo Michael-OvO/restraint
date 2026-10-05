@@ -15,6 +15,11 @@ Layout written under --out:
     relabels.json                   variants validation relabelled as controls (re-applied on every rebuild)
     dedup.jsonl, validation.jsonl, manifest.json
 
+The build is atomic: every dataset file above (train_pool, train, val, test, manifest, split_seeds, test_ids, relabels,
+dedup) is written to a temporary sibling directory `.<out>.build-<pid>` and renamed into `--out` only after every gate
+has passed, manifest last. A refused or crashed build leaves no train, val, test or train_pool behind. `seeds/`,
+`tasks/` and `raw/` are caches that a retry reuses, so they stay.
+
 SPEC_V3 §4 rules implemented here:
 
 * **Pool-independent splits** (L2): a source group goes to `test` / `val` / `train` by `sha256(salt|group) mod 10000`
@@ -27,8 +32,12 @@ SPEC_V3 §4 rules implemented here:
 * **Decontamination is mandatory** (L4): `--benchmark-dir` must be given and non-empty (`scripts/fetch_benchmarks.sh`),
   unless `--i-know-no-benchmark`. Seeds with a Terminal-Bench canary, or whose Dockerfile COPY/ADDs tests or expected
   files, are rejected; `environment/{task.json,test_initial_state.py,container.def}` are deleted (see `sources.py`).
-* **Two held-out families** appear only in `test`: `high_risk` and one environment-mechanism family
-  (default `revoke_permission`). Their controls are held out with them.
+* **Two held-out families** appear only in `test`: `conflicting_constraint` and `no_network` (default). Their controls
+  are held out with them. The independent leak verification (docs/research/leak-register.md) found a lexical cue in
+  conflicting_constraint that no template change removes (the control's path is introduced as stale) and one training
+  pair of no_network, so both are zero-shot test families with a construct-validity caveat. The families whose twin
+  differs only in the environment (`high_risk`, `revoke_permission`, `remove_input`) train. The cue gate refuses the
+  build for a training family and only reports for a held-out one, so a test-only family can never block a build.
 * **Phrasing and name pools**: variants of test seeds are built from the test pools in `perturb.POOLS`, everything else
   from the train pools, so no test phrasing or sentinel path is ever seen in training.
 * **Mixture** (`--mixture`, default 55% plain feasible / 20% near-miss controls / 25% infeasible) is applied to `train` and
@@ -53,13 +62,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
+import os
 import random
 import shutil
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -88,8 +99,10 @@ from honest_agents.tasks.sources import (
     SOURCES,
     SeedReject,
     SeedTask,
+    license_record,
     local_seeds,
     prepare_source,
+    unknown_license_sources,
 )
 from honest_agents.tasks.taskfs import read_task_toml, write_task_toml
 
@@ -98,8 +111,9 @@ log = logging.getLogger(__name__)
 SPLITS = ("train", "val", "test")
 KINDS = ("feasible", "control", "infeasible")  # the mixture strata, in the order of `DEFAULT_MIXTURE`
 DEFAULT_MIXTURE = (0.55, 0.20, 0.25)  # SPEC_V3 §4.5 (L7)
-ENV_FAMILIES = ("remove_tool", "remove_input", "revoke_permission", "no_network")  # environment-mechanism operators
-DEFAULT_HELDOUT_FAMILIES = ("high_risk", "revoke_permission")  # SPEC_V3 §4.6: high_risk + one environment mechanism
+# Test-only families (leak verifier decision): a lexical cue that cannot be removed, and too few pairs to train on.
+DEFAULT_HELDOUT_FAMILIES = ("conflicting_constraint", "no_network")
+MIN_TRAIN_PAIRS = 40  # a training family with fewer infeasible/control pairs in train is warned about in the manifest
 DEFAULT_TEST_SEEDS = (
     300  # V-2: at least 300 test pairs, so that every reported family has at least MIN_FAMILY_TEST_ROWS
 )
@@ -149,6 +163,7 @@ class BuildConfig:
     neardup_threshold: float = DEFAULT_NEARDUP_THRESHOLD  # word 3-gram Jaccard of instructions; 0 = no clustering
     i_know_no_benchmark: bool = False  # build without --benchmark-dir (tests only, never for training data)
     allow_disabled_sources: bool = False  # SETA / tmax (see sources.SOURCES)
+    allow_unknown_license: bool = False  # a source whose data licence is not stated (tmax-15k)
     pair_mixture: bool = True  # draw infeasible and control rows as pairs
     quarantine_include_eval: bool = False  # honour quarantine entries whose source is "eval" (they change test.jsonl)
     enforce_cue_band: bool = True  # fail the build when a family's existence AUC leaves [0.4, 0.6]
@@ -216,16 +231,14 @@ def normalise_mixture(mixture: Sequence[float]) -> tuple[float, float, float]:
     return tuple(x / total for x in m)  # type: ignore[return-value]
 
 
-def heldout_problems(families: Sequence[str]) -> list[str]:
-    """Ways a held-out family list departs from SPEC_V3 §4.6 (empty = conforms). A deviation is allowed but logged."""
+def heldout_problems(families: Sequence[str], operators: Sequence[str] = OPERATORS) -> list[str]:
+    """Ways a held-out family list cannot work (empty = fine): a name no operator makes, or nothing left to train on."""
     problems = []
-    if families and "high_risk" not in families:
-        problems.append("high_risk is not held out")
-    if families and not any(f in ENV_FAMILIES for f in families):
-        problems.append("no environment-mechanism family is held out")
     unknown = [f for f in families if f not in OPERATORS]
     if unknown:
         problems.append(f"unknown families {unknown}")
+    if families and not [o for o in operators if o not in families]:
+        problems.append("every family is held out: there is nothing to train on")
     return problems
 
 
@@ -500,6 +513,18 @@ def check_benchmark_config(cfg: BuildConfig) -> None:
         raise ValueError(f"--benchmark-dir does not exist: {missing} (run scripts/fetch_benchmarks.sh)")
 
 
+def check_licenses(cfg: BuildConfig) -> None:
+    """Refuse a source whose data licence is not stated, before any download (`--allow-unknown-license` overrides)."""
+    unknown = unknown_license_sources(cfg.sources)
+    if unknown and not cfg.allow_unknown_license:
+        raise ValueError(
+            f"sources with an unknown licence: {unknown} ({'; '.join(SOURCES[s].license_basis for s in unknown)}); "
+            "check the terms and pass --allow-unknown-license to build anyway (docs/DATA.md, licences)"
+        )
+    if unknown:
+        log.warning("building from sources with an unknown licence %s (--allow-unknown-license)", unknown)
+
+
 def dedup_seeds_report(
     cfg: BuildConfig, seeds: list[SeedTask]
 ) -> tuple[list[SeedTask], list[dict[str, Any]], dict[str, Any]]:
@@ -712,17 +737,56 @@ def enforce_pairing(variants: list[Pair], *, require_controls: bool = True) -> l
 # ── build ────────────────────────────────────────────────────────────────────
 
 
+@contextlib.contextmanager
+def _staging(out: Path) -> Iterator[Path]:
+    """A fresh temporary directory next to `out` (same filesystem, so the final renames are atomic); always removed."""
+    stage = out.with_name(f".{out.name}.build-{os.getpid()}")
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True)
+    try:
+        yield stage
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def _publish(stage: Path, targets: dict[str, Path]) -> None:
+    """Move the staged files to their final paths, manifest last, so an interrupted publish has no manifest.json."""
+    names = sorted(targets, key=lambda n: n == "manifest.json")
+    for n in names:
+        if n == "manifest.json":
+            targets[n].unlink(missing_ok=True)  # an old manifest must not describe the new files
+    for n in names:
+        targets[n].parent.mkdir(parents=True, exist_ok=True)
+        os.replace(stage / n, targets[n])
+
+
 def build(cfg: BuildConfig) -> dict[str, Any]:
+    """Build the dataset into `cfg.out` atomically: nothing but caches is left behind when a gate or a check fails."""
     check_benchmark_config(cfg)  # before any download: decontamination is not optional
+    check_licenses(cfg)
     cfg.out.mkdir(parents=True, exist_ok=True)
+    with _staging(cfg.out) as stage:
+        manifest, targets = _build(cfg, stage)
+        _publish(stage, targets)
+    return manifest
+
+
+def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Path]]:
+    """Everything `build` does, writing each dataset file into `stage`; returns the manifest and staged name -> target."""
     tasks_root = cfg.out / "tasks"
+    targets: dict[str, Path] = {}
+
+    def staged(name: str, target: Path | None = None) -> Path:
+        targets[name] = target or cfg.out / name
+        return stage / name
+
     for problem in heldout_problems(cfg.heldout_families):
-        log.warning("held-out families %s deviate from SPEC_V3 §4.6: %s", cfg.heldout_families, problem)
+        log.warning("held-out families %s: %s", cfg.heldout_families, problem)
 
     rejected: list[SeedReject] = []
     seeds = collect_seeds(cfg, rejected)
     seeds, dropped, benchmark_stats = dedup_seeds_report(cfg, seeds)
-    _write_jsonl(cfg.out / "dedup.jsonl", dropped)
+    _write_jsonl(staged("dedup.jsonl"), dropped)
     seeds, not_hermetic = filter_hermetic(seeds, allow_legacy=cfg.allow_legacy_verifier)
 
     # Splits are fixed per seed group before any variant is built, because the phrasing pool depends on the split.
@@ -754,18 +818,15 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
     seed_split = assign_seed_splits(groups, clusters=neardup.clusters if neardup else None, **split_kw)
     split_before = assign_seed_splits(groups, **split_kw) if neardup else seed_split
     merged = {**previous, **seed_split}
-    split_path.parent.mkdir(parents=True, exist_ok=True)
-    split_path.write_text(json.dumps(merged, indent=2, sort_keys=True))
+    staged(SPLIT_SEEDS_FILE, split_path).write_text(json.dumps(merged, indent=2, sort_keys=True))
     all_test = frozen_test | {g for g, sp in merged.items() if sp == "test"}
     if all_test != frozen_test:
         log.info("test ids: %d -> %d (%s)", len(frozen_test), len(all_test), test_ids_path)
-    ids_sha = (
-        write_test_ids(test_ids_path, all_test)
-        if all_test != frozen_test or not test_ids_path.exists()
-        else ids_digest(frozen_test)
-    )
+    ids_sha = write_test_ids(
+        staged(TEST_IDS_FILE, test_ids_path), all_test
+    )  # same bytes as before when nothing changed
     if test_ids_path.resolve() != (cfg.out / TEST_IDS_FILE).resolve():  # the output dir stays self-contained
-        shutil.copyfile(test_ids_path, cfg.out / TEST_IDS_FILE)
+        shutil.copyfile(stage / TEST_IDS_FILE, staged("test_ids.out.txt", cfg.out / TEST_IDS_FILE))
     if not any(sp == "train" for sp in seed_split.values()):
         log.warning("no training seeds: the test/val cutoffs use the whole pool")
     n_test_groups = sum(sp == "test" for sp in seed_split.values())
@@ -845,7 +906,7 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
             require_null_check=cfg.require_null_check,
             min_oracle_runs=cfg.min_oracle_runs,
         )
-        relabels_path.write_text(json.dumps(relabels, indent=2, sort_keys=True))
+        staged(RELABELS_FILE).write_text(json.dumps(relabels, indent=2, sort_keys=True))
         variants = enforce_pairing(variants, require_controls=cfg.require_controls)
         log.info("validation kept %d/%d variants (%d relabelled)", len(variants), before, len(info["relabelled"]))
         if info["leaks"]:
@@ -885,8 +946,9 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
         splits[r.split].append(r)
 
     check_no_test_leak((r for name, rs in splits.items() if name != "test" for r in rs), all_test)
+    splits_pool = list(splits["train"])
     # Phase 0 measures a sample of the pool, so every train pair is listed here before the gate and the mixture.
-    _write_jsonl(cfg.out / "train_pool.jsonl", [_row_dict(r) for r in splits["train"]])
+    _write_jsonl(staged("train_pool.jsonl"), [_row_dict(r) for r in splits["train"]])
     gate = DifficultyGate.load(cfg.difficulty_json) if cfg.difficulty_json else None
     n_difficulty_dropped = 0
     if gate is not None:  # the training split only (LV-9): test metrics stay unfiltered
@@ -896,7 +958,7 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
     for name in ("train", "val"):  # test keeps every variant: it is the held-out evaluation set
         splits[name] = balance_mixture(splits[name], cfg.mixture, cfg.seed, paired=cfg.pair_mixture)
     for name, rs in splits.items():
-        _write_jsonl(cfg.out / f"{name}.jsonl", [_row_dict(r) for r in rs])
+        _write_jsonl(staged(f"{name}.jsonl"), [_row_dict(r) for r in rs])
 
     test_coverage = _test_coverage(splits["test"])
     for fam, n in test_coverage["short_families"].items():
@@ -907,17 +969,35 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
             MIN_FAMILY_TEST_ROWS,
         )
     kept_ids = {name: {r.variant_id for r in rs} for name, rs in splits.items()}
-    cue = cue_metrics({name: [v for _, v in variants if v.variant_id in ids] for name, ids in kept_ids.items()})
-    bad = [f"{name}: {m}" for name, ms in cue["violations"].items() for m in ms]
+    cue = cue_metrics(
+        {name: [v for _, v in variants if v.variant_id in ids] for name, ids in kept_ids.items()}, heldout=heldout
+    )
+    bad = [f"{name}: {m}" for name, ms in cue["violations"].items() for m in ms]  # training families only
     for m in bad:
-        log.warning("existence cue outside %s: %s", CUE_BAND, m)
+        log.warning("existence cue outside %s in a TRAINING family: %s", CUE_BAND, m)
+    for name, ms in cue.get("heldout_violations", {}).items():
+        for m in ms:
+            log.warning(
+                "cue outside %s in a HELD-OUT family (reported, not enforced; %s): %s", CUE_BAND, HELDOUT_CAVEAT, m
+            )
     for name, ms in cue.get("watch", {}).items():
         for m in ms:
             log.warning("cue worth a look (not enforced) in %s: %s", name, m)
     if cfg.enforce_cue_band and (bad or not cue["available"]):
         raise ValueError(f"existence AUC outside {CUE_BAND} (L1): {bad or 'analysis.existence_auc is not available'}")
+    training = training_report(splits, [f for f in OPERATORS if f not in heldout], pool=splits_pool)
+    for fam, n in training["thin_families"].items():
+        log.warning(
+            "training family %s has only %d pairs in train (< %d): its rate is too noisy to learn or report",
+            fam,
+            n,
+            MIN_TRAIN_PAIRS,
+        )
+    yields = yield_report(rows, seed_split, neardup.clusters if neardup else {}, splits, heldout)
     manifest = {
         "test_coverage": test_coverage,
+        "training": training,
+        "yield": yields,
         "split_stability": {
             "mode": "count (pool-dependent)" if cfg.test_seeds is not None or cfg.val_seeds is not None else "hash",
             "salt": f"{SPLIT_SALT}|{cfg.split_seed}",
@@ -935,7 +1015,7 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
         "pairing": pairing_stats(splits),
         "cue_metrics": cue,
         "config": {k: _jsonable(v) for k, v in asdict(cfg).items()},
-        "licenses": {s: SOURCES[s].license for s in {x.source for x in seeds} if s in SOURCES},
+        "licenses": license_record({x.source: x.license for x in seeds}),
         "n_seeds": len(seeds),
         "n_dedup_dropped": len(dropped),
         "n_not_hermetic": len(not_hermetic),
@@ -959,8 +1039,8 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
             for k, rs in splits.items()
         },
     }
-    (cfg.out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
-    return manifest
+    staged("manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    return manifest, targets
 
 
 CUE_BAND = (0.4, 0.6)  # L1: a family's existence cue must not separate infeasible from control outside this band
@@ -995,16 +1075,29 @@ def pairing_stats(splits: dict[str, list[Row]]) -> dict[str, Any]:
     return out
 
 
-def cue_metrics(variants_by_split: dict[str, list[Any]]) -> dict[str, Any]:
+HELDOUT_CAVEAT = "zero-shot test family: a lexical cue the generator cannot remove (or too few pairs); keep it out of headline numbers"
+
+
+def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] = ()) -> dict[str, Any]:
     """Per split and family: the existence AUC of the forbidden/target object (L1), from `analysis.existence_auc`.
 
-    `variants_by_split` holds the emitted `Variant`s. The import is guarded so an older `analysis` (no
-    `existence_auc`) yields `available: false` instead of breaking the build."""
+    `variants_by_split` holds the emitted `Variant`s. Violations are split in two: `violations` (the families that
+    train, which the build enforces) and `heldout_violations` (families in `heldout`, only reported: a test-only family
+    can never block a build, and its cue is the documented construct-validity limit). The import is guarded so an older
+    `analysis` (no `existence_auc`) yields `available: false` instead of breaking the build."""
+    heldout = set(heldout)
     try:
         from honest_agents.tasks.analysis import cue_classifiers, existence_auc, existence_rows, existence_violations
     except ImportError:
         return {"available": False, "band": list(CUE_BAND), "violations": {}}
-    out: dict[str, Any] = {"available": True, "band": list(CUE_BAND), "violations": {}}
+    out: dict[str, Any] = {
+        "available": True,
+        "band": list(CUE_BAND),
+        "heldout_families": sorted(heldout),
+        "heldout_caveat": HELDOUT_CAVEAT,
+        "violations": {},
+        "heldout_violations": {},
+    }
     for name, vs in variants_by_split.items():
         try:
             rows = existence_rows(vs)
@@ -1012,7 +1105,11 @@ def cue_metrics(variants_by_split: dict[str, list[Any]]) -> dict[str, Any]:
             for fam, cv in cue_classifiers(rows).items():
                 report[fam]["cv"] = cv
             out[name] = report
-            out["violations"][name] = existence_violations(report, low=CUE_BAND[0], high=CUE_BAND[1])
+            trained = {f: e for f, e in report.items() if f not in heldout}
+            out["violations"][name] = existence_violations(trained, low=CUE_BAND[0], high=CUE_BAND[1])
+            out["heldout_violations"][name] = existence_violations(
+                {f: e for f, e in report.items() if f in heldout}, low=CUE_BAND[0], high=CUE_BAND[1]
+            )
             out.setdefault("watch", {})[name] = cue_watch(report)
             # A thin family is not judged (too few rows for an AUC): list it so it never reads as "clean".
             out.setdefault("unjudged", {})[name] = sorted(
@@ -1036,6 +1133,77 @@ def cue_watch(report: dict[str, Any], *, min_per_class: int = 20, z: float = 2.0
             if not CUE_BAND[0] <= auc <= CUE_BAND[1] and abs(auc - 0.5) > z * se:
                 out.append(f"{fam}: {name} AUC {auc:.2f} (+-{se:.2f}, n {f['n_infeasible']}/{f['n_control']})")
     return out
+
+
+def training_report(
+    splits: dict[str, list[Row]], families: Sequence[str], *, pool: Sequence[Row] = ()
+) -> dict[str, Any]:
+    """Infeasible/control pairs per training family in the train split (and in the pool before the mixture), and the
+    families with fewer than `MIN_TRAIN_PAIRS` (a rate learned from fewer is mostly noise)."""
+    train = Counter(r.family for r in splits["train"] if r.kind == "infeasible")
+    pooled = Counter(r.family for r in pool if r.kind == "infeasible")
+    return {
+        "families": list(families),
+        "min_pairs": MIN_TRAIN_PAIRS,
+        "pairs_per_family": {f: train.get(f, 0) for f in families},
+        "pool_pairs_per_family": {f: pooled.get(f, 0) for f in families},
+        "thin_families": {f: train.get(f, 0) for f in families if train.get(f, 0) < MIN_TRAIN_PAIRS},
+    }
+
+
+def yield_report(
+    rows: Sequence[Row],
+    seed_split: dict[str, str],
+    clusters: dict[str, str],
+    emitted: dict[str, list[Row]],
+    heldout: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Per split and family: how many seeds yield an infeasible/control pair, and how many independent source tasks
+    stand behind them (near-duplicate clusters count once). `pool` is every variant built for the split before the
+    held-out filter and the mixture; `emitted` is what the split file holds. A family with a few source tasks gives a
+    rate nobody should quote, however many rows the mixture drew from it."""
+    heldout = set(heldout)
+
+    def unit(r: Row) -> str:
+        return clusters.get(r.split_group, r.split_group)
+
+    out: dict[str, Any] = {"per": 150}
+    for split in SPLITS:
+        groups = [g for g, sp in seed_split.items() if sp == split]
+        n_units = len({clusters.get(g, g) for g in groups})
+        fams: dict[str, Any] = {}
+        for fam in OPERATORS:
+            inf = [r for r in rows if r.split == split and r.family == fam and r.kind == "infeasible"]
+            ctl = [r for r in rows if r.split == split and r.family == fam and r.kind == "control"]
+            kept = [r for r in emitted[split] if r.family == fam and r.kind == "infeasible"]
+            seeds = {r.split_group for r in inf}
+            fams[fam] = {
+                "role": "held-out (test only)" if fam in heldout else "train",
+                "pool_infeasible": len(inf),
+                "pool_controls": len(ctl),
+                "pool_source_tasks": len({unit(r) for r in inf}),
+                "pool_seeds_with_pair": len(seeds),
+                "pool_yield_per_150_seeds": round(150 * len(seeds) / len(groups), 1) if groups else 0.0,
+                "emitted_pairs": len(kept),
+                "emitted_source_tasks": len({unit(r) for r in kept}),
+            }
+        out[split] = {"seeds": len(groups), "source_tasks": n_units, "families": fams}
+    return out
+
+
+def format_yield(report: dict[str, Any]) -> str:
+    """The yield report as a table, for the console at the end of a build."""
+    lines = []
+    for split in SPLITS:
+        block = report[split]
+        lines.append(f"{split}: {block['seeds']} seeds, {block['source_tasks']} independent source tasks")
+        lines.append(f"  {'family':24s}{'role':22s}{'pool':>6s}{'src':>6s}{'/150':>7s}{'emit':>6s}{'src':>6s}")
+        for fam, e in block["families"].items():
+            lines.append(
+                f"  {fam:24s}{e['role']:22s}{e['pool_infeasible']:6d}{e['pool_source_tasks']:6d}"
+                f"{e['pool_yield_per_150_seeds']:7.1f}{e['emitted_pairs']:6d}{e['emitted_source_tasks']:6d}"
+            )
+    return "\n".join(lines)
 
 
 def _test_coverage(rows: list[Row]) -> dict[str, Any]:
@@ -1103,7 +1271,7 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
     ap.add_argument(
         "--heldout-families",
         default=",".join(DEFAULT_HELDOUT_FAMILIES),
-        help="comma-separated families kept out of train/val (SPEC_V3: high_risk + one environment mechanism)",
+        help="comma-separated test-only families (default conflicting_constraint,no_network: lexical cue / too few pairs)",
     )
     ap.add_argument(
         "--test-bp",
@@ -1139,6 +1307,11 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
     )
     ap.add_argument(
         "--allow-disabled-sources", action="store_true", help="allow the seta-env / tmax-15k sources (leak audit L4)"
+    )
+    ap.add_argument(
+        "--allow-unknown-license",
+        action="store_true",
+        help="build from a source whose data licence is not stated (check its terms first; docs/DATA.md)",
     )
     ap.add_argument(
         "--no-pair-mixture", action="store_true", help="draw infeasible and control rows independently (old behaviour)"
@@ -1216,6 +1389,7 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
         neardup_threshold=a.neardup_threshold,
         i_know_no_benchmark=a.i_know_no_benchmark,
         allow_disabled_sources=a.allow_disabled_sources,
+        allow_unknown_license=a.allow_unknown_license,
         pair_mixture=not a.no_pair_mixture,
         quarantine_include_eval=a.quarantine_include_eval,
         enforce_cue_band=a.enforce_cue_band,
@@ -1244,6 +1418,8 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     manifest = build(parse_args(argv))
     print(json.dumps(manifest["splits"], indent=2))
+    print(format_yield(manifest["yield"]))
+    print("training pairs per family:", json.dumps(manifest["training"]["pairs_per_family"]))
 
 
 if __name__ == "__main__":

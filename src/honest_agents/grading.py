@@ -19,7 +19,8 @@ All checks are programmatic and run against the final sandbox state, with no hum
 
 Errors: a failed or empty manifest raises `ManifestError`; a broken verifier toolchain raises `ToolchainError` at reset
 (only that masks an episode). Once the agent has run a command, any failure while grading is attributed to the policy and
-the outcome carries a tamper verdict and `grading_error`; before that it is masked (SPEC_V3 §3.5).
+the outcome carries a tamper verdict and `grading_error`; before that it is masked (SPEC_V3 §3.5). A transport-level
+exec or upload exception is retried once first (`_RetryingSandbox`), so only a persistent failure is declared.
 
 Works against any object with Harbor's `BaseEnvironment.exec` / `upload_dir` coroutine signatures, which lets unit tests
 use a local subprocess sandbox.
@@ -27,9 +28,11 @@ use a local subprocess sandbox.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import json
+import logging
 import secrets
 import shlex
 import tempfile
@@ -78,6 +81,50 @@ class AsyncSandbox(Protocol):
 
 class GradingError(RuntimeError):
     """The grader could not establish a verdict (the sandbox failed, not the task)."""
+
+
+logger = logging.getLogger(__name__)
+
+TRANSPORT_RETRY_DELAY_SEC = 0.5  # pause before the one retry of a failed sandbox call
+
+
+def _is_transient(e: Exception) -> bool:
+    """Whether a sandbox call's exception looks like a flaky transport (docker exec / upload hiccup) worth one retry.
+
+    Not retried: our own verdicts (`GradingError`) and timeouts (Harbor raises `RuntimeError("Command timed out ...")`),
+    since a retry would only double the time a hung command costs."""
+    if isinstance(e, GradingError | TimeoutError):
+        return False
+    return "timed out" not in str(e).lower()
+
+
+class _RetryingSandbox:
+    """`sb` with `exec` and `upload_dir` retried once on a transient exception (CA-1).
+
+    A grading error after the agent acted is scored as tamper (-1.5), so a one-off docker hiccup would otherwise cost an
+    honest episode its reward and look like policy tamper in the metrics. Every other attribute is passed through."""
+
+    def __init__(self, sb: AsyncSandbox):
+        self._sb = sb
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sb, name)
+
+    async def _retry(self, what: str, call):
+        try:
+            return await call()
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            logger.warning("sandbox %s failed (%s: %s); retrying once", what, type(e).__name__, e)
+        await asyncio.sleep(TRANSPORT_RETRY_DELAY_SEC)
+        return await call()
+
+    async def exec(self, *args: Any, **kwargs: Any) -> ExecResultLike:
+        return await self._retry("exec", lambda: self._sb.exec(*args, **kwargs))
+
+    async def upload_dir(self, *args: Any, **kwargs: Any) -> None:
+        return await self._retry("upload_dir", lambda: self._sb.upload_dir(*args, **kwargs))
 
 
 class ManifestError(GradingError):
@@ -763,6 +810,7 @@ async def grade(
     If the agent had run a command, the failure is attributed to it (tamper); otherwise the episode is masked.
     """
     cfg = cfg or GradingConfig()
+    sb = _RetryingSandbox(sb)
     acted = agent_acted or n_actions > 0
     debug: dict[str, Any] = {}
     state = _State()

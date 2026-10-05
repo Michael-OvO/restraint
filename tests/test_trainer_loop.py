@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import itertools
 import threading
 import time
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ pytest.importorskip("trl")
 
 import torch
 from trl import GRPOTrainer
+from trl.trainer.utils import split_tensor_dict
 
 import honest_agents.trainer as trainer_mod
 from honest_agents.reward import (
@@ -922,6 +924,259 @@ def test_trainer_installs_the_clone_patch_after_super_init(monkeypatch):
     monkeypatch.setattr(GRPOTrainer, "__init__", fake_init)
     HonestGRPOTrainer()
     assert getattr(vg._iter_named_params, "_honest_clones", False)
+
+
+# ── padding-free scoring (audit T1) ────────────────────────────────────────
+#
+# A real tiny Qwen3 and the real `GRPOTrainer._compute_loss` (dapo, token-level IS) on a stub trainer: the loss and the
+# gradients with TRL's batch-global padding must equal those with trimmed, length-sorted chunks and with regrouped
+# micro-batches.
+
+
+def _tiny_policy():
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    torch.manual_seed(0)
+    config = Qwen3Config(
+        vocab_size=64, hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=4,
+        num_key_value_heads=2, head_dim=8, tie_word_embeddings=False,
+    )  # fmt: skip
+    return Qwen3ForCausalLM(config)
+
+
+def _loss_stub(model, *, trim: bool, sort: bool, loss_type: str = "dapo", accumulation: int = 4, per_round: int = 4):
+    from collections import defaultdict
+
+    stub = object.__new__(HonestGRPOTrainer)
+    gather = lambda x: x
+    stub.__dict__.update(
+        model=model,
+        trim_padding=trim,
+        sort_micro_batches=sort,
+        loss_type=loss_type,
+        current_gradient_accumulation_steps=accumulation,
+        args=SimpleNamespace(
+            gradient_accumulation_steps=accumulation,
+            steps_per_generation=per_round,
+            delta=None,
+            use_bias_correction_kl=False,
+            vllm_importance_sampling_clip_max=3.0,
+            per_device_train_batch_size=2,
+        ),
+        accelerator=SimpleNamespace(
+            num_processes=1,
+            is_main_process=True,
+            gather=gather,
+            reduce=lambda x, reduction="sum": x,
+            sync_gradients=True,
+        ),
+        _metrics={"train": defaultdict(list), "eval": defaultdict(list)},
+        _step=0,
+        temperature=1.0,
+        use_liger_kernel=False,
+        model_kwarg_keys={"logits_to_keep"},
+        top_entropy_quantile=1.0,
+        off_policy_mask_threshold=None,
+        importance_sampling_level="token",
+        beta=0.0,
+        epsilon_low=0.2,
+        epsilon_high=0.28,
+        use_vllm=True,
+        vllm_importance_sampling_correction=True,
+        _entropy_bonus_enabled=False,
+        aux_loss_enabled=False,
+        max_completion_length=16,
+        top_k=0,
+    )
+    return stub
+
+
+def _round(rows=8, prompt_width=14, completion_width=12, seed=0):
+    """One generation round, padded like TRL: prompts on the left, completions on the right, unequal lengths."""
+    generator = torch.Generator().manual_seed(seed)
+    prompt_lengths = torch.randint(3, prompt_width + 1, (rows,), generator=generator)
+    completion_lengths = torch.randint(2, completion_width + 1, (rows,), generator=generator)
+    prompt_lengths[0], completion_lengths[1] = prompt_width, completion_width  # the batch-global longest
+    prompt_mask = (torch.arange(prompt_width)[None] >= (prompt_width - prompt_lengths)[:, None]).long()
+    completion_mask = (torch.arange(completion_width)[None] < completion_lengths[:, None]).long()
+    return {
+        "prompt_ids": torch.randint(1, 64, (rows, prompt_width), generator=generator) * prompt_mask,
+        "prompt_mask": prompt_mask,
+        "completion_ids": torch.randint(1, 64, (rows, completion_width), generator=generator) * completion_mask,
+        "completion_mask": completion_mask,
+        "tool_mask": torch.randint(0, 4, (rows, completion_width), generator=generator).clamp(max=1),
+        "advantages": torch.randn(rows, generator=generator),
+        "old_per_token_logps": -torch.rand(rows, completion_width, generator=generator) * 3,
+        "importance_sampling_ratio": 0.5 + 3 * torch.rand(rows, completion_width, generator=generator),
+        "num_items_in_batch": torch.tensor(float(rows * completion_width)),
+    }
+
+
+def _round_loss_and_grads(stub, model, round_, micro: int = 2):
+    """Sum of `_compute_loss` over a round's micro-batches (as the accumulation window does) and the gradients."""
+    model.zero_grad()
+    batches = split_tensor_dict(dict(round_), len(round_["advantages"]) // micro)
+    if stub.sort_micro_batches:
+        batches = trainer_mod.sort_micro_batches(batches)
+    total = 0.0
+    for batch in batches:
+        loss = stub._compute_loss(model, batch)
+        loss.backward()
+        total += float(loss.detach())
+    return total, {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}
+
+
+def test_trimmed_sorted_loss_and_gradients_equal_trls_padded_ones():
+    model = _tiny_policy()
+    round_ = _round()
+    stock_loss, stock_grads = _round_loss_and_grads(_loss_stub(model, trim=False, sort=False), model, round_)
+    trimmed_stub = _loss_stub(model, trim=True, sort=True)
+    new_loss, new_grads = _round_loss_and_grads(trimmed_stub, model, round_)
+    metrics = trimmed_stub._metrics["train"]
+    assert sum(metrics[trainer_mod.METRIC_PAD_TRIMMED]) < sum(metrics[trainer_mod.METRIC_PAD_STOCK])  # it did trim
+    assert stock_loss == pytest.approx(new_loss, rel=1e-5, abs=1e-6)
+    assert stock_grads.keys() == new_grads.keys() and stock_grads
+    for name, grad in stock_grads.items():
+        torch.testing.assert_close(new_grads[name], grad, rtol=1e-4, atol=1e-6, msg=name)
+    assert max(float(g.abs().max()) for g in stock_grads.values()) > 1e-4  # a real signal, not equal zeros
+
+
+def test_trimming_alone_keeps_the_loss_and_gradients_for_each_micro_batch_layout():
+    model = _tiny_policy()
+    round_ = _round(seed=3)
+    for micro in (1, 2, 4):
+        stock = _round_loss_and_grads(_loss_stub(model, trim=False, sort=False), model, round_, micro)
+        trimmed = _round_loss_and_grads(_loss_stub(model, trim=True, sort=False), model, round_, micro)
+        assert stock[0] == pytest.approx(trimmed[0], rel=1e-5, abs=1e-6)
+        for name, grad in stock[1].items():
+            torch.testing.assert_close(trimmed[1][name], grad, rtol=1e-4, atol=1e-6, msg=f"{name} micro={micro}")
+
+
+def test_rows_with_a_fully_masked_completion_keep_the_loss_and_gradients():
+    """`mask_truncated_completions` zeroes a truncated rollout's completion mask: its attended span is the prompt only."""
+    model = _tiny_policy()
+    round_ = _round(seed=7)
+    round_["completion_mask"][[1, 4, 6]] = 0  # includes the row that held the batch-global longest completion
+    stock = _round_loss_and_grads(_loss_stub(model, trim=False, sort=False), model, round_)
+    trimmed = _round_loss_and_grads(_loss_stub(model, trim=True, sort=True), model, round_)
+    assert stock[0] == pytest.approx(trimmed[0], rel=1e-5, abs=1e-6)
+    for name, grad in stock[1].items():
+        torch.testing.assert_close(trimmed[1][name], grad, rtol=1e-4, atol=1e-6, msg=name)
+
+
+def test_scoring_a_whole_round_in_sorted_chunks_matches_the_padded_forward():
+    """The old-logprob pass runs the whole generation batch in `batch_size` chunks; entropies come back in row order."""
+    model = _tiny_policy().eval()
+    round_ = _round(rows=8, seed=5)
+    input_ids = torch.cat([round_["prompt_ids"], round_["completion_ids"]], dim=1)
+    attention_mask = torch.cat([round_["prompt_mask"], round_["completion_mask"]], dim=1)
+    keep = round_["completion_ids"].size(1)
+    with torch.no_grad():
+        want = _loss_stub(model, trim=False, sort=False)._get_per_token_logps_and_entropies(
+            model, input_ids, attention_mask, keep, batch_size=3, compute_entropy=True
+        )
+        got = _loss_stub(model, trim=True, sort=True)._get_per_token_logps_and_entropies(
+            model, input_ids, attention_mask, keep, batch_size=3, compute_entropy=True
+        )
+    valid = round_["completion_mask"].bool()
+    torch.testing.assert_close(got[0][valid], want[0][valid], rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(got[1][valid], want[1][valid], rtol=1e-4, atol=1e-5)
+    assert got[0].shape == want[0].shape == round_["completion_ids"].shape and got[2] is None
+
+
+def test_padded_slots_fall_on_an_unequal_length_batch():
+    round_ = _round(rows=16, prompt_width=64, completion_width=48, seed=1)
+    mask = torch.cat([round_["prompt_mask"], round_["completion_mask"]], dim=1)
+    keep = round_["completion_mask"].size(1)
+    real = int(mask.sum())
+    stock = trainer_mod.padded_slots(mask)
+    trimmed_only = trainer_mod.padded_slots(mask, trainer_mod.plan_chunks(mask, keep, 2, sort=False))
+    sorted_ = trainer_mod.padded_slots(mask, trainer_mod.plan_chunks(mask, keep, 2, sort=True))
+    assert real <= sorted_ < trimmed_only < stock
+    assert stock / real > 1.5 > sorted_ / real  # the audit's 1.7-3.5x becomes close to 1
+
+
+def test_regrouping_keeps_every_row_once_and_orders_micro_batches_longest_first():
+    round_ = _round(rows=8, seed=2)
+    original = split_tensor_dict(dict(round_), 4)
+    regrouped = trainer_mod.sort_micro_batches(original)
+    assert len(regrouped) == 4 and regrouped[0]["num_items_in_batch"] == round_["num_items_in_batch"]
+    key = lambda b: sorted(map(tuple, torch.cat([b["prompt_ids"], b["completion_ids"]], 1).tolist()))
+    assert sorted(itertools.chain(*map(key, original))) == sorted(itertools.chain(*map(key, regrouped)))
+    lengths = [int((b["prompt_mask"].sum(1) + b["completion_mask"].sum(1)).sum()) for b in regrouped]
+    assert lengths == sorted(lengths, reverse=True)
+    for batch in regrouped:  # rows stay aligned across the keys
+        rebuilt = {tuple(r) for r in torch.cat([batch["prompt_ids"], batch["completion_ids"]], 1).tolist()}
+        for i, row in enumerate(torch.cat([batch["prompt_ids"], batch["completion_ids"]], 1).tolist()):
+            j = [
+                k for k in range(8) if torch.cat([round_["prompt_ids"][k], round_["completion_ids"][k]]).tolist() == row
+            ]
+            assert len(j) == 1 and torch.equal(batch["advantages"][i], round_["advantages"][j[0]])
+        assert rebuilt
+
+
+def test_regrouping_leaves_multimodal_rounds_alone():
+    batches = [{"x": torch.zeros(2, 3), "pixel_values": [torch.zeros(1)]}, {"x": torch.ones(2, 3), "pixel_values": []}]
+    assert trainer_mod.sort_micro_batches(batches) is batches
+
+
+def _prepare_stub(loss_type: str, accumulation: int, per_round: int, sort: bool = True):
+    stub = _loss_stub(
+        _tiny_policy(), trim=True, sort=sort, loss_type=loss_type, accumulation=accumulation, per_round=per_round
+    )
+    stub.model.train()
+    round_ = _round(rows=8, seed=4)
+    stub._buffered_inputs = None
+    unsorted = split_tensor_dict(dict(round_), per_round)
+
+    def fake_prepare(self, generation_batch):  # TRL's job: build the round once, hand out a slice per step
+        if self._step % per_round == 0 or self._buffered_inputs is None:
+            self._buffered_inputs = unsorted
+        return self._buffered_inputs[self._step % per_round]
+
+    return stub, unsorted, fake_prepare
+
+
+@pytest.mark.parametrize(
+    ("loss_type", "accumulation", "per_round", "regrouped"),
+    [("dapo", 4, 4, True), ("dapo", 8, 4, True), ("bnpo", 4, 4, False), ("grpo", 4, 4, False), ("dapo", 4, 8, False)],
+)
+def test_micro_batches_are_regrouped_only_where_the_loss_is_globally_normalised(
+    monkeypatch, loss_type, accumulation, per_round, regrouped
+):
+    stub, unsorted, fake_prepare = _prepare_stub(loss_type, accumulation, per_round)
+    monkeypatch.setattr(GRPOTrainer, "_prepare_inputs", fake_prepare)
+    first = stub._prepare_inputs({})
+    assert (stub._buffered_inputs is not unsorted) is regrouped
+    assert first is stub._buffered_inputs[0]
+    stub._step = 1  # the second step of the round reuses the (regrouped) buffer
+    assert stub._prepare_inputs({}) is stub._buffered_inputs[1]
+
+
+def test_regrouping_can_be_switched_off(monkeypatch):
+    stub, unsorted, fake_prepare = _prepare_stub("dapo", 4, 4, sort=False)
+    monkeypatch.setattr(GRPOTrainer, "_prepare_inputs", fake_prepare)
+    stub._prepare_inputs({})
+    assert stub._buffered_inputs is unsorted
+
+
+def test_drift_metrics_count_loss_tokens_at_the_cap_and_outside_the_band():
+    stub = _loss_stub(_tiny_policy(), trim=True, sort=True)
+    stub.model.train()
+    ratio = torch.tensor([[3.0, 1.0, 1.2, 3.0], [0.9, 1.01, 3.0, 3.0]])
+    inputs = {
+        "importance_sampling_ratio": ratio,
+        "completion_mask": torch.tensor([[1, 1, 1, 1], [1, 1, 1, 0]]),
+        "tool_mask": torch.tensor([[1, 1, 1, 0], [1, 1, 1, 1]]),
+    }
+    stub._log_sampling_drift(inputs)  # loss tokens: 3 + 3 = 6 of 8
+    metrics = stub._metrics["train"]
+    assert metrics[trainer_mod.METRIC_IS_AT_CAP] == [
+        pytest.approx(2 / 6)
+    ]  # (0,0) and (1,2); (0,3) and (1,3) are masked
+    assert metrics[trainer_mod.METRIC_IS_OUT_OF_BAND] == [pytest.approx(4 / 6)]  # 3.0, 1.2, 0.9, 3.0
+    stub._log_sampling_drift({**inputs, "importance_sampling_ratio": ratio[:, :1]})  # sequence-level: nothing to log
+    assert len(metrics[trainer_mod.METRIC_IS_AT_CAP]) == 1
 
 
 # ── the real GRPOTrainer, end to end on CPU ────────────────────────────────

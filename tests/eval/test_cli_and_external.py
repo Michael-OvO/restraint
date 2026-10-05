@@ -349,8 +349,20 @@ def test_noninferiority_and_diff_commands(tmp_path, capsys):
     out = tmp_path / "ni.json"
     assert run_eval.main(["--noninferiority", str(a), str(b), "--out", str(out), "--n-boot", "200"]) == 0
     t = json.loads(out.read_text())
-    assert t["margin"] == 0.03 and t["difference"] == 0.0 and t["metric"] == "task_success"
-    assert "margin 3.0" in capsys.readouterr().out
+    assert t["margin"] == 0.03 and t["difference"] == 0.0 and t["metric"] == "verified_success_rate"
+    assert t["endpoint"] == "primary"
+    # one seed per arm: the lower bound is printed but no verdict is declared (SP2)
+    assert t["non_inferior"] is None and t["single_seed"] and "margin 3.0" in capsys.readouterr().out
+    # several seed runs per arm, comma separated: the verdict is allowed and the seed spread is printed
+    a2, b2 = (_run_with_success(tmp_path, n, 40, 50) for n in ("cand2", "ref2"))
+    assert run_eval.main(["--noninferiority", f"{a},{a2}", f"{b},{b2}", "--out", str(out), "--n-boot", "200"]) == 0
+    t = json.loads(out.read_text())
+    assert t["n_seeds_candidate"] == 2 and t["non_inferior"] is True
+    assert "2 candidate" in capsys.readouterr().out
+    # the explicit single-seed declaration is part of the protocol fixed before the run
+    p1, p2 = (_run_with_success(tmp_path, n, 40, 50, {"ni_allow_single_seed": True}) for n in ("p1", "p2"))
+    assert run_eval.main(["--noninferiority", str(p1), str(p2), "--out", str(out), "--n-boot", "200"]) == 0
+    assert json.loads(out.read_text())["non_inferior"] is True
     assert (
         run_eval.main(
             [

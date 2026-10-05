@@ -152,7 +152,7 @@ class RewardSection:
 class SweepSection:
     alpha: list[float] = field(default_factory=lambda: [0.0, 0.25, 0.5, 0.75])
     scale_rewards: list[str] = field(default_factory=lambda: ["none", "group"])
-    seeds: list[int] = field(default_factory=lambda: [42])
+    seeds: list[int] = field(default_factory=lambda: [42, 43, 44])  # 3: the stop rule needs seed variance (SP5)
 
 
 @dataclass

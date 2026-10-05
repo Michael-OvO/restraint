@@ -157,7 +157,7 @@ The cross-validated classifiers are enforced by the build (`--enforce-cue-band` 
 | no_network | 3 | 1 | 1 |
 | remove_tool | 0 | 0 | 0 |
 
-Under the default held-out families, training has two infeasible families (conflicting_constraint, remove_input) plus rare no_network; high_risk and revoke_permission are test only.
+Under the default held-out families, training has two infeasible families (conflicting_constraint, remove_input) plus rare no_network; high_risk and revoke_permission are test only. (This was the integrator's default; superseded by the decision below. Current yields: `docs/DATA.md`.)
 
 ## Independent verification (2026-10-05) and the resulting decision
 
@@ -177,3 +177,42 @@ An independent verifier re-measured the fixed pipeline on 170, 261 and 335 real 
 - Default held-out families: `conflicting_constraint`, `no_network`.
 - The build is atomic and a held-out family can never block it.
 - The cue gate is a hard refusal only for training families.
+
+### Implementation of the verifier decision (data component, 2026-10-05)
+
+Done in `tasks/build.py`, `scripts/build_dataset.sh`, `scripts/build_audit_set.sh`, `tests/tasks/test_tasks_build.py`, `tests/test_data_leakage.py`; the narrative is in `docs/DATA.md`.
+
+| verifier finding | action | proof |
+|---|---|---|
+| cc has a lexical cue; no_network has one pair | default held-out families `conflicting_constraint,no_network`; `high_risk`, `revoke_permission` train | `build.DEFAULT_HELDOUT_FAMILIES`; `test_default_heldout_families_are_the_two_with_a_cue_or_too_few_pairs` |
+| cue gate depends on the pool | hard refusal only for training families; held-out cue reported (`cue_metrics.heldout_violations`, caveat in the manifest) | `test_the_cue_gate_refuses_a_training_family_but_only_reports_a_held_out_one`, `test_a_held_out_family_with_a_cue_never_blocks_the_build_but_a_training_one_does`, `test_held_out_families_have_their_cue_reported_not_enforced` |
+| a failed build leaves train.jsonl and test.jsonl | atomic build through a temporary sibling directory, manifest published last | `test_a_build_that_fails_a_gate_leaves_no_dataset_files`, `test_a_crash_while_writing_leaves_no_dataset_files_and_a_retry_succeeds`, `test_a_failed_rebuild_keeps_the_previous_complete_dataset` |
+| perturbed rows end in a newline and lose trailing spaces, plain rows do not | every instruction, the plain copy included, goes through `taskfs.normalise_instruction` | `test_every_variant_formats_its_instruction_like_the_plain_copy` |
+| too few pairs per family | `manifest.training.pairs_per_family`, warning under 40 | `test_the_manifest_reports_training_pairs_and_warns_about_a_thin_family` |
+| decoy names longer and with more digits | not changed: cc is held out and test-only; caveat stands | `docs/DATA.md` section 7 |
+
+The strict leakage tests stay strict for every training family (`test_every_training_family_has_a_neutral_existence_cue`:
+the same thresholds, features and classifiers as before, for high_risk, revoke_permission and remove_input); the held-out
+families are asserted absent from train, val and train_pool and present in test. This is a design change, not a weakening.
+
+Cue measurements on the new default mix, 335 distinct real cached ET seeds (74 test, 10 val, 251 train by the hash split;
+`build` with `--no-enforce-cue-band`, so the numbers are measured, not gated). Pairs in the split, then AUC of every
+enforced feature and of both grouped-CV classifiers (name tokens, structure):
+
+| split | family | role | pairs | every feature and classifier AUC |
+|---|---|---|---|---|
+| train | high_risk | train | 45 | 0.50 |
+| train | revoke_permission | train | 44 | 0.50 |
+| train | remove_input | train | 14 | 0.50 (thin: under 40 pairs) |
+| test | high_risk | train | 49 | 0.50 |
+| test | revoke_permission | train | 43 | 0.50 |
+| test | remove_input | train | 3 | 0.50 (not judged, too few) |
+| test | conflicting_constraint | held out | 11 | 0.50 (cv structure 0.44); reported only |
+
+The twins of the training families have a byte-identical instruction, so every text feature is exactly 0.5 by
+construction. The verifier's own classifiers (`verify/b_clf.py`, hashed word and char n-grams, source-grouped CV, shuffled
+null) on the same build: instruction impossible against control 0.50 for every family and split (cc test 0.51 word, 0.43
+char, 11 pairs); impossible against the plain feasible copy 0.70 (train, all families) and 0.76 (test), the same for
+controls against feasible (0.70, 0.75), so the perturbation marker is shared by both classes and carries no label; the
+Dockerfile-diff classifier gets 0.94 to 1.00, which is the environment cue itself (what the agent must discover by
+looking), not a text cue. Shuffled-label null means 0.44 to 0.53. Docker was not available: nothing here ran in a sandbox.

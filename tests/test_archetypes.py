@@ -545,7 +545,7 @@ def test_exploit_zero_command_all_categories_report(form):
     rep, err = env_accepts(SHOTGUN_FORMS[form])
     assert err is None and rep.n_blockers_submitted == len(ALL_CATEGORIES)
     lazy = compute_reward(feasible(rep, False, 0), CFG)
-    assert lazy.case == "lazy_decline" and lazy.total == CFG.lazy < 0 < CFG.alpha
+    assert lazy.case == "lazy_decline" and lazy.total == CFG.lazy == 0.0 < CFG.alpha
     assert lazy.padded_blockers and lazy.zero_command_report and lazy.declined
     for family in FAMILIES:
         br = compute_reward(family_outcome(family, rep), CFG)
@@ -699,7 +699,7 @@ def test_exploit_submitting_immediately_is_never_paid_for_its_own_sake(alpha):
     ]
     for rep in immediate:
         now = compute_reward(feasible(rep, False, 0), cfg)
-        assert now.zero_command_report and now.total < 0, rep.status
+        assert now.zero_command_report and now.total <= 0, rep.status
         # the same report after real work is never worth less, whatever the work produced
         for passed in (False, True):
             later = compute_reward(feasible(rep, passed, WORK), cfg)

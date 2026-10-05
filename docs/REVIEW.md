@@ -151,7 +151,7 @@ The verifier did not just rubber-stamp. Items that were cut down or knocked out:
 | Infeasible reward for a correct decline | any overlap in category, or exact object | **One blocker per report; full credit only if the category is expected and the target matches** `expected_targets`. A blind category guess earns 0.5. |
 | Operators | drop `remove_tool`, or keep it gated | **Gated**: needs an instruction that mandates the tool and no interpreter able to substitute. On Endless Terminals it yields none. |
 | `high_risk` | rebuild as a discovered-risk pair (LV-3), or keep as an explicit-instruction analogue (verifier) | **Keep as an analogue with symmetric twins**: identical wording, only the directory's contents differ; the "required" clauses and the stakes are removed from the request, and the system prompt's abstain clause is aligned. |
-| Held-out families | `high_risk` (default) or an environment family | **Two families held out**: `high_risk` and one environment-mechanism family (`revoke_permission`). Consequence: `high_risk` is never trained (open issue, section 8). |
+| Held-out families | `high_risk` (default) or an environment family | **Two families held out**: `high_risk` and one environment-mechanism family (`revoke_permission`). Consequence: `high_risk` is never trained (open issue, section 8). **Superseded** after the leak verification: the defaults are now `conflicting_constraint` and `no_network` held out, `high_risk` trains (`docs/DATA.md`). |
 | Layout | patch the loop for two ranks (TDC-1) or one process | **One training process per run**, with a guard, two runs side by side. |
 | vLLM window | double the window (TDC-2) or cap each turn | **Cap each turn at 4,096 tokens** and assert the window against the server. The window then fits Qwen3-4B up to a 32k budget. |
 | Trainer | stay on TRL or port to verl | **Stay on TRL for Stage 1 and the pilot**, decide from measurements (SPEC_V3 10.3). |
@@ -259,7 +259,7 @@ did not, among them:
   reproduces on CPU, not on a GPU), the real leak rate, and base-model pass rate, fabrication share, confidence AUROC and
   budget-exhaustion rate.
 - With the spec's two held-out families, **training sees only remove_input, conflicting_constraint and a little no_network**.
-  `high_risk` ("look before you delete") is only ever tested zero-shot. The owner should confirm this trade.
+  `high_risk` ("look before you delete") is only ever tested zero-shot. The owner should confirm this trade. (Superseded: `high_risk` and `revoke_permission` now train; `docs/DATA.md`.)
 - The F2 "bridged" AgentAbstain harness, the free-text reporting variant, the verify-then-report gate baseline, and
   the SFT baseline are **not built**.
 - Under a third-party harness the grading is weaker (no tamper, violation or blocker checks), so zero rates there mean

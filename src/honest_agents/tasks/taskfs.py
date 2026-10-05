@@ -245,6 +245,18 @@ def insert_paragraph(task_dir: Path, text: str, position: int) -> int:
     return position
 
 
+def normalise_instruction(task_dir: Path) -> None:
+    """Give instruction.md the one format `insert_paragraph` writes: blank-line separated paragraphs, no trailing space
+    after a paragraph, exactly one final newline.
+
+    Every emitted variant, the plain feasible copy included, goes through this, so a perturbed instruction is not
+    marked by its formatting (the leak verifier saw perturbed rows end in a newline and lose trailing spaces while
+    plain ones kept both, which separates perturbed from plain rows).
+    """
+    paras = _paragraphs(task_dir)
+    (task_dir / "instruction.md").write_text("\n\n".join(p.rstrip() for p in paras) + "\n")
+
+
 def prepend_instruction(task_dir: Path, text: str) -> None:
     path = task_dir / "instruction.md"
     path.write_text(text.strip() + "\n\n" + path.read_text().lstrip())

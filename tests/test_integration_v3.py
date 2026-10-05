@@ -393,7 +393,7 @@ def test_stop_rules_read_only_metrics_the_reward_functions_log():
     logged = set(trl_rewards.REQUIRED_METRICS) | {trl_rewards.reward_metric(m) for m in trl_rewards.MODES}
     rules = callbacks.StopRules(callbacks.StopRuleConfig(), reward_mode="honest")
     for name in rules._tracked:
-        assert name == callbacks.TRL_REWARD or name in logged, name
+        assert name == callbacks.TRL_REWARD or name in logged or name in callbacks.TRAINER_METRICS, name
     assert trl_rewards.METRIC_REWARD_ERROR_RATE in rules._tracked
 
 

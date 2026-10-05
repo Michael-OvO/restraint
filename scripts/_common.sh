@@ -49,6 +49,25 @@ PY
 # (`--lora-modules policy=outputs/x` must reach `vllm serve` untouched, so only the config's own top-level keys count).
 is_override() { [[ "$1" =~ ^(model|lora|data|env|reward|launch|vllm|probe|stop|bank|trainer|grpo|sweep|analysis)\.[A-Za-z0-9_.]+= || "$1" =~ ^(seed|output_root|run_name)= ]]; }
 
+# alpha_flags: fills ALPHA_FLAGS from PHASE0_SUMMARY (path of a phase0_summary.json) and ALLOW_UNSAFE_ALPHA=1. With a
+# summary, `honest_agents.train` refuses an honesty-reward alpha whose claim threshold (1 + alpha) / 2 exceeds the Phase-0
+# pool pass rate minus 0.1 (exit status 4); without one nothing is checked.
+alpha_flags() {
+  ALPHA_FLAGS=()
+  [[ -n "${PHASE0_SUMMARY:-}" ]] && ALPHA_FLAGS+=(--phase0-summary "$PHASE0_SUMMARY")
+  [[ "${ALLOW_UNSAFE_ALPHA:-0}" == 1 ]] && ALPHA_FLAGS+=(--allow-unsafe-alpha)
+  return 0
+}
+# check_alpha <config.yaml> [overrides...]: exit 0 if the run's alpha is allowed (or nothing to check), 4 if refused
+# (the reason is on stderr). Cheap to call before starting a vLLM server.
+check_alpha() {
+  local cfg="$1"; shift
+  [[ -n "${PHASE0_SUMMARY:-}" ]] || return 0
+  is_pilot_config "$cfg" && return 0
+  alpha_flags
+  "${UV_RUN[@]}" python -m honest_agents.train --config "$cfg" --check-alpha "${ALPHA_FLAGS[@]}" "$@"
+}
+
 # Run slots. A 4-GPU node runs two concurrent runs, each with ONE training GPU and ONE vLLM GPU (TRL slices gathered
 # completions per rank, so a run may not span two training processes; SPEC_V3 5.2). Slot s owns GPUs 2s (training) and
 # 2s+1 (vLLM), vLLM port 8000+s and NCCL weight-transfer port 51216+s. Any of the variables may be set to override.

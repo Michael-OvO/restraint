@@ -1,19 +1,23 @@
 """A small audited dataset for hand review (SPEC_V3 §4.9, LV-1: "audit 100 surviving variants by hand").
 
     python -m honest_agents.tasks.audit --out data/audit --sources endless-terminals --n-sources 24 \\
-        --families remove_input conflicting_constraint [--validation-jsonl data/validation.jsonl]
+        --families remove_input revoke_permission [--validation-jsonl data/validation.jsonl] [--no-show-tests]
     python -m honest_agents.tasks.audit --tally data/audit          # after filling in the sheets
 
-Builds the variants of 20-30 source tasks for two operator families (plain feasible copy, infeasible variant and
+Builds the variants of 20-30 source tasks for a few operator families (plain feasible copy, infeasible variant and
 near-miss control per family), prefers sources to which every selected family applies, and writes
 
     <out>/tasks/<variant_id>/       the Harbor task dirs
     <out>/train.jsonl               dataset rows (INTERFACES_V3 §6 columns), usable as `data.train_file` for bring-up
     <out>/sheets/<variant_id>.md    one audit sheet per variant: instruction diff, environment diff, the perturbed
-                                    object, every label, the validation result, and a verdict line to fill in
+                                    object, every label, the tests (file names, what each test asserts, the oracle
+                                    command; `--no-show-tests` hides them), the validation result, a checklist and a
+                                    verdict line to fill in
     <out>/INDEX.md                  all variants with links; <out>/audit.jsonl the same as data
 
-A reviewer reads a sheet and writes `Verdict: ok | wrong | unsure` (and a note). `--tally` counts the verdicts per
+Without the tests a reviewer cannot tell whether an impossible variant is truly impossible (a removed input that the
+tests only compare with whatever sits at its path can be recreated; one whose content the tests hard-code cannot), so
+the sheet shows them. A reviewer reads a sheet and writes `Verdict: ok | wrong | unsure` (and a note). `--tally` counts the verdicts per
 family and kind: `wrong` on an infeasible variant is a residual leak (a route the label denies exists), `wrong` on a
 control means the obstacle is not harmless, and `wrong` on a plain feasible task means the source task is broken.
 """
@@ -21,6 +25,7 @@ control means the obstacle is not harmless, and `wrong` on a plain feasible task
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import json
 import logging
@@ -54,7 +59,9 @@ from honest_agents.tasks.taskfs import read_task_toml
 log = logging.getLogger(__name__)
 
 KIND_ORDER = {"feasible": 0, "infeasible": 1, "control": 2}
-DEFAULT_FAMILIES = ("remove_input", "conflicting_constraint")
+DEFAULT_FAMILIES = ("remove_input", "revoke_permission", "high_risk")  # the training families (build.py)
+TEST_ASSERT_CHARS = 200  # what each test asserts, cut here
+ORACLE_LINES = 30
 DEFAULT_N_SOURCES = 24
 MAX_CANDIDATES = 400  # source tasks examined while looking for `n_sources` that every family applies to
 VERDICT_RE = re.compile(r"^Verdict:[ \t]*([A-Za-z]*)", re.MULTILINE)
@@ -81,6 +88,7 @@ class AuditConfig:
     test_ids_file: Path | None = None  # committed test_ids.txt: those groups are not audited
     test_bp: int = DEFAULT_TEST_BP  # the dataset's hash cutoffs; a source that hashes into test is never audited
     split_seed: int = 0
+    show_tests: bool = True  # tests and oracle command on every sheet (a human cannot judge "impossible" without them)
 
     def __post_init__(self) -> None:
         unknown = [f for f in self.families if f not in OPERATORS]
@@ -203,12 +211,86 @@ def validation_text(result: Any | None, task_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def test_assertions(task_dir: Path, *, chars: int = TEST_ASSERT_CHARS) -> list[tuple[str, str, str]]:
+    """(file, test name, what it asserts) for every test function under tests/: the asserts' source, else the body,
+    collapsed to one line and cut at `chars`."""
+    out = []
+    for f in sorted((task_dir / "tests").glob("test_*.py")):
+        src = _read(f)
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            out.append((f.name, "(unparsable)", " ".join(src.split())[:chars]))
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
+                continue
+            asserts = [n for n in ast.walk(node) if isinstance(n, ast.Assert)]
+            parts = [ast.get_source_segment(src, n) or "" for n in (asserts or node.body)]
+            out.append((f.name, node.name, " ".join(" ".join(parts).split())[:chars]))
+    return out
+
+
+def oracle_command(task_dir: Path, *, lines: int = ORACLE_LINES) -> str:
+    """The oracle solution as it runs (`solution/solve.sh`, comments and blanks dropped, cut at `lines`)."""
+    body = [
+        ln for ln in _read(task_dir / "solution" / "solve.sh").splitlines() if ln.strip() and not ln.startswith("#")
+    ]
+    return "\n".join(body[:lines] + ([f"... ({len(body) - lines} more lines)"] if len(body) > lines else []))
+
+
+def checklist(v: Variant) -> list[str]:
+    """One tick line per question a reviewer must answer for this kind of variant (the first one needs the tests)."""
+    if v.kind == "infeasible":
+        items = [
+            (
+                "the tests above cannot pass without the removed or locked object (nothing they compare with is "
+                "derived from what the agent could recreate)"
+            ),
+            (
+                "no substitute route passes them: recreate the input from the instruction or other image files, "
+                "rename or copy around the lock, another tool"
+            ),
+            "the label names the object a correct decline must point at",
+        ]
+        if v.perturbation == "remove_input":
+            items.insert(
+                1, "the removed file is not rebuildable: not typed in the instruction, not derivable from the image"
+            )
+        return items
+    if v.kind == "control":
+        return [
+            "the obstacle is surmountable by a short, discoverable step and the tests above pass afterwards",
+            "a decline would be a mistake: the oracle command shown does finish the task",
+        ]
+    return ["the tests above check what the instruction asks, and the oracle command passes them"]
+
+
+def tests_section(task_dir: Path) -> list[str]:
+    asserts = test_assertions(task_dir)
+    rows = [f"- `{f}::{name}`: `{text}`" if text else f"- `{f}::{name}`" for f, name, text in asserts]
+    files = ", ".join(f"`{f.name}`" for f in sorted((task_dir / "tests").glob("*")) if f.is_file())
+    return [
+        "## Tests (what the grader checks)",
+        "",
+        f"Files: {files or '(none)'}",
+        "",
+        *(rows or ["(no test functions found)"]),
+        "",
+        "Oracle command (`solution/solve.sh`):",
+        "",
+        _block(oracle_command(task_dir) or "(no oracle)", "bash"),
+        "",
+    ]
+
+
 def render_sheet(
     seed: SeedTask,
     v: Variant,
     *,
     twin: Variant | None,
     result: Any | None,
+    show_tests: bool = True,
 ) -> str:
     spec = v.spec
     src, dst = seed.task_dir, v.task_dir
@@ -239,6 +321,8 @@ def render_sheet(
         "",
         q,
         "",
+        *[f"- [ ] {c}" for c in checklist(v)],
+        "",
         "Verdict: ",
         "",
         "Notes: ",
@@ -257,6 +341,8 @@ def render_sheet(
         _block(json.dumps(v.detail, indent=2, default=str), "json") if v.detail else "(none: unperturbed)",
         "",
     ]
+    if show_tests:
+        out += tests_section(dst)
     if twin is not None:
         out += [f"Paired variant: [{twin.variant_id}]({twin.variant_id}.md) ({twin.kind})", ""]
     inst = _diff(
@@ -331,7 +417,7 @@ def write_audit(cfg: AuditConfig) -> dict[str, Any]:
             elif v.kind == "control":
                 twin = by_key.get((v.perturbation, "infeasible"))
             (sheets / f"{v.variant_id}.md").write_text(
-                render_sheet(seed, v, twin=twin, result=results.get(v.variant_id))
+                render_sheet(seed, v, twin=twin, result=results.get(v.variant_id), show_tests=cfg.show_tests)
             )
             res = results.get(v.variant_id)
             index.append(
@@ -472,6 +558,12 @@ def parse_args(argv: list[str] | None = None) -> tuple[AuditConfig | None, Path 
     ap.add_argument("--benchmark-dir", type=Path, action="append", default=[])
     ap.add_argument("--validation-jsonl", type=Path, help="show validation results on the sheets")
     ap.add_argument("--allow-legacy-verifier", action="store_true")
+    ap.add_argument(
+        "--show-tests",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="put the test files, what each test asserts and the oracle command on every sheet (default on)",
+    )
     ap.add_argument("--task-dir-root")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--i-know-no-benchmark", action="store_true", help="tests only: skip the mandatory decontamination")
@@ -498,6 +590,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[AuditConfig | None, Path 
             benchmark_dirs=a.benchmark_dir,
             validation_jsonl=a.validation_jsonl,
             allow_legacy_verifier=a.allow_legacy_verifier,
+            show_tests=a.show_tests,
             task_dir_root=a.task_dir_root,
             seed=a.seed,
             i_know_no_benchmark=a.i_know_no_benchmark,

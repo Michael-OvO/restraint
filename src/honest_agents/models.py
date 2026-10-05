@@ -533,3 +533,68 @@ def check_tool_flow_template(trainer: Any, *, strict: bool = True) -> list[str]:
     else:
         logger.info("chat template is prefix-preserving for the bash -> submit_report tool flow")
     return failures
+
+
+# ── chat template: the turn's end token is the tokenizer's EOS (audit T2) ─────
+
+
+def end_of_turn_failures(
+    processing_class: Any,
+    *,
+    tools: Sequence[Any] | None = None,
+    chat_template: str | None = None,
+    chat_template_kwargs: dict[str, Any] | None = None,
+) -> list[str]:
+    """Where the token that closes an assistant turn in the template is not the tokenizer's `eos_token_id`.
+
+    TRL decides that a rollout was cut by the length limit when its last sampled id is neither the tokenizer's EOS nor
+    its pad token, masks such rollouts from the loss (`mask_truncated_completions`) and our loop labels them
+    `truncated`. A model that ends turns with `<|im_end|>` while the tokenizer's EOS is `<|endoftext|>` (a base
+    checkpoint) would have every healthy turn counted as truncated and the whole run masked, so this is asserted at
+    start with the real tokenizer and template, for a plain reply and for a tool call.
+    """
+    kw = {
+        "tools": list(tools) if tools else None,
+        "chat_template": chat_template,
+        "add_generation_prompt": False,
+        "chat_template_kwargs": dict(chat_template_kwargs or {}),
+    }
+    eos = getattr(processing_class, "eos_token_id", None)
+    if eos is None:
+        return ["the tokenizer has no eos_token_id"]
+    tokenizer = getattr(processing_class, "tokenizer", processing_class)
+    flow = tool_flow_messages()
+    cases = {
+        "a plain reply": [*flow[:2], {"role": "assistant", "content": "done"}],
+        "a tool call": flow[:3],
+    }
+    failures = []
+    for label, messages in cases.items():
+        ids = _flow_ids(processing_class, messages, **kw)
+        while ids and not tokenizer.decode([ids[-1]]).strip():  # the newline the template adds after the end token
+            ids.pop()
+        if not ids or ids[-1] != eos:
+            last = tokenizer.decode(ids[-1:]) if ids else "(nothing)"
+            failures.append(
+                f"the template ends {label} with {last!r} but the tokenizer's eos_token is "
+                f"{tokenizer.decode([eos])!r} (id {eos})"
+            )
+    return failures
+
+
+def check_end_of_turn_token(trainer: Any, *, strict: bool = True) -> list[str]:
+    """Assert, with the trainer's real tokenizer and effective template, that a turn ends on the tokenizer's EOS."""
+    failures = end_of_turn_failures(
+        trainer.processing_class,
+        tools=getattr(trainer, "tools", None),
+        chat_template=getattr(trainer, "chat_template", None),
+        chat_template_kwargs=getattr(trainer, "chat_template_kwargs", None),
+    )
+    if failures:
+        msg = "end-of-turn token mismatch: " + "; ".join(failures)
+        if strict:
+            raise RuntimeError(msg + " (model.strict_template=false to override)")
+        logger.warning(msg)
+    else:
+        logger.info("the chat template ends every assistant turn with the tokenizer's eos token")
+    return failures

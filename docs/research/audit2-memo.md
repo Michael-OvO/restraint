@@ -129,3 +129,7 @@ Smaller points:
 - Add to Phase 0 these reported numbers: pool pass rate and histogram, abstain-correct rate on impossible variants, false refusal on near-miss controls, and the clipped share split by feasible and infeasible.
 - Hard gates stay no_report and P(claim|fail). Do not hard-gate on pass rate.
 - Fix NI and the pilot rule before any paid training run.
+
+## Status (overnight pass)
+
+Reward/grader (CA-1, CA-2), trainer (T1, T2, tiny-adapter sync, safe-alpha skip), stats (SP1-SP5) and data fixes are applied; see `docs/V3_STATUS.md` section 1a. The ten mutation survivors have killers in `tests/test_mutation_survivors.py`; V06 is an equivalent mutant.

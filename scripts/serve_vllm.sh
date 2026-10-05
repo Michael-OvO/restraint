@@ -5,6 +5,8 @@
 # from the run's limits (prompt reserve + total budget + per-turn cap) and asserted against this server at train start.
 # Env: SLOT (0), VLLM_GPUS / VLLM_PORT (from SLOT), VLLM_TP (default: #GPUs), VLLM_GPU_MEM (0.9),
 #      VLLM_MAX_MODEL_LEN (only to RAISE the window; lower than the computed value is refused),
+#      VLLM_EXPOSE=1 to listen on all interfaces (0.0.0.0); the default is 127.0.0.1, because the server has no
+#      authentication and accepts weight updates (audit T2). Training and evaluation run on the same host.
 #      EVAL=1 to also enable the OpenAI tool/reasoning parsers (evaluation; not needed for training).
 # Flags mirror trl 1.14.1 scripts/vllm_serve.py (the deprecated `trl vllm-serve`), checked against vllm 0.30.0.
 # `--generation-config vllm` makes vLLM ignore the checkpoint's generation_config.json (Qwen3-4B: temperature 0.6,
@@ -32,10 +34,15 @@ if [[ "${EVAL:-0}" == 1 ]]; then
                  --default-chat-template-kwargs '{"enable_thinking": false}')
 fi
 
-echo "serving $MODEL (family $FAMILY) on GPUs $GPUS, TP=$TP, port $VLLM_PORT, max_model_len $MAX_LEN (run needs $NEED_LEN)"
+HOST=127.0.0.1
+if [[ "${VLLM_EXPOSE:-0}" == 1 ]]; then
+  HOST=0.0.0.0
+  echo "WARNING: VLLM_EXPOSE=1: the vLLM server (no authentication, weight updates enabled) listens on every interface" >&2
+fi
+echo "serving $MODEL (family $FAMILY) on GPUs $GPUS, TP=$TP, $HOST:$VLLM_PORT, max_model_len $MAX_LEN (run needs $NEED_LEN)"
 export CUDA_VISIBLE_DEVICES="$GPUS" VLLM_SERVER_DEV_MODE=1 VLLM_WORKER_MULTIPROC_METHOD=spawn
 exec "${UV_RUN[@]}" vllm serve "$MODEL" \
-  --host 0.0.0.0 --port "$VLLM_PORT" \
+  --host "$HOST" --port "$VLLM_PORT" \
   --tensor-parallel-size "$TP" \
   --gpu-memory-utilization "${VLLM_GPU_MEM:-0.9}" \
   --max-model-len "$MAX_LEN" \

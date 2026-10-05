@@ -21,6 +21,10 @@ What this module guarantees (SPEC_V3 §5, §9; the finding ids are in `docs/rese
 * **Resume continues the task order** (SPEC §9.3.3): the dataset order is a pure function of the config and the seed,
   its fingerprint is stored and re-checked on resume, and one generation round is exactly one optimizer step so a
   checkpoint never falls inside a generation batch.
+* **Unsafe alphas are refused** when a Phase-0 summary is supplied (`--phase0-summary`): (1 + alpha) / 2 above the pool
+  pass rate minus 0.1 means declining everything beats working (`--allow-unsafe-alpha` overrides; exit status 4).
+* **Trainer safety checks at start**: the chat template ends every assistant turn with the tokenizer's EOS (else every
+  turn counts as truncated), and the vLLM server binds to 127.0.0.1 unless `VLLM_EXPOSE=1` (`scripts/serve_vllm.sh`).
 * **Data guards**: only `verifier = "pytest"` tasks (override: `data.allow_legacy_verifier`), no test-split rows in
   training, a validation probe split that shares no variant with training, and labels in the rows that agree with the
   task's own `task.toml`.
@@ -47,9 +51,10 @@ from typing import Any
 import yaml
 
 from honest_agents import trl_rewards
-from honest_agents.callbacks import StopRuleConfig
+from honest_agents.callbacks import SAFE_ALPHA_MARGIN, StopRuleConfig, alpha_is_safe
 from honest_agents.models import (
     ModelFamily,
+    check_end_of_turn_token,
     check_full_distribution_sampling,
     check_tool_flow_template,
     check_training_template,
@@ -69,6 +74,10 @@ SPLIT_TRAIN = "train"
 VALIDATION_SPLITS = ("validation", "val")
 DATA_ORDER_FILE = "data_order.json"
 EXIT_STOPPED_BY_RULE = 3  # distinct from a crash, so a sweep can tell a collapse from a failure
+EXIT_UNSAFE_ALPHA = 4  # the alpha was refused against the Phase-0 pool pass rate: a sweep skips it instead of failing
+ALPHA_PASS_MARGIN = (
+    SAFE_ALPHA_MARGIN  # (1 + alpha) / 2 must stay this far below the pool pass rate (audit2 memo, reward item 3)
+)
 
 # GRPOConfig fields derived from other sections; setting them under `grpo:` would silently disagree with the run.
 _DERIVED_GRPO_FIELDS = {
@@ -198,6 +207,8 @@ class TrainerSection:
     """Attributes of `honest_agents.trainer.HonestGRPOTrainer` set after construction."""
 
     max_tool_workers: int | None = None  # None = one thread per live episode
+    trim_padding: bool = True  # length-trimmed forward chunks (audit T1); False = TRL's batch-global padding
+    sort_micro_batches: bool = True  # regroup a round's micro-batches by length (dapo/cispo/vespo only)
 
 
 @dataclass
@@ -410,6 +421,70 @@ def build_reward_config(cfg: TrainRunConfig, call_budget: int | None = None) -> 
         )
     values["efficiency_ref_actions"] = call_budget
     return RewardConfig(**values)
+
+
+class UnsafeAlphaError(ValueError):
+    """The honesty reward's claim threshold is too close to (or above) what the task pool lets the policy pass."""
+
+
+def alpha_of(cfg: TrainRunConfig) -> float | None:
+    """The run's alpha, or None for a reward without one (the outcome arms)."""
+    if cfg.reward.mode != "honest":
+        return None
+    return float(build_reward_config(cfg).alpha)
+
+
+def load_pool_pass_rate(summary_path: str | Path) -> float:
+    """The mean pass rate on feasible tasks from `scripts/phase0.sh`'s `phase0_summary.json` (`pool` section)."""
+    path = Path(summary_path)
+    try:
+        summary = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise UnsafeAlphaError(f"cannot read the Phase-0 summary {path}: {e}") from e
+    rate = (summary.get("pool") or {}).get("mean_pass_rate_feasible")
+    if not isinstance(rate, int | float) or isinstance(rate, bool):
+        raise UnsafeAlphaError(
+            f"{path} has no pool.mean_pass_rate_feasible (it needs the trajectory bank: run Phase 0 with bank.enabled), "
+            "so the alpha cannot be checked against the pool"
+        )
+    return float(rate)
+
+
+def check_safe_alpha(
+    cfg: TrainRunConfig,
+    summary_path: str | Path | None,
+    *,
+    allow_unsafe: bool = False,
+    margin: float = ALPHA_PASS_MARGIN,
+) -> str | None:
+    """Refuse an alpha whose claim threshold (1 + alpha) / 2 exceeds the Phase-0 pool pass rate minus `margin`.
+
+    Above that line quitting beats working at the pool's pass rate, and the reward drifts to refuse-everything (audit2
+    memo, INC-5): `callbacks.pool_stats` only reported it (`safe_alphas`), this makes it a hard skip. Needs a summary;
+    without one nothing is checked (Phase 0 has not run: the first runs are the ones that produce it). Outcome arms have
+    no alpha. `allow_unsafe` turns the refusal into a warning. Returns the message when it was overridden.
+    """
+    alpha = alpha_of(cfg)
+    if summary_path is None or alpha is None:
+        return None
+    try:
+        rate = load_pool_pass_rate(summary_path)
+        threshold = (1 + alpha) / 2
+        if alpha_is_safe(alpha, rate, margin):
+            logger.info("alpha %g is safe: threshold %.3f <= pool pass rate %.3f - %g", alpha, threshold, rate, margin)
+            return None
+        message = (
+            f"alpha {alpha:g} refused: its claim threshold (1 + alpha) / 2 = {threshold:.3f} exceeds the Phase-0 pool "
+            f"pass rate {rate:.3f} minus the margin {margin:g} = {rate - margin:.3f} ({summary_path}). A policy would "
+            "do better by declining everything. Pick a smaller alpha, easier tasks, or pass --allow-unsafe-alpha "
+            "(ALLOW_UNSAFE_ALPHA=1 in the scripts) to run it anyway."
+        )
+    except UnsafeAlphaError as e:
+        message = f"alpha {alpha:g} cannot be checked: {e}. Pass --allow-unsafe-alpha to run without the check."
+    if not allow_unsafe:
+        raise UnsafeAlphaError(message)
+    logger.warning("%s (overridden by --allow-unsafe-alpha)", message)
+    return message
 
 
 def reward_weights(mode: str) -> list[float]:
@@ -1406,8 +1481,11 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
         environment_factory=plan.environment_factory,
     )
     trainer.max_tool_workers = plan.cfg.trainer.max_tool_workers
+    trainer.trim_padding = plan.cfg.trainer.trim_padding
+    trainer.sort_micro_batches = plan.cfg.trainer.sort_micro_batches
     check_training_template(trainer, plan.family, strict=plan.cfg.model.strict_template)
     check_tool_flow_template(trainer, strict=plan.cfg.model.strict_template)
+    check_end_of_turn_token(trainer, strict=plan.cfg.model.strict_template)
     check_prompt_budget(trainer, plan)
     if list(trainer.reward_weights.tolist()) != list(plan.grpo_config.reward_weights):
         raise RuntimeError(
@@ -1469,11 +1547,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the limits and the vLLM --max-model-len as JSON and exit (used by scripts/serve_vllm.sh)",
     )
+    ap.add_argument(
+        "--phase0-summary",
+        default=None,
+        help="Phase-0 phase0_summary.json: refuse an alpha with (1 + alpha) / 2 above its pool pass rate minus 0.1",
+    )
+    ap.add_argument(
+        "--allow-unsafe-alpha", action="store_true", help="run an alpha refused by --phase0-summary (logs a warning)"
+    )
+    ap.add_argument(
+        "--check-alpha",
+        action="store_true",
+        help=f"only check the alpha against --phase0-summary and exit (status {EXIT_UNSAFE_ALPHA} if refused)",
+    )
     ap.add_argument("overrides", nargs="*", help="dotted overrides, e.g. reward.config.alpha=0.25 grpo.max_steps=2")
     args = ap.parse_intermixed_args(argv)  # flags may follow the dotted overrides
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     cfg = load_run_config(args.config, args.overrides)
+    try:
+        check_safe_alpha(cfg, args.phase0_summary, allow_unsafe=args.allow_unsafe_alpha)
+    except UnsafeAlphaError as e:
+        print(f"train: {e}", file=sys.stderr)
+        return EXIT_UNSAFE_ALPHA
+    if args.check_alpha:
+        return 0
     if args.print_limits:
         limits = build_limits(cfg)
         print(

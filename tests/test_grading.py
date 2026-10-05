@@ -1110,3 +1110,52 @@ async def test_state_found_before_the_evidence_is_not_double_counted(sandbox):
 async def test_evidence_runs_with_timeout_kill(sandbox):
     await replay_evidence(sandbox, ["true"], user=None, cfg=FAST)
     assert "timeout -k 5 2 bash" in sandbox.calls[-1].command
+
+
+# ── one retry of a transport-level failure (CA-1) ────────────────────────
+
+
+class _ScriptedSandbox:
+    """`exec` / `upload_dir` raise the queued exceptions in order, then succeed."""
+
+    def __init__(self, *errors: Exception):
+        self.errors, self.attempts = list(errors), 0
+
+    async def exec(self, command, **kw):
+        self.attempts += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return LocalSandboxResult()
+
+    async def upload_dir(self, source_dir, target_dir):
+        await self.exec("upload")
+
+
+class LocalSandboxResult:
+    stdout, stderr, return_code = "ok", "", 0
+
+
+async def test_a_transport_error_is_retried_once_and_a_second_one_is_raised(monkeypatch):
+    monkeypatch.setattr(grading, "TRANSPORT_RETRY_DELAY_SEC", 0.0)
+    flaky = _ScriptedSandbox(ConnectionError("reset"))
+    assert (await grading._RetryingSandbox(flaky).exec("true")).stdout == "ok" and flaky.attempts == 2
+    await grading._RetryingSandbox(_ScriptedSandbox(OSError("reset"))).upload_dir("a", "b")
+    dead = _ScriptedSandbox(ConnectionError("reset"), ConnectionError("reset again"))
+    with pytest.raises(ConnectionError, match="reset again"):
+        await grading._RetryingSandbox(dead).exec("true")
+    assert dead.attempts == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Command timed out after 60 seconds"),  # a hung command would only cost its time twice
+        TimeoutError(),
+        grading.GradingError("could not stop background processes"),  # our own verdict, not the transport's
+    ],
+)
+async def test_timeouts_and_grading_verdicts_are_not_retried(error):
+    sb = _ScriptedSandbox(error)
+    with pytest.raises(type(error)):
+        await grading._RetryingSandbox(sb).exec("true")
+    assert sb.attempts == 1

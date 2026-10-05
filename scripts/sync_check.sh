@@ -8,6 +8,10 @@
 # outputs/sync_check/<config>_slot<N>.json. Pass: mean importance ratio within 1% of 1, mean |gap| no larger than the base
 # model's, no NaN. If it fails: adapter-only sync, float32 serving, or Qwen3-4B (the JSON's "recommendation").
 # --bank DIR   use the token ids of banked Phase-0 trajectories instead of synthetic transcripts.
+# --tiny-adapter   second pass (run it too): an adapter of one learning step (B std 1e-5) instead of std 0.01, which is
+#                  20-60x larger than early training deltas. Passes only if at least half of the delta survives the bf16
+#                  merge into the served dtype (--served-dtype, default bfloat16); a failure means early updates never reach
+#                  the sampler (serve float32, sync the adapter only, or raise the learning rate).
 source "$(dirname "$0")/_common.sh"
 CONFIG="configs/base.yaml"
 if [[ $# -gt 0 && "$1" == *.yaml ]]; then CONFIG="$1"; shift; fi

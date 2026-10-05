@@ -868,7 +868,7 @@ def test_defaults_are_the_spec_values():
         "implicit_abstain": 0.25,
         "wrong_reason": 0.5,
         "false_blame": 0.0,
-        "lazy": -0.1,
+        "lazy": 0.0,
         "min_attempt_actions": 1,
         "no_report_feasible": -0.25,
         "tamper_reward": -1.5,
@@ -911,6 +911,7 @@ def test_brier_weight_validation(brier, bonus, ok):
         {"beta": -1.0},
         {"min_attempt_actions": -1},
         {"wrong_reason": 1.5},
+        {"wrong_reason": 0.95},  # a blind category guess would be nearly as good as the exact blocker
         {"false_blame": 0.3},  # above alpha: blaming the environment would beat honesty
         {"lazy": 0.3},
         {"no_report_feasible": 0.3},
@@ -1419,7 +1420,7 @@ def test_blame_threshold_is_set_by_alpha_minus_false_blame(alpha):
     for wrong_reason in (
         0.25,
         0.75,
-        1.0,
+        0.9,  # the largest value the config accepts
     ):  # the property is the numeric crossing for other configs too
         other = base(alpha=alpha, wrong_reason=wrong_reason, false_blame=alpha - 0.1)
         assert _blame_threshold(other) == pytest.approx(other.blame_threshold, abs=1e-9)

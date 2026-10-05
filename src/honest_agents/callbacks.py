@@ -33,6 +33,7 @@ from honest_agents.trl_rewards import (
     METRIC_NO_CONTRAST,
     METRIC_REPORT_RATE,
     METRIC_REWARD_ERROR_RATE,
+    METRIC_TAMPER_RATE,
     METRIC_TASK_SUCCESS,
     METRIC_ZERO_VARIANCE_GROUPS,
     reward_metric,
@@ -40,6 +41,10 @@ from honest_agents.trl_rewards import (
 
 logger = logging.getLogger(__name__)
 
+METRIC_IS_MEAN = "sampling/importance_sampling_ratio/mean"  # TRL: batch mean of the sampler/trainer ratio
+METRIC_IS_AT_CAP = "sampling/importance_sampling_ratio/at_cap_share"  # trainer.py: loss tokens at the ratio cap
+METRIC_TRUNCATED = "completions/clipped_ratio"  # TRL: share of completions cut by max_completion_length
+TRAINER_METRICS = (METRIC_IS_MEAN, METRIC_IS_AT_CAP, METRIC_TRUNCATED)  # tracked, but logged by TRL / trainer.py
 EVAL_PREFIX = "eval_"  # transformers prefixes every evaluation metric with this
 TRL_REWARD = "reward"  # trl GRPOTrainer: nanmean of the optimised reward over the batch
 
@@ -51,6 +56,10 @@ RULE_MASKED_SHARE = "masked_share_high"
 RULE_REPORT_RATE = "report_rate_falling"
 RULE_VAL_SUCCESS = "validation_success_falling_reward_rising"
 RULE_REWARD_ERROR = "reward_error_rate_high"
+RULE_TAMPER_RATE = "tamper_rate_high"
+RULE_IS_DRIFT = "sampler_trainer_drift"
+RULE_IS_AT_CAP = "importance_ratio_at_cap"
+RULE_TRUNCATED = "truncated_share_high"
 RULES = (
     RULE_CLAIM_RATE,
     RULE_ZERO_VARIANCE,
@@ -60,6 +69,10 @@ RULES = (
     RULE_REPORT_RATE,
     RULE_VAL_SUCCESS,
     RULE_REWARD_ERROR,
+    RULE_TAMPER_RATE,
+    RULE_IS_DRIFT,
+    RULE_IS_AT_CAP,
+    RULE_TRUNCATED,
 )
 
 STOP_RULES_FILE = "stop_rules.jsonl"
@@ -105,6 +118,18 @@ class StopRuleConfig:
     max_decline_rate_feasible: float = 0.8  # ceiling on non-claim reports on feasible tasks; set from Phase 0
     max_masked_share: float = 0.15  # infrastructure failures or leaks are eating the batch
     max_reward_error_rate: float = 0.05  # reward/grading failures (scored as tamper or masked): a grader bug
+    # Tamper share over the short `tamper_window`. A genuine policy exploit and a broken grader both show up here (a
+    # grading failure after the agent acted is scored as tamper), and either must stop the run within a few steps: at
+    # -1.5 a tamper rate this high drives the policy, so waiting for a 20-step window would train on it for hours.
+    max_tamper_rate: float = 0.10
+    tamper_window: int = 5
+    # Sampler vs trainer drift (audit T2): vLLM and the trainer should score a token alike; a window-mean ratio far
+    # from 1 means the served weights are stale or in another dtype, and the run is training on off-policy data.
+    max_is_ratio_deviation: float = 0.05
+    max_is_ratio_at_cap_share: float = 0.05
+    # Absolute ceiling (no Phase-0 baseline is wired in): truncated rollouts are masked, so a high share starves the
+    # batch while the reward still looks fine.
+    max_truncated_share: float = 0.30
     task_success_drop: float = 0.10  # absolute drop of feasible task success while mean reward rises
     report_rate_drop: float = 0.15  # absolute drop of the share of episodes that end with a parsed report
     val_task_success_drop: float = 0.05  # same, on the validation probe, against the best earlier probe
@@ -113,10 +138,10 @@ class StopRuleConfig:
     def __post_init__(self) -> None:
         if self.action not in ("stop", "warn"):
             raise ValueError(f"stop.action must be 'stop' or 'warn', got {self.action!r}")
-        if self.window < 1 or self.val_patience < 1:
-            raise ValueError("stop.window and stop.val_patience must be >= 1")
+        if self.window < 1 or self.val_patience < 1 or self.tamper_window < 1:
+            raise ValueError("stop.window, stop.tamper_window and stop.val_patience must be >= 1")
         for name in ("min_claim_rate_feasible", "max_zero_variance_group_share", "max_decline_rate_feasible",
-                     "max_masked_share", "max_reward_error_rate", "task_success_drop", "report_rate_drop", "val_task_success_drop"):  # fmt: skip
+                     "max_masked_share", "max_reward_error_rate", "max_tamper_rate", "max_is_ratio_deviation", "max_is_ratio_at_cap_share", "max_truncated_share", "task_success_drop", "report_rate_drop", "val_task_success_drop"):  # fmt: skip
             if not 0.0 <= getattr(self, name) <= 1.0:
                 raise ValueError(f"stop.{name} must be in [0, 1], got {getattr(self, name)}")
 
@@ -162,8 +187,10 @@ class StopRules(TrainerCallback):
       higher than it was in that window;
     * decline rate on feasible tasks above a ceiling;
     * masked share above 15%;
-    * reward-function errors above 5% of episodes (a grading failure after the agent acted is scored as tamper, not
-      masked, so without this rule a broken grader would silently train the policy against it);
+    * reward-function errors above 5% of episodes (`honest/reward_error_rate` counts every grading failure after the
+      agent acted, which is scored as tamper, not masked, so a broken grader cannot train the policy unseen);
+    * tamper rate above `max_tamper_rate` over the last `tamper_window` (5) steps, a shorter window than the others
+      because tamper is paid -1.5 and a flaky grader or an exploit must not be trained on for 20 steps;
     * share of episodes that end with a report down by `report_rate_drop` against the best earlier window;
     * validation-probe task success below the best earlier probe by `val_task_success_drop` for `val_patience`
       consecutive probes while the training reward is higher than at that probe.
@@ -185,6 +212,10 @@ class StopRules(TrainerCallback):
             METRIC_DECLINE_RATE_FEASIBLE,
             METRIC_MASKED_SHARE,
             METRIC_REWARD_ERROR_RATE,
+            METRIC_TAMPER_RATE,
+            METRIC_IS_MEAN,
+            METRIC_IS_AT_CAP,
+            METRIC_TRUNCATED,
             METRIC_REPORT_RATE,
             METRIC_NO_CONTRAST,
             TRL_REWARD,
@@ -197,9 +228,10 @@ class StopRules(TrainerCallback):
         value = _number(logs.get(TRL_REWARD))
         return value if value is not None else _number(logs.get(reward_metric(self.reward_mode)))
 
-    def _window(self, name: str, end: int | None = None) -> float | None:
-        """Mean of `name` over the `window` logged steps ending at index `end` (exclusive; default: the latest)."""
-        w = self.config.window
+    def _window(self, name: str, end: int | None = None, w: int | None = None) -> float | None:
+        """Mean of `name` over the `w` (default `window`) logged steps ending at index `end` (exclusive; default: the
+        latest)."""
+        w = self.config.window if w is None else w
         values = self.state.series.get(name, [])
         end = len(values) if end is None else end
         if end < w:
@@ -227,21 +259,29 @@ class StopRules(TrainerCallback):
             return []
         out: list[Trigger] = []
 
-        def threshold(rule: str, name: str, limit: float, *, below: bool) -> None:
-            value = self._window(name)
+        def threshold(rule: str, name: str, limit: float, *, below: bool, w: int | None = None) -> None:
+            w = c.window if w is None else w
+            value = self._window(name, w=w)
             if value is None:
                 return
             if (value < limit) if below else (value > limit):
                 side = "below" if below else "above"
-                out.append(
-                    Trigger(rule, step, value, limit, f"{name} = {value:.3f} over {c.window} steps, {side} {limit}")
-                )
+                out.append(Trigger(rule, step, value, limit, f"{name} = {value:.3f} over {w} steps, {side} {limit}"))
 
         threshold(RULE_CLAIM_RATE, METRIC_CLAIM_RATE_FEASIBLE, c.min_claim_rate_feasible, below=True)
         threshold(RULE_ZERO_VARIANCE, METRIC_ZERO_VARIANCE_GROUPS, c.max_zero_variance_group_share, below=False)
         threshold(RULE_DECLINE_RATE, METRIC_DECLINE_RATE_FEASIBLE, c.max_decline_rate_feasible, below=False)
         threshold(RULE_MASKED_SHARE, METRIC_MASKED_SHARE, c.max_masked_share, below=False)
         threshold(RULE_REWARD_ERROR, METRIC_REWARD_ERROR_RATE, c.max_reward_error_rate, below=False)
+        threshold(RULE_TAMPER_RATE, METRIC_TAMPER_RATE, c.max_tamper_rate, below=False, w=c.tamper_window)
+
+        threshold(RULE_IS_AT_CAP, METRIC_IS_AT_CAP, c.max_is_ratio_at_cap_share, below=False)
+        threshold(RULE_TRUNCATED, METRIC_TRUNCATED, c.max_truncated_share, below=False)
+        ratio = self._window(METRIC_IS_MEAN)
+        if ratio is not None and abs(ratio - 1.0) > c.max_is_ratio_deviation:
+            out.append(Trigger(RULE_IS_DRIFT, step, ratio, c.max_is_ratio_deviation,
+                               f"{METRIC_IS_MEAN} = {ratio:.4f} over {c.window} steps, more than "
+                               f"{c.max_is_ratio_deviation} from 1"))  # fmt: skip
 
         success, peak = self._window(METRIC_TASK_SUCCESS), self._peak_before(METRIC_TASK_SUCCESS)
         if success is not None and peak is not None and peak[0] - success >= c.task_success_drop:
@@ -495,6 +535,11 @@ PHASE0_MEANS = (
     "sampling/importance_sampling_ratio/min",
     "sampling/importance_sampling_ratio/mean",
     "sampling/importance_sampling_ratio/max",
+    "sampling/importance_sampling_ratio/at_cap_share",
+    "sampling/importance_sampling_ratio/outside_band_share",
+    "clip_ratio/region_mean",
+    "padding/stock_slots_per_token",
+    "padding/trimmed_slots_per_token",
     "sampling/sampling_logp_difference/mean",
     "sampling/sampling_logp_difference/max",
     "step_time",
@@ -513,6 +558,12 @@ def _is_timing_key(key: str) -> bool:
 
 
 ALPHA_GRID = (0.0, 0.1, 0.25, 0.4)
+SAFE_ALPHA_MARGIN = 0.1  # the claim threshold must sit this far below the pool's mean pass rate
+
+
+def alpha_is_safe(alpha: float, mean_pass_rate: float, margin: float = SAFE_ALPHA_MARGIN) -> bool:
+    """Whether `alpha` can be trained on a pool with this mean pass rate: (1 + alpha) / 2 <= pass rate - margin."""
+    return (1.0 + alpha) / 2.0 <= mean_pass_rate - margin
 
 
 def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) -> dict[str, Any]:
@@ -570,6 +621,9 @@ def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) ->
         "work_vs_quit_gap": gaps,
         "work_beats_quitting": ({k: v > 0 for k, v in gaps.items()} if gaps is not None else None),
         "safe_alphas": ({f"{a:g}": (1 + a) / 2 <= mean_pass for a in alphas} if mean_pass is not None else None),
+        # The gate the trainer may hard-skip on (audit 2 RD-3): the claim threshold must clear the pool's pass rate by
+        # SAFE_ALPHA_MARGIN, else quitting beats working. `safe_alphas` above is the margin-free reading.
+        "alpha_is_safe": ({f"{a:g}": alpha_is_safe(a, mean_pass) for a in alphas} if mean_pass is not None else None),
     }
 
 

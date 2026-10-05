@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Build the small audited dataset for hand review (SPEC_V3 section 4.9): 20-30 source tasks, two operator families
+# Build the small audited dataset for hand review (SPEC_V3 section 4.9): 20-30 source tasks, a few operator families
 # plus their near-miss controls, one markdown audit sheet per variant (instruction diff, environment diff, perturbed
-# object, labels, validation result, a verdict line).
+# object, labels, the tests and the oracle command, validation result, a checklist, a verdict line). The default families
+# are the TRAINING families; the test-only families (conflicting_constraint, no_network) are zero-shot and are audited
+# with FAMILIES="conflicting_constraint" when wanted.
 #
 #   scripts/build_audit_set.sh [OUT_DIR=data/audit] [extra audit args...]
 #   scripts/build_audit_set.sh --tally data/audit          # count the verdicts after reviewing the sheets
 #
 # Env:
 #   N_SOURCES=24          source tasks (20-30)
-#   FAMILIES="remove_input conflicting_constraint"   the two operator families to audit
+#   FAMILIES="remove_input revoke_permission high_risk"   the operator families to audit (the training families)
+#   SHOW_TESTS=1          tests and oracle command on every sheet (default); SHOW_TESTS=0 hides them
 #   SOURCES="endless-terminals"
 #   LIMIT=300             seed tasks sampled before selection
 #   BENCH_DIR=benchmarks  eval benchmarks to deduplicate against: REQUIRED (scripts/fetch_benchmarks.sh); I_KNOW_NO_BENCHMARK=1
@@ -29,7 +32,8 @@ fi
 
 OUT="${1:-data/audit}"; shift || true
 N_SOURCES="${N_SOURCES:-24}"
-FAMILIES="${FAMILIES:-remove_input conflicting_constraint}"
+FAMILIES="${FAMILIES:-remove_input revoke_permission high_risk}"
+SHOW_TESTS="${SHOW_TESTS:-1}"
 SOURCES="${SOURCES:-endless-terminals}"
 LIMIT="${LIMIT-300}"
 BENCH_DIR="${BENCH_DIR:-benchmarks}"
@@ -38,6 +42,7 @@ CONCURRENCY="${CONCURRENCY:-4}"
 
 ARGS=(--out "$OUT" --sources $SOURCES --families $FAMILIES --n-sources "$N_SOURCES" --seed 0)
 [[ -n "$LIMIT" ]] && ARGS+=(--limit "$LIMIT")
+[[ "$SHOW_TESTS" == 0 ]] && ARGS+=(--no-show-tests)
 if [[ -n "${I_KNOW_NO_BENCHMARK:-}" ]]; then
   echo "WARNING: I_KNOW_NO_BENCHMARK set: seeds are NOT deduplicated against the eval benchmarks." >&2
   ARGS+=(--i-know-no-benchmark)

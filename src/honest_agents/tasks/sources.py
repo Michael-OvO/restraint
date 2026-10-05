@@ -56,6 +56,9 @@ class SourceInfo:
     enabled: bool = (
         False  # selectable without `--allow-disabled-sources` (a source must clear the decontamination audit)
     )
+    license_known: bool = True  # False: no licence is stated for the data; a build refuses it without a flag
+    license_basis: str = ""  # where the licence was read, so a reader can check it
+    code_license: str = ""  # licence of the generating code repository, when it differs from the data's
 
 
 SOURCES: dict[str, SourceInfo] = {
@@ -64,9 +67,12 @@ SOURCES: dict[str, SourceInfo] = {
         "obiwan96/endless-terminals",
         "MIT",
         True,
-        "README front-matter is malformed (`license: mit` after the body); MIT recorded manually.",
+        "The Hub API returns license None because the README front-matter (`license: mit`) sits after the body; the "
+        "tasks are LLM-generated, so the generating model's terms also apply.",
         hermetic_default=True,
         enabled=True,
+        license_basis="dataset card README front-matter (`license: mit`), read 2026-10-05; Hub API cardData is None",
+        code_license="Apache-2.0 (github.com/kanishkg/endless-terminals, the paper's generator)",
     ),
     "seta-env": SourceInfo(
         "seta-env",
@@ -75,6 +81,7 @@ SOURCES: dict[str, SourceInfo] = {
         True,
         "DISABLED by default (leak audit L4): some SETA_Synth files carry the terminal-bench canary GUID; such seeds are "
         "rejected, and the source needs `--allow-disabled-sources` plus a clean benchmark overlap report.",
+        license_basis="dataset card (not re-read for this record)",
     ),
     "tmax-15k": SourceInfo(
         "tmax-15k",
@@ -84,6 +91,8 @@ SOURCES: dict[str, SourceInfo] = {
         "DISABLED by default (leak audit L4): a task ships `_perturbation.json` (the expected output) into its image via "
         "COPY, which the seed screen now rejects. No oracle solutions: feasible-only pool, usable only after a pass@k "
         "filter (allowlist).",
+        license_known=False,
+        license_basis="none stated on the Harbor re-upload; the upstream card says ODC-BY-1.0, which a re-upload may not carry",
     ),
 }
 
@@ -419,3 +428,26 @@ def local_seeds(root: Path, *, source: str = "local", rejected: list[SeedReject]
 
 def iter_licenses(seeds: Iterable[SeedTask]) -> dict[str, str]:
     return {s.source: s.license for s in seeds}
+
+
+def unknown_license_sources(sources: Iterable[str]) -> list[str]:
+    """The registered sources among `sources` whose data licence is not stated (a `local` dir is the owner's own)."""
+    return [s for s in sources if s in SOURCES and not SOURCES[s].license_known]
+
+
+def license_record(licenses: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Source -> licence facts for manifest.json: licence, whether it is known, where it was read, the code licence."""
+    out: dict[str, dict[str, Any]] = {}
+    for src, lic in sorted(licenses.items()):
+        info = SOURCES.get(src)
+        if info is None:  # a local task dir: whatever its provenance says, otherwise unrecorded
+            out[src] = {"license": lic, "known": lic != "unknown", "basis": "task.toml [metadata.provenance]"}
+        else:
+            out[src] = {
+                "license": info.license,
+                "known": info.license_known,
+                "basis": info.license_basis,
+                "code_license": info.code_license,
+                "note": info.note,
+            }
+    return out

@@ -20,7 +20,8 @@ Baselines without training:
 Other modes:
   --metrics-only                recompute metrics.json / summary.md from an existing episodes.jsonl
   --compare DIR [DIR ...]       comparison table + Pareto front over finished runs
-  --noninferiority CAND REF     non-inferiority of CAND against REF on task success, margin from the protocol
+  --noninferiority CAND REF     non-inferiority of CAND against REF on verified success (the primary endpoint), margin
+                                from the protocol; each side may be several seed runs, comma separated (a,b,c)
   --diff CAND REF --metric M    paired difference CAND − REF on any metric (H1 direction check)
   --bank-dir DIR                also write a trajectory bank (`honest_agents.bank`) for the report-only pilot
 """
@@ -39,7 +40,7 @@ from typing import Any
 from honest_agents import bank, harness
 from honest_agents.eval import metrics as M
 from honest_agents.eval.metrics import DEFAULT_ALPHAS, compute_metrics
-from honest_agents.eval.protocol import EvalProtocol, protocol_of_run
+from honest_agents.eval.protocol import EvalProtocol, endpoint_role, protocol_of_run
 from honest_agents.eval.records import (
     EpisodeRecord,
     iter_records,
@@ -194,8 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="RUN_DIR",
         help="compare finished runs instead of evaluating",
     )
-    p.add_argument("--noninferiority", nargs=2, metavar=("CANDIDATE_DIR", "REFERENCE_DIR"))
-    p.add_argument("--diff", nargs=2, metavar=("CANDIDATE_DIR", "REFERENCE_DIR"))
+    p.add_argument("--noninferiority", nargs=2, metavar=("CANDIDATE_DIR[,SEED_DIR...]", "REFERENCE_DIR[,SEED_DIR...]"))
+    p.add_argument("--diff", nargs=2, metavar=("CANDIDATE_DIR[,SEED_DIR...]", "REFERENCE_DIR[,SEED_DIR...]"))
     p.add_argument(
         "--metric",
         default=None,
@@ -563,41 +564,40 @@ def evaluate(args: argparse.Namespace) -> dict:
 
 
 def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool) -> dict[str, Any]:
-    cand, ref = (Path(d) for d in dirs)
-    protos = [_protocol(args, d) for d in (cand, ref)]
-    if protos[0] != protos[1]:
-        raise SystemExit(f"the two runs were started under different protocols:\n  {protos[0]}\n  {protos[1]}")
+    arms = [[Path(d) for d in arm.split(",") if d] for arm in dirs]  # each arm: one run per training seed
+    runs = [d for arm in arms for d in arm]
+    protos = [_protocol(args, d) for d in runs]
+    if any(p != protos[0] for p in protos):
+        raise SystemExit("the runs were started under different protocols:\n  " + "\n  ".join(map(str, protos)))
     proto = protos[0]
     if args.ni_margin is not None and abs(args.ni_margin - proto.ni_margin) > 1e-12:
         raise SystemExit(
             f"--ni-margin {args.ni_margin} differs from the margin fixed before the runs ({proto.ni_margin}); "
             "the margin cannot be changed after the fact"
         )
-    cfg = _stored_reward_config(cand, args)
-    recs = [read_records(d / "episodes.jsonl") for d in (cand, ref)]
+    cfg = _stored_reward_config(arms[0][0], args)
+    recs = [[read_records(d / "episodes.jsonl") for d in arm] for arm in arms]
+    cand, ref = (r if len(r) > 1 else r[0] for r in recs)  # a single run stays a flat list
     metric = args.metric or proto.ni_metric
+    names = [",".join(d.name for d in arm) for arm in arms]
     if noninferiority:
         t = M.noninferiority(
-            *recs,
+            cand,
+            ref,
             cfg,
             margin=proto.ni_margin,
             metric=metric,
             alpha=proto.ni_alpha,
             n_boot=proto.n_boot,
             seed=proto.seed,
+            allow_single_seed=proto.ni_allow_single_seed,
         )
-        title = f"Non-inferiority: {cand.name} against {ref.name}"
+        title = f"Non-inferiority: {names[0]} against {names[1]}"
     else:
-        t = M.paired_difference(
-            *recs,
-            metric,
-            cfg,
-            n_boot=proto.n_boot,
-            seed=proto.seed,
-            level=proto.ci_level,
-        )
+        t = M.paired_difference(cand, ref, metric, cfg, n_boot=proto.n_boot, seed=proto.seed, level=proto.ci_level)
         t.pop("samples")
-        title = f"Paired difference: {cand.name} − {ref.name}"
+        title = f"Paired difference: {names[0]} − {names[1]}"
+    t["endpoint"] = endpoint_role(metric)
     print(render_test(t, title))
     return t
 

@@ -2,10 +2,12 @@
 # One complete run in one slot: start this slot's vLLM server, train against it, stop the server.
 #   SLOT=0 scripts/run_slot.sh configs/honest_alpha0.25.yaml [key.path=value ...]
 # Logs: outputs/logs/<run>_slot<N>_{vllm,train}.log. The exit status is the training run's.
-# Env: SLOT, TAG (log name; default: config name), RESUME=1, everything train.sh / serve_vllm.sh read.
+# Env: SLOT, TAG (log name; default: config name), RESUME=1, everything train.sh / serve_vllm.sh read (PHASE0_SUMMARY,
+#      ALLOW_UNSAFE_ALPHA: a refused alpha exits 4 before any server is started).
 source "$(dirname "$0")/_common.sh"
 CONFIG="${1:?usage: run_slot.sh CONFIG [overrides...]}"; shift
 slot_env
+check_alpha "$CONFIG" "$@" || exit $?
 TAG="${TAG:-$(basename "$CONFIG" .yaml)}_slot${SLOT}"
 mkdir -p outputs/logs
 trap stop_vllm EXIT INT TERM

@@ -11,6 +11,7 @@ from honest_agents.eval.metrics import (
     PAIRED_HEADLINE,
     pareto_front,
 )
+from honest_agents.eval.protocol import endpoint_role
 
 _BREAKDOWN_COLS = (
     "task_success",
@@ -44,6 +45,10 @@ def _f(x: Any, pct: bool = True) -> str:
 
 def _ci(c: list[float] | None, pct: bool = True) -> str:
     return f"[{_f(c[0], pct)}, {_f(c[1], pct)}]" if c else ""
+
+
+def _pts(x: float | None) -> str:
+    return "n/a" if x is None else f"{100 * x:.1f}"
 
 
 def _table(header: list[str], rows: list[list[str]], right_from: int = 1) -> list[str]:
@@ -127,7 +132,7 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
         p = _is_pct(k)
         rows.append(
             [
-                k,
+                k + (" [primary]" if endpoint_role(k) == "primary" else ""),
                 _f(e["value"], p),
                 _ci(e["ci95"], p),
                 f"{e['num']:g}/{e['den']}" if "den" in e else "",
@@ -136,7 +141,22 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
     lines += ["", *_table(["metric", "value", "95% CI", "n/den"], rows)]
     lines += [
         "",
-        f"Nominal claim threshold (1 + α) / 2 = {m['nominal_claim_threshold']:.3f}.",
+        (
+            "Two primary endpoints (pre-registered): verified_success_rate (non-inferiority) and false_claim_share "
+            "(false completions among claims). Every other row is secondary; no multiplicity correction is applied "
+            "and none supports a confirmatory claim."
+        ),
+        "",
+        (
+            f"Nominal claim threshold (1 + α) / 2 = {m['nominal_claim_threshold']:.3f}; realised threshold bracket "
+            f"[{_f(m['metrics']['claim_bracket_low']['value'])}, {_f(m['metrics']['claim_bracket_high']['value'])}]% "
+            "= [pass rate among unclaimed, 1 − fabrication among claimed]."
+        ),
+        (
+            "Diagnostic only, not identified (stated confidence is not trained): confidence cut "
+            f"{_f(m['metrics']['diagnostic_confidence_cut']['value'], False)} over "
+            f"{m['metrics']['diagnostic_confidence_values']['value']:.0f} distinct stated values."
+        ),
     ]
     lines += _reference_table(m)
 
@@ -192,6 +212,7 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
             ),
         ]
 
+    thin = m.get("suppressed_families") or {}
     for name, key in (
         ("kind", "by_kind"),
         ("harness", "by_harness"),
@@ -204,6 +225,12 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
             continue
         rows = [[g, str(e["n"]), *(_f(e.get(k), _is_pct(k)) for k in _BREAKDOWN_COLS)] for g, e in groups.items()]
         lines += ["", f"## By {name}", "", *_table([name, "n", *_BREAKDOWN_COLS], rows)]
+        if thin.get(key):
+            lines += [
+                "",
+                "Below the minimum variants, pooled or left out: "
+                + ", ".join(f"{f}={n}" for f, n in thin[key].items()),
+            ]
         if key == "by_blocker":
             lines += ["", "Reported blocker category per expected category:", ""]
             lines += [f"- **{g}**: {e.get('reported_categories') or {}}" for g, e in groups.items()]
@@ -333,13 +360,21 @@ def render_test(t: dict[str, Any], title: str) -> str:
             f"difference {_f(t['difference'], pct)} {_ci(t.get('ci'), pct)} ({100 * t['level']:.0f}% CI)"
         ),
     ]
+    if t.get("n_seeds_candidate", 1) > 1 or t.get("n_seeds_reference", 1) > 1:
+        lines.append(
+            f"seeds: {t['n_seeds_candidate']} candidate (SD {_pts(t['seed_sd_candidate'])} pts), "
+            f"{t['n_seeds_reference']} reference (SD {_pts(t['seed_sd_reference'])} pts); the interval covers tasks and "
+            "seeds"
+        )
     if "margin" in t:
         verdict = {
             True: "NON-INFERIOR",
             False: "NOT shown non-inferior",
-            None: "undefined",
+            None: "no verdict" if t.get("refusal") else "undefined",
         }[t["non_inferior"]]
         lines.append(
             f"margin {_f(t['margin'], pct)}, one-sided lower bound {_f(t['lower_bound'], pct)} at alpha={t['alpha']}: {verdict}"
         )
+        if t.get("refusal"):
+            lines.append(f"REFUSED: {t['refusal']}")
     return "\n".join(lines) + "\n"

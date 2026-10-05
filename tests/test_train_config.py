@@ -169,7 +169,8 @@ def test_the_probe_trainer_is_memory_safe_and_times_every_step(tmp_path: Path):
     compute = GRPOTrainer._compute_loss
 
     def spy_logps(self, model, *a, batch_size=None, **k):
-        seen.append((self.model.training, batch_size))
+        # HonestGRPOTrainer chunks by `batch_size` itself (length-trimmed passes), so TRL's method sees the chunk's rows.
+        seen.append((self.model.training, a[0].size(0) if batch_size is None else batch_size))
         return full_logits(self, model, *a, batch_size=batch_size, **k)
 
     def spy_loss(self, model, inputs):
@@ -211,7 +212,8 @@ def test_the_probe_trainer_is_memory_safe_and_times_every_step(tmp_path: Path):
         trainer._get_per_token_logps_and_entropies(trainer.model, ids, ids, 3, batch_size=6)
     finally:
         GRPOTrainer._full_logits_logps, GRPOTrainer._compute_loss = full_logits, compute
-    assert seen == [(False, 2), (False, 2), (True, 6)]  # evaluation capped at the training micro-batch only
+    # evaluation is capped at the training micro-batch (two rows per forward pass); training scores its own batch whole
+    assert seen == [(False, 2)] * 6 + [(True, 6)]
 
 
 @pytest.mark.parametrize("alpha", ["0", "0.1", "0.25", "0.4"])
@@ -249,7 +251,7 @@ def test_base_geometry_and_server_mode(data: SimpleNamespace):
     assert g.mask_truncated_completions and g.use_vllm and g.vllm_mode == "server"
     assert g.vllm_importance_sampling_correction and g.vllm_importance_sampling_mode == "token_truncate"
     assert plan.generation_batch_size == 64 and plan.generation_batch_size // g.num_generations == 8
-    assert (g.per_device_train_batch_size, g.gradient_accumulation_steps) == (2, 32)  # 64 episodes, one process
+    assert (g.per_device_train_batch_size, g.gradient_accumulation_steps) == (1, 64)  # 64 episodes, one process
     assert g.shuffle_dataset is False  # pair_batches owns the order
     assert plan.limits.max_model_len == 3072 + 16384 + 4096 == 23552
 
@@ -466,7 +468,7 @@ def test_checkpoint_guards(data: SimpleNamespace):
 
 def test_one_generation_round_is_one_optimizer_step(data: SimpleNamespace):
     with pytest.raises(ValueError, match="optimizer step"):
-        _plan(BASE, data, "grpo.steps_per_generation=64")
+        _plan(BASE, data, "grpo.steps_per_generation=128")  # base accumulates 64 micro-batches per step
     with pytest.raises(ValueError, match="num_iterations"):
         _plan(BASE, data, "grpo.num_iterations=2")
 
@@ -808,6 +810,46 @@ def test_tool_flow_check_catches_the_hybrid_qwen3_template_and_accepts_trl_swap(
     assert models.check_tool_flow_template(trainer, strict=False)
     trainer.chat_template = ctu.qwen3_training_chat_template
     assert models.check_tool_flow_template(trainer) == []
+
+
+class _ChatTokenizer:
+    """Ids are code points; the template closes every assistant turn with `end` and a newline."""
+
+    def __init__(self, end: str, eos: str | None):
+        self.end, self.eos_token_id = end, None if eos is None else ord(eos)
+
+    def apply_chat_template(self, messages, tools=None, chat_template=None, add_generation_prompt=False, tokenize=True,
+                            return_dict=False, **kwargs):  # fmt: skip
+        text = "".join(f"<{m['role']}>x{self.end if m['role'] == 'assistant' else ''}\n" for m in messages)
+        return [ord(c) for c in text]
+
+    def decode(self, ids):
+        return "".join(chr(i) for i in ids)
+
+
+def test_end_of_turn_check_accepts_a_template_that_ends_turns_with_the_eos():
+    tok = _ChatTokenizer(end="\u2603", eos="\u2603")
+    assert models.end_of_turn_failures(tok) == []
+    assert models.check_end_of_turn_token(SimpleNamespace(processing_class=tok)) == []
+
+
+def test_end_of_turn_check_refuses_a_tokenizer_whose_eos_is_not_the_turn_end():
+    tok = _ChatTokenizer(end="\u2603", eos="\u2602")  # a base checkpoint: eos <|endoftext|>, turns end <|im_end|>
+    failures = models.end_of_turn_failures(tok)
+    assert len(failures) == 2 and "plain reply" in failures[0] and "tool call" in failures[1]
+    with pytest.raises(RuntimeError, match="end-of-turn token mismatch"):
+        models.check_end_of_turn_token(SimpleNamespace(processing_class=tok))
+    assert models.check_end_of_turn_token(SimpleNamespace(processing_class=tok), strict=False) == failures
+    assert models.end_of_turn_failures(_ChatTokenizer(end="\u2603", eos=None)) == ["the tokenizer has no eos_token_id"]
+
+
+def test_end_of_turn_token_of_the_real_tokenizers():
+    from honest_agents.harness import tool_schemas
+
+    tok = _cached_tokenizer("Qwen/Qwen3.5-9B")
+    assert models.end_of_turn_failures(tok, tools=tool_schemas(), chat_template_kwargs={"enable_thinking": False}) == []
+    base = _cached_tokenizer("Qwen/Qwen3-0.6B-Base")  # eos <|endoftext|>, but the template ends turns with <|im_end|>
+    assert models.end_of_turn_failures(base, chat_template_kwargs={"enable_thinking": False})
 
 
 def test_dry_run_checks_the_template_when_the_tokenizer_is_cached(data: SimpleNamespace):
@@ -1162,8 +1204,8 @@ def stub_trainer(monkeypatch):
 
     _StubTrainer.instances = []
     monkeypatch.setattr(trainer_module, "HonestGRPOTrainer", _StubTrainer)
-    for name in ("check_training_template", "check_tool_flow_template", "check_prompt_budget", "_preflight_gpu",
-                 "check_lm_head_cast", "startup_probe"):  # fmt: skip
+    for name in ("check_training_template", "check_tool_flow_template", "check_end_of_turn_token",
+                 "check_prompt_budget", "_preflight_gpu", "check_lm_head_cast", "startup_probe"):  # fmt: skip
         monkeypatch.setattr(train, name, lambda *a, **k: None)
     return _StubTrainer
 
@@ -1325,3 +1367,116 @@ def test_trl_swap_on_real_tokenizer():
     tok.chat_template = ctu.qwen3_chat_template
     assert not ctu.is_chat_template_prefix_preserving(tok)
     assert models.template_name(ctu.get_training_chat_template(tok)) in models.family_spec("qwen3").training_templates
+
+
+# ── safe alpha (audit2 reward item 3): the claim threshold against the Phase-0 pool pass rate ──
+
+
+def _summary(tmp_path: Path, rate: float | None, name: str = "phase0_summary.json") -> Path:
+    pool = None if rate is None else {"mean_pass_rate_feasible": rate}
+    path = tmp_path / name
+    path.write_text(json.dumps({"pool": pool, "gates": {}}))
+    return path
+
+
+@pytest.mark.parametrize(
+    ("alpha", "rate", "safe"),
+    [
+        (0.25, 0.85, True),  # threshold 0.625 <= 0.75
+        (0.4, 0.85, True),  # 0.700 <= 0.75
+        (0.4, 0.78, False),  # 0.700 > 0.68
+        (0.0, 0.55, False),  # 0.500 > 0.45: even the mildest alpha is refused on a hard pool
+        (0.0, 0.62, True),
+    ],
+)
+def test_alpha_is_refused_when_its_threshold_is_within_the_margin_of_the_pool_pass_rate(tmp_path, alpha, rate, safe):
+    cfg = train.load_run_config(BASE, [f"reward.config.alpha={alpha}"])
+    summary = _summary(tmp_path, rate)
+    if safe:
+        assert train.check_safe_alpha(cfg, summary) is None
+        return
+    with pytest.raises(train.UnsafeAlphaError) as e:
+        train.check_safe_alpha(cfg, summary)
+    msg = str(e.value)
+    assert f"alpha {alpha:g} refused" in msg and f"{(1 + alpha) / 2:.3f}" in msg and f"{rate:.3f}" in msg
+    assert "--allow-unsafe-alpha" in msg and "declining everything" in msg
+
+
+def test_the_override_runs_an_unsafe_alpha_with_a_warning(tmp_path, caplog):
+    cfg = train.load_run_config(BASE, ["reward.config.alpha=0.4"])
+    with caplog.at_level("WARNING", logger="honest_agents.train"):
+        message = train.check_safe_alpha(cfg, _summary(tmp_path, 0.6), allow_unsafe=True)
+    assert message and "refused" in message and "overridden" in caplog.text
+
+
+def test_nothing_is_checked_without_a_summary_or_for_a_reward_without_alpha(tmp_path):
+    cfg = train.load_run_config(BASE, ["reward.config.alpha=0.4"])
+    assert train.check_safe_alpha(cfg, None) is None  # Phase 0 has not run yet
+    outcome = train.load_run_config(REPO / "configs" / "outcome.yaml")
+    assert train.alpha_of(outcome) is None
+    assert train.check_safe_alpha(outcome, _summary(tmp_path, 0.01)) is None
+
+
+@pytest.mark.parametrize("what", ["no_pool", "missing_file", "not_json"])
+def test_a_summary_that_cannot_be_used_refuses_the_run_unless_overridden(tmp_path, what):
+    cfg = train.load_run_config(BASE)
+    path = {"no_pool": _summary(tmp_path, None), "missing_file": tmp_path / "gone.json"}.get(what)
+    if path is None:
+        path = tmp_path / "bad.json"
+        path.write_text("{not json")
+    with pytest.raises(train.UnsafeAlphaError, match="cannot be checked"):
+        train.check_safe_alpha(cfg, path)
+    assert train.check_safe_alpha(cfg, path, allow_unsafe=True)
+
+
+def test_main_exits_with_the_unsafe_alpha_status_and_the_flags_work(tmp_path, capsys):
+    argv = ["--config", str(BASE), "--check-alpha", "reward.config.alpha=0.4"]
+    low, high = _summary(tmp_path, 0.6, "low.json"), _summary(tmp_path, 0.9, "high.json")
+    assert train.EXIT_UNSAFE_ALPHA == 4 != train.EXIT_STOPPED_BY_RULE
+    assert train.main([*argv, "--phase0-summary", str(low)]) == train.EXIT_UNSAFE_ALPHA
+    assert "alpha 0.4 refused" in capsys.readouterr().err
+    assert train.main([*argv, "--phase0-summary", str(low), "--allow-unsafe-alpha"]) == 0
+    assert train.main([*argv, "--phase0-summary", str(high)]) == 0
+    assert train.main(argv) == 0  # no summary: nothing to check
+
+
+def test_the_scripts_skip_an_unsafe_alpha_before_starting_anything(tmp_path):
+    import os
+
+    low = _summary(tmp_path, 0.6)
+    snippet = "check_alpha configs/base.yaml reward.config.alpha=0.4 && echo rc=0 || echo rc=$?"
+    out = subprocess.run(
+        ["bash", "-c", f'source "{REPO}/scripts/_common.sh"; {snippet}'], capture_output=True, text=True, check=False,
+        env={**os.environ, "PHASE0_SUMMARY": str(low)},
+    )  # fmt: skip
+    assert "rc=4" in out.stdout and "alpha 0.4 refused" in out.stderr
+    assert bash(snippet, PHASE0_SUMMARY=str(low), ALLOW_UNSAFE_ALPHA="1") == "rc=0"
+    assert bash(snippet) == "rc=0"  # no summary: no check
+    scripts = {n: (REPO / "scripts" / f"{n}.sh").read_text() for n in ("run_slot", "train", "sweep_alpha")}
+    assert 'check_alpha "$CONFIG"' in scripts["run_slot"] and "ALPHA_FLAGS" in scripts["train"]
+    assert "rc == 4" in scripts["sweep_alpha"] and "SKIPPED" in scripts["sweep_alpha"]
+
+
+def test_the_vllm_server_binds_to_localhost_unless_exposure_is_explicit():
+    script = (REPO / "scripts" / "serve_vllm.sh").read_text()
+    assert '--host "$HOST"' in script and "HOST=127.0.0.1" in script
+    assert script.count("0.0.0.0") == 2  # the explicit branch and its comment
+    branch = script[script.index('if [[ "${VLLM_EXPOSE:-0}" == 1 ]]') :].split("fi", 1)[0]
+    assert "HOST=0.0.0.0" in branch and "WARNING" in branch
+
+
+def test_the_trainer_section_reaches_the_trainer(stub_trainer, data: SimpleNamespace):
+    plan = _plan(BASE, data, "trainer.trim_padding=false", "trainer.sort_micro_batches=false")
+    train.make_trainer(plan, check_server=False)
+    (t,) = stub_trainer.instances
+    assert t.trim_padding is False and t.sort_micro_batches is False
+    plan = _plan(BASE, data)
+    train.make_trainer(plan, check_server=False)
+    assert stub_trainer.instances[-1].trim_padding is True and stub_trainer.instances[-1].sort_micro_batches is True
+
+
+def test_the_base_config_scores_one_sequence_at_a_time_until_memory_is_measured():
+    g = train.load_run_config(BASE).grpo
+    assert g["per_device_train_batch_size"] == 1 and g["gradient_accumulation_steps"] == 64
+    assert g["epsilon"] == 0.2 and g["epsilon_high"] == 0.28  # PPO clipping defaults are not changed (audit T2 / clip)
+    assert "clip_ratio/region_mean" in BASE.read_text() and "measured on the node" in BASE.read_text()

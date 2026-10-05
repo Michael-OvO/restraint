@@ -549,11 +549,18 @@ def test_phrasing_split():
     assert [phrasing_split(s) for s in ("train", "val", "test")] == ["train", "train", "test"]
 
 
-def test_heldout_problems_follow_the_spec():
+def test_default_heldout_families_are_the_two_with_a_cue_or_too_few_pairs():
+    """Leak verifier decision: conflicting_constraint (lexical cue) and no_network (one pair) are test-only; the
+    families whose twin differs only in the environment train, so high_risk and revoke_permission are not held out."""
+    assert set(DEFAULT_HELDOUT_FAMILIES) == {"conflicting_constraint", "no_network"}
+    assert not {"high_risk", "revoke_permission", "remove_input"} & set(DEFAULT_HELDOUT_FAMILIES)
+
+
+def test_heldout_problems_flag_what_cannot_work():
     assert heldout_problems(DEFAULT_HELDOUT_FAMILIES) == []
-    assert heldout_problems(["high_risk"]) == ["no environment-mechanism family is held out"]
-    assert heldout_problems(["revoke_permission"]) == ["high_risk is not held out"]
-    assert heldout_problems([]) == []
+    assert heldout_problems(["high_risk"]) == [] and heldout_problems([]) == []
+    assert heldout_problems(["nonsense"]) == ["unknown families ['nonsense']"]
+    assert "nothing to train on" in heldout_problems(list(OPERATORS))[0]
 
 
 def test_enforce_pairing_drops_orphans():
@@ -870,3 +877,170 @@ def test_held_out_and_openenv_quarantine_entries_leave_test_unchanged(tmp_path, 
         )
     )
     assert [r["variant_id"] for r in _rows(again)["test"]] == [r["variant_id"] for r in test_rows]
+
+
+# ── leak verifier decisions: held-out gate, atomic build, training counts, yield, licences ────────────────────────────
+
+
+def _shortcut_rows(family: str) -> list[dict]:
+    """Rows of the pre-fix shape: the forbidden object exists only in controls (AUC near 0)."""
+    return [
+        {
+            "family": family,
+            "infeasible": infeasible,
+            "features": {"exists": float(not infeasible), "depth": 3.0, "has_extension": 1.0},
+        }
+        for _ in range(40)
+        for infeasible in (True, False)
+    ]
+
+
+def test_the_cue_gate_refuses_a_training_family_but_only_reports_a_held_out_one(monkeypatch):
+    """Design change, not a loosening: a family in the training mix is still refused outside the band; a test-only
+    family is reported with its caveat, so it can never block a build."""
+    from honest_agents.tasks import analysis
+    from honest_agents.tasks.build import HELDOUT_CAVEAT, cue_metrics
+
+    monkeypatch.setattr(analysis, "existence_rows", lambda vs: _shortcut_rows("conflicting_constraint"))
+    held = cue_metrics({"test": [object()]}, heldout={"conflicting_constraint"})
+    assert held["violations"]["test"] == []  # nothing the build refuses
+    assert held["heldout_violations"]["test"] and "conflicting_constraint" in held["heldout_violations"]["test"][0]
+    assert held["heldout_caveat"] == HELDOUT_CAVEAT and held["heldout_families"] == ["conflicting_constraint"]
+    trained = cue_metrics({"train": [object()]})
+    assert trained["violations"]["train"] and not trained["heldout_violations"]["train"]
+
+
+def test_a_held_out_family_with_a_cue_never_blocks_the_build_but_a_training_one_does(tmp_path, seeds, monkeypatch):
+    from honest_agents.tasks import analysis
+
+    real = analysis.existence_rows
+    monkeypatch.setattr(analysis, "existence_rows", lambda vs: [*real(vs), *_shortcut_rows("conflicting_constraint")])
+    args = [a for a in _args(tmp_path / "ok", seeds) if a != "--no-enforce-cue-band"]
+    m = build(parse_args(args))  # conflicting_constraint is held out by default
+    assert (tmp_path / "ok" / "manifest.json").exists()
+    assert m["cue_metrics"]["heldout_violations"]["test"] and not any(m["cue_metrics"]["violations"].values())
+    bad = [
+        a for a in _args(tmp_path / "bad", seeds, "--heldout-families", "no_network") if a != "--no-enforce-cue-band"
+    ]
+    with pytest.raises(ValueError, match="existence AUC outside"):
+        build(parse_args(bad))
+
+
+DATASET_FILES = ("train.jsonl", "val.jsonl", "test.jsonl", "train_pool.jsonl", "manifest.json")
+
+
+def _leftovers(out: Path) -> list[str]:
+    return sorted([n for n in DATASET_FILES if (out / n).exists()] + [p.name for p in out.parent.glob(".*build-*")])
+
+
+def test_a_build_that_fails_a_gate_leaves_no_dataset_files(tmp_path, seeds, monkeypatch):
+    """The cue gate used to fire after train.jsonl and test.jsonl were written, leaving them without a manifest."""
+    from honest_agents.tasks import build as build_mod
+
+    monkeypatch.setattr(
+        build_mod,
+        "cue_metrics",
+        lambda *a, **k: {"available": True, "violations": {"train": ["high_risk: forced failure"]}, "band": [0.4, 0.6]},
+    )
+    out = tmp_path / "out"
+    args = [a for a in _args(out, seeds) if a != "--no-enforce-cue-band"]
+    with pytest.raises(ValueError, match="forced failure"):
+        build(parse_args(args))
+    assert _leftovers(out) == []
+    assert not (out / "split_seeds.json").exists() and not (out / "test_ids.txt").exists()  # staged with the rest
+
+
+def test_a_crash_while_writing_leaves_no_dataset_files_and_a_retry_succeeds(tmp_path, seeds, monkeypatch):
+    from honest_agents.tasks import build as build_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(build_mod, "balance_mixture", boom)
+    out = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="disk full"):
+        build(parse_args(_args(out, seeds)))
+    assert _leftovers(out) == []
+    monkeypatch.undo()
+    build(parse_args(_args(out, seeds)))  # the caches (tasks/) are reused, nothing stale is in the way
+    assert _leftovers(out) == sorted(DATASET_FILES)  # complete, and no staging directory is left behind
+
+
+def test_a_failed_rebuild_keeps_the_previous_complete_dataset(tmp_path, seeds, monkeypatch):
+    from honest_agents.tasks import build as build_mod
+
+    out = tmp_path / "out"
+    build(parse_args(_args(out, seeds)))
+    before = {n: (out / n).read_bytes() for n in DATASET_FILES}
+    monkeypatch.setattr(build_mod, "balance_mixture", lambda *a, **k: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        build(parse_args(_args(out, seeds)))
+    assert {n: (out / n).read_bytes() for n in DATASET_FILES} == before
+
+
+def test_the_manifest_reports_training_pairs_and_warns_about_a_thin_family(tmp_path, seeds, caplog):
+    out = tmp_path / "out"
+    with caplog.at_level("WARNING"):
+        m = build(parse_args(_args(out, seeds)))
+    t = m["training"]
+    assert set(t["families"]) == set(OPERATORS) - set(DEFAULT_HELDOUT_FAMILIES) and t["min_pairs"] == 40
+    train_inf = Counter(r["family"] for r in _rows(out)["train"] if r["kind"] == "infeasible")
+    assert t["pairs_per_family"] == {f: train_inf.get(f, 0) for f in t["families"]}
+    assert t["thin_families"] == {f: n for f, n in t["pairs_per_family"].items() if n < 40}
+    assert t["thin_families"], "a 14-seed pool cannot reach 40 pairs per family"
+    assert any("training family" in r.message and "pairs in train" in r.message for r in caplog.records)
+
+
+def test_the_manifest_reports_the_yield_per_family_and_the_independent_source_tasks(tmp_path, seeds, capsys):
+    out = tmp_path / "out"
+    m = build(parse_args(_args(out, seeds)))
+    y = m["yield"]
+    assert y["per"] == 150 and set(y) == {"per", "train", "val", "test"}
+    train = y["train"]
+    assert train["seeds"] == m["seed_splits"]["train"] and train["source_tasks"] <= train["seeds"]
+    fams = train["families"]
+    assert set(fams) == set(OPERATORS)
+    assert fams["high_risk"]["role"] == "train" and fams["conflicting_constraint"]["role"] == "held-out (test only)"
+    pool = [json.loads(x) for x in (out / "train_pool.jsonl").read_text().splitlines()]
+    for fam in ("high_risk", "revoke_permission"):
+        inf = [r for r in pool if r["family"] == fam and r["kind"] == "infeasible"]
+        assert fams[fam]["pool_infeasible"] == len(inf) > 0
+        assert fams[fam]["pool_source_tasks"] == len({r["pair_id"] for r in inf})
+        assert fams[fam]["pool_yield_per_150_seeds"] == round(150 * len(inf) / train["seeds"], 1)
+    held = fams["conflicting_constraint"]  # built for the train seeds too, but never emitted to a train file
+    assert held["emitted_pairs"] == 0 and not any(r["family"] == "conflicting_constraint" for r in pool)
+    assert y["test"]["families"]["conflicting_constraint"]["pool_infeasible"] > 0
+    main(_args(tmp_path / "again", seeds))
+    printed = capsys.readouterr().out
+    assert "independent source tasks" in printed and "training pairs per family" in printed
+
+
+def test_manifest_records_the_licence_facts_of_each_source(tmp_path, seeds):
+    from honest_agents.tasks.sources import SOURCES, license_record
+
+    rec = license_record({"endless-terminals": "MIT"})["endless-terminals"]
+    assert rec["license"] == "MIT" and rec["known"] and "Apache-2.0" in rec["code_license"]
+    assert (
+        "front-matter" in rec["basis"] and "None" in rec["basis"]
+    )  # the card says MIT but the Hub API cannot parse it
+    assert not SOURCES["tmax-15k"].license_known
+    m = build(parse_args(_args(tmp_path / "out", seeds)))
+    assert m["licenses"]["local"]["known"] is False  # a local dir without provenance is recorded, not refused
+
+
+def test_a_source_with_an_unknown_licence_is_refused_unless_a_flag_is_passed(tmp_path):
+    from honest_agents.tasks.build import check_licenses
+
+    base = [
+        "--out",
+        str(tmp_path / "out"),
+        "--sources",
+        "tmax-15k",
+        "--allow-disabled-sources",
+        "--i-know-no-benchmark",
+    ]
+    with pytest.raises(ValueError, match="unknown licence"):
+        build(parse_args(base))  # refused before any download
+    assert not (tmp_path / "out" / "raw").exists()
+    check_licenses(parse_args([*base, "--allow-unknown-license"]))  # the flag lets the build go on
+    check_licenses(parse_args(["--out", str(tmp_path / "x"), "--sources", "endless-terminals"]))  # a stated one is fine

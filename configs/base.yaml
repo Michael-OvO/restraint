@@ -67,7 +67,12 @@ stop:                   # callbacks.StopRuleConfig (SPEC_V3 5.6, 9.2.2)
   max_zero_variance_group_share: 0.5
   max_decline_rate_feasible: 0.8      # set from the Phase-0 measurement
   max_masked_share: 0.15
-  max_reward_error_rate: 0.05         # a grader that keeps failing is scored as tamper, so watch it explicitly
+  max_reward_error_rate: 0.05         # every grading failure after the agent acted (or masked): a grader bug
+  max_tamper_rate: 0.10               # also counts those grading failures; short window, -1.5 drives the policy
+  tamper_window: 5
+  max_is_ratio_deviation: 0.05        # window-mean sampler/trainer importance ratio must stay within 1 +- this
+  max_is_ratio_at_cap_share: 0.05
+  max_truncated_share: 0.30           # absolute ceiling on completions/clipped_ratio
   task_success_drop: 0.10
   report_rate_drop: 0.15
   val_task_success_drop: 0.05
@@ -80,21 +85,31 @@ bank:
 
 trainer:
   max_tool_workers: null   # null = one thread per live episode
+  trim_padding: true       # forward passes on length-trimmed chunks instead of the batch-global padding (same loss)
+  sort_micro_batches: true # regroup a round's micro-batches by length, longest first (dapo only; no effect at batch 1)
 
 grpo:
   # Loss (DESIGN.md "Training"): DAPO token-level aggregation, no KL / reference model, clip-higher.
   loss_type: dapo
   beta: 0.0
+  # PPO clipping never binds here: a generation round is one optimizer step, so the policy that scores a token is the
+  # one that sampled it (old logps come from the same weights) and the ratio is 1 up to float noise at learning rates
+  # of 1e-5. The defaults stay; `clip_ratio/region_mean` is logged each step and should read ~0. The drift that matters
+  # is sampler vs trainer: `sampling/importance_sampling_ratio/{mean,at_cap_share,outside_band_share}`.
   epsilon: 0.2
   epsilon_high: 0.28
   scale_rewards: none               # group would erase alpha (INC-1); train.py rejects anything else
   mask_truncated_completions: true
   # Rollouts: 8 prompts x 8 generations = 64 episodes per generation round = one optimizer step
-  # (per_device 2 x 1 process x gradient_accumulation_steps 32; steps_per_generation defaults to grad accum).
-  # If 2 x ~20k tokens does not fit in memory, use per_device_train_batch_size 1 and gradient_accumulation_steps 64.
+  # (per_device 1 x 1 process x gradient_accumulation_steps 64; steps_per_generation defaults to grad accum).
+  # per_device_train_batch_size stays 1 until the memory headroom is measured on the node (audit T1): the 4B model's
+  # logits for 2 x ~16k tokens are ~15 GiB in bf16 plus ~30 GiB for an fp32 copy. HonestGRPOTrainer already trims padding
+  # and length-sorts micro-batches, so the saving from 2 is small; raise it (and halve gradient_accumulation_steps)
+  # only after `gpu/peak_memory_gb` of a Phase-0 round shows room. The loss is token-sum normalised (dapo), so the
+  # value does not depend on the split.
   num_generations: 8
-  per_device_train_batch_size: 2
-  gradient_accumulation_steps: 32
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 64
   # Limits: the ONE place they live. EpisodeBudget (env), the efficiency reference and vLLM --max-model-len derive from these.
   max_completion_length: 16384      # total budget across all turns, tool output included
   max_tool_calling_iterations: 30   # bash budget = this - 2

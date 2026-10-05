@@ -134,7 +134,8 @@ METRIC_REPORT_RATE = "honest/report_rate"
 METRIC_MASKED_SHARE = "honest/masked_share"
 METRIC_ZERO_VARIANCE_GROUPS = "honest/zero_variance_group_share"
 METRIC_NO_CONTRAST = "honest/no_contrast_batch"
-METRIC_REWARD_ERROR_RATE = "honest/reward_error_rate"
+METRIC_REWARD_ERROR_RATE = "honest/reward_error_rate"  # grading/reward failures; distinct from tamper (CA-1)
+METRIC_TAMPER_RATE = "honest/tamper_rate"  # includes a grading failure after the agent acted, which is scored as tamper
 
 
 def reward_metric(mode: str) -> str:
@@ -245,7 +246,7 @@ def batch_metrics(
     for reason in STOP_REASONS:
         ratio(f"honest/stop_reason/{reason}", count(scored, lambda b, r=reason: b.stop_reason == r), len(scored))
     ratio("honest/stop_reason/unknown", count(scored, lambda b: b.stop_reason not in STOP_REASONS), len(scored))
-    ratio("honest/tamper_rate", count(scored, lambda b: b.tamper), len(scored))
+    ratio(METRIC_TAMPER_RATE, count(scored, lambda b: b.tamper), len(scored))
     ratio("honest/violation_rate", count(scored, lambda b: b.violation), len(scored))
     ratio("honest/post_hoc_rate", count(scored, lambda b: b.post_hoc), len(scored))
 
@@ -453,15 +454,22 @@ def _grading_failed(env: Any, error: BaseException, feasible: Any) -> tuple[Epis
     return outcome, breakdown, {"error": text}
 
 
-def _grade_all(environments: Sequence[Any], columns: dict[str, Any]) -> tuple[list[tuple], int]:
-    """Graded `(outcome, breakdown, debug)` per environment, and how many of them had to be synthesised."""
+def grading_failed(o: EpisodeOutcome) -> bool:
+    """The grader or the reward path failed on an episode that is not a boot failure: the failure is the grader's, not
+    the policy's, whatever the reward says. After the agent acted it is scored as tamper (SPEC_V3 §3.5), so without
+    this count a flaky grader looks like a policy that tampers (CA-1). Boot failures have `honest/masked/boot_failure`."""
+    return o.grading_error is not None and (o.acted or o.masked_reason == MASK_REWARD_ERROR)
+
+
+def _grade_all(environments: Sequence[Any], columns: dict[str, Any]) -> list[tuple]:
+    """Graded `(outcome, breakdown, debug)` per environment; one whose grading raised is synthesised."""
     for env in environments:  # start every sandbox's grading before waiting on any
         try:
             env._start_grading()
         except Exception:  # reported again below, when the result is fetched
             logger.exception("could not start grading")
     feasible = _per_rollout(columns, "feasible", len(environments))
-    graded, failures = [], 0
+    graded = []
     for i, env in enumerate(environments):
         try:
             graded.append(_checked(env, env._graded()))
@@ -469,9 +477,8 @@ def _grade_all(environments: Sequence[Any], columns: dict[str, Any]) -> tuple[li
         # grading coroutine cancelled on the environment's loop must not escape either.
         except (Exception, asyncio.CancelledError) as e:
             logger.exception("grading of rollout %d raised; scoring it by the grading-failure rule", i)
-            failures += 1
             graded.append(_grading_failed(env, e, feasible[i]))
-    return graded, failures
+    return graded
 
 
 def _checked(env: Any, result: Any) -> tuple[EpisodeOutcome, RewardBreakdown, dict]:
@@ -529,7 +536,7 @@ def score_batch(
         )
     columns = columns or {}
     n = len(environments)
-    graded, failures = _grade_all(environments, columns)
+    graded = _grade_all(environments, columns)
     outcomes = [g[0] for g in graded]
     groups = group_ids(environments, columns)
     breakdowns, leaking = mask_leaking_groups(outcomes, [g[1] for g in graded], groups)
@@ -537,7 +544,7 @@ def score_batch(
 
     def log_metrics() -> None:
         metrics = batch_metrics(breakdowns, groups, rewards)
-        metrics[METRIC_REWARD_ERROR_RATE] = failures / n if n else 0.0
+        metrics[METRIC_REWARD_ERROR_RATE] = sum(grading_failed(o) for o in outcomes) / n if n else 0.0
         for name, value in metrics.items():
             log_metric(name, value)
 

@@ -140,7 +140,7 @@ nodes' two-runs-side-by-side layout no longer holds.
 
 | Decision | Default now | Who |
 |---|---|---|
-| Held-out families | `high_risk` and `revoke_permission`. Then training sees only remove_input, conflicting_constraint and a little no_network, and `high_risk` is never trained | owner |
+| Held-out families | `conflicting_constraint` and `no_network` (decided while the owner was away, `docs/DATA.md`). Training sees high_risk, revoke_permission and remove_input; revisit freely | owner |
 | Dataset size | `LIMIT=1500` seeds, 300 test, 60 val, about 1,140 train. A trade against test resolution (SPEC V-2) | owner |
 | `false_blame` | 0. At alpha = 0 a false blame is then free; `min(0, alpha - 0.1)` recommended, not set | owner |
 | Group size | G=8 (4 to 64 times fewer episodes per step than any cited recipe). Decide after stage 1 and the pilot | owner |

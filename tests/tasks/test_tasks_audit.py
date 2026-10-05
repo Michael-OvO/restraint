@@ -38,7 +38,9 @@ def seeds(tmp_path) -> Path:
 
 
 def _cfg(tmp_path, seeds, **kw) -> AuditConfig:
-    kw = {"i_know_no_benchmark": True, "test_bp": 0} | kw  # synthetic seeds: no benchmark, none hashes into test
+    # Synthetic seeds: no benchmark, none hashes into test. These tests exercise two particular families whatever the
+    # default audit families are (they became the training families: see `test_the_default_audit_families_...`).
+    kw = {"i_know_no_benchmark": True, "test_bp": 0, "families": ("remove_input", "conflicting_constraint")} | kw
     return AuditConfig(out=tmp_path / "audit", sources=["local"], seeds_dir=seeds, allow_legacy_verifier=True, **kw)
 
 
@@ -253,3 +255,51 @@ def test_audit_parses_the_split_flags():
     )
     assert parsed.i_know_no_benchmark and parsed.split_seeds == Path("s.json")
     assert parsed.test_ids_file == Path("t.txt") and parsed.test_bp == 100
+
+
+def test_the_default_audit_families_are_the_training_families():
+    from honest_agents.tasks.build import DEFAULT_HELDOUT_FAMILIES
+
+    assert set(audit.DEFAULT_FAMILIES) == {"remove_input", "revoke_permission", "high_risk"}
+    assert not set(audit.DEFAULT_FAMILIES) & set(DEFAULT_HELDOUT_FAMILIES)
+    cfg, _ = parse_args(["--out", "x"])
+    assert cfg is not None and cfg.families == audit.DEFAULT_FAMILIES and cfg.show_tests
+
+
+def test_sheets_show_the_tests_and_the_oracle_command(tmp_path, seeds):
+    """Without the tests a human cannot judge whether a variant is truly impossible (audit 2, data item c)."""
+    cfg = _cfg(tmp_path, seeds, n_sources=1)
+    _write(cfg)
+    sheets = {p.stem: p.read_text() for p in (cfg.out / "sheets").glob("*.md")}
+    twin = next(t for k, t in sheets.items() if k.endswith("__remove_input"))
+    section = twin.split("## Tests (what the grader checks)")[1].split("##")[0]
+    assert "`test_outputs.py`" in section and "`test.sh`" in section  # the file names
+    assert "`test_outputs.py::test_" in section and "assert" in section  # what each test asserts
+    assert "Oracle command (`solution/solve.sh`)" in section and "ffmpeg" in section  # the oracle, comments dropped
+    assert "#!/bin/bash" not in section
+    assert all(len(line) <= 260 for line in section.splitlines() if line.startswith("- `test_outputs"))  # cut at 200
+    # a checklist line per variant, kind-specific, ahead of the verdict line
+    assert twin.index("- [ ] the tests above cannot pass") < twin.index("Verdict: ")
+    assert "- [ ] the removed file is not rebuildable" in twin
+    ctrl = next(t for k, t in sheets.items() if k.endswith("__conflicting_constraint__control"))
+    assert "- [ ] the obstacle is surmountable" in ctrl
+    plain = next(t for k, t in sheets.items() if k.endswith("__feasible"))
+    assert "- [ ] the tests above check what the instruction asks" in plain
+
+
+def test_no_show_tests_hides_the_tests_section(tmp_path, seeds):
+    cfg = _cfg(tmp_path, seeds, n_sources=1, show_tests=False)
+    _write(cfg)
+    assert all("## Tests (what the grader checks)" not in p.read_text() for p in (cfg.out / "sheets").glob("*.md"))
+    cfg, _ = parse_args(["--out", "x", "--no-show-tests"])
+    assert cfg is not None and not cfg.show_tests
+
+
+def test_test_assertions_cut_each_test_at_200_characters(tmp_path):
+    t = tmp_path / "t"
+    (t / "tests").mkdir(parents=True)
+    (t / "tests" / "test_x.py").write_text(
+        "def test_long():\n    assert 'a' == '" + "a" * 500 + "'\n\ndef helper():\n    pass\n"
+    )
+    (rows,) = audit.test_assertions(t)
+    assert rows[:2] == ("test_x.py", "test_long") and len(rows[2]) == 200

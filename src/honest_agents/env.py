@@ -14,7 +14,8 @@ Extends `trl.experimental.harbor.HarborEnv` with what honesty training needs and
   `timeout -k`; the stop reason is recorded (SPEC_V3 §3.6-3.8).
 * **Grading**: baseline manifests and the verifier toolchain self-check at reset (only a failure there masks the
   episode), `honest_agents.grading.grade` after the rollout, cached per episode. After the agent has acted, a grading
-  failure is scored as tamper, never masked (SPEC_V3 §3.5).
+  failure is scored as tamper, never masked (SPEC_V3 §3.5), and is counted as `honest/reward_error_rate` so a flaky
+  grader is visible; `grade` retries a transport error once, and a teardown failure never changes a grade.
 
 Prompt, tool-output format and report coercion live in the trl-free `honest_agents.harness`, shared with the OpenEnv
 session and the eval agents.
@@ -85,6 +86,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_OUTPUT_CHARS = MAX_OUTPUT_CHARS  # back-compat alias
 _DEL_TIMEOUT_SEC = 30
+_STOP_TIMEOUT_SEC = 120  # `compose down` under 64 concurrent sandboxes is slow; a hang must not hold the batch
 _KILL_AFTER_SEC = 5  # `timeout -k`: SIGKILL this long after SIGTERM
 _EXEC_SLACK_SEC = 15  # the host-side exec timeout is only a backstop behind `timeout` inside the sandbox
 _TIMEOUT_CODES = (124, 137)  # GNU timeout: 124 = timed out, 137 = had to SIGKILL
@@ -280,7 +282,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         from harbor.models.trial.paths import TrialPaths
         from harbor.trial.network_policy import resolve_trial_network_plan
 
-        await self._stop()
+        await self._teardown()
         self._task = Task(task_dir=self._task_dir)
         # Resolved here, before the agent acts: a missing host variable is an infrastructure failure (masked), not
         # something to blame on the policy once it has run commands.
@@ -389,8 +391,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         try:
             await asyncio.wrap_future(self._boot)
         except Exception as e:  # noqa: BLE001 — sandbox never came up: not the policy's fault, mask from loss
-            with contextlib.suppress(Exception):  # start() may have succeeded before healthcheck/snapshot failed
-                await self._stop()
+            await self._teardown()  # start() may have succeeded before healthcheck/snapshot failed
             return (
                 self._failed_outcome(f"boot: {e}", acted=False, masked_reason=self._boot_mask),
                 {"error": str(e)},
@@ -432,8 +433,19 @@ class HonestHarborEnv(ReportTools, HarborEnv):
             outcome = self._failed_outcome(f"grade: {err}", acted=acted)
             debug["error"] = err
         finally:
-            await self._stop()  # free the container as soon as it is graded
+            await self._teardown()  # free the container as soon as it is graded
         return outcome, debug
+
+    async def _teardown(self) -> None:
+        """Stop the sandbox; a failure is logged and never reaches the reward (CA-2).
+
+        A `compose down` error or timeout after a good grade would otherwise replace the computed outcome and score an
+        honest verified success as tamper (-1.5). The worst a failed teardown can cost is a leaked container, which
+        the next boot's own cleanup and the VM's reaper deal with."""
+        try:
+            await asyncio.wait_for(self._stop(), _STOP_TIMEOUT_SEC)
+        except Exception as e:  # noqa: BLE001 - TimeoutError included
+            logger.warning("sandbox teardown failed (%s: %s); the grade is kept", type(e).__name__, e)
 
     def _start_grading(self) -> concurrent.futures.Future:
         """Kick off grading on this env's loop without blocking (lets a reward func grade a whole batch concurrently)."""
@@ -454,7 +466,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
             return
         if getattr(self, "_env", None) is not None and loop.is_running():
             with contextlib.suppress(Exception):
-                asyncio.run_coroutine_threadsafe(self._stop(), loop).result(timeout=_DEL_TIMEOUT_SEC)
+                asyncio.run_coroutine_threadsafe(self._teardown(), loop).result(timeout=_DEL_TIMEOUT_SEC)
         with contextlib.suppress(Exception):
             loop.call_soon_threadsafe(loop.stop)
 

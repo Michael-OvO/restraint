@@ -1990,6 +1990,76 @@ def token_overlap(content: str, text: str) -> float:
     return len(toks & other) / len(toks)
 
 
+_BOUND_TOKEN = re.compile(r"[A-Za-z0-9_.\-/:@]{4,}")
+# Words that any file of that kind contains, so a test that mentions one says nothing about this file.
+_COMMON_WORDS = frozenset(
+    [
+        "return",
+        "import",
+        "include",
+        "print",
+        "printf",
+        "string",
+        "number",
+        "integer",
+        "object",
+        "array",
+        "type",
+        "class",
+        "version",
+        "name",
+        "value",
+        "values",
+        "status",
+        "error",
+        "warning",
+        "info",
+        "debug",
+        "true",
+        "false",
+        "null",
+        "none",
+        "default",
+        "required",
+        "properties",
+        "pattern",
+        "format",
+        "schema",
+        "description",
+        "title",
+        "items",
+        "email",
+        "password",
+        "username",
+        "hostname",
+        "localhost",
+        "service",
+        "server",
+        "client",
+        "config",
+    ]
+)
+
+
+def content_bound_tokens(content: str, tests_text: str, visible: str) -> list[str]:
+    """Tokens of a file's content that the tests spell out but the agent cannot see anywhere else.
+
+    A removed input is only irrecoverable when the tests depend on what the file held: a distinctive value of it (a
+    number with 3+ characters, or a word of 6+ characters that is not a language or schema keyword) appears in the test
+    source and neither in the instruction nor in another file of the image (`visible`). A test that reads the file at
+    run time and recomputes its expectation holds no such token: any plausible recreation passes (the audit-2 leaks:
+    a C file whose output the instruction prints, a key the test only compares with itself, a log the test re-parses).
+    """
+    out = set()
+    for tok in _BOUND_TOKEN.findall(content):
+        tok = tok.strip(".:,-/")
+        strong = len(tok) >= 3 and any(c.isdigit() for c in tok)
+        word = len(tok) >= 6 and tok.lower() not in _COMMON_WORDS
+        if (strong or word) and tok in tests_text and tok not in visible:
+            out.add(tok)
+    return sorted(out)
+
+
 def content_shape(content: str) -> tuple[int, int]:
     """(characters, non-blank lines) of a file's text."""
     return len(content.strip()), sum(1 for ln in content.splitlines() if ln.strip())

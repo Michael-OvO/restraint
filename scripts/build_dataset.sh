@@ -16,8 +16,12 @@
 #                         val or train_pool row for an id in it. Commit the file after the first build.
 #   NEARDUP_THRESHOLD=0.1  near-duplicate sources (instruction 3-gram Jaccard) are split as one unit; 0 = off
 #   QUARANTINE_INCLUDE_EVAL=  1 = honour quarantine entries found while evaluating (they change test.jsonl; default off)
-#   NO_ENFORCE_CUE_BAND=  1 = only warn when a family's existence AUC leaves [0.4, 0.6] (default: the build fails)
-#   HELDOUT=high_risk,revoke_permission   families seen only in the test split: high_risk + one environment mechanism
+#   NO_ENFORCE_CUE_BAND=  1 = only warn when a TRAINING family's existence AUC leaves [0.4, 0.6] (default: the build fails;
+#                         a held-out family is only ever reported)
+#   HELDOUT=conflicting_constraint,no_network   test-only families (zero-shot, with the construct-validity caveat): the
+#                         first has a lexical cue no template removes, the second has too few pairs. high_risk,
+#                         revoke_permission and remove_input train. no_network can be trained with HELDOUT=conflicting_constraint
+#   ALLOW_UNKNOWN_LICENSE=  1 = build from a source whose data licence is not stated (tmax-15k); default refuses
 #   MIXTURE=0.55,0.20,0.25        plain feasible, near-miss control, infeasible shares of train and val
 #   QUARANTINE_FILE=      quarantine list (leaky variants); listed variants are excluded and validation leaks appended
 #   DIFFICULTY_JSON=      Phase-0 gate from `python -m honest_agents.tasks.difficulty`; filters the train split only
@@ -37,7 +41,7 @@ SOURCES="${SOURCES:-endless-terminals}"
 BENCH_DIR="${BENCH_DIR:-benchmarks}"
 TEST_BP="${TEST_BP:-2200}"
 VAL_BP="${VAL_BP:-400}"
-HELDOUT="${HELDOUT:-high_risk,revoke_permission}"
+HELDOUT="${HELDOUT:-conflicting_constraint,no_network}"
 MIXTURE="${MIXTURE:-0.55,0.20,0.25}"
 VALIDATE="${VALIDATE:-auto}"
 CONCURRENCY="${CONCURRENCY:-8}"
@@ -69,6 +73,7 @@ fi
 [[ -n "${DIFFICULTY_JSON:-}" ]] && ARGS+=(--difficulty-json "$DIFFICULTY_JSON")
 [[ -n "${NO_ENFORCE_CUE_BAND:-}" ]] && ARGS+=(--no-enforce-cue-band)
 [[ -n "${ALLOW_LEGACY:-}" ]] && ARGS+=(--allow-legacy-verifier)
+[[ -n "${ALLOW_UNKNOWN_LICENSE:-}" ]] && ARGS+=(--allow-unknown-license)
 
 if [[ "$VALIDATE" == auto ]]; then
   if docker info >/dev/null 2>&1; then VALIDATE=1; else VALIDATE=0; fi
@@ -87,4 +92,4 @@ else
   echo "WARNING: building WITHOUT oracle validation (no Docker). Re-run on the Linux node before training." >&2
   "${BUILD[@]}" "${ARGS[@]}" "$@"
 fi
-echo "dataset: $OUT/{train,val,test}.jsonl  (manifest: $OUT/manifest.json)"
+echo "dataset: $OUT/{train,val,test}.jsonl  (manifest: $OUT/manifest.json: yield, training pairs per family, licences)"

@@ -1,6 +1,6 @@
 # Report-only pilot (SPEC_V3 §6, §8 stage 2): train only the final report on frozen Phase-0 trajectories.
 #   python -m honest_agents.pilot.run --config configs/pilot.yaml [--dry-run] [--shard 0/2] [key.path=value ...]
-# Sweep: alpha x scale_rewards {none, group} (x seeds). `none` is the target (SPEC_V3 §5.1); `group` is the ablation that
+# Sweep: alpha x scale_rewards {none, group} x 3 seeds. `none` is the target (SPEC_V3 §5.1); `group` is the ablation that
 # should erase alpha (go/no-go review TDC-3). One training process per run (SPEC_V3 §5.2), generation by a vLLM server on
 # its own GPU, no Docker, no sandbox. Run scripts/sync_check.sh first: this is the first run that learns (SPEC_V3 §10.1).
 # Not a statement about effort or action-level abstention: see `honest_agents.pilot.__doc__`.
@@ -41,7 +41,7 @@ reward:
 sweep:
   alpha: [0.0, 0.25, 0.5, 0.75]
   scale_rewards: [none, group]
-  seeds: [42]
+  seeds: [42, 43, 44]                    # 3 seeds: the verdict's intervals cover seed variance too (audit2 SP5); no sandbox, so cheap
 
 launch:
   num_processes: 1
@@ -49,15 +49,16 @@ launch:
 
 analysis:                                # honest_agents.pilot.analyze.StopRule: the SPEC_V3 §6 stop rule
   window_rounds: 10
-  monotone_tolerance: 0.02
-  min_claim_spread: 0.05
+  min_claim_spread: 0.10                 # smallest fall of the claim rate over the alpha range worth having (nominal about 0.3)
   min_fabrication_drop: 0.05
   min_initial_fabrication: 0.10
   min_claim_rate: 0.05
   min_discrimination: 0.10
   min_report_rate: 0.70
-  min_failed_episodes: 20
+  min_failed_prompts: 10                 # distinct prompts with a failure per window: a degeneracy guard, not a power gate
   threshold_tolerance: 0.15
+  n_boot: 1000                           # cluster bootstrap over prompts (and seeds); every check is an interval
+  ci_level: 0.90                         # two-sided: each tail 5%
 
 grpo:                                    # trl.GRPOConfig fields (validated at startup)
   loss_type: dapo

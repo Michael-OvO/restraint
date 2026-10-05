@@ -26,7 +26,8 @@ CONFIG = REPO / "configs" / "pilot.yaml"
 def test_the_shipped_config_loads_and_sweeps_alpha_by_scale():
     cfg = load_pilot_config(CONFIG)
     arms = expand_arms(cfg)
-    assert len(arms) == 8 and {a.scale_rewards for a in arms} == {"none", "group"}
+    assert len(arms) == 24 and {a.scale_rewards for a in arms} == {"none", "group"}
+    assert cfg.sweep.seeds == [42, 43, 44] and {a.seed for a in arms} == {42, 43, 44}  # SP5: seed variance is measured
     assert [a.alpha for a in arms[:4]] == [0.0, 0.25, 0.5, 0.75]
     assert arms[0].name == "a0_none_s42" and arms[5].name == "a0.25_group_s42"
     assert cfg.launch.num_processes == 1 and cfg.reward.mode == "honest"
@@ -131,7 +132,7 @@ def test_grpo_section_is_validated(override, match):
 def test_select_arms_by_name_filter_and_shard():
     arms = expand_arms(load_pilot_config(CONFIG))
     assert [a.name for a in select_arms(arms, ["a0.25_none_s42"])] == ["a0.25_none_s42"]
-    assert len(select_arms(arms, ["scale=group"])) == 4 and len(select_arms(arms, ["alpha=0.5"])) == 2
+    assert len(select_arms(arms, ["scale=group"])) == 12 and len(select_arms(arms, ["alpha=0.5"])) == 6
     assert [a.name for a in select_arms(arms, ["alpha=0.25,scale=none,seed=42"])] == ["a0.25_none_s42"]
     assert select_arms(arms, ["alpha=0.3"]) == [] and select_arms(arms, ["bogus"]) == []
     shards = [select_arms(arms, shard=f"{k}/2") for k in range(2)]
@@ -173,7 +174,7 @@ def _small_config(tmp_path: Path, bank: Path, **extra) -> Path:
             "max_epochs": 1000,
             "build": {"mix": "default", "seed": 1},
         },
-        "sweep": {"alpha": [0.0, 0.5], "scale_rewards": ["none", "group"]},
+        "sweep": {"alpha": [0.0, 0.5], "scale_rewards": ["none", "group"], "seeds": [42]},
         **extra,
     }
     path = tmp_path / "pilot_test.yaml"
@@ -226,7 +227,7 @@ def test_the_sweep_skips_completed_arms_and_reports_the_verdict(tmp_path, capsys
     cfg_path = _small_config(
         tmp_path,
         bank,
-        sweep={"alpha": [0.0, 0.25, 0.5, 0.75], "scale_rewards": ["none", "group"]},
+        sweep={"alpha": [0.0, 0.25, 0.5, 0.75], "scale_rewards": ["none", "group"], "seeds": [42]},
         analysis={"window_rounds": 10},
     )
     cfg = load_pilot_config(cfg_path)
@@ -292,6 +293,7 @@ def test_the_context_window_check_renders_the_longest_prompts():
 
 def test_the_pilot_config_class_is_the_documented_one():
     assert PilotConfig.from_dict({}).sweep.alpha == [0.0, 0.25, 0.5, 0.75]
+    assert PilotConfig.from_dict({}).sweep.seeds == [42, 43, 44]
 
 
 def test_break_even_flags_the_alphas_where_blanket_claiming_loses():
