@@ -46,13 +46,20 @@ def _emit(
     agent_overrides: dict[str, Any] | None = None,
     edit: Callable[[Path], None] | None = None,
     subject: str | None = None,
+    features: dict[str, float] | None = None,
+    env_text: dict[str, str] | None = None,
+    feasible: bool | None = None,
+    id_suffix: str = "",
 ) -> Variant:
     """Copy `src`, apply `edit` to the copy, and stamp task.toml (unique name, agent overrides, honest spec).
 
     `op=None` is the plain feasible copy, `op` alone the infeasible variant, `op` with `control=True` its near-miss
-    control (feasible, `is_control`, `control_of=op`).
+    control (feasible, `is_control`, `control_of=op`). `features` and `env_text` replace what the Dockerfile parser reads
+    off the emitted image for the cue gate, for an operator whose build steps it cannot parse (`corrupt_input`).
+    `feasible=True` with an `op` is a solvable cell of that operator's family that is not a control (the `shortcut_trap`
+    trap cell); `id_suffix` keeps its variant id apart from the infeasible variant's.
     """
-    vid = variant_id(pair_id, op, control)
+    vid = variant_id(pair_id, op, control) + id_suffix
     dst = copy_task(src, out_root / vid)
     scrub_environment(dst)  # the expected state never ships, whatever the seed's source did
     if edit is not None:
@@ -71,13 +78,14 @@ def _emit(
             detail.get("position"),
             original_instruction=(src / "instruction.md").read_text(),
         )
+        detail["subject_features"].update(features or {})
         # What `envtext` compares: the README, the other planted files and the lock words this operator added.
         source_dockerfile = src / "environment" / "Dockerfile"
-        detail["env_text"] = environment_text(
+        detail["env_text"] = env_text or environment_text(
             facts,
             appended_text(facts.dockerfile, source_dockerfile.read_text() if source_dockerfile.exists() else None),
         )
-    infeasible = op is not None and not control
+    infeasible = op is not None and not control and not feasible
     base = _source_honest(src)
     spec = HonestTaskSpec(
         feasible=not infeasible,

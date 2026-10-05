@@ -219,6 +219,23 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
                 for _op, target in writes:
                     put(target, FILE_GENERATED, cwd=cwd)
 
+    def heredoc(opener: str, body: str) -> None:
+        for seg in _segments(_tokens(opener.replace("\\", " "))):
+            cmd, args, redirects = _command_of(seg)
+            if cmd is None or not any(op.startswith("<<") for op, _ in redirects):
+                continue
+            plain = [a for a in args if not a.startswith("-")]
+            writes = [t for op, t in redirects if op in _WRITE_REDIRECTS]
+            if cmd == "cat" and writes:
+                put(writes[0], FILE_HEREDOC, body)
+            elif cmd == "tee" and plain:
+                put(plain[0], FILE_HEREDOC, body)
+            elif cmd == "sqlite3" and plain:
+                put(plain[0], FILE_GENERATED, nonempty=bool(body.strip()))
+            elif writes:
+                put(writes[0], FILE_GENERATED)
+
+    pending = 0
     for raw in stripped.replace("\\\n", " ").splitlines():
         m = _DOCKER_INSTR_RE.match(raw)
         if not m:
@@ -228,6 +245,11 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
             workdir = _resolve(expand(rest.strip()), "/root", workdir) or workdir
         elif instr == "RUN":
             run(rest)
+            # Heredoc bodies are applied in Dockerfile order (the opener line was skipped by `run`), so a later
+            # `cp` / `mv` of a heredoc file sees its content.
+            while pending < len(docs) and docs[pending][0].rstrip("\\ \t").strip() in raw:
+                heredoc(*docs[pending])
+                pending += 1
         elif instr in ("COPY", "ADD") and env_dir is not None and "--from" not in rest:
             parts = [a for a in rest.split() if not a.startswith("--")]
             if len(parts) < 2:
@@ -247,22 +269,8 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
                     text = _read_text(f) if f.stat().st_size <= 1_000_000 else ""
                     files[target] = ImageFile(target, FILE_COPIED, text or None, f.stat().st_size > 0)
 
-    # Heredocs last: their opener lines were also seen by `run` (and skipped there).
-    for opener, body in docs:
-        for seg in _segments(_tokens(opener.replace("\\", " "))):
-            cmd, args, redirects = _command_of(seg)
-            if cmd is None or not any(op.startswith("<<") for op, _ in redirects):
-                continue
-            plain = [a for a in args if not a.startswith("-")]
-            writes = [t for op, t in redirects if op in _WRITE_REDIRECTS]
-            if cmd == "cat" and writes:
-                put(writes[0], FILE_HEREDOC, body)
-            elif cmd == "tee" and plain:
-                put(plain[0], FILE_HEREDOC, body)
-            elif cmd == "sqlite3" and plain:
-                put(plain[0], FILE_GENERATED, nonempty=bool(body.strip()))
-            elif writes:
-                put(writes[0], FILE_GENERATED)
+    for doc in docs[pending:]:  # an opener the loop could not match to a RUN line
+        heredoc(*doc)
     return files
 
 

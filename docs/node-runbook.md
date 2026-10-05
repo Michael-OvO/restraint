@@ -18,6 +18,7 @@ CPU-box hours, plus 30 to 50% for bring-up and reruns. Continue to Stage 2 only 
 | Optional Docker smoke on the Mac | Colima or OrbStack (not installed; below) | finds path and compose mistakes early, proves nothing about x86 |
 | **Authoritative Docker checks** (`pytest -m docker`, audit set, oracle validation at scale) | the rented single H100 box (x86, Docker daemon, nftables) | same architecture as the task images |
 | Weight-sync check, base evaluation, Phase 0, SFT, short GRPO | the same H100 box, one GPU, colocated config | one rental, nothing idle |
+| External transfer (Agentic Abstention terminal, AgentAbstain), base and trained | the same box: GPU for the endpoint, Docker for the first; the AgentAbstain judge is an API | [evaluation.md](evaluation.md) section 10.1; scorers and the delta tool run on the Mac |
 
 Rent one x86 VM with one H100 and a real Docker daemon (not a container pod). A 4xH100 VM is for Stages 2 to 4 only
 ([design.md](design.md) section 8 describes the two run slots).
@@ -85,6 +86,30 @@ MODEL=policy scripts/eval_heldout.sh data/test.jsonl runs/eval/base --n-samples 
 AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh data/test.jsonl runs/harbor     # the same under a stock harness
 kill -TERM -- -$SERVER; sleep 20; nvidia-smi --query-gpu=memory.used --format=csv   # stop the server and its children; the GPU must be empty before training
 ```
+
+**Step 4b: external transfer (after the base evaluation, again for each trained adapter).** Other people's abstention tasks, base against
+trained, with the act side measured so over-refusal shows ([evaluation.md](evaluation.md) section 10.1 has the endpoint, the verdict
+rule and the simulated power). Serve the arm as in step 4 (the base as `policy`; an adapter by the `--lora-modules policy=...` form of
+step 7), then, with `TAG` naming the arm:
+
+```bash
+# Agentic Abstention terminal: 108 tasks (19 abstain-warranted, from 10 source tasks); needs Docker, pulls 108 prebuilt images
+TAG=base N_ATTEMPTS=4 MODEL=policy scripts/eval_agentic_abstention.sh runs/harbor   # materialises, checks that all 108 load, runs, scores
+# AgentAbstain: 263 pairs, MCP sandboxes (no Docker); smoke first, then the full set; JUDGE=1 adds the paid judge (526 calls per arm)
+MODEL=policy scripts/eval_agentabstain.sh smoke
+JUDGE=1 JUDGE_API_KEY=... MODEL=policy scripts/eval_agentabstain.sh        # without JUDGE=1 only commit-only bounds are written
+# after both arms exist (any machine):
+python -m honest_agents.eval.external.transfer --benchmark agentic_abstention --base <base summary> --trained <trained summary>
+python -m honest_agents.eval.external.transfer --benchmark agentabstain --subset env_only --base runs/agentabstain/base.json --trained runs/agentabstain/trained.json
+```
+
+The AgentAbstain output file is named after `MODEL`, so give the two arms two served names (`base`, `trained`) or copy the file between runs.
+Time, with wide error bars (nothing has been timed): Agentic Abstention 1.5 to 4 hours per arm at 4 attempts and 8 concurrent plus a first-run image
+pull; AgentAbstain 1 to 2 hours per arm. Stop and read the logs, not the numbers, if more than a few percent of trials are `n_missing` or run errors
+(`run_errors` in the AgentAbstain summary): an endpoint that is down scores as missing, never as a miss. Decision use: a `no_evidence`
+verdict at these sample sizes is expected for a small effect and neither passes nor fails the stage; `gain_with_possible_over_refusal` and
+`degraded` are worth reading per category before anything else. Drop AgentAbstain as a transfer metric if the base model's act accuracy on the
+`env_only` pairs is below about 25 to 30% (section 4), which needs the judge to measure.
 
 Optional, only if the H1 direction check is wanted (two more inference runs): `scripts/h1_tmax_check.sh data/test.jsonl runs/h1_tmax`.
 
@@ -162,6 +187,10 @@ step 5's summary so an unsafe alpha is refused (exit 4).
    the oracle writes outside the handed-over workspace, `remove_tool` (no candidate on real seeds), Harbor allowlist enforcement for the
    `no_network` controls, the sticky-parent ancestor sealing, and the audit sheets (nobody has read them). The checks to run inside a
    container are in [data.md](data.md) section 6. Gate: at least 95% of variants validate as labelled; measure the real leak rate.
+   `corrupt_input` (the transfer family) needs its own checks: the oracle fails the twin and passes the control 3 of 3; `stat`/`cmp` equality
+   of P, D and the noise across the pair; `python3` on PATH and root at build time; the control oracle passes with the decoy present
+   (data.md section 6, "Docker-only checks for `corrupt_input`"). `conflicting_constraint` additionally needs its stub steps (GNU `stat -c`,
+   `chown`, `touch -r`) checked on a real Linux image and the null check on stale stubs.
 9. **Phase 0 cannot measure the pool** (see step 6, the pass@8 run).
 10. **Stock harnesses.** The report file reaching the artifacts directory, `terminus-2` trajectory files, `mini-swe-agent` reaching the endpoint
     from inside the container, and how well a 4B model follows `REPORT_FILE_INSTRUCTIONS`. Under a stock harness Harbor runs the task's own

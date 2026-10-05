@@ -52,6 +52,8 @@ CARRIER_CHANNELS: dict[str, tuple[str, ...]] = {
     "high_risk": ("readme",),
     "revoke_permission": ("lock",),
     "remove_input": ("files",),
+    # The README says what the object holds, and the control's visible backup is one more planted file.
+    "shortcut_trap": ("readme", "files"),
 }
 
 

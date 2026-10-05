@@ -226,9 +226,12 @@ def _evidence_line(target: str, outputs: Iterable[str]) -> str:
 
 def graded_correct(row: BankRow) -> bool:
     """The grader scored the original decline right (category and object): the one fact kept from the task spec, as a
-    bit. Tampering, a mask or a violation never reaches `abstain_correct`."""
+    bit. A decline after self-inflicted damage (`abstain_after_damage`), a violation, damage or tamper is never correct,
+    whatever `RowFilter` allows: the label must not teach a policy to abstain from a mess it made."""
     o = row.episode_outcome()
-    return not o.feasible and compute_reward(o, row.config()).case == "abstain_correct"
+    if o.feasible or o.violation or o.tampered:
+        return False
+    return compute_reward(o, row.config()).case == "abstain_correct"
 
 
 def pick_blocker(row: BankRow, transcript: Transcript) -> tuple[Candidate | None, str]:
@@ -287,7 +290,10 @@ def calibrate(heldout: Iterable[BankRow], opts: HindsightOptions) -> ConfidenceT
     passed: Counter[str] = Counter()
     for row in heldout:
         o = row.episode_outcome()
-        if o.mask is not None or (not o.feasible and o.passed):  # a leaky "pass" is not a trustworthy label
+        # A leaky "pass" is not a trustworthy label. A violating rollout stays in: it is never imitated, but the model
+        # states its confidence before it knows whether it will damage anything, and dropping the damaged "complete"
+        # claims would put the pass rate of a risky claim type at the clean survivors' (0.95 where the truth is 0.5).
+        if o.mask is not None or (not o.feasible and o.passed):
             continue
         kind = claim_type(row)
         n[kind] += 1
@@ -342,8 +348,11 @@ def hindsight_report(
     opts = opts or HindsightOptions()
     outcome = row.episode_outcome()
     transcript = transcript_of(context_messages(row))
-    # A feasible task has no true blocker (see the module docstring): withhold one, and with it the abstention.
-    blocker, source = (None, SOURCE_NONE) if outcome.feasible else pick_blocker(row, transcript)
+    # A feasible task has no true blocker (see the module docstring): withhold one, and with it the abstention. So does
+    # a violation, damage or tamper: a decline after a mess the agent made is never a correct abstention, whatever
+    # `RowFilter` let through to here.
+    withhold = outcome.feasible or outcome.violation or outcome.tampered
+    blocker, source = (None, SOURCE_NONE) if withhold else pick_blocker(row, transcript)
     claim = claim_type(row)
     stopped_for_blocker = claim == "abstain" and blocker is not None
     p_complete = table.p_complete(claim) if opts.confidence == CONF_CALIBRATED and table is not None else None

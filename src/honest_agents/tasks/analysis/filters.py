@@ -364,6 +364,36 @@ def is_link_only(content: str) -> bool:
     return bool(lines) and all(re.fullmatch(r"(?:https?://\S+|/\S+|\S+\s*->\s*\S+)", ln) for ln in lines)
 
 
+# What lists, globs or walks a directory: python calls, a shell command word, or a wildcard inside a path-like word.
+_PY_SCAN_RE = re.compile(r"\.r?glob\(|\bglob\.i?glob\(|iterdir|listdir|scandir|os\.walk|\bwalk\(|fnmatch")
+_SH_SCAN_RE = re.compile(
+    r"(?:^|[|;&(]|\bdo\b|\bthen\b|\bin\b)\s*(?:sudo\s+)?(?:ls|find|du|tree|xargs)\b|[^\s'\"]*[*?][^\s'\"]*[/.][^\s'\"]*|[^\s'\"]*[/.][^\s'\"]*[*?]",
+    re.MULTILINE,
+)
+_PY_SHELL_OUT_RE = re.compile(r"[\"']\s*(?:ls|find|du|tree)\b")
+
+
+def dir_is_scanned(facts: TaskFacts, directory: str) -> bool:
+    """The oracle or a test may list, glob or walk `directory`, so an extra file there could change what they see.
+
+    Conservative reading: the directory is named as a whole path (not only as the prefix of a file path) in the oracle or in
+    a test file, and that text also holds a listing or walking construct anywhere (a python glob or listdir, `ls`, `find`, a
+    wildcard in a path-like word); or the oracle `cd`s into it and uses a wildcard word. A directory nothing names this way
+    is safe for `corrupt_input` to plant a decoy in.
+    """
+    directory = posixpath.normpath(directory)
+    whole = re.compile(re.escape(directory) + r"/?(?![\w.\-/])")
+    oracle = strip_heredoc_bodies(facts.solve or "")
+    cd_in = re.search(rf"\bcd\s+[\"']?{re.escape(directory)}/?[\"']?(?:\s|$|;|&)", oracle)
+    if (whole.search(oracle) or cd_in) and (_SH_SCAN_RE.search(oracle) or _PY_SCAN_RE.search(facts.solve or "")):
+        return True
+    for t in facts.test_files:
+        text = t.read_text(errors="replace")
+        if whole.search(text) and (_PY_SCAN_RE.search(text) or _PY_SHELL_OUT_RE.search(text)):
+            return True
+    return False
+
+
 def _mkdir_operands(script: str, home: str, cwd: str | None) -> set[str]:
     out: set[str] = set()
     for seg in _segments(_tokens(strip_heredoc_bodies(script).replace("\\\n", " "))):

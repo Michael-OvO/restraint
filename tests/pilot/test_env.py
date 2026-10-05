@@ -529,7 +529,8 @@ def test_replay_scores_exactly_what_compute_reward_scores(case_id):
 
 def test_the_table_reaches_every_case_but_the_masks():
     seen = {r[1] for r in TABLE}
-    assert set(CASES) - seen == {"masked", "leak"}  # both have their own tests below
+    # masks have their own tests below; the two post-damage cases need a violation (tests/test_reward_damage.py)
+    assert set(CASES) - seen == {"masked", "leak", "abstain_after_damage", "self_caused_failure"}
 
 
 def test_a_masked_trajectory_stays_masked_whatever_the_new_report_says():

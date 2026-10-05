@@ -76,7 +76,7 @@ async def run_grade(sb, spec, baseline, *, report=None, tests_dir=None, cfg=FAST
 def _no_sha256sum_path(base: Path) -> str | None:
     """A PATH holding only what the manifest pipeline needs, minus `sha256sum`, so the `shasum` fallback really runs
     (on Linux both usually sit in /usr/bin, so filtering an existing PATH would never exercise it)."""
-    found = {t: shutil.which(t) for t in ("sh", "find", "sed", "readlink", "shasum")}
+    found = {t: shutil.which(t) for t in ("sh", "find", "sed", "readlink", "shasum", "tr", "stat")}
     if not all(found.values()):
         return None
     base.mkdir(parents=True, exist_ok=True)
@@ -103,6 +103,7 @@ async def test_manifest_command_runs_under_posix_sh(tmp_path, hasher):
     m = await take_manifest(sb, [str(d), missing], timeout=30)
 
     assert m == {
+        str(d): "DIR",
         str(a): sha(a),
         str(b): sha(b),
         str(d / "link"): "L:a",

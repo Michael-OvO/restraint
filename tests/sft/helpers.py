@@ -33,6 +33,10 @@ def make_row(
     no_report: bool = False,
     episode_id: str | None = None,
     reward_config: RewardConfig | None = None,
+    damage_paths: tuple[str, ...] = (),
+    spec: dict[str, Any] | None = None,
+    is_control: bool = False,
+    blocker_check: str = "unknown",
 ) -> BankRow:
     """A banked trajectory: `turns` = [(command, output)], then a report turn (`original` args via `tool`)."""
     turns = turns if turns is not None else [("ls /app", "in.txt")]
@@ -53,6 +57,9 @@ def make_row(
         expected_targets=expected_targets or [],
         tamper=tamper,
         masked_reason=masked_reason,
+        damage_paths=damage_paths,
+        is_control=is_control,
+        blocker_check=blocker_check,
     )
     cfg = reward_config or RewardConfig()
     br = compute_reward(o, cfg)
@@ -67,6 +74,7 @@ def make_row(
             "split": split,
             "task_dir": f"tasks/{variant}",
             "perturbation": "secret_perturbation",
+            **({"spec": spec} if spec is not None else {}),
         },
         blocker_facts=facts or BlockerFacts(commands=["ls", "cat", "python3"], cwd="/app", network_mode="public"),
         reward_config=cfg,

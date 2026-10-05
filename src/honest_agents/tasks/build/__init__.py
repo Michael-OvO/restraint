@@ -32,12 +32,15 @@ docs/design.md section 7 rules implemented here:
 * **Decontamination is mandatory**: `--benchmark-dir` must be given and non-empty (`scripts/fetch_benchmarks.sh`),
   unless `--i-know-no-benchmark`. Seeds with a Terminal-Bench canary, or whose Dockerfile COPY/ADDs tests or expected
   files, are rejected; `environment/{task.json,test_initial_state.py,container.def}` are deleted (see `sources.py`).
-* **Two held-out families** appear only in `test`: `conflicting_constraint` and `no_network` (default). Their controls
-  are held out with them. The independent leak verification (docs/data.md) found a lexical cue in
-  conflicting_constraint that no template change removes (the control's path is introduced as stale) and one training
-  pair of no_network, so both are zero-shot test families with a construct-validity caveat. The families whose twin
-  differs only in the environment (`high_risk`, `revoke_permission`, `remove_input`) train. The cue gate refuses the
-  build for a training family and only reports for a held-out one, so a test-only family can never block a build.
+* **Three held-out families** appear only in `test`: `corrupt_input`, `conflicting_constraint` and `no_network`
+  (default). Their controls are held out with them. `corrupt_input` is the transfer test: the input is present but its
+  bytes are noise, a mechanism no training family has, and its twin and control differ only in the environment (which
+  file is corrupted). The independent leak verification (docs/data.md) found a lexical cue in conflicting_constraint
+  that no template change removes (the control's path is introduced as stale) and one training pair of no_network, so
+  those two are zero-shot test families with a construct-validity caveat. The families whose twin differs only in the
+  environment (`high_risk`, `revoke_permission`, `remove_input`) train. The cue gate refuses the build for a training
+  family AND for `corrupt_input` (`config.ENFORCED_HELDOUT_FAMILIES`: a transfer test with a cue measures the cue) and
+  only reports for the other held-out families, so those can never block a build.
 * **Phrasing and name pools**: variants of test seeds are built from the test pools in `perturb.POOLS`, everything else
   from the train pools, so no test phrasing or sentinel path is ever seen in training.
 * **Mixture** (`--mixture`, default 55% plain feasible / 20% near-miss controls / 25% infeasible) is applied to `train` and
@@ -65,6 +68,7 @@ from honest_agents.tasks.build.config import (
     DEFAULT_MIXTURE,
     DEFAULT_TEST_BP,
     DEFAULT_VAL_BP,
+    ENFORCED_HELDOUT_FAMILIES,
     BuildConfig,
     Row,
     heldout_problems,
@@ -94,6 +98,7 @@ __all__ = [
     "DEFAULT_MIXTURE",
     "DEFAULT_TEST_BP",
     "DEFAULT_VAL_BP",
+    "ENFORCED_HELDOUT_FAMILIES",
     "HELDOUT_CAVEAT",
     "BuildConfig",
     "Row",

@@ -167,17 +167,42 @@ def test_table():
 """
 
 
-def rich_task(path: Path, *, verifier: str | None = None, outputs: tuple[str, str] | None = None) -> Path:
+_INPUT_WORDS = (
+    "alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "indigo", "juniper", "kelp", "lumen",
+    "meadow", "nectar", "orchid", "pebble", "quartz", "ripple", "summit", "thistle", "umber", "velvet", "willow", "zephyr",
+)  # fmt: skip
+
+
+def varied_inputs(i: int) -> tuple[str, str]:
+    """The two input names of the `i`-th source of a pool (a settings file and a clip list): different in every source,
+    so that a pool of identical tasks does not hand a name classifier two constant names to learn."""
+    n = len(_INPUT_WORDS)
+    return (
+        f"{_INPUT_WORDS[i % n]}_{_INPUT_WORDS[(i * 5 + 1) % n]}.conf",
+        f"{_INPUT_WORDS[(i * 7 + 2) % n]}_{_INPUT_WORDS[(i * 11 + 3) % n]}.txt",
+    )
+
+
+def rich_task(
+    path: Path,
+    *,
+    verifier: str | None = None,
+    outputs: tuple[str, str] | None = None,
+    inputs: tuple[str, str] | None = None,
+) -> Path:
     """Named mandated tool outside any interpreter's reach (`ffmpeg`), build-created inputs, literal outputs, a download.
 
     `verifier="pytest"` stamps `[metadata.honest] verifier = "pytest"` the way the data pipeline's hermetic conversion
     does, so tests can check that the operators carry it through. `outputs` renames the two deliverables
-    (`summary.txt`, `table.txt`), so a pool of seeds does not have exactly two deliverable names.
+    (`summary.txt`, `table.txt`), so a pool of seeds does not have exactly two deliverable names; `inputs` does the same
+    for the two input files (`settings.conf`, `clips.txt`).
     """
 
     def rename(text: str) -> str:
         for old, new in zip(("summary.txt", "table.txt"), outputs or (), strict=False):
             text = text.replace(f"/home/user/out/{old}", f"/home/user/out/{new}")
+        for old, new in zip(("settings.conf", "clips.txt"), inputs or (), strict=False):
+            text = text.replace(f"/home/user/data/{old}", f"/home/user/data/{new}")
         return text
 
     toml = TASK_TOML

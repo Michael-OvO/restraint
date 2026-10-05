@@ -4,7 +4,7 @@ What the task dataset is made of, which families train, how many tasks stand beh
 may be used, which leaks were found and how each was closed, and how to rebuild it. Code: `src/honest_agents/tasks/`; the build is
 `scripts/build_dataset.sh`. Everything here was measured without Docker or a GPU, on the full real Endless Terminals (ET) pool
 (2,492 tasks, 2,482 of them convertible; section 8 has the numbers and the build cost). Nothing has been oracle-validated yet
-(that needs Docker).
+(that needs Docker). Section 3a describes `corrupt_input`, the held-out transfer family.
 
 ## 1. Sources and licences
 
@@ -35,7 +35,8 @@ makes the obstacle harmless, and records `decoy_targets`. Each infeasible varian
 | `revoke_permission` | the lock sits in the image, the instruction is byte-identical; the lock is on the file's directory when the file is the only deliverable there, so `expected_targets` lists both the file and the directory (`perturb/revoke_permission._lock_targets`) | train | no text cue |
 | `remove_input` | a build-time input is deleted; filtered so a recreated input cannot pass (section 5) | train | no text cue |
 | `remove_tool` | a tool is removed (the instruction must mandate it and no interpreter may substitute) | **not built by default** (`perturb.NOT_BUILT_BY_DEFAULT`; `--operators remove_tool` turns it on) | structural: 1 variant in 2,482 ET seeds (section 8) |
-| `conflicting_constraint` | the instruction forbids the path the task needs | **held out** (test only) | a lexical cue no template removes (section 4) |
+| `corrupt_input` | an input the task needs is present but overwritten with noise of its own length; the control overwrites a planted look-alike file instead (section 3a) | **held out** (test only), the transfer test; its cue gate is enforced | a mechanism no training family has, no text cue, 61 test pairs |
+| `conflicting_constraint` | the instruction forbids the path the task needs | **held out** (test only), reported with a caveat, not in the transfer headline | gated cues in band at 114 pairs (31 test) but a position cue (AUC 0.91) and role vocabulary remain (section 3) |
 | `no_network` | the network is cut | **held out** (test only) | about 2 pairs per 150 seeds: too few to train or report |
 
 Yield, seeds that give at least one infeasible variant (each with a matched control), per 150 real ET seeds. "Before" is the
@@ -48,8 +49,9 @@ tasks" equals the seed count behind each family:
 |---|---|---|---|---|
 | high_risk | 148 | 102.5 | 105.2 | 1,740 |
 | revoke_permission | 101 | 96.7 | 94.8 | 1,568 |
-| conflicting_constraint | 72 | 29.1 | 33.5 | 555 |
+| conflicting_constraint | 72 | 29.1 | 6.7 (second design, after stub-safety filters and pairing; 383 sources have a candidate) | 114 pairs |
 | remove_input | 31 | 7.6 | 11.4 | 188 |
+| corrupt_input | new | new | 17.0 | 282 |
 | no_network | 1 | 1.8 | 2.5 | 41 |
 | remove_tool | 0 | 0.0 | 0.1 | 1 |
 
@@ -76,45 +78,137 @@ unrelated, so a rule on the forbidden path's own sentence reaches 86% accuracy a
 AUC 1.0; the fraction of the path's name tokens found in the task's original instruction gives AUC 0.99 (train) and 1.00 (test); and
 the enforced cue gate failed on the 335-seed pool (name-token AUC 0.634 on 52 pairs) while passing at 261 and 170, so a gate on a
 family with this few pairs depends on the pool. So families whose twin differs only in the environment train, and
-`conflicting_constraint` and `no_network` are **zero-shot test families**. This is a design change, not a weakening of a check:
+`conflicting_constraint` and `no_network` are **zero-shot test families**. Neither is a clean transfer test (a cue, and 15 test pairs),
+so `corrupt_input` (section 3a) was added as the transfer family. This is a design change, not a weakening of a check:
 
-- the cue gate (`--enforce-cue-band`, on by default) refuses a build for any family in the training mix and only reports for a
-  held-out one (`manifest.json` `cue_metrics.heldout_violations`), so a test-only family can never block a build;
+- the cue gate (`--enforce-cue-band`, on by default) refuses a build for any family in the training mix and for the held-out
+  transfer family `corrupt_input` (`build.ENFORCED_HELDOUT_FAMILIES`: a transfer test with a cue measures the cue), and only
+  reports for the other held-out ones (`manifest.json` `cue_metrics.heldout_violations`), so those can never block a build;
 - the leakage tests stay strict for every training family and assert that the held-out families and their controls are absent from
   train, val and train_pool and present in test;
 - any number for a held-out family carries the construct-validity caveat (a policy can learn "forbidden path described as unrelated
   means proceed") and stays out of headline results;
-- `HELDOUT=conflicting_constraint scripts/build_dataset.sh` also trains `no_network` (about 4 pairs per 335 seeds; an owner decision
-  to revisit).
+- `HELDOUT=corrupt_input,conflicting_constraint scripts/build_dataset.sh` also trains `no_network` (about 4 pairs per 335 seeds; an
+  owner decision to revisit). Leave `corrupt_input` in the list or there is no transfer test.
 
 With these defaults training sees three of AgentAbstain's eight scenarios.
 
-## 3. conflicting_constraint after the fix
+## 2a. Transfer decision and evidence (final)
 
-The first design (the control forbids an existing input, the variant forbids a missing output) let `test -e` predict the label (control
-426/432 present, infeasible 44/432). Now a pair shares one image and one instruction up to one path in the constraint sentence. The
-task names a deliverable D; a second path D' (same directory and extension, a name recombined from the words of other tasks'
-deliverables, never a copy) is introduced as a stale leftover in both variants with as many mentions as D. The impossible variant
-forbids D, the control forbids D'. When a stale stub of D is planted, an identical stub of D' goes beside it. The enforced
-classifiers use folds equal to donor groups (`analysis/cues.donor_group`), so a control's borrowed words never come from the fold
-being tested.
+Default held-out list `corrupt_input,conflicting_constraint,no_network`; the decision rule was fixed before the numbers.
 
-| cue (conflicting_constraint, held out by source) | before | after |
+- `corrupt_input`: primary transfer family. Rule: enforced cue gates in band on at least 40 test pairs. Result on the full pool
+  build (`python -m honest_agents.tasks.build --no-download --test-bp 2200 --val-bp 2200`): 61 test pairs (158 train-side pool, 63 val),
+  every enforced cue 0.50 (`cv:name_tokens` 0.485, null band 0.40 to 0.61); the semantic features (named, mentions, `name_token_frac`)
+  are 1.0, 1.0 and 0.97 by design and only reported. Met.
+- `conflicting_constraint`: outside the primary transfer endpoint. Rule: every enforced cue in band on at least 150 pairs. Result: 114
+  pairs (31 test). Not met (section 3). It is in `EvalProtocol.cue_families`, reported with a caveat, never pooled.
+- `no_network`: 41 pairs (15 test), reported with a caveat (also in `cue_families`; it gets a row only at 50 sources).
+- Full-pool yields: remove_input 104 / 43 / 42 pairs (train-side pool / val / test), revoke_permission 870 / 341 / 357 (230 / 88 emitted
+  in train / val), high_risk 981 / 365 / 394 (231 / 88), corrupt_input 158 / 63 / 61, conflicting_constraint 62 / 21 / 31,
+  no_network 21 / 5 / 15. Cue violations: none in train, val or test.
+- Consequence for evaluation: the headline transfer row is `corrupt_input` (pooled clean held-out, [evaluation.md](evaluation.md)
+  section 2a); the transfer protocol and the data build use the same family names.
+
+## 3. conflicting_constraint: second design, still not a transfer family
+
+The first design (the control forbids an existing input, the variant forbids a missing output) let `test -e` predict the label, and
+the second (a decoy path borrowed from other tasks and introduced as stale) left `name_token_frac` at AUC 0.98. The current design:
+the impossible variant forbids a deliverable D that the instruction names and the oracle writes; the control forbids an input I that
+the same instruction names, the image provides and the oracle never touches. Both use one sentence template at the same place over
+one shared image; the constraint wordings ban writes only, so reading I stays allowed. When D is absent a stub of D (`cp -p` of an
+input, parent directories with the parent's owner, mode and mtime, ctime renewed in a pair-id-hashed order, guarded by `[ -e D ] ||`) is
+planted so existence, bytes and size match; deliverables whose oracle needs D absent (sqlite3, zip, gpg, `ln`, exclusive open, appends,
+...) get no stub. A pool-level matched pairing (`select_pairs`) balances name words, mentions, depth, name length, sibling count, size
+bucket and extension between the classes; it balances counts and never consults a classifier.
+
+Measured on the 2,482 cached sources (build with the repository command; split as in the build):
+
+| cue | value |
+|---|---|
+| sources with a valid (D, I) candidate | 383 |
+| pairs after stub-safety filters and pairing | 114 (62 train-side pool, 21 val, 31 test) |
+| gated cues (exists, depth, extension, mentions, name_token_frac, position, size, name tokens, structure, env files) | all in [0.4, 0.6]; test split: name tokens 0.47, structure 0.60 (se 0.07 at 31 pairs) |
+| without the pairing (fallback for pools under 60 candidate sources) | name tokens 0.895, structure 0.757, mentions 0.658 |
+| ungated path char-3-gram LR | 0.56 to 0.62 |
+| first-mention position of the path in the original instruction | 0.91 |
+| original-context words (the semantic carrier) | 0.75 to 0.78 |
+
+**Verdict: not eligible for the primary transfer endpoint; held out, reported with a caveat.** The bar was every enforced cue in band
+on at least 150 pairs; the pool gives 114 (31 test). The pairing weight was tuned against the gate metric, neighbouring settings give
+name-token AUC 0.58 to 0.64, inputs are described before outputs so the path's first mention separates at 0.91 and matching on it
+cut the yield to 76 pairs and left 0.70, and nothing has run in Docker (oracle on the twin and control, stub tests; section 6).
+`cue_families` in `EvalProtocol` keeps it out of every pool and headline. Proof: `tests/tasks/test_tasks_perturb_cc.py::
+test_a_build_pairs_the_pool_and_existence_is_at_chance_on_the_emitted_tasks`.
+
+## 3a. corrupt_input: the transfer test
+
+**Why.** A transfer test must show that "check whether the task can be done, and say so" generalises to a kind of impossibility
+never trained on, with no shortcut. The held-out families before this one failed that: `conflicting_constraint` has a lexical cue,
+`no_network` has 15 test pairs. `corrupt_input` has a mechanism none of the training families has (not deletion, not permission, not
+a destructive request): the input file EXISTS with its name, size, owner, mode and mtime, and holds noise. `test -e`, `ls -l` and
+`stat` all say "fine"; only reading it shows the problem. Code: `tasks/perturb/corrupt_input.py` (module note), tests
+`tests/tasks/test_tasks_corrupt_input.py`.
+
+**Construction (one image, one instruction).** The instruction, the tests and the oracle of a pair are byte-identical to the source
+and to each other. The image differs in one argument of the last build step:
+
+- a decoy file D is planted next to the input P in BOTH members: same directory and extension, a name and a body of the same
+  shape (`shape_copy`: each run of letters or digits replaced by one of the same length, delimiters kept, so size, line count and
+  layout match and no value of P survives), and the same owner, mode and mtime as P (cloned at build time);
+- the impossible variant overwrites P in place with seeded noise of its own length, the control overwrites D with the SAME bytes;
+  mtime is restored afterwards. Three procedures (noise 50%, zeros 25%, ones 25%) are drawn per pair and shared by both members;
+- both steps are one-line `python3 -c` programs (python3 is in every hermetic image), run as root after the source image, and read the
+  size from the file itself, so equal sizes do not depend on how well the parser read the Dockerfile.
+
+Planted rather than found: in the pool a file that neither oracle nor tests read, next to one they do, exists in 4 of 188 sources
+with a `remove_input` candidate. The decoy's name words are drawn from the file names of the pool's own inputs
+(`perturb.set_name_words`, installed by the build; `FILE_WORDS` is the default and the padding of a thin pool), so it is an independent
+draw from the distribution P's name came from.
+
+**Soundness (static; Docker checks in section 6).** The candidate rules are those of `remove_input` (`InputRules`: the instruction
+names the file, the image creates it with known text, the oracle reads it, the tests spell out a value of it that neither the
+instruction, nor another image file, nor the oracle shows, and that cannot be rebuilt from visible text) with the register floors
+relaxed (`CORRUPTION_RULES`): `.log` inputs, an oracle that only copies the file, 40 characters and 2 lines. The relaxation is safe
+because corruption keeps no partial content and the tests still depend on the bytes. The noise is checked not to contain any of those
+values. The oracle spelling the value itself excludes the file (it would pass on noise). A decoy is not planted in a directory the
+oracle or the tests may list, glob or walk (`analysis.dir_is_scanned`). Expected blockers: `missing_capability`, `missing_parameter`,
+`conflicting_evidence` (all external; the target must be the corrupted path, so a wider category list does not let a blind guess
+through). The control records the decoy in `decoy_targets`, so blaming the corrupted-but-irrelevant file is false blame. Note the
+grader's `missing_capability` probe (`command -v` / `test -e`) is FALSE for a present file; reward only reads it on feasible
+tasks, but a "claim verified" statistic over this family is not meaningful.
+
+**Cue gates (enforced for this family although it is held out).** One feature class is the relation the policy has to verify and
+separates the pair by construction: the file the instruction names versus a planted file it never mentions (`named_in_instruction`,
+`mentions_in_instruction`, `name_token_frac`, AUC 1.0, 1.0, 0.97; `analysis.cues.SEMANTIC_FEATURES`). The text is identical on both
+sides, so no policy can read it without opening the files. They are reported (`cue_metrics.semantic`) and not judged. Everything else is
+enforced in [0.4, 0.6]: exists, size, depth, extension, garbage entropy / NUL share / distinct bytes, and grouped-CV classifiers
+(folds are donor groups of pairs) over the path words (`cv:name_tokens`), structure, environment difference (`cv:env_diff`: size,
+depth, extension, name length, the bytes written), instruction word 1-2-grams and character 5-grams, and the planted text
+(`env:files`). A shuffled-label null (labels swapped within pairs, 20 shuffles) is in the manifest next to each classifier
+(`cue_metrics.<split>.corrupt_input.null`). Owner, mode and mtime are equal by construction and verified on a real filesystem by the
+unit tests, not by a classifier: the Dockerfile parser cannot read them (Docker check below).
+
+| cue, test split, 61 pairs (full pool) | AUC | shuffled null (p05-p95) |
 |---|---|---|
-| exists at boot, AUC | 0.007 (old code) | 0.50 |
-| name-token naive Bayes, grouped CV | 0.82 | 0.49 (57 pairs) |
-| structure logistic regression (depth, extension, mentions, position, size, name length), grouped CV | 0.74 | 0.46 |
-| mentions in instruction, AUC | 0.66 | 0.50 |
-| whole-instruction bag-of-words, source-grouped CV | 0.51 | 0.51 |
-| share of the path's name words found in the seed's own instruction (`name_token_frac`), full pool, 129 test pairs | 0.99 | 0.984 (reported while held out; enforced for any family that trains) |
+| exists, size, depth, extension, garbage entropy, NUL share, distinct bytes | 0.50 | |
+| `cv:structure` | 0.502 | 0.498-0.502 |
+| `cv:env_diff` | 0.502 | 0.499-0.502 |
+| `cv:instruction_words`, `cv:instruction_chars` | 0.500 | 0.500 |
+| `cv:name_tokens` | 0.485 | 0.399-0.605 |
+| `env:files` | 0.500 | |
+| named / mentions in instruction (semantic, not judged) | 1.00 / 1.00 | |
 
-**Remaining, not removable:** the label is whether the forbidden path is the one the task requires, and a classifier given only the
-lines that mention the forbidden path reaches AUC 1.0 because the control's path is introduced as stale. That is the conflict itself
-in lexical form. Opener and tail pools (8 and 6 train, 3 and 2 test phrasings) keep any single template from being a marker, but the
-generator is the same for test, so this is a construct-validity limit to state next to any number. Decoy names are also longer and
-have more digits than deliverables (low severity; held out, not changed).
-Since `name_token_frac` is enforced, a build that trains `conflicting_constraint` (`HELDOUT=no_network`) is refused at AUC 0.98
-unless `NO_ENFORCE_CUE_BAND=1`: the family can only be reported zero-shot until its decoy stops borrowing words.
+**Yield, full pool (2,482 seeds).** 349 sources (14%) have an input candidate under the relaxed rules (remove_input's own: 188). Of
+those 58 lose to a listed or globbed input directory and 13 to "no safe decoy", leaving 282 pairs from 282 independent sources
+(every near-duplicate cluster is one seed): 158 in the train-side pool, 63 in val, **61 in test**. Only the test pairs are emitted
+(`yield.<split>.families.corrupt_input` in the manifest); the others stay in `tasks/` for debugging. 61 pairs clear the 50-row reporting
+floor, and a 95% interval for a rate over 61 pairs is at most +-12.5 points. The family is skewed to logs (30 of 61 test pairs are `.log`,
+16 `.csv`), noise 32, ones 17, zeros 12.
+
+**Limits.** Two-thirds of the yield is about one kind of file (logs and CSV), the decoy is a made-up file (its words are drawn, not
+real), and the family is held out only by default: trained on, it would be judged by the same gate. The honest answer is "the file
+the task names is unusable", which a policy can reach only by reading it, so a policy that never reads inputs cannot pass.
 
 ## 4. Leak register: status of every finding
 
@@ -124,17 +218,18 @@ are fixed locally; Docker-only checks are in section 6.
 
 | ID | Finding | Status | Proof |
 |---|---|---|---|
-| L1 | conflicting_constraint path-existence shortcut (accuracy 0.935) | **fixed**; one lexical cue remains by design (section 3) | `tasks/perturb/conflicting_constraint.py` (`_cc_plan`, `_borrowed_sibling`, `_cc_edit`), `tasks/analysis/cues.py` (`cue_classifiers`, `ENFORCED_FEATURES`); `tests/test_data_leakage.py::test_every_training_family_has_a_neutral_existence_cue`, `::test_forbidden_path_existence_rule_is_at_chance_on_the_emitted_tasks`; `tests/tasks/test_tasks_perturb.py`, `test_tasks_analysis.py` |
+| L1 | conflicting_constraint path-existence shortcut (accuracy 0.935) | **fixed** (second design); gated cues in band, a position cue (AUC 0.91) and role vocabulary remain, so the family is reported with a caveat only (section 3) | `tasks/perturb/conflicting_constraint.py` (`cc_candidates`, `select_pairs`, `_stub_run`), `tasks/analysis/cues.py`; `tests/tasks/test_tasks_perturb_cc.py::test_a_build_pairs_the_pool_and_existence_is_at_chance_on_the_emitted_tasks`, `tests/test_data_leakage.py::test_every_training_family_has_a_neutral_existence_cue` |
 | L2 | test seeds move when the pool changes (78 of 300 old test seeds fell into train at LIMIT=2492 in simulation) | **fixed**: fixed-hash split, `test_ids.txt` with its hash, `train/` refuses a test id | `tasks/build/splits.py` (`split_bucket`, `write_test_ids`, `check_no_test_leak`); `tests/test_data_leakage.py::test_rebuild_at_a_different_pool_size_keeps_the_test_ids`, `::test_a_frozen_test_id_stays_in_test_and_a_tampered_file_is_refused`, `::test_train_accepts_the_built_rows_and_refuses_a_test_id` |
 | L3 | variant id, operator and `__control` in Docker names and error text | **fixed in the training path** (Docker unverified): opaque `ep<hex>` ids, fixed `[sandbox unavailable]` text, also in OpenEnv | `harness.py` (`harbor_names`, `SANDBOX_UNAVAILABLE`), `trainer.py` (`_tool_error_text`), `openenv_env/server/environment.py`; `tests/test_data_flow.py` |
 | L4 | decontamination off by default | **fixed**: benchmark dir mandatory; seeds with a canary or a COPY/ADD of tests, expected files or `task.json` are rejected; `task.json`, `test_initial_state.py` and `container.def` are deleted from every emitted variant | `tasks/build/seeds.py::check_benchmark_config`, `tasks/taskfs.py::scrub_environment`; `tests/test_data_leakage.py::test_the_build_fails_without_a_benchmark_dir`, `::test_no_emitted_environment_file_holds_the_expected_final_state` |
 | L5 | label strings in Dockerfile comments | **fixed**: stripped, and emitted files are scanned (dropped variants counted in `manifest.json`) | `perturb/emit.py::scrub_labels`, `analysis/labels.py::label_leaks`, `build/reports.py::emitted_label_leaks`; `tests/test_data_leakage.py::test_no_label_word_in_any_emitted_environment_file_or_comment` |
 | L6 | split guards accept rows with no split | **fixed**: `split == "train"` required in `train.check_rows`, the pilot and `difficulty.py` | `tests/test_data_flow.py::test_check_rows_train_requires_split_train`, `::test_pilot_refuses_non_train_and_missing_splits`, `::test_difficulty_counts_only_train_rows` |
 | L7 | eval-sourced quarantine entries change `test.jsonl` on rebuild | **fixed**: eval, test and openenv sources ignored by default | `bank.DEFAULT_IGNORED_SOURCES`; `tests/test_data_flow.py::test_eval_quarantine_entries_are_ignored_by_default` |
-| L8 | held-out families are described in the system prompt (a claim limit, not a leak) | **documented**: call them "held-out variants", run the neutral-prompt arm | [evaluation.md](evaluation.md) section 1, [proposal.md](proposal.md) section 7.1 |
+| L8 | held-out families are described in the system prompt (a claim limit) | **fixed for the prompt, residual vocabulary**: `SYSTEM_PROMPT` is mechanism-neutral ([evaluation.md](evaluation.md) section 2a); the blocker category names remain shared report vocabulary | `tests/eval/test_prompt.py`, `tests/eval/test_transfer.py` |
 | L9 | the cue gate was blind to the environment text of the environment-only families (a twin and its control share one instruction, so every path feature is pair-identical): README wording and length, lock owner and mode | **fixed**: grouped-CV classifiers over the planted text are a hard gate for training families (section 4.1); the first full-pool build found a real shortcut, README length at AUC 0.91, and the junk texts were rewritten to match the risky ones | `tasks/analysis/envtext.py`, `tasks/perturb/pools.py` (`_JUNK_WHAT`, `_make_sites`), `tests/tasks/test_tasks_envtext.py`, `tests/test_data_leakage.py::test_the_planted_environment_text_of_every_training_family_is_neutral_except_its_carrier`, `tests/tasks/test_tasks_perturb.py::test_every_risky_text_has_a_junk_text_of_the_same_shape_and_they_are_dealt_as_pairs` |
 | L10 | the name-token-share feature (AUC 1.0 for a borrowed-name decoy) was not enforced | **fixed**: `name_token_frac` is in `ENFORCED_FEATURES`, computed against the seed's own instruction | `tasks/analysis/cues.py`; `tests/tasks/test_tasks_envtext.py::test_a_decoy_that_borrows_names_from_other_tasks_is_refused_for_a_training_family` |
 | L11 | the empty-build guard sat after the seed collection, so a build whose seeds were all removed by decontamination or the hermetic filter wrote a manifest with `n_seeds: 0`; a cue metric that crashed counted as clean | **fixed**: the guard is after both filters and names the counts; an enforced build fails on a crashed metric; both leave no dataset file | `tasks/build/pipeline.py`; `tests/tasks/test_tasks_build.py::test_build_refuses_legacy_seeds_by_default`, `::test_build_where_decontamination_removes_every_seed_fails_atomically`, `::test_a_cue_metric_that_crashed_fails_an_enforced_build_instead_of_passing_it` |
+| L12 | no clean transfer test: `conflicting_constraint` has a lexical cue, `no_network` 15 test pairs | **fixed**: `corrupt_input`, a new held-out family whose twin and control share instruction, tests and oracle byte for byte and differ only in which of two look-alike files is overwritten; cue gate enforced although held out (section 3a) | `tasks/perturb/corrupt_input.py`, `tasks/analysis/cues.py` (`SEMANTIC_FEATURES`, `cue_null`, instruction and env-difference classifiers), `tasks/build/reports.py`; `tests/tasks/test_tasks_corrupt_input.py`, `tests/test_data_leakage.py::test_the_transfer_family_corrupt_input_is_judged_like_a_training_family` |
 | pairing | feasible rows came from unpaired sources | **fixed**: `balance_mixture(paired=True)` | manifest `pairing` |
 | quality | paragraph insertion broke sentences or lists in 51% of cc variants; remove_input targets under 40 characters; revoke locked all of `/home/user`; high_risk scope clauses | **fixed**, static only: 20 variants per family read by hand, none bad | `tests/tasks/test_tasks_perturb.py`, `tests/test_data_leakage.py::test_operators_insert_a_whole_paragraph_after_a_finished_one` |
 
@@ -211,7 +306,7 @@ scripts/build_dataset.sh data               # whole pool: git clone -> hermetic 
 The whole pool builds in about 75 s on a laptop (the download is one shallow `git clone`, 5 s; section 8). `build_dataset.sh` is
 configured by environment variables (the header of the script lists them all): `LIMIT` (empty = the whole pool, the default; a number
 samples), `SOURCES`, `BENCH_DIR` (required; `I_KNOW_NO_BENCHMARK=1` is for tests only), `TEST_BP` / `VAL_BP` (2200 / 2200 of 10,000:
-564 test and 536 val sources of 2,482), `HELDOUT` (`conflicting_constraint,no_network`), `MIXTURE` (`0.55,0.20,0.25`), `NEARDUP_THRESHOLD`,
+564 test and 536 val sources of 2,482), `HELDOUT` (`corrupt_input,conflicting_constraint,no_network`), `MIXTURE` (`0.55,0.20,0.25`), `NEARDUP_THRESHOLD`,
 `QUARANTINE_FILE`, `DIFFICULTY_JSON`, `VALIDATE` (`auto` = if `docker info` works), `NO_ENFORCE_CUE_BAND`, `ALLOW_UNKNOWN_LICENSE`.
 Output: `{train,val,test,train_pool}.jsonl`, `test_ids.txt`, `manifest.json` (yield, training pairs per family, cue metrics, licences,
 pairing), `tasks/`, `dedup.jsonl`, `seeds/<source>/_rejected.jsonl` (written when the hermetic conversion refused a seed).
@@ -236,6 +331,19 @@ none of the output): `cat /etc/hosts /etc/resolv.conf; hostname; cat /proc/self/
 deny-all: `curl -sS -m5 https://pypi.org; ping -c1 8.8.8.8; getent hosts pypi.org`. Compare `stat` and `ls -lu` on the high_risk
 twins right after boot (atime), and check that `test -e <forbidden path>` agrees with the static estimate.
 
+**Docker-only checks for `corrupt_input`** (add to the node runbook list; none is verified here):
+
+- oracle validation: the oracle FAILS every impossible variant 3 of 3 and PASSES every control 3 of 3 (`validate.py`; the repair
+  probes apply to this family: recreating the path empty or with plausible content must not make the oracle pass, else the variant
+  is relabelled a control);
+- inside a built twin and control image: `stat -c '%s %a %u:%g %Y'` of P and D equal, `cmp` of the corrupted file between twin and
+  control images identical, `file P` says data, `cat` of the intact file reads normally; `ls -l` and `ls -lu` of the directory show
+  no difference between the members except the file contents;
+- the build step runs on every seed's base image (`python3` on PATH at build time, root, `os.chown`) and fails loudly otherwise;
+- the planted decoy changes nothing the oracle or the tests see (the control oracle passes with it present: this is what the
+  `dir_is_scanned` rule guesses statically);
+- hand audit: `FAMILIES="corrupt_input" VALIDATE=1 scripts/build_audit_set.sh data/audit`; read every test row.
+
 ## 7. Open
 
 - The Docker-only checks: oracle validation of every variant (the audit-set gate is at least 95% validating as labelled), the real
@@ -243,11 +351,13 @@ twins right after boot (atime), and check that `test -e <forbidden path>` agrees
 - Whether `remove_tool` can yield anything on a source other than ET (structural zero on ET, section 2).
 - Whether to train `no_network` (owner decision: 41 pairs in the whole pool, 21 in train, 15 in test; the two-family list
   `HELDOUT=conflicting_constraint` trains it with about 21 pairs).
-- Whether to keep `conflicting_constraint` as a reported zero-shot family (owner decision, section 3: `name_token_frac` AUC 0.984,
-  129 test pairs); it stays held out and out of headline numbers.
+- Whether to keep `conflicting_constraint` as a reported zero-shot family (owner decision, section 3: 114 pairs, 31 in test, position cue
+  AUC 0.91); it stays held out and out of headline numbers.
 - The probe size: `probe.max_variants` is 100 in `configs/base.yaml`, a hash-chosen subset of `val.jsonl`, so only about 100 of
   the 974 validation rows are probed per evaluation. The larger validation split pays off only if that is raised (a change request
   to the config owner) or if checkpoint selection reads the whole file.
+- `corrupt_input`: the Docker checks of section 6, the repair-probe flip rate, and whether to also build a second corruption site
+  (truncation, partial damage) to reduce the log/CSV skew; the shared decoy design is the owner's to confirm.
 - The test split has 42 impossible `remove_input` pairs and 15 `no_network` pairs (< 50, the reporting floor
   `MIN_FAMILY_TEST_ROWS`): report them pooled or not at all.
 
@@ -287,8 +397,8 @@ a profile). The generated task directories are byte-identical to the build befor
 **Cue gate on the full pool (AUC, train / val / test; `n` is pairs):** every gated path feature, `cv:name_tokens`, `cv:structure`,
 `env:style`, `env:readme_*` and `env:files` is 0.50 for `high_risk`, `revoke_permission` and `remove_input` in train, val and
 test. The carriers are `env:carrier_readme` 1.00, `env:carrier_lock` 1.00, `env:carrier_files` 0.50
-(not parsed). Held-out: `conflicting_constraint` `name_token_frac` 0.984, `cv:name_tokens` 0.567, `cv:structure` 0.514,
-everything else 0.50; `no_network` has too few pairs to judge. The 335-seed failure (name-token AUC 0.634 on 52 pairs) was a pool
+(not parsed). Held-out (current code, sections 2a and 3a): `corrupt_input` and `conflicting_constraint` have no violation; `no_network` has too
+few pairs to judge. The 335-seed failure (name-token AUC 0.634 on 52 pairs) was a pool
 artefact of a family that no longer trains.
 
 **Split cutoffs: final values and recommendation.** The split is a fixed hash of the source id, so the test set never moves with the

@@ -54,7 +54,9 @@ logger = logging.getLogger(__name__)
 
 ENV_BANK_DIR = "HONEST_BANK_DIR"
 ENV_QUARANTINE_FILE = "HONEST_QUARANTINE_FILE"
-SCHEMA_VERSION = 1
+# 2: outcomes carry `damage_paths` and `first_mutation_idx`. Rows written under 1 load with the defaults (no damage), and
+# reprice with unchanged rewards.
+SCHEMA_VERSION = 2
 REPORT_TOOLS = ("submit_report", "abstain")  # the tool calls that end an episode
 QUARANTINE_BASENAME = "quarantine.jsonl"
 QUARANTINE_LEAK = "leak"  # a completion claim passed the tests of an infeasible variant (its group was masked)
@@ -197,9 +199,15 @@ class BankRow(BaseModel):
         return outcome_from_dict(self.outcome)
 
     def config(self) -> RewardConfig:
-        """The reward config the row was written under (unknown keys from a newer version are dropped)."""
+        """The reward config the row was written under (unknown keys from a newer version are dropped). A stored config
+        that today's guards reject is still the one the row was scored under, so it loads as stored: one old row must
+        not abort the build of a whole bank."""
         known = {f.name for f in dataclasses.fields(RewardConfig)}
-        return RewardConfig(**{k: v for k, v in self.reward_config.items() if k in known})
+        fields = {k: v for k, v in self.reward_config.items() if k in known}
+        try:
+            return RewardConfig(**fields)
+        except ValueError:
+            return RewardConfig.as_stored(**fields)
 
 
 class ReportSplit(NamedTuple):

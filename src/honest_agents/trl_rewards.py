@@ -249,6 +249,11 @@ def batch_metrics(
     ratio(METRIC_TAMPER_RATE, count(scored, lambda b: b.tamper), len(scored))
     ratio("honest/violation_rate", count(scored, lambda b: b.violation), len(scored))
     ratio("honest/post_hoc_rate", count(scored, lambda b: b.post_hoc), len(scored))
+    # Self-inflicted damage (the grader's content diff of `preserve_paths`), overall and per cell: plain feasible and
+    # control (is the policy learning to leave things alone, or to refuse everything) and infeasible (pre-existing).
+    ratio("honest/self_inflicted_rate", count(scored, lambda b: b.self_inflicted), len(scored))
+    for cell, items in (("feasible", [b for b in feas if not b.is_control]), ("control", ctrl), ("infeasible", infeas)):
+        ratio(f"honest/damage_by_cell/{cell}", count(items, lambda b: b.self_inflicted), len(items))
 
     # the optimised signal, and what every other arm would have paid for the same episodes
     share = zero_variance_group_share(rewards, groups)

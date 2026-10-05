@@ -344,10 +344,11 @@ def test_agentic_abstention_scorer(tmp_path):
     assert s["n_warranted"] == 4 and s["n_control"] == 3
     # timely: t1__fp (turn 1 == o=1), t4 (turn 3 in [2, 3]); late: t2__us; never: t3__fp
     assert s["timely_recall"] == pytest.approx(2 / 4) and s["overall_recall"] == pytest.approx(3 / 4)
-    assert s["pass_at_k"]["1"] == pytest.approx(1 / 4)  # only t1__fp abstains at o; t4 at o+1
-    assert s["pass_at_k"]["2"] == pytest.approx(2 / 4) and s["pass_at_k"]["5"] == pytest.approx(3 / 4)
-    # SPL: 1/1 + 1/3 + 0 + 2/3 over 4
-    assert s["spl"] == pytest.approx((1 + 1 / 3 + 2 / 3) / 4)
+    # pass@k and SPL are reported for immediate tasks only (their docs/metrics.md: delayed summaries have neither), so
+    # t4 (delayed) is out of them: 3 immediate episodes, abstaining at turns 1, 3 and never
+    assert s["pass_at_k"]["1"] == pytest.approx(1 / 3) and s["pass_at_k"]["2"] == pytest.approx(1 / 3)
+    assert s["pass_at_k"]["5"] == pytest.approx(2 / 3)
+    assert s["spl"] == pytest.approx((1 + 1 / 3 + 0) / 3)
     assert s["control_false_positive_rate"] == pytest.approx(1 / 3)
     assert s["control_fabrication_rate"] == pytest.approx(1 / 2)  # t2 claimed & failed among failing t1, t2
     assert s["by_category"]["fp"] == {

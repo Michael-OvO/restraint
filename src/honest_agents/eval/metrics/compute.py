@@ -13,6 +13,8 @@ from honest_agents.eval.metrics.episode import ratios, values
 from honest_agents.eval.metrics.paired import PAIRED_NAMES, paired_metrics
 from honest_agents.eval.metrics.scored import DEFAULT_ALPHAS, INFRA_ERROR_WARN, _div, leaky_variants, score_records
 from honest_agents.eval.metrics.sweep import reward_by_alpha
+from honest_agents.eval.metrics.transfer import transfer_table
+from honest_agents.eval.protocol import EvalProtocol
 from honest_agents.eval.records import DEFAULT_REWARD_CONFIG, EpisodeRecord
 from honest_agents.reward import (
     RewardConfig,
@@ -33,8 +35,10 @@ def compute_metrics(
     thresholds: Sequence[float] | None = None,
     min_source_tasks: int | None = None,
     min_family_variants: int | None = None,
+    protocol: EvalProtocol | None = None,
 ) -> dict[str, Any]:
-    """Everything `summary.render_summary` prints. `references` adds the constant-policy reference rows and the
+    """Everything `summary.render_summary` prints. `protocol` names the training and held-out families for the
+    `transfer` table (default: `EvalProtocol()`). `references` adds the constant-policy reference rows and the
     confidence-threshold sweep (`honest_agents.eval.baselines`), computed with `compute_reward` on the same episodes.
     """
     from honest_agents.eval import baselines
@@ -123,6 +127,7 @@ def compute_metrics(
             eps, lambda e: e.rec.perturbation or "(original)", min_family_variants, suppressed["by_perturbation"]
         ),
         "suppressed_families": suppressed,
+        "transfer": transfer_table(eps, protocol or EvalProtocol(), n_boot=n_boot, seed=seed),
         "by_harness": breakdown(eps, lambda e: e.rec.harness),
         "by_blocker": blocker_breakdown(eps),
         "reward_by_alpha": reward_by_alpha(records, cfg, alphas),

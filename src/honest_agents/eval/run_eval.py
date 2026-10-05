@@ -23,6 +23,9 @@ Other modes:
   --noninferiority CAND REF     non-inferiority of CAND against REF on verified success (the primary endpoint), margin
                                 from the protocol; each side may be several seed runs, comma separated (a,b,c)
   --diff CAND REF --metric M    paired difference CAND − REF on any metric (H1 direction check)
+  --transfer TRAINED BASE [PROMPT_ONLY]
+                                the pre-registered transfer comparison (honest_agents.eval.protocol): trained minus base
+                                (and minus the prompt-only baseline) on the held-out families, with intervals
   --bank-dir DIR                also write a trajectory bank (`honest_agents.bank`) for the report-only pilot
 """
 
@@ -49,7 +52,7 @@ from honest_agents.eval.records import (
     write_records,
 )
 from honest_agents.eval.rollout import RolloutConfig, Task, load_split, run_rollouts
-from honest_agents.eval.summary import render_comparison, render_summary, render_test
+from honest_agents.eval.summary import render_comparison, render_summary, render_test, render_transfer_delta
 from honest_agents.reward import RewardConfig
 
 NEUTRAL_PROMPT_FILE = Path(__file__).parent / "prompts" / "neutral_system_prompt.txt"
@@ -197,6 +200,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--noninferiority", nargs=2, metavar=("CANDIDATE_DIR[,SEED_DIR...]", "REFERENCE_DIR[,SEED_DIR...]"))
     p.add_argument("--diff", nargs=2, metavar=("CANDIDATE_DIR[,SEED_DIR...]", "REFERENCE_DIR[,SEED_DIR...]"))
+    p.add_argument(
+        "--transfer",
+        nargs="+",
+        metavar="RUN_DIR[,SEED_DIR...]",
+        help="TRAINED BASE [PROMPT_ONLY]: trained minus base (and minus the prompt-only baseline) on held-out families",
+    )
     p.add_argument(
         "--metric",
         default=None,
@@ -348,6 +357,7 @@ def write_metrics(out: Path, cfg: RewardConfig, args: argparse.Namespace, title:
         exclude_variants=_excluded(args),
         min_source_tasks=proto.min_source_tasks,
         min_family_variants=proto.min_family_variants,
+        protocol=proto,
     )
     m["protocol"] = proto.to_dict()
     (out / "metrics.json").write_text(json.dumps(m, indent=2, default=str))
@@ -563,13 +573,32 @@ def evaluate(args: argparse.Namespace) -> dict:
 # ── comparisons between finished runs ────────────────────────────────────
 
 
-def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool) -> dict[str, Any]:
-    arms = [[Path(d) for d in arm.split(",") if d] for arm in dirs]  # each arm: one run per training seed
-    runs = [d for arm in arms for d in arm]
+def _same_protocol(args: argparse.Namespace, runs: list[Path]) -> EvalProtocol:
     protos = [_protocol(args, d) for d in runs]
     if any(p != protos[0] for p in protos):
         raise SystemExit("the runs were started under different protocols:\n  " + "\n  ".join(map(str, protos)))
-    proto = protos[0]
+    return protos[0]
+
+
+def compare_transfer(args: argparse.Namespace, dirs: list[str]) -> dict[str, Any]:
+    """Trained minus base, and minus the prompt-only baseline when given, under the protocol the runs share."""
+    if len(dirs) not in (2, 3):
+        raise SystemExit("--transfer takes TRAINED BASE [PROMPT_ONLY]")
+    arms = [[Path(d) for d in arm.split(",") if d] for arm in dirs]
+    proto = _same_protocol(args, [d for arm in arms for d in arm])
+    cfg = _stored_reward_config(arms[0][0], args)
+    recs = [[read_records(d / "episodes.jsonl") for d in arm] for arm in arms]
+    cand, *refs = (r if len(r) > 1 else r[0] for r in recs)
+    out: dict[str, Any] = {"protocol": proto.to_dict()}
+    for name, ref in zip(("base", "prompt_only"), refs, strict=False):
+        out[f"vs_{name}"] = M.transfer_delta(cand, ref, proto, cfg)
+    print(render_transfer_delta(out, [",".join(d.name for d in arm) for arm in arms]))
+    return out
+
+
+def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool) -> dict[str, Any]:
+    arms = [[Path(d) for d in arm.split(",") if d] for arm in dirs]  # each arm: one run per training seed
+    proto = _same_protocol(args, [d for arm in arms for d in arm])
     if args.ni_margin is not None and abs(args.ni_margin - proto.ni_margin) > 1e-12:
         raise SystemExit(
             f"--ni-margin {args.ni_margin} differs from the margin fixed before the runs ({proto.ni_margin}); "
@@ -608,6 +637,12 @@ def main(argv: list[str] | None = None) -> int:
         runs = {Path(d).name: json.loads((Path(d) / "metrics.json").read_text()) for d in args.compare}
         print(render_comparison(runs))
         return 0
+    if args.transfer:
+        t = compare_transfer(args, args.transfer)
+        if args.out:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.out).write_text(json.dumps(t, indent=2))
+        return 0 if any(v.get("headline") for k, v in t.items() if k.startswith("vs_")) else 1
     if args.noninferiority or args.diff:
         t = compare_two(args, args.noninferiority or args.diff, bool(args.noninferiority))
         if args.out:

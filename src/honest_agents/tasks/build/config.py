@@ -17,8 +17,13 @@ from honest_agents.tasks.perturb import (
 SPLITS = ("train", "val", "test")
 KINDS = ("feasible", "control", "infeasible")  # the mixture strata, in the order of `DEFAULT_MIXTURE`
 DEFAULT_MIXTURE = (0.55, 0.20, 0.25)  # docs/design.md section 7
-# Test-only families (leak verifier decision): a lexical cue that cannot be removed, and too few pairs to train on.
-DEFAULT_HELDOUT_FAMILIES = ("conflicting_constraint", "no_network")
+# Test-only families: `corrupt_input` is the clean transfer test (a mechanism no training family has, twin and control
+# differ only in the environment); `conflicting_constraint` has a lexical cue that cannot be removed (leak verifier
+# decision) and `no_network` too few pairs to train on.
+DEFAULT_HELDOUT_FAMILIES = ("corrupt_input", "conflicting_constraint", "no_network")
+# Held-out families whose cue gate is ENFORCED like a training family's: a transfer test with a cue measures the cue.
+# The others (conflicting_constraint, no_network) are only reported when held out.
+ENFORCED_HELDOUT_FAMILIES = ("corrupt_input",)
 MIN_TRAIN_PAIRS = 40  # a training family with fewer infeasible/control pairs in train is warned about in the manifest
 DEFAULT_TEST_SEEDS = 300  # At least 300 test pairs, so that every reported family has at least MIN_FAMILY_TEST_ROWS
 MIN_FAMILY_TEST_ROWS = 50  # Infeasible variants per reported family in the test split (fewer: pool or drop the family)

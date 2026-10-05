@@ -18,11 +18,15 @@
 #                         val or train_pool row for an id in it. Commit the file after the first build.
 #   NEARDUP_THRESHOLD=0.1  near-duplicate sources (instruction 3-gram Jaccard) are split as one unit; 0 = off
 #   QUARANTINE_INCLUDE_EVAL=  1 = honour quarantine entries found while evaluating (they change test.jsonl; default off)
-#   NO_ENFORCE_CUE_BAND=  1 = only warn when a TRAINING family's existence AUC leaves [0.4, 0.6] (default: the build fails;
-#                         a held-out family is only ever reported)
-#   HELDOUT=conflicting_constraint,no_network   test-only families (zero-shot, with the construct-validity caveat): the
-#                         first has a lexical cue no template removes, the second has too few pairs. high_risk,
-#                         revoke_permission and remove_input train. no_network can be trained with HELDOUT=conflicting_constraint
+#   NO_ENFORCE_CUE_BAND=  1 = only warn when an enforced family's existence AUC leaves [0.4, 0.6] (default: the build fails;
+#                         enforced = every training family and the held-out transfer family corrupt_input; the other
+#                         held-out families are only ever reported)
+#   HELDOUT=corrupt_input,conflicting_constraint,no_network   test-only families (zero-shot). corrupt_input is the transfer
+#                         test (the input is present but its bytes are noise; twin and control differ only in which file is
+#                         corrupted, so its cue gate is enforced although it never trains); conflicting_constraint has a lexical
+#                         cue no template removes (zero-shot, with the construct-validity caveat); no_network has too few pairs.
+#                         high_risk, revoke_permission and remove_input train. no_network can be trained with
+#                         HELDOUT=corrupt_input,conflicting_constraint; leave corrupt_input in, or there is no transfer test
 #   ALLOW_UNKNOWN_LICENSE=  1 = build from a source whose data licence is not stated (tmax-15k); default refuses
 #   MIXTURE=0.55,0.20,0.25        plain feasible, near-miss control, infeasible shares of train and val
 #   QUARANTINE_FILE=      quarantine list (leaky variants); listed variants are excluded and validation leaks appended
@@ -32,8 +36,8 @@
 #   TASK_DIR_ROOT=        path of <OUT_DIR>/tasks on the training node, if different
 #   ALLOW_LEGACY=1        keep seeds that are not graded by the hermetic verifier (never for training)
 #
-# With validation the build runs five steps, all resumable: build, validate, rebuild (relabels remove_input variants the
-# repair probe proved harmless into near-miss controls, quarantines leaks), validate again (the relabelled controls),
+# With validation the build runs five steps, all resumable: build, validate, rebuild (relabels remove_input and corrupt_input
+# variants the repair probe proved harmless into near-miss controls, quarantines leaks), validate again (the relabelled controls),
 # final rebuild. Without Docker it builds without validation and says so: re-run on the Linux node before training.
 source "$(dirname "$0")/_common.sh"
 
@@ -43,7 +47,7 @@ SOURCES="${SOURCES:-endless-terminals}"
 BENCH_DIR="${BENCH_DIR:-benchmarks}"
 TEST_BP="${TEST_BP:-2200}"
 VAL_BP="${VAL_BP:-2200}"
-HELDOUT="${HELDOUT:-conflicting_constraint,no_network}"
+HELDOUT="${HELDOUT:-corrupt_input,conflicting_constraint,no_network}"
 MIXTURE="${MIXTURE:-0.55,0.20,0.25}"
 VALIDATE="${VALIDATE:-auto}"
 CONCURRENCY="${CONCURRENCY:-8}"

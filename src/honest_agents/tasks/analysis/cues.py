@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 import posixpath
+import random
 import re
+import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -98,9 +101,24 @@ ENFORCED_FEATURES = (
     "mentions_in_instruction",
     "position",
     "name_token_frac",
+    # The corrupted bytes (`corrupt_input` only): the same procedure on the same length of file on both sides.
+    "garbage_entropy",
+    "garbage_nul_frac",
+    "garbage_distinct",
 )
-# Grouped cross-validated classifiers over everything a single row shows (see `cue_classifiers`), also enforced.
-ENFORCED_CLASSIFIERS = ("cv:name_tokens", "cv:structure")
+# Grouped cross-validated classifiers over everything a single row shows (see `cue_classifiers`), also enforced. The
+# instruction and environment-difference classifiers exist only for a family whose rows carry them (`corrupt_input`).
+ENFORCED_CLASSIFIERS = ("cv:name_tokens", "cv:structure", "cv:instruction_words", "cv:instruction_chars", "cv:env_diff")
+# Features that ARE the relation the policy has to verify, so they separate a family's impossible variants from its
+# controls by construction and are reported, never enforced: `corrupt_input` corrupts the file the instruction names
+# (twin) or a planted file it never mentions (control). A policy cannot read that off the text, which is identical on both
+# sides; it has to open the files. Everything else about the two files (extension, size, name shape, owner, mode, mtime,
+# the bytes written) is held equal and IS enforced.
+SEMANTIC_FEATURES: dict[str, tuple[str, ...]] = {
+    "corrupt_input": ("named_in_instruction", "mentions_in_instruction", "name_token_frac"),
+}
+# Families whose rows carry the instruction text (`existence_rows`), so that n-gram classifiers can be run on it.
+INSTRUCTION_FAMILIES = ("corrupt_input",)
 # The planted environment text (`envtext.py`): README style alone and as a classifier, and the words of every channel that
 # is not the family's carrier. The carriers (`env:carrier_*`) are in the report but not here: their meaning is the label.
 ENFORCED_ENV_TEXT = (
@@ -176,10 +194,11 @@ def existence_violations(
     out = []
     for fam, entry in sorted(report.items()):
         judged = {**(entry.get("features") or {}), **(entry.get("cv") or {})}
+        semantic = SEMANTIC_FEATURES.get(fam, ())
         for name, f in sorted(judged.items()):
             auc = f.get("auc")
             n = min(f["n_infeasible"], f["n_control"]) if auc is not None else 0
-            if name not in features or auc is None or n < min_significant:
+            if name not in features or name in semantic or auc is None or n < min_significant:
                 continue
             if n < min_per_class and abs(auc - 0.5) <= z * (f.get("auc_se") or 0.0):
                 continue
@@ -261,6 +280,7 @@ def _logistic_scores(xtr: Any, ytr: Any, xte: Any, l2: float = 1.0, iters: int =
 
 
 STRUCTURE_FEATURES = ("exists", "depth", "has_extension", "named_in_instruction", "mentions_in_instruction", "position")
+GARBAGE_FEATURES = ("garbage_entropy", "garbage_nul_frac", "garbage_distinct")
 
 
 def _structure_vector(row: Mapping[str, Any]) -> list[float]:
@@ -268,20 +288,110 @@ def _structure_vector(row: Mapping[str, Any]) -> list[float]:
     size = f.get("size")
     subject = str(row.get("subject") or "")
     base = posixpath.basename(subject.rstrip("/"))
+    skip = SEMANTIC_FEATURES.get(str(row.get("family")), ())
     return [
-        *(float(f.get(k, 0.0)) for k in STRUCTURE_FEATURES),
+        *(float(f.get(k, 0.0)) for k in STRUCTURE_FEATURES if k not in skip),
         math.log1p(size) if size is not None else 0.0,
         float(size is not None),
         float(len(base)),
         float(len(name_tokens(subject))),
+        *(float(f[k]) for k in GARBAGE_FEATURES if k in f),
     ]
 
 
+def _env_diff_vector(row: Mapping[str, Any]) -> list[float] | None:
+    """What the environment shows about the corrupted file and nothing about the task text: its size, the bytes written
+    over it, where it sits and how long its name is. None for a family without a corruption signature."""
+    f = row.get("features") or {}
+    if any(k not in f for k in GARBAGE_FEATURES):
+        return None
+    base = posixpath.basename(str(row.get("subject") or "").rstrip("/"))
+    return [
+        math.log1p(float(f.get("size", 0.0))),
+        float(f.get("depth", 0.0)),
+        float(f.get("has_extension", 0.0)),
+        float(len(base)),
+        *(float(f[k]) for k in GARBAGE_FEATURES),
+    ]
+
+
+def _word_ngrams(text: str) -> list[str]:
+    words = re.findall(r"[a-z0-9_]+", text.lower())
+    return [*words, *(f"{a} {b}" for a, b in itertools.pairwise(words))]
+
+
+def _char_ngrams(text: str, n: int = 5) -> list[str]:
+    t = re.sub(r"\s+", " ", text.lower())
+    return [t[i : i + n] for i in range(max(len(t) - n + 1, 0))]
+
+
+def _family_scores(rs: Sequence[Mapping[str, Any]], y: Sequence[bool], np: Any) -> dict[str, list[float]]:
+    """Pooled out-of-fold scores of every classifier a family's rows support, for the labels `y`.
+
+    The folds are the donor groups (`donor_group`): every row of a source, its twin and its control, sits in one fold."""
+    groups = [str(r["group"]) for r in rs]
+    folds = [donor_group(g) for g in groups]
+    toks = [name_tokens(str(r["subject"])) for r in rs]
+    vec = [_structure_vector(r) for r in rs]
+    env = [_env_diff_vector(r) for r in rs]
+    text = [str(r.get("instruction") or "") for r in rs]
+    words = [_word_ngrams(t) for t in text] if any(text) else None
+    chars = [_char_ngrams(t) for t in text] if any(text) else None
+    kinds: dict[str, Any] = {"cv:name_tokens": ("nb", toks), "cv:structure": ("lr", vec)}
+    if all(e is not None for e in env):
+        kinds["cv:env_diff"] = ("lr", env)
+    if words is not None and chars is not None:
+        kinds["cv:instruction_words"] = ("nb", words)
+        kinds["cv:instruction_chars"] = ("nb", chars)
+    pooled = {name: [0.0] * len(rs) for name in kinds}
+    for k in range(DONOR_GROUPS):
+        tr = [i for i, f in enumerate(folds) if f != k]
+        te = [i for i, f in enumerate(folds) if f == k]
+        if not te or len({y[i] for i in tr}) < 2:
+            continue
+        for name, (kind, feats) in kinds.items():
+            if kind == "nb":
+                fold = _nb_scores([(feats[j], y[j], groups[j]) for j in tr], [feats[i] for i in te])
+            else:
+                fold = _logistic_scores(
+                    np.array([feats[j] for j in tr]),
+                    np.array([float(y[j]) for j in tr]),
+                    np.array([feats[i] for i in te]),
+                )
+            for i, v in zip(te, fold, strict=True):
+                pooled[name][i] = float(v)
+    return pooled
+
+
+def _classifier_inputs(rows: Iterable[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    """Rows with a subject and a group, by family, for the families the classifiers can be run on (enough pairs, spread over
+    every donor group); the others are left out."""
+    by_fam: dict[str, list[Mapping[str, Any]]] = {}
+    for r in rows:
+        if r.get("subject") and r.get("group") is not None:
+            by_fam.setdefault(str(r["family"]), []).append(r)
+    out = {}
+    for fam, rs in sorted(by_fam.items()):
+        n_pos = sum(bool(r["infeasible"]) for r in rs)
+        if (
+            n_pos >= DONOR_GROUPS
+            and len(rs) - n_pos >= DONOR_GROUPS
+            and len({donor_group(str(r["group"])) for r in rs}) == DONOR_GROUPS
+        ):
+            out[fam] = rs
+    return out
+
+
 def cue_classifiers(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
-    """Per family: held-out AUC of two classifiers that read only one row's forbidden/target object.
+    """Per family: held-out AUC of the classifiers that read only one row's forbidden/target object (and its text).
 
     * `cv:name_tokens`: naive Bayes over the words of the path (output, summary, error ... against backup, orig, old).
-    * `cv:structure`: logistic regression over existence, depth, extension, mention count, position, size, name length.
+    * `cv:structure`: logistic regression over existence, depth, extension, mention count, position, size, name length
+      (and, for a family with corrupted bytes, their entropy). A family's semantic features (`SEMANTIC_FEATURES`) are left out.
+    * `cv:env_diff` (rows with a corruption signature): logistic regression over the file's size, depth, extension, name
+      length and the bytes written over it.
+    * `cv:instruction_words`, `cv:instruction_chars` (rows with an `instruction`, `INSTRUCTION_FAMILIES`): naive Bayes over
+      the word 1- and 2-grams and the character 5-grams of the whole task text.
     The folds are the donor groups (`donor_group`): every row of a source, its twin and its control, sits in one fold,
     and a control's borrowed words never come from another fold's rows. Entries have the shape of an `existence_auc`
     feature (`auc`, `auc_se`, `accuracy`, `n_infeasible`, `n_control`) plus `n_groups` (sources); `auc_se` is the
@@ -290,36 +400,13 @@ def cue_classifiers(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, di
     """
     import numpy as np
 
-    by_fam: dict[str, list[Mapping[str, Any]]] = {}
-    for r in rows:
-        if r.get("subject") and r.get("group") is not None:
-            by_fam.setdefault(str(r["family"]), []).append(r)
     out: dict[str, dict[str, dict[str, Any]]] = {}
-    for fam, rs in sorted(by_fam.items()):
+    for fam, rs in _classifier_inputs(rows).items():
         y = [bool(r["infeasible"]) for r in rs]
-        groups = [str(r["group"]) for r in rs]
-        folds = [donor_group(g) for g in groups]
         n_pos = sum(y)
         n_neg = len(y) - n_pos
-        if n_pos < DONOR_GROUPS or n_neg < DONOR_GROUPS or len(set(folds)) < DONOR_GROUPS:
-            continue
-        toks = [name_tokens(str(r["subject"])) for r in rs]
-        vec = [_structure_vector(r) for r in rs]
-        pooled: dict[str, list[float]] = {"cv:name_tokens": [0.0] * len(rs), "cv:structure": [0.0] * len(rs)}
-        for k in range(DONOR_GROUPS):
-            tr = [i for i, f in enumerate(folds) if f != k]
-            te = [i for i, f in enumerate(folds) if f == k]
-            if not te or len({y[i] for i in tr}) < 2:
-                continue
-            nb = _nb_scores([(toks[j], y[j], groups[j]) for j in tr], [toks[i] for i in te])
-            lo = _logistic_scores(
-                np.array([vec[j] for j in tr]), np.array([float(y[j]) for j in tr]), np.array([vec[i] for i in te])
-            )
-            for i, a_, b_ in zip(te, nb, lo, strict=True):
-                pooled["cv:name_tokens"][i] = a_
-                pooled["cv:structure"][i] = float(b_)
         out[fam] = {}
-        for name, sc in pooled.items():
+        for name, sc in _family_scores(rs, y, np).items():
             pos = [v for v, yy in zip(sc, y, strict=True) if yy]
             neg = [v for v, yy in zip(sc, y, strict=True) if not yy]
             auc = auc_score(pos, neg) or 0.5
@@ -329,8 +416,47 @@ def cue_classifiers(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, di
                 "accuracy": best_rule_accuracy(pos, neg) or 0.5,
                 "n_infeasible": n_pos,
                 "n_control": n_neg,
-                "n_groups": len(set(groups)),
+                "n_groups": len({str(r["group"]) for r in rs}),
             }
+    return out
+
+
+def cue_null(
+    rows: Iterable[Mapping[str, Any]], *, families: Sequence[str] | None = None, shuffles: int = 20, seed: int = 0
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """The shuffled-label null of `cue_classifiers`: the same classifiers with each pair's two labels swapped at random.
+
+    A classifier AUC is only evidence of a cue when it lies outside what the same pipeline gives on labels that mean
+    nothing, which for a few dozen pairs is wider than the enforced band. Per family and classifier: `auc_mean`,
+    `auc_p05`, `auc_p95` over `shuffles` swaps and `n_shuffles`; reported in the manifest, never enforced. Swapping within
+    a pair keeps both classes in every source and fold, exactly as in the real labelling."""
+    import numpy as np
+
+    rng = random.Random(seed)
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for fam, rs in _classifier_inputs(rows).items():
+        if families is not None and fam not in families:
+            continue
+        groups = sorted({str(r["group"]) for r in rs})
+        aucs: dict[str, list[float]] = {}
+        for _ in range(shuffles):
+            flip = {g: rng.random() < 0.5 for g in groups}
+            y = [bool(r["infeasible"]) != flip[str(r["group"])] for r in rs]
+            if len(set(y)) < 2:
+                continue
+            for name, sc in _family_scores(rs, y, np).items():
+                pos = [v for v, yy in zip(sc, y, strict=True) if yy]
+                neg = [v for v, yy in zip(sc, y, strict=True) if not yy]
+                aucs.setdefault(name, []).append(auc_score(pos, neg) or 0.5)
+        out[fam] = {
+            name: {
+                "auc_mean": statistics.fmean(v),
+                "auc_p05": sorted(v)[int(0.05 * (len(v) - 1))],
+                "auc_p95": sorted(v)[math.ceil(0.95 * (len(v) - 1))],
+                "n_shuffles": len(v),
+            }
+            for name, v in aucs.items()
+        }
     return out
 
 
@@ -344,6 +470,8 @@ def existence_check(variants: Iterable[Any], **kw: Any) -> tuple[dict[str, dict[
     for fam, cv in cue_classifiers(rows).items():
         report[fam]["cv"] = cv
     attach_env_text(report, rows)
+    for fam, null in cue_null(rows, families=INSTRUCTION_FAMILIES).items():
+        report[fam]["null"] = null
     return report, existence_violations(report, **kw)
 
 
@@ -375,6 +503,9 @@ def existence_rows(variants: Iterable[Any]) -> list[dict[str, Any]]:
         spec = v.spec
         if not feats or not spec.family or (spec.feasible and not spec.is_control):
             continue
+        row_text = (
+            _read_instruction(v) if spec.family in INSTRUCTION_FAMILIES else None
+        )  # n-gram classifiers need the text
         rows.append(
             {
                 "family": spec.family,
@@ -383,6 +514,15 @@ def existence_rows(variants: Iterable[Any]) -> list[dict[str, Any]]:
                 "group": getattr(spec, "pair_id", None) or getattr(spec, "variant_id", None),
                 "subject": (getattr(v, "detail", None) or {}).get("subject"),
                 "env_text": (getattr(v, "detail", None) or {}).get("env_text"),
+                **({"instruction": row_text} if row_text is not None else {}),
             }
         )
     return rows
+
+
+def _read_instruction(v: Any) -> str | None:
+    path = getattr(v, "task_dir", None)
+    try:
+        return (path / "instruction.md").read_text() if path is not None else None
+    except OSError:
+        return None

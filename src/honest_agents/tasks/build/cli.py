@@ -38,7 +38,10 @@ def parse_args(argv: list[str] | None = None) -> BuildConfig:
     ap.add_argument(
         "--heldout-families",
         default=",".join(DEFAULT_HELDOUT_FAMILIES),
-        help="comma-separated test-only families (default conflicting_constraint,no_network: lexical cue / too few pairs)",
+        help=(
+            "comma-separated test-only families (default corrupt_input,conflicting_constraint,no_network: the transfer "
+            "test, a lexical cue, too few pairs); the cue gate is enforced for corrupt_input only"
+        ),
     )
     ap.add_argument(
         "--test-bp",

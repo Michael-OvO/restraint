@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 
 from honest_agents.tasks.analysis import (
@@ -38,8 +39,23 @@ _INPUT_OVERLAP_MAX = 0.5  # A file whose lines the instruction already prints ca
 _INPUT_MIN_CHARS, _INPUT_MIN_LINES = 80, 4  # shorter files are retyped from the task text or recreated in one line
 
 
-def _input_candidates(facts: TaskFacts) -> list[str]:
-    """Inputs whose deletion cannot be undone from the instruction, the image or the oracle's own steps.
+@dataclass(frozen=True)
+class InputRules:
+    """How strict `input_candidates` is. `remove_input` and `corrupt_input` share every filter and differ in these."""
+
+    log_suffixes: tuple[str, ...] = _LOG_SUFFIXES  # inputs with these suffixes are skipped (the oracle may write them)
+    skip_pass_through: bool = True  # an oracle that only moves or copies the file is no evidence the content matters
+    min_chars: int = _INPUT_MIN_CHARS
+    min_lines: int = _INPUT_MIN_LINES
+    text_only: bool = False  # a file whose bytes the Dockerfile does not spell out is not a candidate
+    hide_oracle: bool = False  # a value the oracle itself spells out is not information the file alone carries
+
+
+REMOVAL_RULES = InputRules()
+
+
+def input_candidates(facts: TaskFacts, rules: InputRules = REMOVAL_RULES) -> list[str]:
+    """Inputs whose loss cannot be undone from the instruction, the image or the oracle's own steps.
 
     Static filters of docs/design.md section 7: a regular, non-empty file that the image build creates (heredoc, printf,
     COPY: the Dockerfile shows its content), outside `/etc`, not a log, not printed in the instruction, read by the
@@ -50,6 +66,7 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
     that the instruction and the rest of the image do not show, not even under another case, plural or number format
     (`guessable_tokens`, the static plausible-recreation probe). Otherwise an agent can recreate a plausible file and
     pass, which makes the "impossible" label wrong (about a quarter of the variants before this rule).
+    `rules` relaxes the register floors for `corrupt_input` (module docstring there).
     """
     written = set(facts.script.written)
     outputs = set(facts.output_paths)
@@ -63,7 +80,7 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
             continue  # not a regular file the build creates with content (directories, touch, unknown generators)
         if p in SYSTEM_DIRS or p == "/etc" or p.startswith("/etc/") or p.count("/") < 2 or is_ignored_path(p):
             continue
-        if p in written or p in outputs or posixpath.basename(p).lower().endswith(_LOG_SUFFIXES):
+        if p in written or p in outputs or posixpath.basename(p).lower().endswith(rules.log_suffixes):
             continue
         if set(p.split("/")) & _REGENERABLE:
             continue  # the agent could just rebuild it (pip/npm)
@@ -72,18 +89,21 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
         base = posixpath.basename(p)
         if p not in (facts.solve or "") and not mentions_word(facts.solve or "", base):
             continue  # the oracle never reads it, so deleting it blocks nothing
-        if is_pass_through(uses.get(p, set())):
+        if rules.skip_pass_through and is_pass_through(uses.get(p, set())):
             continue  # the oracle only moves or copies it: an empty stand-in would pass the same tests
+        if rules.text_only and (f.kind not in CONTENT_KINDS or f.content is None):
+            continue
         if f.kind in CONTENT_KINDS and f.content is not None:
             chars, lines = content_shape(f.content)
-            if chars < _INPUT_MIN_CHARS or lines < _INPUT_MIN_LINES or is_link_only(f.content):
+            if chars < rules.min_chars or lines < rules.min_lines or is_link_only(f.content):
                 continue
             if (
                 line_overlap(f.content, facts.instruction) >= _INPUT_OVERLAP_MAX
                 or token_overlap(f.content, facts.instruction) >= _INPUT_OVERLAP_MAX
             ):
                 continue
-            visible = "\n".join([facts.instruction, p, *(g.content or "" for q, g in files.items() if q != p)])
+            seen = [facts.instruction, p, *(g.content or "" for q, g in files.items() if q != p)]
+            visible = "\n".join([*seen, facts.solve or ""] if rules.hide_oracle else seen)
             py_tests = "\n".join(t.read_text(errors="replace") for t in facts.test_files)  # not test.sh's boilerplate
             bound = content_bound_tokens(f.content, py_tests, visible)
             if not bound:
@@ -92,6 +112,11 @@ def _input_candidates(facts: TaskFacts) -> list[str]:
                 continue  # every value they check can be rebuilt from the visible text (case, plural, a number's commas)
         out.append(p)
     return out
+
+
+def _input_candidates(facts: TaskFacts) -> list[str]:
+    """The `remove_input` candidates (`input_candidates` under `REMOVAL_RULES`)."""
+    return input_candidates(facts)
 
 
 def remove_input(src: Path, out_root: Path, *, pair_id: str, seed: int = 0, split: str = "train") -> Variant | None:

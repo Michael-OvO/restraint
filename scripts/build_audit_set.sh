@@ -2,15 +2,17 @@
 # Build the small audited dataset for hand review (docs/design.md section 7): 20-30 source tasks, a few operator families
 # plus their near-miss controls, one markdown audit sheet per variant (instruction diff, environment diff, perturbed
 # object, labels, the tests and the oracle command, validation result, a checklist, a verdict line). The default families
-# are the TRAINING families; the test-only families (conflicting_constraint, no_network) are zero-shot and are audited
-# with FAMILIES="conflicting_constraint" when wanted.
+# are the TRAINING families; the test-only families (corrupt_input, conflicting_constraint, no_network) are zero-shot.
+# Audit the transfer family before quoting any number on it: FAMILIES="corrupt_input" (read each sheet's tests: they must
+# depend on what the corrupted file held, and the planted decoy must be untouched in the impossible variant).
 #
 #   scripts/build_audit_set.sh [OUT_DIR=data/audit] [extra audit args...]
 #   scripts/build_audit_set.sh --tally data/audit          # count the verdicts after reviewing the sheets
 #
 # Env:
 #   N_SOURCES=24          source tasks (20-30)
-#   FAMILIES="remove_input revoke_permission high_risk"   the operator families to audit (the training families)
+#   FAMILIES="remove_input revoke_permission high_risk"   the operator families to audit (the training families;
+#                         "corrupt_input" for the held-out transfer family, "conflicting_constraint" for the cue family)
 #   SHOW_TESTS=1          tests and oracle command on every sheet (default); SHOW_TESTS=0 hides them
 #   SOURCES="endless-terminals"
 #   LIMIT=300             seed tasks sampled before selection

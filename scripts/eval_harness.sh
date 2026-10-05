@@ -7,6 +7,8 @@
 # harness. Results are reported per harness, and the agent name is recorded on every episode.
 # Env: BASE_URL (policy endpoint, http://localhost:8000/v1), AGENT (terminus-2 | mini-swe-agent | opencode | ...),
 #      N_CONCURRENT (8), N_ATTEMPTS (1; `-k`), MAX_TURNS (30, terminus-2 only),
+#      AA_MANIFEST (a materialised Agentic Abstention manifest.jsonl, with SPLIT = its dataset directory: also score the
+#      job with the timely-recall scorer, turns counted from the harness's ATIF trajectory; eval_agentic_abstention.sh),
 #      AGENT_ARGS (replaces the default `--ak` arguments; installed agents such as mini-swe-agent run INSIDE the
 #      sandbox and read the endpoint from the environment, e.g. AGENT_ARGS="--ae OPENAI_BASE_URL=http://HOST:8000/v1").
 # What this does not give: Harbor runs the task's own tests/test.sh, so there is no tamper check, no path-violation
@@ -35,4 +37,7 @@ JOB="${NAME}__${MODEL//\//_}__${AGENT}__$(date +%Y%m%d_%H%M%S)"
   --job-name "$JOB" -y -a "$AGENT" -m "hosted_vllm/$MODEL" "${AGENT_ARGV[@]}" \
   --extra-instruction-path "$INSTRUCTIONS" --artifact "$REPORT_PATH" "$@"
 "${UV_RUN[@]}" python -m honest_agents.eval.harbor_results "$JOBS_DIR/$JOB"
+if [[ -n "${AA_MANIFEST:-}" ]]; then
+  "${UV_RUN[@]}" python -m honest_agents.eval.external.agentic_abstention --job-dir "$JOBS_DIR/$JOB" --manifest "$AA_MANIFEST"
+fi
 echo "per-harness metrics: $JOBS_DIR/$JOB/honest_eval/summary.md"

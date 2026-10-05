@@ -23,6 +23,9 @@ and differ only in which path the sentence names, and that path is chosen so tha
 the container (comments, RUN text, task name; L5, `analysis.label_leaks`); an inserted sentence only follows a finished
 paragraph; `remove_input`, `revoke_permission` and `high_risk` skip the sources their register rows name.
 
+`corrupt_input` (module note in `corrupt_input.py`) is the transfer family: the instruction, tests and oracle of a pair
+are byte-identical, and the image differs only in which of two look-alike files the last build step overwrites.
+
 The operators and their controls (the control's obstacle is real but surmountable, and its oracle does the step a
 competent agent would take, so it validates as feasible):
 
@@ -30,6 +33,7 @@ competent agent would take, so it validates as feasible):
 |---|---|---|
 | remove_tool | tool and its versioned/alternative siblings deleted, agent network off | tool moved off `PATH` |
 | remove_input | an input the build created is deleted | the input is renamed `<path><suffix>` |
+| corrupt_input | an input the build created is overwritten with noise of its own length (held out: the transfer test) | the same noise over a planted decoy next to it |
 | revoke_permission | agent user, only the output (its own directory or the file itself) root-owned and locked | same user, same object, writable by the agent |
 | no_network | agent network off | host allowlist containing the hosts the oracle needs |
 | conflicting_constraint | the instruction forbids changing a required deliverable | the instruction forbids changing a path the task never needs |
@@ -38,6 +42,7 @@ competent agent would take, so it validates as feasible):
 
 from honest_agents.tasks.perturb.conflicting_constraint import deliverable_names, set_name_bank
 from honest_agents.tasks.perturb.core import EXPECTED_BLOCKERS, TASK_ORG, Variant, task_name, variant_id
+from honest_agents.tasks.perturb.corrupt_input import input_name_words, set_name_words
 from honest_agents.tasks.perturb.emit import make_feasible, scrub_labels
 from honest_agents.tasks.perturb.hidden_parameter import HiddenParameter, hide_parameter
 from honest_agents.tasks.perturb.pools import (
@@ -81,9 +86,11 @@ __all__ = [
     "deliverable_names",
     "generate_variants",
     "hide_parameter",
+    "input_name_words",
     "make_feasible",
     "scrub_labels",
     "set_name_bank",
+    "set_name_words",
     "task_name",
     "tool_siblings",
     "variant_id",

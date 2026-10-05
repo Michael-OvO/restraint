@@ -61,6 +61,7 @@ DROP_LEAKY = "infeasible_clean_pass"
 DROP_LEAKY_VARIANT = "leaky_variant"  # a sibling rollout of the variant cleanly passed its "infeasible" tests
 DROP_TAMPERED = "tampered"
 DROP_VIOLATION = "violation"
+DROP_SELF_INFLICTED = "self_inflicted"  # the agent damaged a path the task needed: never imitated, never relabelled
 DROP_NO_REPORT = "no_report"
 DROP_UNSEEN = "unseen_actions"
 DROP_TOO_LONG_CHARS = "too_long_chars"
@@ -130,6 +131,10 @@ def drop_reason(row: BankRow, flt: RowFilter, quarantined: set[str], leaky: Coll
         return DROP_LEAKY
     if flt.drop_leaky and variant_of(row) in leaky:
         return DROP_LEAKY_VARIANT
+    # Not a `RowFilter` flag: the label is a grader-only bit, so a relabelled row would leak it and an imitated one
+    # would teach damage. Restraint comes from the clean siblings. The row still counts in its group's mean.
+    if o.damage_paths:
+        return DROP_SELF_INFLICTED
     if flt.drop_tampered and o.tampered:
         return DROP_TAMPERED
     if flt.drop_violations and o.violation:

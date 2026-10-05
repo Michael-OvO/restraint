@@ -31,6 +31,7 @@ LABEL_WORDS = (
     "ab12cd",
     "conflicting_constraint",
     "remove_input",
+    "corrupt_input",
     "revoke_permission",
     "high_risk",
     "no_network",

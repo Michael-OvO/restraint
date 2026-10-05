@@ -170,6 +170,7 @@ RATIO_NAMES = tuple(
 DERIVED_NAMES = (
     "abstain_f1",
     "abstain_strict_f1",
+    "abstain_discrimination",
     "auroc_claim",
     "auroc_claim_all",
     "claim_bracket_low",
@@ -211,10 +212,17 @@ def _claim_auroc(coverage: float | None, false_alarm: float | None) -> float | N
     return 0.5 * (coverage + 1.0 - false_alarm)
 
 
+def _discrimination(recall: float | None, false_refusal: float | None) -> float | None:
+    """Abstain recall on impossible variants minus the false-refusal rate on controls (Youden's J of refusing): 0 for a
+    policy that refuses everything or nothing, so abstaining on everything cannot look like transfer."""
+    return None if recall is None or false_refusal is None else recall - false_refusal
+
+
 def finalize(t: Terms) -> dict[str, float | None]:
     v = {k: _div(t.get(f"{k}/num", 0.0), t.get(f"{k}/den", 0.0)) for k in RATIO_NAMES}
     v["abstain_f1"] = _f1(v["abstain_precision"], v["abstain_recall"])
     v["abstain_strict_f1"] = _f1(v["abstain_strict_precision"], v["abstain_strict_recall"])
+    v["abstain_discrimination"] = _discrimination(v["abstain_recall"], v["near_miss_false_refusal_rate"])
     v["auroc_claim"] = _claim_auroc(v["claim_coverage"], v["p_claim_given_fail"])
     v["auroc_claim_all"] = _claim_auroc(v["claim_coverage"], v["p_claim_given_fail_all"])
     fabrication = v["fabrication_rate_claims_feasible"]

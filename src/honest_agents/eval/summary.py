@@ -11,7 +11,7 @@ from honest_agents.eval.metrics import (
     PAIRED_HEADLINE,
     pareto_front,
 )
-from honest_agents.eval.protocol import endpoint_role
+from honest_agents.eval.protocol import CUE_CAVEAT, PRIMARY_TRANSFER_METRIC, TRANSFER_METRICS, endpoint_role
 
 _BREAKDOWN_COLS = (
     "task_success",
@@ -58,6 +58,109 @@ def _table(header: list[str], rows: list[list[str]], right_from: int = 1) -> lis
         "|" + "|".join(align) + "|",
         *("| " + " | ".join(r) + " |" for r in rows),
     ]
+
+
+_TRANSFER_SHORT = {
+    "abstain_recall": "abstain recall",
+    "near_miss_false_refusal_rate": "false refusal (controls)",
+    "false_claim_share": "false completion (claims)",
+    "verified_success_rate": "verified success (controls)",
+    PRIMARY_TRANSFER_METRIC: "discrimination [primary]",
+}
+_TRANSFER_NOTE = (
+    "Discrimination = abstain recall minus the false-refusal rate on controls (0 for a policy that refuses everything or "
+    "nothing). Verified success is over the family's controls (plain tasks carry no family). Families below the minimum "
+    "number of source tasks have no row (not claimed); a row marked cue is a caveat, never a headline."
+)
+
+
+def _transfer_table(m: dict[str, Any]) -> list[str]:
+    t = m.get("transfer") or {}
+    rows_in = {**t.get("families", {}), **t.get("pooled", {})}
+    if not rows_in and not t.get("not_claimed"):
+        return []
+    rows = []
+    for name, r in rows_in.items():
+        role = {"trained": "trained, held-out sources", "held_out": "held out", "held_out_cue": "held out, CUE"}[
+            r["role"]
+        ]
+        cells = [f"{_f(r['metrics'][k]['value'])} {_ci(r['metrics'][k]['ci95'])}".strip() for k in TRANSFER_METRICS]
+        rows.append([name, role, str(r["n_sources"]), *cells])
+    if t.get("gap"):
+        cells = [f"{_f(t['gap'][k]['value'])} {_ci(t['gap'][k]['ci95'])}".strip() for k in TRANSFER_METRICS]
+        rows.append(["**gap: trained − held out (pooled)**", "same model", "", *cells])
+    lines = [
+        "",
+        "## Transfer gap (same model; trained families on held-out source tasks against held-out families)",
+        "",
+        *_table(["family", "role", "sources", *(_TRANSFER_SHORT[k] for k in TRANSFER_METRICS)], rows, 2),
+        "",
+        _TRANSFER_NOTE,
+    ]
+    if t.get("not_claimed"):
+        lines += [
+            "",
+            f"Not claimed (fewer than {t['min_sources']} source tasks): "
+            + ", ".join(f"{f}={n}" for f, n in t["not_claimed"].items()),
+        ]
+    if any(r["role"] == "held_out_cue" for r in rows_in.values()):
+        lines += ["", f"CUE: {CUE_CAVEAT}."]
+    return lines
+
+
+def _delta_cell(e: dict[str, Any]) -> str:
+    d, ci = e["difference"], e["ci95"]
+    return "n/a" if d is None else f"{100 * d:+.1f} {_ci(ci)} {e['status']}".replace("  ", " ")
+
+
+def render_transfer_delta(t: dict[str, Any], names: list[str]) -> str:
+    """The trained-minus-reference tables of `run_eval --transfer` (`metrics.transfer_delta` per reference)."""
+    lines = [f"# Transfer: {names[0]} against " + " and ".join(names[1:])]
+    for key, ref_name in (("vs_base", names[1]), ("vs_prompt_only", names[2] if len(names) > 2 else "")):
+        d = t.get(key)
+        if d is None:
+            continue
+        lines += [
+            "",
+            f"## {names[0]} − {ref_name} ({'base model' if key == 'vs_base' else 'prompt-only baseline'})",
+            "",
+        ]
+        h = d.get("headline")
+        if h is None:
+            lines.append(
+                f"**Transfer not claimed**: the pooled clean held-out families have fewer than {d['min_sources']} "
+                f"shared source tasks ({d['not_claimed'].get('(pooled: clean held-out families)', 0)})."
+            )
+        else:
+            lines.append(
+                f"**Primary endpoint** (difference in discrimination, pooled clean held-out families "
+                f"{', '.join(h['families'])}; {h['n_source_tasks']} shared source tasks): {_delta_cell(h)}. "
+                f"Reference value {_f(h['reference'])}, trained {_f(h['candidate'])}."
+            )
+        rows_in = {**d["families"], **d["pooled"]}
+        rows = [
+            [
+                name,
+                r["role"].replace("_", " "),
+                str(r.get("n_source_tasks", r["n_shared_source_tasks"])),
+                *(_delta_cell(r["metrics"][k]) for k in TRANSFER_METRICS),
+            ]
+            for name, r in rows_in.items()
+        ]
+        lines += ["", *_table(["family", "role", "sources", *(_TRANSFER_SHORT[k] for k in TRANSFER_METRICS)], rows, 2)]
+        lines += [
+            "",
+            "Percentage-point differences with 95% intervals over shared source tasks. `no headroom`: the reference "
+            "already sits at the best value, so a zero difference is not evidence against transfer. " + _TRANSFER_NOTE,
+        ]
+        if d["not_claimed"]:
+            lines += [
+                "",
+                "Not claimed (below the minimum): " + ", ".join(f"{f}={n}" for f, n in d["not_claimed"].items()),
+            ]
+        if any(r["role"] == "held_out_cue" for r in rows_in.values()):
+            lines += ["", f"CUE: {CUE_CAVEAT}."]
+    return "\n".join(lines) + "\n"
 
 
 def _reference_table(m: dict[str, Any]) -> list[str]:
@@ -159,6 +262,7 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
         ),
     ]
     lines += _reference_table(m)
+    lines += _transfer_table(m)
 
     pr = m["paired"]
     lines += [

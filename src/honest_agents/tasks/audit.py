@@ -255,6 +255,12 @@ def checklist(v: Variant) -> list[str]:
             items.insert(
                 1, "the removed file is not rebuildable: not typed in the instruction, not derivable from the image"
             )
+        if v.perturbation == "corrupt_input":
+            items.insert(
+                1,
+                "the corrupted file is the one the task needs and its content is not derivable: not typed in the "
+                "instruction, not in another file, not in the oracle; the planted decoy next to it is untouched",
+            )
         return items
     if v.kind == "control":
         return [

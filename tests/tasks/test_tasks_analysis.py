@@ -240,6 +240,15 @@ RUN mkdir -p /home/user/emptydir
     assert not files["/home/user/empty.txt"].has_content
 
 
+def test_a_later_copy_of_a_heredoc_file_keeps_its_content():
+    """Heredoc bodies are applied in Dockerfile order, so a `cp -p` after the heredoc sees the file (it did not when
+    they were applied last, which hid the size of a conflicting_constraint stub copied from a heredoc input)."""
+    df = "FROM ubuntu\nRUN cat > /d/in.conf <<'EOF'\na=1\nEOF\nRUN cp -p /d/in.conf /o/out.txt && rm /d/gone\n"
+    files = image_files(df)
+    assert files["/o/out.txt"].content == "a=1\n" and files["/o/out.txt"].kind == FILE_HEREDOC
+    assert files["/d/in.conf"].content == "a=1\n"
+
+
 def test_image_files_copy_from_the_build_context(tmp_path):
     t = write_task(
         tmp_path / "t",

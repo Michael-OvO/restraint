@@ -6,7 +6,13 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from honest_agents.tasks.build.config import MIN_FAMILY_TEST_ROWS, MIN_TRAIN_PAIRS, SPLITS, Row
+from honest_agents.tasks.build.config import (
+    ENFORCED_HELDOUT_FAMILIES,
+    MIN_FAMILY_TEST_ROWS,
+    MIN_TRAIN_PAIRS,
+    SPLITS,
+    Row,
+)
 from honest_agents.tasks.build.pairs import Pair
 from honest_agents.tasks.perturb import (
     OPERATORS,
@@ -45,24 +51,32 @@ def pairing_stats(splits: dict[str, list[Row]]) -> dict[str, Any]:
 
 
 HELDOUT_CAVEAT = "zero-shot test family: a lexical cue the generator cannot remove (or too few pairs); keep it out of headline numbers"
+TRANSFER_NOTE = (
+    "the cue gate is ENFORCED for these held-out families (config.ENFORCED_HELDOUT_FAMILIES): a transfer test with a cue "
+    "would measure the cue"
+)
 
 
 def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] = ()) -> dict[str, Any]:
     """Per split and family: the existence AUC of the forbidden/target object, from `analysis.existence_auc`.
 
     `variants_by_split` holds the emitted `Variant`s. Violations are split in two: `violations` (the families that
-    train, which the build enforces) and `heldout_violations` (families in `heldout`, only reported: a test-only family
-    can never block a build, and its cue is the documented construct-validity limit). The import is guarded so an older
+    train, which the build enforces, and the held-out families in `ENFORCED_HELDOUT_FAMILIES`, the transfer test) and
+    `heldout_violations` (the other families in `heldout`, only reported: a cue in them is the documented
+    construct-validity limit). A family's `SEMANTIC_FEATURES` are listed under `semantic` and never judged. The import is guarded so an older
     `analysis` (no `existence_auc`) yields `available: false` instead of breaking the build."""
     heldout = set(heldout)
+    enforced_heldout = heldout & set(ENFORCED_HELDOUT_FAMILIES)
     try:
         from honest_agents.tasks.analysis import (
             attach_env_text,
             cue_classifiers,
+            cue_null,
             existence_auc,
             existence_rows,
             existence_violations,
         )
+        from honest_agents.tasks.analysis.cues import SEMANTIC_FEATURES
     except ImportError:
         return {"available": False, "band": list(CUE_BAND), "violations": {}}
     out: dict[str, Any] = {
@@ -70,6 +84,8 @@ def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] 
         "band": list(CUE_BAND),
         "heldout_families": sorted(heldout),
         "heldout_caveat": HELDOUT_CAVEAT,
+        "enforced_heldout_families": sorted(enforced_heldout),
+        "enforced_heldout_note": TRANSFER_NOTE,
         "violations": {},
         "heldout_violations": {},
     }
@@ -81,11 +97,22 @@ def cue_metrics(variants_by_split: dict[str, list[Any]], heldout: Iterable[str] 
                 report[fam]["cv"] = cv
             attach_env_text(report, rows)
             out[name] = report
-            trained = {f: e for f, e in report.items() if f not in heldout}
-            out["violations"][name] = existence_violations(trained, low=CUE_BAND[0], high=CUE_BAND[1])
+            enforced = {f: e for f, e in report.items() if f not in heldout or f in enforced_heldout}
+            out["violations"][name] = existence_violations(enforced, low=CUE_BAND[0], high=CUE_BAND[1])
             out["heldout_violations"][name] = existence_violations(
-                {f: e for f, e in report.items() if f in heldout}, low=CUE_BAND[0], high=CUE_BAND[1]
+                {f: e for f, e in report.items() if f in heldout and f not in enforced_heldout},
+                low=CUE_BAND[0],
+                high=CUE_BAND[1],
             )
+            semantic = {
+                fam: {k: (report[fam].get("features") or {}).get(k, {}).get("auc") for k in feats}
+                for fam, feats in SEMANTIC_FEATURES.items()
+                if fam in report
+            }
+            if semantic:
+                out.setdefault("semantic", {})[name] = semantic
+            for fam, null in cue_null(rows, families=enforced_heldout).items():  # the transfer family only (cost)
+                report[fam]["null"] = null
             out.setdefault("watch", {})[name] = cue_watch(report)
             # A thin family is not judged (too few rows for an AUC): list it so it never reads as "clean".
             out.setdefault("unjudged", {})[name] = sorted(
@@ -101,8 +128,12 @@ def cue_watch(report: dict[str, Any], *, min_per_class: int = 20, z: float = 2.0
     `z` standard errors from 0.5. They are listed in the manifest (never fatal), because a cue the enforced list does not
     name (for example `mentions_in_instruction`) is the same shortcut in another form."""
     out = []
+    from honest_agents.tasks.analysis.cues import SEMANTIC_FEATURES
+
     for fam, entry in sorted(report.items()):
         for name, f in sorted((entry.get("features") or {}).items()):
+            if name in SEMANTIC_FEATURES.get(fam, ()):
+                continue  # the relation the policy has to verify: listed under `semantic`, not a cue to watch
             auc, se = f.get("auc"), f.get("auc_se")
             if auc is None or se is None or min(f["n_infeasible"], f["n_control"]) < min_per_class:
                 continue

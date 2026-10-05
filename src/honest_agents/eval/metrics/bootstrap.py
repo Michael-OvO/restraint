@@ -209,17 +209,25 @@ def paired_difference(
     weights = _cluster_weights(len(shared), n_boot, seed)
     nan = float("nan")
 
+    def draw_ratio(resampled: np.ndarray, keys: list[str], name: str) -> np.ndarray:
+        """A plain ratio of two summed terms: one vectorised division (IEEE, so the same floats as `_div` per row)."""
+        col = {k: i for i, k in enumerate(keys)}
+        num_key, den_key = _TERM_KEYS[name]
+        zeros = np.zeros(len(resampled))
+        num = resampled[:, col[num_key]] if num_key in col else zeros
+        den = resampled[:, col[den_key]] if den_key in col else zeros
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(den != 0, num / den, nan)
+
     def draw_values(resampled: np.ndarray, keys: list[str]) -> np.ndarray:
         """`value` of every resampled term row (NaN where undefined)."""
         if metric in _TERM_KEYS:
-            # a plain ratio of two summed terms: one vectorised division (IEEE, so the same floats as `_div` per row)
-            col = {k: i for i, k in enumerate(keys)}
-            num_key, den_key = _TERM_KEYS[metric]
-            zeros = np.zeros(len(resampled))
-            num = resampled[:, col[num_key]] if num_key in col else zeros
-            den = resampled[:, col[den_key]] if den_key in col else zeros
-            with np.errstate(divide="ignore", invalid="ignore"):
-                return np.where(den != 0, num / den, nan)
+            return draw_ratio(resampled, keys, metric)
+        if metric == "abstain_discrimination":  # recall minus false refusal: two ratios of summed terms, vectorised
+            recall, refusal = (
+                draw_ratio(resampled, keys, m) for m in ("abstain_recall", "near_miss_false_refusal_rate")
+            )
+            return recall - refusal
         return np.array([nan if (v := value(row, keys)) is None else v for row in resampled])
 
     draws = np.array([draw_values(weights @ m, k) for m, k in zip(mats, keysets, strict=True)]).T  # n_boot × runs

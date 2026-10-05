@@ -62,6 +62,7 @@ from honest_agents.harness import (
     read_instruction,
     start_sandbox,
 )
+from honest_agents.mutation import first_mutation_index
 from honest_agents.report import ReportParseError, SelfReport
 from honest_agents.reward import (
     MASK_BOOT_FAILURE,
@@ -363,6 +364,8 @@ class HonestHarborEnv(ReportTools, HarborEnv):
 
     async def _grade_episode(self) -> tuple[EpisodeOutcome, RewardBreakdown, dict]:
         outcome, debug = await self._grade_outcome()
+        # Metrics and best-of-N tiebreaks only; the reward never reads it.
+        outcome.first_mutation_idx = first_mutation_index([str(h.get("command") or "") for h in self._history])
         debug["history"] = self._history
         debug["stop_reason"] = outcome.stop_reason
         # The contract promises these keys on every episode, graded or not.

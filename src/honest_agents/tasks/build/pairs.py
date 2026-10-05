@@ -31,7 +31,7 @@ def read_relabels(path: Path) -> dict[str, list[str]]:
 
 
 def relabel_variant(task_dir: Path, repair_paths: Sequence[str]) -> None:
-    """Rewrite an infeasible `remove_input` variant in place as a near-miss control (`validate.relabel_to_control`)."""
+    """Rewrite an infeasible variant of a `REPAIR_OPERATORS` family in place as a near-miss control (`validate.relabel_to_control`)."""
     from honest_agents.tasks.validate import relabel_to_control
 
     relabel_to_control(task_dir, repair_paths=list(repair_paths))
@@ -54,7 +54,7 @@ def apply_validation(
 ) -> tuple[list[Pair], dict[str, Any]]:
     """Fold validation results into the variant list; returns the kept variants and what changed.
 
-    1. A `remove_input` variant already in `relabels`, or whose current result says `relabel_to_control`, is rewritten in
+    1. A `REPAIR_OPERATORS` variant (`remove_input`, `corrupt_input`) already in `relabels`, or whose current result says `relabel_to_control`, is rewritten in
        place as a control (and recorded in `relabels`, which the caller persists). It needs validating again, as a
        control, so it is kept only once a result for its new content exists. It replaces the control the operator
        generated for the same pair.
@@ -63,7 +63,7 @@ def apply_validation(
 
     Leak results are returned in `info["leaks"]` for quarantine. Pairing is enforced by the caller afterwards.
     """
-    from honest_agents.tasks.validate import filter_valid, is_current
+    from honest_agents.tasks.validate import REPAIR_OPERATORS, filter_valid, is_current
 
     info: dict[str, Any] = {"relabelled": [], "leaks": [], "dropped": 0}
     relabelled_pairs: set[tuple] = set()
@@ -72,7 +72,7 @@ def apply_validation(
         r = results.get(v.variant_id)
         current = r is not None and is_current(r, v.task_dir)
         flagged = current and getattr(r, "relabel_to_control", False)
-        if v.kind == "infeasible" and v.perturbation == "remove_input" and (v.variant_id in relabels or flagged):
+        if v.kind == "infeasible" and v.perturbation in REPAIR_OPERATORS and (v.variant_id in relabels or flagged):
             if v.variant_id not in relabels:
                 relabels[v.variant_id] = list((getattr(r, "debug", None) or {}).get("repair_paths") or [])
             relabel_variant(v.task_dir, relabels[v.variant_id])

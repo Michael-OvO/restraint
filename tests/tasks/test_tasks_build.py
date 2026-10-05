@@ -24,6 +24,7 @@ from honest_agents.tasks.build import (
     COLUMNS,
     DEFAULT_HELDOUT_FAMILIES,
     DEFAULT_MIXTURE,
+    ENFORCED_HELDOUT_FAMILIES,
     Row,
     assign_seed_splits,
     balance_mixture,
@@ -44,7 +45,7 @@ from honest_agents.tasks.build import (
 from honest_agents.tasks.perturb import DEFAULT_OPERATORS, NOT_BUILT_BY_DEFAULT, OPERATORS
 from honest_agents.tasks.sources import SeedTask
 from honest_agents.tasks.validate import ValidationResult
-from tests.tasks.synthetic import plain_task, rich_task, write_task
+from tests.tasks.synthetic import plain_task, rich_task, varied_inputs, write_task
 
 N_RICH = 14
 
@@ -53,7 +54,7 @@ N_RICH = 14
 def seeds(tmp_path) -> Path:
     root = tmp_path / "seeds"
     for i in range(N_RICH):
-        rich_task(root / f"rich-{i:02d}", verifier="pytest")
+        rich_task(root / f"rich-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
     plain_task(root / "plain")
     write_task(  # no oracle: feasible-only, needs the allowlist
         root / "nosol",
@@ -196,7 +197,7 @@ def test_split_assignment_survives_a_growing_pool(tmp_path, seeds):
     first = json.loads((out / "split_seeds.json").read_text())
     before = {r["pair_id"] for r in _rows(out)["test"]}
     for i in range(N_RICH, N_RICH + 12):
-        rich_task(seeds / f"rich-{i:02d}", verifier="pytest")
+        rich_task(seeds / f"rich-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
     build(parse_args(_args(out, seeds, "--no-download")))
     after = {r["pair_id"] for r in _rows(out)["test"]}
     assert after == before  # quota already met: no test seed moved, none added
@@ -211,7 +212,7 @@ def test_split_seeds_file_carries_the_assignment_into_a_fresh_out_dir(tmp_path, 
     build(parse_args(_args(first, seeds)))
     test_pairs = {r["pair_id"] for r in _rows(first)["test"]}
     for i in range(N_RICH, N_RICH + 10):  # new seeds hash anywhere, but the quota is met
-        rich_task(seeds / f"rich-{i:02d}", verifier="pytest")
+        rich_task(seeds / f"rich-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
     second = tmp_path / "out2"
     build(parse_args(_args(second, seeds, "--split-seeds-file", str(first / "split_seeds.json"))))
     assert {r["pair_id"] for r in _rows(second)["test"]} == test_pairs
@@ -592,11 +593,14 @@ def test_phrasing_split():
     assert [phrasing_split(s) for s in ("train", "val", "test")] == ["train", "train", "test"]
 
 
-def test_default_heldout_families_are_the_two_with_a_cue_or_too_few_pairs():
+def test_default_heldout_families_are_the_transfer_test_the_cue_family_and_the_thin_one():
     """Leak verifier decision: conflicting_constraint (lexical cue) and no_network (one pair) are test-only; the
-    families whose twin differs only in the environment train, so high_risk and revoke_permission are not held out."""
-    assert set(DEFAULT_HELDOUT_FAMILIES) == {"conflicting_constraint", "no_network"}
+    families whose twin differs only in the environment train, so high_risk and revoke_permission are not held out.
+    Changed on purpose: corrupt_input joined them as the transfer test (a mechanism no training family has), and it is
+    the one whose cue gate is still enforced."""
+    assert DEFAULT_HELDOUT_FAMILIES == ("corrupt_input", "conflicting_constraint", "no_network")
     assert not {"high_risk", "revoke_permission", "remove_input"} & set(DEFAULT_HELDOUT_FAMILIES)
+    assert set(ENFORCED_HELDOUT_FAMILIES) == {"corrupt_input"} <= set(DEFAULT_HELDOUT_FAMILIES)
 
 
 def test_heldout_problems_flag_what_cannot_work():
@@ -626,7 +630,7 @@ def test_enforce_pairing_drops_orphans():
 def test_remove_tool_is_registered_but_not_built_by_default():
     """Behaviour change (full-pool build): remove_tool yields 1 variant in 2,482 Endless Terminals seeds (structural), so
     it is out of the default operator list; it stays registered and selectable with --operators."""
-    assert NOT_BUILT_BY_DEFAULT == ("remove_tool",) and "remove_tool" in OPERATORS
+    assert NOT_BUILT_BY_DEFAULT == ("remove_tool", "shortcut_trap") and "remove_tool" in OPERATORS  # + the trap family
     assert "remove_tool" not in DEFAULT_OPERATORS and set(DEFAULT_OPERATORS) | set(NOT_BUILT_BY_DEFAULT) == set(
         OPERATORS
     )
@@ -718,7 +722,7 @@ def test_fresh_out_dir_and_a_bigger_pool_leave_the_test_ids_unchanged(tmp_path, 
     ids1 = read_test_ids(first / "test_ids.txt")
     assert test1 and {r["pair_id"] for r in _rows(first)["train"]}
     for i in range(N_RICH, N_RICH + 14):  # a bigger pool, and a fresh --out with no split_seeds.json at all
-        rich_task(seeds / f"rich-{i:02d}", verifier="pytest")
+        rich_task(seeds / f"rich-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
     second = tmp_path / "out2"
     build(parse_args(_bp_args(second, seeds)))
     rows2 = _rows(second)
@@ -788,14 +792,14 @@ def test_near_duplicate_seeds_never_straddle_a_split(tmp_path):
             )
 
     for i in range(12):
-        rich_task(seeds / f"twin-{i:02d}", verifier="pytest")
+        rich_task(seeds / f"twin-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
         distinct_tests(seeds / f"twin-{i:02d}", f"zebra{i}quartz")
         (seeds / f"twin-{i:02d}" / "instruction.md").write_text(base + f"Mention run number {i}.")
     topics = ["rotate the nginx logs", "archive the old photos", "convert the csv files to json", "list open ports",
               "check disk usage per user", "compress the backup directory", "sort the server names alphabetically",
               "find duplicated invoice numbers"]  # fmt: skip
     for i, t in enumerate(topics):
-        rich_task(seeds / f"other-{i:02d}", verifier="pytest")
+        rich_task(seeds / f"other-{i:02d}", verifier="pytest", inputs=varied_inputs(i))
         distinct_tests(seeds / f"other-{i:02d}", f"walrus{i}marble")
         (seeds / f"other-{i:02d}" / "instruction.md").write_text(
             f"Please {t} under /srv/data/{i} and tell me what you did."

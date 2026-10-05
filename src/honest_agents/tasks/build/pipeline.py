@@ -73,7 +73,9 @@ from honest_agents.tasks.perturb import (
     LEAK_DROPPED,
     deliverable_names,
     generate_variants,
+    input_name_words,
     set_name_bank,
+    set_name_words,
 )
 from honest_agents.tasks.sources import (
     SeedReject,
@@ -204,11 +206,16 @@ def _perturb_seeds(
     """Generate every variant of every seed; returns the `(seed, variant)` pairs and the seeds skipped for lacking an
     oracle solution (those only join a feasible-only pool when `--feasible-allowlist` names them)."""
     bank: list[tuple[str, str, str]] = []  # D' of a conflicting_constraint control: other tasks' deliverable names
+    input_words: list[str] = []  # the words of real input names, for the decoy names of corrupt_input
     for s in seeds:
         if s.has_solution:
             split = phrasing_split(plan.seed_split[s.split_group])
-            bank += [(split, s.pair_id, n) for n in deliverable_names(TaskFacts.load(s.task_dir))]
+            facts = TaskFacts.load(s.task_dir)
+            bank += [(split, s.pair_id, n) for n in deliverable_names(facts)]
+            if "corrupt_input" in cfg.operators and facts.dockerfile_editable:
+                input_words += input_name_words(facts)
     set_name_bank(bank)
+    set_name_words(input_words)
     allow = read_allowlist(cfg.feasible_allowlist)
     variants: list[Pair] = []
     skipped_no_solution = 0
@@ -350,7 +357,11 @@ def _enforce_cue_gate(
     )
     bad = [f"{name}: {m}" for name, ms in cue["violations"].items() for m in ms]  # training families only
     for m in bad:
-        log.warning("existence cue outside %s in a TRAINING family: %s", CUE_BAND, m)
+        log.warning(
+            "existence cue outside %s in an ENFORCED family (training, or the held-out transfer family): %s",
+            CUE_BAND,
+            m,
+        )
     for name, ms in cue.get("heldout_violations", {}).items():
         for m in ms:
             log.warning(
