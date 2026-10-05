@@ -535,3 +535,21 @@ def test_heredoc_normalisation_leaves_arithmetic_and_unterminated_operators_alon
     assert normalize_heredocs(arithmetic) == arithmetic
     no_terminator = "RUN cat << 'NEVER_CLOSED'\nbody\n"
     assert normalize_heredocs(no_terminator) == no_terminator  # not a heredoc as far as we can tell: do not touch it
+
+
+def test_heredoc_bodies_are_data_not_docker_instructions():
+    """Seen on a real node: SQL `user   TEXT,` inside a heredoc became the image's final USER and the container refused to start."""
+    from honest_agents.tasks.taskfs import final_stage, final_user, mask_heredoc_bodies
+
+    df = (
+        "FROM ubuntu:22.04\nUSER app\n"
+        "RUN sqlite3 /db <<'SQL'\nCREATE TABLE t(\n    ts   TEXT,\n    user   TEXT,\n    FROM x\n);\nSQL\n"
+        "RUN echo $((1 << 4)) && true\nUSER   worker\n"
+    )
+    assert final_user(df) == "worker"
+    assert final_user(df.replace("USER   worker\n", "")) == "app"  # not `TEXT,`
+    masked = mask_heredoc_bodies(df)
+    assert len(masked) == len(df) and masked.count("\n") == df.count("\n")
+    assert "user   TEXT" not in masked and "<<'SQL'" in masked and "\nSQL\n" in masked
+    assert "$((1 << 4))" in masked  # no terminator line: arithmetic is not a heredoc
+    assert "FROM x" in final_stage(df)  # the stage text itself still carries the body (installs live there)

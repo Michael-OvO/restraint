@@ -329,14 +329,15 @@ class DockerfileFacts:
 
 
 def analyse_dockerfile(text: str) -> DockerfileFacts:
-    from honest_agents.tasks.taskfs import final_stage
+    from honest_agents.tasks.taskfs import final_stage, mask_heredoc_bodies
 
     # Only the final image's stages count: a builder stage's USER / installs never reach the image the agent runs in.
     joined = final_stage(text)
-    froms = re.findall(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)", joined, re.IGNORECASE | re.MULTILINE)
-    users = re.findall(r"^\s*USER\s+(\S+)", joined, re.IGNORECASE | re.MULTILINE)
-    workdirs = re.findall(r"^\s*WORKDIR\s+(\S+)", joined, re.IGNORECASE | re.MULTILINE)
-    homes = re.findall(r"^\s*ENV\s+HOME[= ]\s*(\S+)", joined, re.IGNORECASE | re.MULTILINE)
+    instructions = mask_heredoc_bodies(joined)  # heredoc bodies are data (SQL, scripts), not Docker instructions
+    froms = re.findall(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)", instructions, re.IGNORECASE | re.MULTILINE)
+    users = re.findall(r"^\s*USER\s+(\S+)", instructions, re.IGNORECASE | re.MULTILINE)
+    workdirs = re.findall(r"^\s*WORKDIR\s+(\S+)", instructions, re.IGNORECASE | re.MULTILINE)
+    homes = re.findall(r"^\s*ENV\s+HOME[= ]\s*(\S+)", instructions, re.IGNORECASE | re.MULTILINE)
     apt: list[str] = []
     pip: list[str] = []
     for m in _INSTALL_ARGS_RE.finditer(joined):

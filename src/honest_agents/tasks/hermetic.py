@@ -42,6 +42,7 @@ from honest_agents.tasks.taskfs import (
     ENV_SCRUB_FILES,
     final_stage,
     forbidden_copy_sources,
+    mask_heredoc_bodies,
     read_task_toml,
     scrub_environment,
     set_honest,
@@ -382,7 +383,7 @@ def _render_test_sh(cwd: str) -> str:
 
 
 def _dockerfile_workdir(dockerfile: str) -> str | None:
-    dirs = re.findall(r"^\s*WORKDIR\s+(\S+)", final_stage(dockerfile), re.MULTILINE)
+    dirs = re.findall(r"^\s*WORKDIR\s+(\S+)", mask_heredoc_bodies(final_stage(dockerfile)), re.MULTILINE)
     return dirs[-1] if dirs and dirs[-1].startswith("/") else None
 
 

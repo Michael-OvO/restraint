@@ -52,6 +52,33 @@ def normalize_heredocs(dockerfile: str) -> str:
     return "\n".join(lines)
 
 
+_HEREDOC_START = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def mask_heredoc_bodies(dockerfile: str) -> str:
+    """The Dockerfile with every heredoc body blanked out (same length, so offsets still match the original).
+
+    A body is script or data, never Docker instructions: an SQL line `user   TEXT,` must not read as `USER TEXT,`
+    (seen on a real node: the image's "final user" became `TEXT,` and the container refused to start). Only an operator
+    whose delimiter reappears alone on a later line opens a body, so `$((1 << 4))` is left alone.
+    """
+    lines = dockerfile.split("\n")
+    i = 0
+    while i < len(lines):
+        ends = [
+            next((j for j in range(i + 1, len(lines)) if lines[j].strip() == m.group(2)), None)
+            for m in _HEREDOC_START.finditer(lines[i])
+        ]
+        end = max((e for e in ends if e is not None), default=None)
+        if end is None:
+            i += 1
+            continue
+        for j in range(i + 1, end):
+            lines[j] = " " * len(lines[j])
+        i = end + 1
+    return "\n".join(lines)
+
+
 def scrub_environment(task_dir: Path) -> list[str]:
     """Delete the expected-state files from `environment/`; returns the relative paths removed."""
     env = task_dir / "environment"
@@ -190,7 +217,7 @@ def final_stage(dockerfile: str) -> str:
     file would e.g. restore a builder's `USER` onto the final stage.
     """
     text = dockerfile.replace("\\\n", " ")
-    froms = list(_FROM_RE.finditer(text))
+    froms = list(_FROM_RE.finditer(mask_heredoc_bodies(text)))
     if not froms:
         return text
     stages = [
@@ -213,7 +240,7 @@ def final_stage(dockerfile: str) -> str:
 
 
 def final_user(dockerfile: str) -> str | None:
-    users = _USER_RE.findall(final_stage(dockerfile))
+    users = _USER_RE.findall(mask_heredoc_bodies(final_stage(dockerfile)))
     return users[-1] if users else None
 
 
