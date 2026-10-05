@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents.env import HonestHarborEnv
+from honest_agents.harness import set_max_concurrent_boots
 from honest_agents.reward import EpisodeOutcome
 from honest_agents.spec import VERIFIER_PYTEST, HonestTaskSpec
 from honest_agents.tasks.hermetic import NO_NETWORK, hermetic_problems
@@ -858,6 +859,9 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     dirs = sorted(p.parent for p in args.tasks_dir.glob("*/task.toml"))
+    # Sandbox boots are throttled by a separate semaphore (16 by default): without this, --concurrency 32 would overlap 32
+    # validations but never boot more than 16 containers at a time.
+    set_max_concurrent_boots(max(args.concurrency, 16))
     kw: dict[str, Any] = {
         "concurrency": args.concurrency,
         "env_factory": lambda: OracleHarborEnv(environment_type=args.environment_type),
