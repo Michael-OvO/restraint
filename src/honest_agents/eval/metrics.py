@@ -487,6 +487,20 @@ DERIVED_NAMES = (
 METRIC_NAMES = (*RATIO_NAMES, *DERIVED_NAMES)
 
 
+_TERM_KEYS = {k: (f"{k}/num", f"{k}/den") for k in RATIO_NAMES}  # built once: `values` runs per breakdown and sweep row
+
+
+def _total_terms(eps: Iterable[Scored]) -> Terms:
+    """Summed per-episode terms (same additions in the same order as `_add` over `episode_terms`, minus the temporaries)."""
+    tot: Terms = {}
+    for e in eps:
+        for k, (n, d) in episode_ratios(e).items():
+            kn, kd = _TERM_KEYS[k]
+            tot[kn] = tot.get(kn, 0.0) + n
+            tot[kd] = tot.get(kd, 0.0) + d
+    return tot
+
+
 def _add(tot: Terms, terms: Terms) -> None:
     for k, x in terms.items():
         tot[k] = tot.get(k, 0.0) + x
@@ -519,18 +533,13 @@ def finalize(t: Terms) -> dict[str, float | None]:
 
 
 def ratios(eps: Iterable[Scored]) -> dict[str, Ratio]:
-    tot: Terms = {}
-    for e in eps:
-        _add(tot, episode_terms(e))
+    tot = _total_terms(eps)
     return {k: (tot.get(f"{k}/num", 0.0), int(tot.get(f"{k}/den", 0))) for k in RATIO_NAMES}
 
 
 def values(eps: Iterable[Scored]) -> dict[str, float | None]:
     """Every additive metric plus the derived ones (no AUROC of confidence / threshold: see `calibration`)."""
-    tot: Terms = {}
-    for e in eps:
-        _add(tot, episode_terms(e))
-    return finalize(tot)
+    return finalize(_total_terms(eps))
 
 
 # ── discrimination and calibration (not ratios of sums) ──────────────────
@@ -992,12 +1001,21 @@ def paired_difference(
         return out
     weights = _cluster_weights(len(shared), n_boot, seed)
     nan = float("nan")
-    draws = np.array(
-        [
-            [nan if (v := value(row, k)) is None else v for row in weights @ m]
-            for m, k in zip(mats, keysets, strict=True)
-        ]
-    ).T  # n_boot × runs
+
+    def draw_values(resampled: np.ndarray, keys: list[str]) -> np.ndarray:
+        """`value` of every resampled term row (NaN where undefined)."""
+        if metric in _TERM_KEYS:
+            # a plain ratio of two summed terms: one vectorised division (IEEE, so the same floats as `_div` per row)
+            col = {k: i for i, k in enumerate(keys)}
+            num_key, den_key = _TERM_KEYS[metric]
+            zeros = np.zeros(len(resampled))
+            num = resampled[:, col[num_key]] if num_key in col else zeros
+            den = resampled[:, col[den_key]] if den_key in col else zeros
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return np.where(den != 0, num / den, nan)
+        return np.array([nan if (v := value(row, keys)) is None else v for row in resampled])
+
+    draws = np.array([draw_values(weights @ m, k) for m, k in zip(mats, keysets, strict=True)]).T  # n_boot × runs
     seed_rng = np.random.default_rng(seed + 1)  # its own stream: one-seed results do not depend on it
 
     def arm_value(cols: np.ndarray, pts: list[float]) -> np.ndarray:

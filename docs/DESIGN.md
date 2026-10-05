@@ -325,3 +325,36 @@ external-benchmark adapter against its real data.
    by about 0.006 at the default config).
 6. Training covers three families (`high_risk`, `revoke_permission`, `remove_input`, with remove_input thin until a full
    build); `conflicting_constraint` and `no_network` are zero-shot test families with a construct-validity caveat.
+
+## 13. Performance notes
+
+Measured on the M-series Mac with the cached real Endless Terminals pool (335 seeds), 8-core, other jobs running (so read the
+ratios, not the seconds). Every change keeps its output bit-identical: the build was diffed file by file (rows, split files,
+`dedup.jsonl`, the `tasks/` tree, `manifest.json` after key sorting: its dict order follows `PYTHONHASHSEED`), the
+bootstrap by a hash of every sample, and each has a golden test.
+
+| Hot path | Before | After | Change |
+| --- | --- | --- | --- |
+| `tasks.build`, 335 seeds, wall (`analysis._tokens`, `boot_dirs`, `_removed_by_build` memoised; substring pre-test in `_borrowed_sibling`) | 15.0 s | 10.2 s | -32% |
+| `compute_metrics`, 3,600 episodes, `n_boot=1000` (`values`/`ratios` sum terms without temporaries) | 3.3 s | 2.7 s | -19% |
+| `paired_difference` / `noninferiority` on a ratio metric (vectorised draws), the NI test at margin | 14.4 s | 6.0 s | -58% |
+| Grading exec round trips per hermetic episode, counted from the calls (snapshot 9 to 5, state checks 5 to 1, verifier cleanup 2 to 1) | n | n - 9 | -9 execs |
+
+Round trips (each is a `docker exec`, 50 to 300 ms): the boot snapshot ran 9 execs (3 manifests, `$PATH`, python, 2 for
+`discover`, toolchain manifest, `ldd` resolution) and now runs 5: `grading.take_manifests` / `exec_batch` put independent
+root snippets in one exec, each closed by a random-tagged status line so a file name cannot forge a section boundary, and a
+truncated or non-zero batch raises `ManifestError` exactly like an empty manifest. `_state_checks` ran 5 execs (protected,
+toolchain, `ldd`, irreversible, forbidden) and now runs 1 (and again after evidence replay). `run_pytest` reads the forged
+reward files and removes its scratch directory in one exec. `resolve_python`, `discover` and the uploads stay separate: the
+next step needs their output, and the tests monkeypatch `resolve_python`. Not measured against Docker: the saving is
+counted from the exec calls, the latency per call is the node's.
+
+Looked at and left alone: bank write and read (64 realistic rows with 6,000 token ids each: 80 ms for the whole step, 28 ms
+to read back), `jaccard_pairs` (already an inverted index, 0.3 s for 335 seeds), `trainer._tool_call_loop` (list
+concatenation on token ids, microseconds beside generation and tool execution), the vectorised AUROC bootstrap. Remaining
+build time is file copying and TOML parsing (about 25% each of what is left).
+
+On the node, profile in this order: (1) a real training step's wall split into generation, tool exec and grading (the
+`LoopRecord` seconds and `honest/` timing metrics), (2) `grade()` per episode: count `sb.exec` calls (`LocalSandbox.calls` in
+tests) and time the verifier upload (`upload_dir` runs three times per episode), (3) `docker exec` latency itself
+(`scripts/probe_node.sh`), which sets what a round trip is worth.

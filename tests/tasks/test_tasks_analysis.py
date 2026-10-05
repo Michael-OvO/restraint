@@ -704,3 +704,39 @@ def test_donor_groups_partition_sources_stably():
         donor_group(f"endless-terminals/task_{i}") for i in range(400)
     ]
     assert min(groups.count(g) for g in range(DONOR_GROUPS)) > 60
+
+
+def test_cached_shell_analysis_matches_golden_outputs() -> None:
+    """Golden outputs captured before `_tokens`, `boot_dirs` and `_removed_by_build` were memoised (speed pass)."""
+    from honest_agents.tasks.analysis import _removed_by_build, _tokens, boot_dirs
+
+    df = (
+        "FROM ubuntu\nWORKDIR /srv/app\nRUN mkdir -p /home/user/{data,out} && useradd -m bob \\\n"
+        " && rm -rf /tmp/x && mv /a/b /c/d\nRUN echo 'unbalanced\n"
+    )
+    for _ in range(2):  # the second call is served from the cache
+        assert sorted(boot_dirs(df)) == [
+            "/",
+            "/home",
+            "/home/bob",
+            "/home/user",
+            "/home/user/data",
+            "/home/user/out",
+            "/srv",
+            "/srv/app",
+        ]
+        assert sorted(_removed_by_build(df)) == ["/a/b", "/tmp/x"]
+        assert list(_tokens("echo 'a b' | cat; ls > /tmp/x\nfoo \"bar baz\" # c")) == [
+            "echo",
+            "a b",
+            "|",
+            "cat",
+            ";",
+            "ls",
+            ">",
+            "/tmp/x",
+            "\n",
+            "foo",
+            "bar baz",
+        ]
+        assert list(_tokens("echo 'unbalanced; x|y")) == ["echo", "'unbalanced", ";", "x", "|", "y"]

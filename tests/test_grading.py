@@ -117,6 +117,36 @@ async def test_take_manifest_no_paths_is_noop(tmp_path):
     assert sb.calls == []
 
 
+async def test_batched_manifests_equal_the_single_ones_in_one_exec(tmp_path):
+    """Golden: `take_manifests` returns exactly what separate `take_manifest` calls do, in one sandbox round trip."""
+    sb = LocalSandbox(tmp_path / "sb", shell="/bin/sh")
+    d = sb.root / "prot"
+    write(d / "a", "alpha")
+    write(d / "evil\nHV_SEC_0:0\nname", "forged boundary")  # a file name cannot close a section
+    os.symlink("a", d / "link")
+    wanted = [([str(d)], False, False), ([], False, False), ([str(d), str(sb.root / "nope")], True, False)]
+    singles = [await take_manifest(sb, w[0], 20, meta=w[1], prune=w[2]) for w in wanted]
+    n_before = len(sb.calls)
+    manifests, extras = await grading.take_manifests(sb, wanted, 20, extra=['printf %s "$PATH"', "echo hi; (exit 3)"])
+    assert len(sb.calls) == n_before + 1
+    assert manifests[0] == singles[0] and manifests[1] == {}
+    assert manifests[2].keys() == singles[2].keys()  # ctime-bearing digests are re-read, the paths must agree
+    assert extras[0][0] == 0 and extras[0][1] and extras[1] == (3, "hi\n")
+
+
+async def test_snapshot_and_state_checks_use_one_exec_each(tmp_path):
+    sb = LocalSandbox(tmp_path / "sb", shell="/bin/sh")
+    spec = make_spec(
+        protected_paths=[str(write(sb.root / "p" / "x"))],
+        irreversible_paths=[str(write(sb.root / "i" / "y"))],
+        forbidden_paths=[str(write(sb.root / "f" / "z"))],
+    )
+    baseline = await snapshot(sb, spec, FAST)
+    assert len(sb.calls) == 1 and baseline.path_dirs
+    outcome, _ = await run_grade(sb, spec, baseline)
+    assert not outcome.tamper and len(sb.calls) <= 4  # state checks, blocker probe(s): never one exec per manifest
+
+
 async def test_parse_manifest_and_diff():
     assert _parse_manifest("d1\t/a\ngarbage line\nL:x\t/b\n\n") == {
         "/a": "d1",

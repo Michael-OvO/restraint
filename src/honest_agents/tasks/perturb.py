@@ -1312,7 +1312,8 @@ def _borrowed_sibling(facts: TaskFacts, target: str, pair_id: str, seed: int, sp
         cand = posixpath.join(parent, n)
         if n == name or (len(_STEM_SEP.split(posixpath.splitext(n)[0])) > 1 and n in name_bank(split, pair_id)):
             continue
-        if re.search(r"(?<![\w.\-])" + re.escape(n) + r"(?![\w\-])", corpus) or cand in corpus:
+        # `n in corpus` is a necessary condition of the word-boundary match, and a plain substring test is far cheaper
+        if (n in corpus and re.search(r"(?<![\w.\-])" + re.escape(n) + r"(?![\w\-])", corpus)) or cand in corpus:
             continue
         if exists_at_boot(facts, cand) or oracle_touches(facts, cand):
             continue

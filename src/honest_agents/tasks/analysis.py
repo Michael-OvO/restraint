@@ -17,6 +17,7 @@ SPEC_V3 §4.4 adds three stricter readings, all static:
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -575,16 +576,20 @@ def _logical_lines(script: str) -> list[str]:
 _PUNCT = "();<>|&\n"
 
 
-def _tokens(text: str) -> list[str]:
-    """Shell-ish tokens over a whole script; newlines become separator tokens so quoted multi-line args survive."""
+@functools.lru_cache(maxsize=4096)
+def _tokens(text: str) -> tuple[str, ...]:
+    """Shell-ish tokens over a whole script; newlines become separator tokens so quoted multi-line args survive.
+
+    Cached (a Dockerfile RUN line is re-tokenised for every probed path) and therefore an immutable tuple.
+    """
     try:
         lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCT)
         lex.whitespace = " \t\r"
         lex.whitespace_split = True
         lex.commenters = "#"
-        return list(lex)
+        return tuple(lex)
     except ValueError:  # unbalanced quotes: fall back to a crude split
-        return re.findall(r"[^\s;|&()<>]+|[;|&()<>\n]+", text)
+        return tuple(re.findall(r"[^\s;|&()<>]+|[;|&()<>\n]+", text))
 
 
 _REDIRECTS = frozenset({">", ">>", "<", "<<", "<<<", ">&", "&>", "&>>", "2>", "2>>", ">|", "<<-", "<&"})
@@ -1193,7 +1198,7 @@ def _split_heredocs(text: str) -> tuple[str, list[tuple[str, str]]]:
     return "\n".join(out), docs
 
 
-def _segments(tokens: list[str]) -> list[list[str]]:
+def _segments(tokens: Sequence[str]) -> list[list[str]]:
     segs: list[list[str]] = [[]]
     for t in tokens:
         if _is_separator(t):
@@ -1419,7 +1424,8 @@ def _brace_expand(word: str) -> list[str]:
     return [x for alt in m.group(1).split(",") for x in _brace_expand(word[: m.start()] + alt + word[m.end() :])]
 
 
-def boot_dirs(dockerfile: str) -> set[str]:
+@functools.lru_cache(maxsize=512)
+def boot_dirs(dockerfile: str) -> frozenset[str]:
     """Directories the build creates (`mkdir`, `WORKDIR`, `useradd -m`), with their ancestors (heuristic)."""
     stripped, _ = _split_heredocs(dockerfile)
     dirs: set[str] = set()
@@ -1451,10 +1457,11 @@ def boot_dirs(dockerfile: str) -> set[str]:
         while d not in ("/", ""):
             d = posixpath.dirname(d)
             out.add(d)
-    return out
+    return frozenset(out)
 
 
-def _removed_by_build(dockerfile: str) -> set[str]:
+@functools.lru_cache(maxsize=512)
+def _removed_by_build(dockerfile: str) -> frozenset[str]:
     """Paths a build step deletes or moves away (`rm`, the source of `mv`), as written in the Dockerfile."""
     stripped, _ = _split_heredocs(dockerfile)
     out: set[str] = set()
@@ -1471,7 +1478,7 @@ def _removed_by_build(dockerfile: str) -> set[str]:
                 plain = [a for a in args if not a.startswith("-")]
                 srcs = plain[:-1] if cmd == "mv" else plain if cmd in ("rm", "unlink") else []
                 out.update(p for p in (_resolve(a, "/root", workdir) for a in srcs) if p)
-    return out
+    return frozenset(out)
 
 
 def exists_at_boot(facts: TaskFacts, path: str) -> bool:

@@ -145,11 +145,14 @@ async def discover(sb: Any, python: str, timeout: int = 120) -> tuple[list[str],
     return list(dict.fromkeys(paths + found)), layout.sys_path
 
 
+def resolution_cmd(python: str) -> str:
+    """The shell command whose stdout `resolution` reads (so a caller can batch it with other root execs)."""
+    return f"sh -c {shlex.quote(_RESOLVE_SCRIPT)} sh {shlex.quote(python)}"
+
+
 async def resolution(sb: Any, python: str, timeout: int = 60) -> str:
     """`ldd` of the interpreter as sorted `soname=path` lines; empty when `ldd` is missing (then nothing is compared)."""
-    res = await sb.exec(
-        f"sh -c {shlex.quote(_RESOLVE_SCRIPT)} sh {shlex.quote(python)}", user="root", timeout_sec=timeout
-    )
+    res = await sb.exec(resolution_cmd(python), user="root", timeout_sec=timeout)
     return (res.stdout or "").strip()
 
 

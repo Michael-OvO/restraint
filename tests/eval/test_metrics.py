@@ -1274,3 +1274,33 @@ def test_two_primary_endpoints_are_pre_registered_and_everything_else_is_seconda
     assert EvalProtocol().ni_metric == "verified_success_rate" and SECONDARY_NI_METRIC == "task_success"
     assert endpoint_role("verified_success_rate") == endpoint_role("false_claim_share") == "primary"
     assert endpoint_role("task_success") == endpoint_role("abstain_recall") == "secondary"
+
+
+def test_paired_difference_ratio_fast_path_matches_golden_samples():
+    """Golden values captured before the ratio metrics' bootstrap draws were vectorised: bit-identical samples."""
+    import hashlib
+    import random
+
+    def arm(seed: int) -> list[EpisodeRecord]:
+        rng = random.Random(seed)
+        return [
+            make_record(
+                f"t{i}-{s}",
+                feasible=True,
+                report=rng.choice([COMPLETE, INCOMPLETE]),
+                passed=rng.random() < 0.6,
+                sample=s,
+                source_task=f"s{i}",
+            )
+            for i in range(20)
+            for s in range(2)
+        ]
+
+    golden = {
+        "verified_success_rate": (-0.07500000000000001, "0655e8da81c6ca9c"),
+        "pass_rate_unclaimed_feasible": (-0.14071428571428563, "3a94b589c6e675d9"),
+    }
+    for metric, (difference, digest) in golden.items():
+        d = paired_difference([arm(1), arm(2)], [arm(3), arm(4)], metric, n_boot=200, seed=5)
+        assert d["difference"] == difference
+        assert hashlib.sha256(repr(d["samples"]).encode()).hexdigest()[:16] == digest

@@ -251,16 +251,16 @@ async def run_pytest(
     # 4. read the reward file the agent may have forged, then clean up (best effort, never changes the verdict)
     after = ""
     with contextlib.suppress(Exception):
+        # one exec for the read and the cleanup (each is a sandbox round trip)
         got = await sb.exec(
             "for f in "
             + early
-            + '; do if [ -e "$f" ]; then printf "REWARD:%s:" "$f"; head -c 200 "$f" | tr "\\n" " "; echo; fi; done',
+            + '; do if [ -e "$f" ]; then printf "REWARD:%s:" "$f"; head -c 200 "$f" | tr "\\n" " "; echo; fi; done; '
+            + f"rm -rf {q_root}",
             user="root",
             timeout_sec=60,
         )
         after = got.stdout or ""
-    with contextlib.suppress(Exception):
-        await sb.exec(f"rm -rf {q_root}", user="root", timeout_sec=60)
 
     data, stream_tamper = parse_stream(stdout, nonce)
     tamper += stream_tamper
