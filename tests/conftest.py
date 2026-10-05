@@ -79,7 +79,7 @@ def grading_paths(monkeypatch: pytest.MonkeyPatch, shim_bin: Path, verifier_bund
 
     # `stop_background` kills every process but init and itself: against a sandbox that is a plain host subprocess that
     # would be the developer's own session. Tests of the kill script aim `grading.kill_script` at a fake /proc instead.
-    async def no_kill(sb, cfg):
+    async def no_kill(sb, cfg, baseline=None):
         return None
 
     monkeypatch.setattr(grading, "stop_background", no_kill)

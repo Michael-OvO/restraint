@@ -324,6 +324,45 @@ async def test_the_kill_script_refuses_a_host_init_and_a_missing_proc(sandbox, t
     assert "HV_SKIP:no-proc" in out and alive(victim)
 
 
+def write_stat(proc: Path, pid: int, ppid: int, start: int, comm: str = "sleep") -> None:
+    """A /proc/PID/stat line: field 22 is the start time; comm may contain spaces and parentheses."""
+    fields = ["S", str(ppid)] + ["0"] * 17 + [str(start)] + ["0"] * 30
+    (proc / str(pid) / "stat").write_text(f"{pid} ({comm}) " + " ".join(fields) + "\n")
+
+
+async def test_the_kill_script_spares_the_baseline_processes_by_pid_and_start_time(sandbox, tmp_path, sleepers):
+    """Harbor starts `main` as `sh -c "sleep infinity"`: sparing only pid 1 kills the keep-alive sleep, the shell exits
+    with 137 and the container dies under the grader (found on a real Docker node)."""
+    keepalive, daemon, reused = (spawn_sleeper() for _ in range(3))
+    sleepers += [keepalive, daemon, reused]
+    me = 424242
+    proc = fake_proc(tmp_path / "proc", {keepalive.pid: 1, daemon.pid: 1, reused.pid: 1, me: 1})
+    write_stat(proc, keepalive.pid, 1, start=100)
+    write_stat(proc, daemon.pid, 1, start=200, comm="evil (x) y")  # started by the agent: not in the baseline
+    write_stat(proc, reused.pid, 1, start=300)  # a pid the baseline knew, reused later by the agent
+    keep = (f"{keepalive.pid}:100", f"{reused.pid}:111")
+    script = grading.kill_script(proc=str(proc), me=str(me), kill="hvkill", keep_procs=keep)
+    log = tmp_path / "signals.log"
+    out = (await sandbox.exec(f'hvkill() {{ echo "$@" >> {log}; builtin kill "$@"; }}\n{script}', user="root")).stdout
+    await asyncio.sleep(0.3)
+    assert alive(keepalive)  # the container's own keep-alive survives
+    assert not alive(daemon) and not alive(reused)  # a new process, and a reused pid with another start time
+    assert "HV_KILLED:2" in out
+
+
+async def test_list_processes_reads_pid_and_start_time_from_proc(sandbox, tmp_path):
+    proc = fake_proc(tmp_path / "proc", {7: 1, 8: 7})
+    write_stat(proc, 7, 1, start=1234)
+    write_stat(proc, 8, 7, start=5678, comm="a) (b")
+    assert sorted(await grading.list_processes(sandbox, proc=str(proc))) == ["7:1234", "8:5678"]
+    assert await grading.list_processes(sandbox, proc=str(tmp_path / "no-such-proc")) == []  # a host sandbox: no /proc
+
+
+def test_kill_script_refuses_malformed_keep_entries():
+    with pytest.raises(ValueError):
+        grading.kill_script(keep_procs=("12:34", "1; rm -rf /"))
+
+
 def test_the_kill_script_uses_only_builtins():
     """Nothing in the agent-modifiable PATH may run while the agent's processes are being killed."""
     script = grading.kill_script()
@@ -378,7 +417,7 @@ async def test_a_legacy_task_keeps_its_background_processes(sandbox, monkeypatch
 
     calls: list[int] = []
 
-    async def recorder(sb, cfg):
+    async def recorder(sb, cfg, baseline=None):
         calls.append(1)
         return 0
 

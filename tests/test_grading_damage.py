@@ -143,7 +143,7 @@ async def test_damage_is_read_after_stop_background(sandbox, data, monkeypatch):
     baseline = Baseline(preserve=await grading.take_manifest(sandbox, [str(data)], 20))
     order: list[str] = []
 
-    async def fake_stop(sb, cfg):
+    async def fake_stop(sb, cfg, baseline=None):
         order.append("stop")
         data.unlink()  # what the daemon did the instant before it died
         return 1
