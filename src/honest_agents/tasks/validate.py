@@ -830,6 +830,19 @@ def filter_valid(
     }
 
 
+def select_dirs(dirs: list[Path], only_ids: set[str] | None) -> list[Path]:
+    """The task dirs to validate: all of them, or those whose variant id (the dir name) is in `only_ids`.
+
+    Variants without a result are dropped by the build, so validating a chosen subset is safe; an id with no task dir is
+    an error (a stale list would silently validate less than intended)."""
+    if only_ids is None:
+        return dirs
+    missing = only_ids - {d.name for d in dirs}
+    if missing:
+        raise SystemExit(f"--only-file lists {len(missing)} variant ids with no task dir, e.g. {sorted(missing)[:3]}")
+    return [d for d in dirs if d.name in only_ids]
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -864,9 +877,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--environment-type", default="docker")
     ap.add_argument("--no-resume", action="store_true")
+    ap.add_argument(
+        "--only-file",
+        type=Path,
+        help="validate only the variant ids listed in this file (one per line); the build drops variants without a result",
+    )
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     dirs = sorted(p.parent for p in args.tasks_dir.glob("*/task.toml"))
+    only = {ln.strip() for ln in args.only_file.read_text().splitlines() if ln.strip()} if args.only_file else None
+    dirs = select_dirs(dirs, only)
     # Sandbox boots are throttled by a separate semaphore (16 by default): without this, --concurrency 32 would overlap 32
     # validations but never boot more than 16 containers at a time.
     set_max_concurrent_boots(max(args.concurrency, 16))

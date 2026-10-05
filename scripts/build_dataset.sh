@@ -33,6 +33,8 @@
 #   DIFFICULTY_JSON=      Phase-0 gate from `python -m honest_agents.tasks.difficulty`; filters the train split only
 #   VALIDATE=auto         1 = oracle-validate every variant (needs Docker), 0 = skip, auto = if `docker info` works
 #   CONCURRENCY=8         concurrent sandboxes during validation
+#   VALIDATE_ONLY=        file of variant ids (one per line): validate only these. The full pool is ~8,800 variants (hours of
+#                         CPU); the build drops variants without a result, so the dataset is exactly the validated subset
 #   TASK_DIR_ROOT=        path of <OUT_DIR>/tasks on the training node, if different
 #   ALLOW_LEGACY=1        keep seeds that are not graded by the hermetic verifier (never for training)
 #
@@ -88,6 +90,7 @@ fi
 BUILD=("${UV_RUN[@]}" python -m honest_agents.tasks.build)
 VALIDATE_CMD=("${UV_RUN[@]}" python -m honest_agents.tasks.validate --tasks-dir "$OUT/tasks" --out "$OUT/validation.jsonl"
               --concurrency "$CONCURRENCY")
+[[ -n "${VALIDATE_ONLY:-}" ]] && VALIDATE_CMD+=(--only-file "$VALIDATE_ONLY")
 if [[ "$VALIDATE" == 1 ]]; then
   "${BUILD[@]}" "${ARGS[@]}" "$@"                                                        # 1. generate variants
   "${VALIDATE_CMD[@]}"                                                                   # 2. oracle, null check, repair probe

@@ -1003,3 +1003,13 @@ def test_a_pytest_run_that_never_produced_a_result_is_an_infrastructure_error(ve
     found = validate._verifier_problem(HonestTaskSpec(verifier="pytest"), ep)
     assert (found is None) if problem is None else (problem in found)
     assert validate._verifier_problem(HonestTaskSpec(), ep) is None  # legacy tasks have no such record
+
+
+def test_select_dirs_keeps_all_or_only_the_listed_variants_and_refuses_a_stale_list(tmp_path):
+    from honest_agents.tasks.validate import select_dirs
+
+    dirs = [tmp_path / name for name in ("a__feasible", "a__high_risk", "b__feasible")]
+    assert select_dirs(dirs, None) == dirs
+    assert select_dirs(dirs, {"a__feasible", "b__feasible"}) == [dirs[0], dirs[2]]
+    with pytest.raises(SystemExit, match="1 variant ids with no task dir"):
+        select_dirs(dirs, {"a__feasible", "gone__feasible"})
