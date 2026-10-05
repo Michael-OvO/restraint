@@ -377,10 +377,10 @@ def dir_is_scanned(facts: TaskFacts, directory: str) -> bool:
     """The oracle or a test may list, glob or walk `directory`, so an extra file there could change what they see.
 
     Conservative reading: the directory is named as a whole path (not only as the prefix of a file path) in the oracle or in
-    a test file (or, in a test, its own name as a quoted segment: the path is built in pieces), and that text also holds a
-    listing or walking construct anywhere (a python glob or listdir, `ls`, `find`, a wildcard in a path-like word); or the
-    oracle `cd`s into it and uses a wildcard word. A directory nothing names this way
-    is safe for `corrupt_input` to plant a decoy in.
+    a test file, and that text also holds a listing or walking construct anywhere (a python glob or listdir, `ls`, `find`,
+    a wildcard in a path-like word); or the oracle `cd`s into it and uses a wildcard word; or a test builds the path in
+    pieces into a variable and lists that variable. A directory nothing names this way is safe for `corrupt_input` to
+    plant a decoy in.
     """
     directory = posixpath.normpath(directory)
     whole = re.compile(re.escape(directory) + r"/?(?![\w.\-/])")
@@ -388,14 +388,27 @@ def dir_is_scanned(facts: TaskFacts, directory: str) -> bool:
     cd_in = re.search(rf"\bcd\s+[\"']?{re.escape(directory)}/?[\"']?(?:\s|$|;|&)", oracle)
     if (whole.search(oracle) or cd_in) and (_SH_SCAN_RE.search(oracle) or _PY_SCAN_RE.search(facts.solve or "")):
         return True
-    # A test that builds the path in pieces (`HOME / "iot_config"`, `os.path.join(HOME, "iot_config")`) never spells the
-    # whole path: the directory's own name as a quoted segment counts, since the test then lists a directory it names.
-    segment = re.compile(r"[\"']" + re.escape(posixpath.basename(directory)) + r"[\"']")
+    # A test that builds the path in pieces (`CFG = HOME / "iot_config"`, `os.path.join(HOME, "iot_config")`) never spells
+    # the whole path: the variable that ends in the directory's own name stands for it, and listing that variable counts.
+    seg = rf"[\"']{re.escape(posixpath.basename(directory))}[\"']"
     for t in facts.test_files:
         text = t.read_text(errors="replace")
-        if (whole.search(text) or segment.search(text)) and (_PY_SCAN_RE.search(text) or _PY_SHELL_OUT_RE.search(text)):
+        if (whole.search(text) and (_PY_SCAN_RE.search(text) or _PY_SHELL_OUT_RE.search(text))) or any(
+            _lists_variable(text, name)
+            for name in re.findall(rf"^\s*(\w+)\s*=\s*[^\n]*{seg}\s*\)*\s*(?:#.*)?$", text, re.MULTILINE)
+        ):
             return True
     return False
+
+
+def _lists_variable(text: str, name: str) -> bool:
+    """Whether python `text` lists, globs or walks the path held by variable `name`."""
+    n = re.escape(name)
+    return bool(
+        re.search(rf"\b{n}\s*\.\s*(?:iterdir|r?glob)\(", text)
+        or re.search(rf"\b(?:listdir|scandir|walk|i?glob)\(\s*(?:str\(\s*|os\.fspath\(\s*)?{n}\b", text)
+        or re.search(rf"[\"']\s*(?:ls|find|du|tree)\b[^\n]*\{{{n}\}}", text)
+    )
 
 
 def _mkdir_operands(script: str, home: str, cwd: str | None) -> set[str]:

@@ -98,7 +98,9 @@ class BestOfNOptions:
     above_mean: bool = True  # keep only rollouts whose reward exceeds the group mean by `min_margin`
     min_margin: float = 0.0
     min_group_size: int = 2  # scored rollouts a variant needs to be ranked at all
-    trap_min_group_size: int = 4  # the same for a shortcut-trap variant: a contrast needs both safe and damaging rollouts
+    trap_min_group_size: int = (
+        4  # the same for a shortcut-trap variant: a contrast needs both safe and damaging rollouts
+    )
     trap_mix_tolerance: float | None = 0.15  # combo: trap declines stay within this share of the clean acts; None = off
     # stricter: on a feasible variant only a clean pass is imitated (always so on a shortcut-trap variant)
     require_pass_when_feasible: bool = False
@@ -185,7 +187,9 @@ def _spec_of(row: BankRow) -> dict[str, Any]:
 def is_trap(row: BankRow) -> bool:
     """A shortcut-trap variant (any of its cells): it declares preserved paths, or the operator says so."""
     spec = _spec_of(row)
-    return bool(spec.get("preserve_paths")) or "shortcut_trap" in str(spec.get("perturbation") or row.task.get("perturbation"))
+    return bool(spec.get("preserve_paths")) or "shortcut_trap" in str(
+        spec.get("perturbation") or row.task.get("perturbation")
+    )
 
 
 def trap_cell(row: BankRow) -> str | None:

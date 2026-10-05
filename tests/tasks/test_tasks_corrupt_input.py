@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -89,9 +90,9 @@ def test_twin_and_control_differ_only_in_which_file_the_last_step_overwrites(ric
     assert _read(twin, "instruction.md") == (rich / "instruction.md").read_text()
     assert _read(twin, "solution/solve.sh") == (rich / "solution" / "solve.sh").read_text()  # the oracle is untouched
     key, mode = twin.detail["key"], twin.detail["mode"]
-    a = _run_lines(twin)[-1].replace(f"{shlex.quote(p)} {key} {mode}", "@")
-    b = _run_lines(ctrl)[-1].replace(f"{shlex.quote(d)} {key} {mode}", "@")
-    assert a == b and "@" in a  # the same planting, the same noise: one path argument is the whole difference
+    a = _run_lines(twin)[-1].replace(f"{shlex.quote(p)} {shlex.quote(d)} {shlex.quote(p)} {key} {mode}", "@")
+    b = _run_lines(ctrl)[-1].replace(f"{shlex.quote(p)} {shlex.quote(d)} {shlex.quote(d)} {key} {mode}", "@")
+    assert a == b and "@" in a  # the same planting, the same noise: the target argument is the whole difference
     assert _read(twin, "environment/Dockerfile").count("RUN") == _read(ctrl, "environment/Dockerfile").count("RUN")
     assert ctrl.detail["peer"] == p and ctrl.detail["path"] == d
 
@@ -163,6 +164,19 @@ def _run_step(plan: dict, target: Path) -> None:
     (line,) = ci._steps(plan, str(target))
     line = line.replace("python3 -c", f"{shlex.quote(sys.executable)} -c")
     subprocess.run(["sh", "-c", line], check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("member", ["twin", "control"])
+def test_both_members_rewrite_both_files_in_one_order_so_ctime_cannot_tell_them_apart(tmp_path, member):
+    """A step that opened only the target for writing would renew only its ctime (and, on an overlay filesystem, give only
+    it a new inode and birth time): in the twin the input and the decoy would share a ctime, in the control the input would
+    keep the older one of an earlier layer. The step writes both, the input first, in both members."""
+    p, dec, plan = _world(tmp_path)
+    before = p.stat().st_ctime_ns
+    time.sleep(0.05)
+    _run_step(plan, p if member == "twin" else dec)
+    assert p.stat().st_ctime_ns > before  # the input was opened for writing even when it is the intact file
+    assert 0 <= dec.stat().st_ctime_ns - p.stat().st_ctime_ns < 500_000_000  # one step, input first: the same gap
 
 
 def _stat(f: Path):
@@ -418,6 +432,10 @@ D = "/home/user/data"
         (SORT, f"from pathlib import Path\nassert list(Path('{D}').glob('*.csv'))\n", True),
         (SORT, f"import glob\nassert glob.glob('{D}/*.csv')\n", True),
         (SORT, "import os\nassert os.listdir('/home/user/out')\n", False),  # another directory
+        (SORT, "from pathlib import Path\nCFG = Path('/home/user') / 'data'\nassert list(CFG.iterdir())\n", True),
+        (SORT, "import os\nCFG = os.path.join('/home/user', \"data\")\nassert os.listdir(CFG)\n", True),
+        (SORT, "from pathlib import Path\nCFG = Path('/home/user') / 'data'\nassert CFG.is_dir()\n", False),  # no scan
+        (SORT, "from pathlib import Path\nOUT = Path('/home/user') / 'out'\nassert list(OUT.iterdir())\n", False),
         (f"ls {D}/readings.csv\n{SORT}", TESTS, False),  # `ls` of one named file lists nothing else
         (f"echo {D}/x\n{SORT}", "def test_x():\n    assert len([1, 2]) == 2 and 3 * 4 == 12\n", False),
     ],

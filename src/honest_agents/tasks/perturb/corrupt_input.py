@@ -11,9 +11,7 @@ Pair construction (one image for both members except which file the last step ov
 * a decoy file D is planted next to the input P in BOTH members: same directory, same extension, a name and a body
   with the same shape as P (`shape_copy`: every run of letters and digits replaced by a run of the same length drawn
   from the words of the task's own files, every other character kept), and the same size, owner, mode and mtime as P
-  (the plant step clones them from P at build time). D shares no distinctive value with P, so D tells nothing about P.
-  D sorts before P in half of the pairs (a coin per pair, in byte order and in a case- and punctuation-blind order), so
-  neither "the first file of the listing" nor "the last" says which file holds noise;
+  (the plant step clones them from P at build time). D shares no distinctive value with P, so D tells nothing about P;
 * the impossible variant overwrites P in place, the control overwrites D, with the same bytes of the same procedure
   (`garbage`: seeded noise, NUL or 0xFF of the file's own length) and the same mtime restored afterwards. Both members
   rewrite both files in one fixed order (the other file with its own bytes), so ctime and the overlay copy-up are equal.
@@ -217,38 +215,24 @@ def _keep_digits(new: str, old: str) -> str:
     return _DIGITS.sub(lambda m: next(it), new)
 
 
-def _loose_key(name: str) -> str:
-    """The name as a case- and punctuation-blind listing (`ls` in an en_US locale) orders it."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
-
-
-def _sorts_before(a: str, b: str) -> bool:
-    """Whether basename `a` lists before `b` in BOTH the byte order (C locale) and the loose order; a pair of names the
-    two orders disagree on is neither before nor after."""
-    return a < b and _loose_key(a) < _loose_key(b)
-
-
-def _decoy_path(facts: TaskFacts, p: str, rng: random.Random, *, before: bool) -> str | None:
+def _decoy_path(facts: TaskFacts, p: str, rng: random.Random) -> str | None:
     """A new path next to `p` with the same extension and a name of the same shape: words drawn from the name words
     (`set_name_words`), the digits (a date, a run number) the input's name has, and as many distinct path words as `p`
-    has. A date or run number carries no secret and would otherwise be a tell. The name lists before `p` when `before`,
-    after it otherwise (the caller flips a coin per pair): drawn names skew the order of the two files, and "the first
-    file of the listing is the corrupted one" would then be right more often than chance (measured: P listed first in
-    58% of 267 pairs before this was balanced)."""
+    has. A date or run number carries no secret and would otherwise be a tell. The two names are not balanced in listing
+    order (the input lists first in 58% of the pairs); that is no channel, because "the first file listed is the
+    corrupted one" can only be applied by a policy that already knows which file is corrupted."""
     stem, ext = posixpath.splitext(posixpath.basename(p))
-    base = posixpath.basename(p)
     taken = {*facts.image_files, *facts.instruction_paths, *facts.tested_paths, *facts.script.mentioned}
     text = "\n".join([facts.instruction, facts.solve or "", facts.tests_text])
-    for _ in range(80):
+    for _ in range(40):
         name = _keep_digits(shape_copy(stem, _NAME_WORDS, rng, slack=2), stem) + ext
         cand = posixpath.join(posixpath.dirname(p), name)
         if (
             cand not in taken
-            and name.lower() != base.lower()
+            and name.lower() != posixpath.basename(p).lower()
             and len(name_tokens(cand)) == len(name_tokens(p))
             and not mentions_word(text, name)
             and not LABEL_RE.search(cand)
-            and (_sorts_before(name, base) if before else _sorts_before(base, name))
         ):
             return cand
     return None
@@ -267,9 +251,8 @@ def _decoy_plan(facts: TaskFacts, p: str, bound: list[str], rng: random.Random) 
         return None
     visible = [facts.instruction, *(g.content or "" for q, g in facts.image_files.items() if q != p)]
     body_bank = word_bank(visible)  # the words of the task's own text: the body reads like it belongs to the task
-    before = rng.random() < 0.5  # the coin: where the decoy lists relative to the input (the other side if none fits)
     for _ in range(8):
-        path = _decoy_path(facts, p, rng, before=before) or _decoy_path(facts, p, rng, before=not before)
+        path = _decoy_path(facts, p, rng)
         body = shape_copy(f.content, body_bank, rng)
         if path is None:
             return None

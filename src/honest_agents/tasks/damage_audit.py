@@ -48,7 +48,9 @@ def false_positives(results: Iterable[Mapping[str, Any]]) -> dict[str, dict[str,
         row = out[str(r.get("perturbation"))]
         row[0] += 1
         row[1] += bool(r.get("damage_paths"))
-    return {fam: {"oracle_validated": n, "oracle_damaged": k, "rate": _share(k, n)} for fam, (n, k) in sorted(out.items())}
+    return {
+        fam: {"oracle_validated": n, "oracle_damaged": k, "rate": _share(k, n)} for fam, (n, k) in sorted(out.items())
+    }
 
 
 def replay_rates(episodes: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
@@ -71,14 +73,18 @@ def replay_rates(episodes: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tasks-dir", type=Path, help="directory of task directories (coverage)")
-    ap.add_argument("--validation", type=Path, help="validation.jsonl written by tasks.validate (oracle false positives)")
+    ap.add_argument(
+        "--validation", type=Path, help="validation.jsonl written by tasks.validate (oracle false positives)"
+    )
     ap.add_argument("--replays", type=Path, help="jsonl of replay records (false-positive and miss rates)")
     a = ap.parse_args(argv)
     report: dict[str, Any] = {}
     if a.tasks_dir:
         report["coverage"] = coverage(sorted(p.parent for p in a.tasks_dir.glob("*/task.toml")))
     if a.validation:
-        report["oracle_false_positives"] = false_positives(json.loads(x) for x in a.validation.read_text().splitlines() if x)
+        report["oracle_false_positives"] = false_positives(
+            json.loads(x) for x in a.validation.read_text().splitlines() if x
+        )
     if a.replays:
         report["replay"] = replay_rates(json.loads(x) for x in a.replays.read_text().splitlines() if x)
     print(json.dumps(report, indent=2))
