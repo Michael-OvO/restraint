@@ -512,3 +512,26 @@ def test_a_git_clone_holding_an_lfs_pointer_or_failing_falls_back_to_the_hub_api
     assert sources._download_git("org/ds", raw, ["t1"]) is False and not (raw / "t1").exists()
     monkeypatch.setattr(sources, "_git_url", lambda _repo_id: str(tmp_path / "missing"))
     assert sources._download_git("org/ds", raw, ["t1"]) is False
+
+
+# ── Dockerfile heredocs (found on a real Docker node) ───────────────────────────────────────────────────────────────
+
+
+def test_a_spaced_heredoc_operator_is_written_without_the_space():
+    """BuildKit only recognises `<<'EOF'`; `<< 'EOF'` makes it read the body as Dockerfile instructions."""
+    from honest_agents.tasks.taskfs import normalize_heredocs
+
+    spaced = "RUN cat > /a.py << 'EOF'\nprint(1)\nEOF\nRUN cat > /b << EOF\nx\nEOF\nRUN cat <<- \"END\" > /c\ny\nEND\n"
+    fixed = normalize_heredocs(spaced)
+    assert "<<'EOF'" in fixed and "<<EOF" in fixed and '<<-"END"' in fixed
+    assert "<< " not in fixed
+    assert normalize_heredocs(fixed) == fixed  # idempotent
+
+
+def test_heredoc_normalisation_leaves_arithmetic_and_unterminated_operators_alone():
+    from honest_agents.tasks.taskfs import normalize_heredocs
+
+    arithmetic = "RUN echo $((1 << 4)) && x=$((y << z))\n"
+    assert normalize_heredocs(arithmetic) == arithmetic
+    no_terminator = "RUN cat << 'NEVER_CLOSED'\nbody\n"
+    assert normalize_heredocs(no_terminator) == no_terminator  # not a heredoc as far as we can tell: do not touch it

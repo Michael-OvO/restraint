@@ -36,6 +36,7 @@ from honest_agents.tasks.taskfs import (
     copy_task,
     forbidden_context_files,
     forbidden_copy_sources,
+    normalize_heredocs,
     read_task_toml,
     scrub_environment,
     set_task_name,
@@ -332,6 +333,9 @@ def normalize_task(
         return None
     dst = copy_task(raw_task_dir, out_dir)
     scrub_environment(dst)  # the expected state must never sit in the docker build context
+    df = dst / "environment" / "Dockerfile"
+    if df.exists():
+        df.write_text(normalize_heredocs(df.read_text()))
     for junk in (dst / "solution").glob("*_summary.json"):  # Endless Terminals model trajectories
         junk.unlink()
     # Harbor strips leading canary lines only via `Task.instruction`; `HonestHarborEnv.reset` reads the file directly.

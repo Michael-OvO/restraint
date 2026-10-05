@@ -30,6 +30,28 @@ _FORBIDDEN_SOURCE_RE = re.compile(
 _COPY_ADD_RE = re.compile(r"^\s*(?:COPY|ADD)\s+(.*)$", re.IGNORECASE | re.MULTILINE)
 
 
+_HEREDOC_OPERATOR = re.compile(r"<<(-?)[ \t]+(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+
+
+def normalize_heredocs(dockerfile: str) -> str:
+    """Write every `<< 'EOF'` heredoc operator as `<<'EOF'`.
+
+    Docker's BuildKit only recognises a heredoc when the delimiter follows `<<` directly; with a space it reads the body
+    as Dockerfile instructions (`unknown instruction: print(...)`). Endless Terminals' Dockerfiles use the spaced form
+    because the dataset ran them as Apptainer shell scripts, so about one source in twelve does not build at all on a
+    real Docker daemon. Only an operator whose delimiter reappears alone on a later line is rewritten, so shell
+    arithmetic such as `$((1 << 4))` and plain redirections are left alone.
+    """
+    lines = dockerfile.split("\n")
+    for i, line in enumerate(lines):
+        for m in reversed(list(_HEREDOC_OPERATOR.finditer(line))):
+            word = m.group(3)
+            if any(later.strip() == word for later in lines[i + 1 :]):
+                line = line[: m.start()] + f"<<{m.group(1)}{m.group(2)}{word}{m.group(2)}" + line[m.end() :]
+        lines[i] = line
+    return "\n".join(lines)
+
+
 def scrub_environment(task_dir: Path) -> list[str]:
     """Delete the expected-state files from `environment/`; returns the relative paths removed."""
     env = task_dir / "environment"

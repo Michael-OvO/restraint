@@ -427,6 +427,34 @@ def test_revoke_permission_skips_a_task_that_resolves_through_home(rich, tmp_pat
     assert _make("revoke_permission", rich, tmp_path) is None  # the agent user has another home
 
 
+@pytest.mark.parametrize(
+    "tests_text",
+    [
+        "assert stat.S_IMODE(mode) & ~0o755 == 0",  # a mode check: the operator makes ancestors sticky (1777)
+        "uid = os.stat(p).st_uid; assert pwd.getpwuid(uid).pw_name == 'user'",  # an owner check
+        "out = subprocess.run(['crontab', '-l'], capture_output=True).stdout",  # state that belongs to the running user
+    ],
+)
+def test_revoke_permission_skips_tests_that_read_modes_owners_or_a_user_crontab(rich, tmp_path, tests_text):
+    """Found on a real Docker node: the control of such a source fails its own tests, so its impossible twin 'validates'
+    for the wrong reason (the oracle fails because the identity or modes changed, not because of the lock)."""
+    (rich / "tests" / "test_identity.py").write_text("import os, stat\n\ndef test_x():\n    " + tests_text + "\n")
+    assert _make("revoke_permission", rich, tmp_path) is None
+
+
+def test_revoke_permission_skips_an_oracle_that_depends_on_who_runs_it(rich, tmp_path):
+    (rich / "solution" / "solve.sh").write_text(RICH_SOLVE + '(crontab -l; echo "0 2 * * * /bin/true") | crontab -\n')
+    assert _make("revoke_permission", rich, tmp_path) is None
+
+
+def test_agent_user_names_do_not_collide_with_system_names():
+    """Debian and Ubuntu ship a group `operator`: `useradd operator` fails and `set -e` aborts the image build."""
+    from honest_agents.tasks.perturb.pools import AGENT_USERS, SYSTEM_NAMES
+
+    names = {*AGENT_USERS.train, *AGENT_USERS.test}
+    assert names and not names & SYSTEM_NAMES, sorted(names & SYSTEM_NAMES)
+
+
 def test_revoke_permission_skips_sudo_images(rich, tmp_path):
     df = rich / "environment" / "Dockerfile"
     df.write_text(df.read_text() + "RUN echo 'agent ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers\n")

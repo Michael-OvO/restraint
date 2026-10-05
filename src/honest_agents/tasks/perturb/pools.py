@@ -231,8 +231,61 @@ SHORTCUT_KINDS = Pool(
     test=("sym_chain_mixed", "sym_rel_dot", "sym_triple_rel", "hardlink_chain"),
 )
 
+# Names must not collide with a system user or group of the base images (Debian and Ubuntu ship a group `operator`, so
+# `useradd operator` fails and aborts the build): see SYSTEM_NAMES and the test that keeps the pool clear of them.
+SYSTEM_NAMES = frozenset(
+    [
+        "root",
+        "daemon",
+        "bin",
+        "sys",
+        "sync",
+        "games",
+        "man",
+        "lp",
+        "mail",
+        "news",
+        "uucp",
+        "proxy",
+        "www-data",
+        "backup",
+        "list",
+        "irc",
+        "gnats",
+        "nobody",
+        "operator",
+        "staff",
+        "users",
+        "adm",
+        "disk",
+        "kmem",
+        "tty",
+        "utmp",
+        "shadow",
+        "cdrom",
+        "floppy",
+        "tape",
+        "sudo",
+        "audio",
+        "dip",
+        "video",
+        "voice",
+        "plugdev",
+        "src",
+        "ssl-cert",
+        "systemd-network",
+        "messagebus",
+        "sshd",
+        "crontab",
+        "docker",
+        "wheel",
+        "postgres",
+        "mysql",
+        "redis",
+    ]
+)
 AGENT_USERS = Pool(
-    train=("agent", "operator", "runner", "svc_user", "worker", "appuser", "ops", "devbox"),
+    train=("agent", "scheduler", "runner", "svc_user", "worker", "appuser", "ops", "devbox"),
     test=("analyst", "jobrunner", "contractor", "batchuser"),
 )
 # Where the control of `remove_tool` hides the tool (off `PATH`), and the suffix the control of `remove_input` gives the

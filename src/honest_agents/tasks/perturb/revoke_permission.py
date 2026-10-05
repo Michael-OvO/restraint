@@ -33,6 +33,35 @@ def _home_dependent(facts: TaskFacts) -> bool:
     return any(t in corpus for t in ("~/", "$HOME", "${HOME}", "Path.home", "expanduser"))
 
 
+# The agent runs as another user and the operator makes ancestors sticky (mode 1777), so a task whose tests read mode
+# bits or ownership, or whose result depends on WHO ran it (a user crontab), fails for reasons that have nothing to do
+# with the lock. Found on a real Docker node: the control of such a source fails its own tests, and its impossible twin
+# "validates" for the wrong reason.
+_MODE_OR_OWNER_IN_TESTS = (
+    "S_IMODE",
+    "st_mode",
+    "st_uid",
+    "st_gid",
+    "getpwuid",
+    "getpwnam",
+    "getuid",
+    "getpass",
+    "crontab",
+    "/var/spool/cron",
+    "grp.",
+    "pwd.",
+)
+_IDENTITY_IN_SOLUTION = ("crontab", "whoami", "$USER", "${USER}", "logname", "id -un", "id -u")
+
+
+def _identity_dependent(facts: TaskFacts) -> bool:
+    """Tests that inspect modes or owners, or an oracle whose effect depends on the running user."""
+    py_tests = "\n".join(f.read_text(errors="replace") for f in facts.test_files)
+    return any(t in py_tests for t in _MODE_OR_OWNER_IN_TESTS) or any(
+        t in (facts.solve or "") for t in _IDENTITY_IN_SOLUTION
+    )
+
+
 def _lock_plan(facts: TaskFacts, target: str) -> tuple[str, str] | None:
     """What to lock so that the target alone is blocked: `("dir", path)` or `("file", target)`, None when unclear.
 
@@ -112,7 +141,7 @@ def revoke_permission(
         return None  # sudoers may come from a COPY'd file, not the Dockerfile itself
     if facts.agent_user not in (None, "root", 0, "0") or facts.docker.final_user not in (None, "root", "0"):
         return None
-    if _home_dependent(facts) or unreadable_inputs(facts):
+    if _home_dependent(facts) or _identity_dependent(facts) or unreadable_inputs(facts):
         return None
     cands = [
         p
