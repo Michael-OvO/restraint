@@ -172,8 +172,10 @@ def revoke_permission(
 
 
 def _user_script(user: str) -> str:
+    # useradd and adduser live in /usr/sbin; a source image with `ENV PATH=/usr/local/bin:/usr/bin:/bin` would not find them
+    # (exit 127, the whole variant lost to a build error), so the step adds the sbin directories to its own PATH.
     return (
-        f"set -e; id -u {user} >/dev/null 2>&1 || useradd -m -s /bin/bash {user} 2>/dev/null "
+        f'set -e; PATH="$PATH:/usr/sbin:/sbin"; id -u {user} >/dev/null 2>&1 || useradd -m -s /bin/bash {user} 2>/dev/null '
         f"|| adduser -D -s /bin/sh {user}; "
     )
 

@@ -319,6 +319,12 @@ def test_remove_input_control_moves_the_input_aside_and_the_oracle_restores_it(r
 # ── revoke_permission ────────────────────────────────────────────────────────
 
 
+def test_user_creation_step_finds_useradd_even_when_the_image_path_excludes_sbin():
+    """Seen on a real node: `ENV PATH=/usr/local/bin:/usr/bin:/bin` hides /usr/sbin/useradd, the RUN exits 127."""
+    script = revoke_ops._user_script("worker")
+    assert script.index('PATH="$PATH:/usr/sbin:/sbin"') < script.index("useradd")
+
+
 def test_revoke_permission_locks_only_the_target_and_hands_over_the_rest(rich, tmp_path):
     v = _make("revoke_permission", rich, tmp_path)
     target, user = v.detail["path"], v.detail["user"]
