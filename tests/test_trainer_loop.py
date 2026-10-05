@@ -1321,6 +1321,66 @@ def test_trimmed_sorted_loss_and_gradients_equal_trls_over_random_agentic_window
         assert max(float(g.abs().max()) for g in stock[1].values()) > 1e-5
 
 
+@pytest.mark.parametrize("seed", [5, 999])
+def test_on_a_hybrid_model_only_the_decay_gate_gradients_feel_the_padding(seed):
+    """HF linear-attention layers do not make left padding fully neutral for the decay gate (`A_log`, `dt_bias`,
+    `in_proj_a`): their gradients move by up to a few percent of their (tiny) scale with the padding, in float64 too, in
+    stock TRL and in the trimmed path alike. Every row run alone with no padding is the reference on an unusual batch
+    (6 and 9 rows, one live row, a 5- and a 33-token prompt): the loss agrees to round-off, every other parameter agrees
+    to 1e-4 of its scale in both paths, and the decay gate stays within 3e-2 in both."""
+    model = _tiny_qwen35()[1].eval().double()
+    rounds = [
+        _agentic_round(seed=seed + k, vocab=64, rows=r, prompt_width=pw, completion_width=cw)
+        for k, (r, pw, cw) in enumerate([(6, 5, 40), (9, 33, 7)])
+    ]
+    rounds[0]["completion_mask"][1:] = 0
+    rounds[0]["num_items_in_batch"] = (rounds[0]["completion_mask"] * rounds[0]["tool_mask"]).sum().float().clamp(min=1)
+    for r in rounds:
+        for k, v in list(r.items()):
+            if v.is_floating_point() and v.dim() > 0:
+                r[k] = v.double()
+    stubs = {
+        name: _loss_stub(model, trim=trim, sort=trim, accumulation=15, per_round=5)
+        for name, trim in (("stock", False), ("trimmed", True))
+    }
+    for stub in stubs.values():
+        stub.beta, stub.importance_sampling_level = 0.04, "token"
+    stock = _window_loss_and_grads(stubs["stock"], model, rounds, micro=3)
+    trimmed = _window_loss_and_grads(stubs["trimmed"], model, rounds, micro=3)
+
+    model.zero_grad()
+    total = 0.0
+    for r in rounds:
+        for i in range(len(r["advantages"])):
+            length = int(r["completion_mask"][i].sum())
+            if not length:
+                continue
+            row = {
+                k: v[i : i + 1][:, r["prompt_mask"][i].bool()] if k.startswith("prompt_") else v[i : i + 1][:, :length]
+                for k, v in r.items()
+                if k not in ("num_items_in_batch", "advantages")
+            }
+            row.update(num_items_in_batch=r["num_items_in_batch"], advantages=r["advantages"][i : i + 1])
+            loss = stubs["stock"]._compute_loss(model, row)
+            loss.backward()
+            total += float(loss.detach())
+    reference = {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}
+
+    gate = ("A_log", "dt_bias", "in_proj_a")
+
+    def worst(grads, *, decay_gate):
+        return max(
+            float((grads[n] - g).abs().max()) / (float(g.abs().max()) + 1e-30)
+            for n, g in reference.items()
+            if any(w in n for w in gate) == decay_gate
+        )
+
+    assert stock[0] == pytest.approx(total, rel=1e-8) and trimmed[0] == pytest.approx(total, rel=1e-8)
+    for grads in (stock[1], trimmed[1]):
+        assert worst(grads, decay_gate=False) < 1e-4
+        assert worst(grads, decay_gate=True) < 3e-2
+
+
 def test_the_dapo_denominator_counts_the_same_tokens_before_and_after_regrouping():
     """Regrouping moves rows between micro-batches, never between rounds: each micro-batch carries the round's one
     `num_items_in_batch` and the masks of all micro-batches still add up to it (tool-masked and truncated rows out)."""

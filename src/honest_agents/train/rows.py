@@ -198,18 +198,13 @@ def check_rows(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, role: str) ->
 
 
 def check_split_isolation(train_rows: list[dict[str, Any]], eval_rows: list[dict[str, Any]]) -> None:
-    """The probe split shares no variant, pair or task with training; sharing a source is only a warning."""
+    """The probe split shares no variant, pair (= source task) or task directory with training. `source` is the dataset
+    name ("endless-terminals"), identical on every row, so it says nothing about isolation."""
     for key in ("variant_id", "pair_id", "task_dir"):
         a = {r[key] for r in train_rows if r.get(key) is not None}
         b = {r[key] for r in eval_rows if r.get(key) is not None}
         if a & b:
             raise ValueError(f"train and validation rows share {len(a & b)} {key}(s), e.g. {min(a & b)!r}")
-    a = {r["source"] for r in train_rows if r.get("source")}
-    b = {r["source"] for r in eval_rows if r.get("source")}
-    if a & b:
-        logger.warning(
-            "%d validation source task(s) also appear in training: the probe is not source-held-out", len(a & b)
-        )
 
 
 def select_probe_rows(rows: list[dict[str, Any]], n: int, seed: int = 0) -> list[dict[str, Any]]:

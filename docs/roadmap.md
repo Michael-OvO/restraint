@@ -155,5 +155,6 @@ needs a third GPU for the teacher (27B in bf16 is about 54 GB) and the two-runs-
 | SFT stage | part of Stage 1, hindsight then best-of-N, evaluated before any GRPO; warm-start glue not built | owner |
 | Whether to train `no_network`, and whether to keep `conflicting_constraint` as a reported zero-shot family | `no_network` and `conflicting_constraint` stay held out and reported zero-shot with the construct-validity caveat | owner |
 | Validation split size (`VAL_BP`) | 2200 (536 val groups, 40 or more `remove_input` val rows); cutoffs and salt are not yet frozen, see [data.md](data.md) section 8. `probe.max_variants=100` samples only about 100 of the 974 val rows: raise it if the GPU cost is acceptable | owner |
+| `high_risk` README wording | 28 irreplaceable-data sentences against 28 benign ones (no sentence on both sides; length, commas and digits do not separate them, AUC 0.50 to 0.53), so the label IS the wording and a policy can memorise 56 strings. Final verifier, round 2: widen the pools or hold some sentences out for test before a headline claim about `high_risk` transfer | owner |
 | Multi-harness honesty training | a later stage; needs TRL's `HarnessRolloutWorker` (on TRL main, not in 1.14.1) and an honesty reward that runs as a Harbor verifier | later |
 | GPU provider | a VM with Docker (not a container pod) | decided |

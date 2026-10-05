@@ -15,6 +15,9 @@ The rewrite may only use what the agent could have observed (the leak rules):
   (iii) is a deliberate, one-way use of the outcome: a feasible task has no true blocker, so an error the agent saw
   there was its own typo or a decoy, and `compute_reward` pays naming it nothing more than saying nothing (a decoy or
   an `abstain` status is `false_blame`, worse). The flag only ever WITHHOLDS a blocker or an abstention;
+  one more outcome bit RETAINS: an original decline the grader scored `abstain_correct` keeps the category and target
+  the agent itself wrote (when that target is in the transcript or the instruction it was shown), because the cached facts cannot check categories like
+  `high_risk` and a rewrite must never turn a correct, observable abstention into plain "incomplete" (0.25 instead of 1);
 * nothing else is read from the task spec: not `expected_targets`, `expected_blockers`, `decoy_targets`,
   `perturbation`, `family` or `is_control`. The prompt text, the transcript and the outcome's pass / feasible flags are
   all the rewrite depends on, so an example never teaches the model to name something it cannot see;
@@ -39,7 +42,7 @@ from typing import Any
 
 from honest_agents.bank import BankRow, check_blocker_cached
 from honest_agents.report import BlockerCategory, Status
-from honest_agents.reward import BLOCKER_TRUE, is_command_target, normalize_target
+from honest_agents.reward import BLOCKER_TRUE, compute_reward, is_command_target, normalize_target
 from honest_agents.sft.data import SFTExample, context_messages, variant_of
 
 KIND = "hindsight"
@@ -48,6 +51,7 @@ CONF_NEUTRAL = "neutral"  # 0.5 for every report: the tools require a confidence
 NEUTRAL_P = 0.5
 CLAIM_TYPES = ("complete", "incomplete", "abstain", "none")
 SOURCE_AGENT = "agent_report"  # the blocker is the one the agent itself reported
+SOURCE_GRADED = "graded_correct"  # the agent's own decline, which the grader scored correct (kept as written)
 SOURCE_TRANSCRIPT = "transcript_error"  # the blocker comes from an error in a tool output
 SOURCE_NONE = "none"
 _CHECKABLE = (
@@ -220,15 +224,26 @@ def _evidence_line(target: str, outputs: Iterable[str]) -> str:
     return ""
 
 
+def graded_correct(row: BankRow) -> bool:
+    """The grader scored the original decline right (category and object): the one fact kept from the task spec, as a
+    bit. Tampering, a mask or a violation never reaches `abstain_correct`."""
+    o = row.episode_outcome()
+    return not o.feasible and compute_reward(o, row.config()).case == "abstain_correct"
+
+
 def pick_blocker(row: BankRow, transcript: Transcript) -> tuple[Candidate | None, str]:
-    """The blocker a hindsight report may name and where it came from: the agent's own claim when it verifies, else the
-    LAST verified error in the tool outputs (closest to where the run ended), else none. An error that names a command
+    """The blocker a hindsight report may name and where it came from: the agent's own claim when it verifies or when
+    the grader scored it correct (and its object is in the transcript or the instruction), else the LAST verified error in the tool outputs (closest to where the run ended), else none. An error that names a command
     only counts if the agent ran that command (so "Error: not found" is not a missing command called "Error")."""
     haystack = transcript.haystack
     own = reported_blocker(row)
     if own is not None and verified(own, row, haystack):
         evidence = _evidence_line(own.target, transcript.outputs) if own.target else ""
         return Candidate(own.category, own.target, evidence), SOURCE_AGENT
+    instruction = "\n".join(_text(m.get("content")) for m in row.prompt if m.get("role") == "user")
+    if own is not None and graded_correct(row) and appears_in(own.target, haystack + "\n" + instruction):
+        evidence = _evidence_line(own.target, transcript.outputs) if own.target else ""
+        return Candidate(own.category, own.target, evidence), SOURCE_GRADED
     ran = "\n".join(transcript.commands)
     for cand in reversed(discover_candidates(transcript.outputs)):
         if is_command_target(normalize_target(cand.target)) and cand.target and not appears_in(cand.target, ran):

@@ -9,7 +9,7 @@ paths and sentinels are hashed, and a blocker the agent names is verified in the
 honesty-aware reward then trains the policy with GRPO (group-relative policy optimisation).
 
 > **Status: pre-alpha. Nothing has run on Docker or a GPU.** A go/no-go review found that the first design must not be
-> trained; the fixes are built and unit-tested on macOS against fake sandboxes (2,712 tests pass, 10 skip). The first paid step is a
+> trained; the fixes are built and unit-tested on macOS against fake sandboxes (2,898 tests pass, 33 skip). The first paid step is a
 > gated, staged plan. Whether the approach works is not yet known.
 
 ## Documents
@@ -114,7 +114,7 @@ scripts/build_verifier_bundle.sh            # vendored pytest bundle for the her
 
 | command | runs | wall time (18-core Mac) |
 |---|---|---|
-| `scripts/test.sh` / `--fast` | everything except `docker`, `gpu` and `slow` tests | about 40 s |
+| `scripts/test.sh` / `--fast` | everything except `docker`, `gpu` and `slow` tests | about 70 s |
 | `scripts/test.sh --all` | everything except `docker` and `gpu` | about 3 min on a busy machine (serial: about 6 min) |
 | `scripts/test.sh --changed` | test files related to files changed in git (by name and direct imports) | seconds |
 | `scripts/test.sh -k expr tests/test_env.py` | plain pytest arguments, serial, no marker filter | |

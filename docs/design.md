@@ -357,7 +357,10 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
   fingerprints changed. It trims padding and sorts micro-batches longest first (`trainer.trim_padding`, `sort_micro_batches`;
   regrouping is skipped for losses that are not token sums and whenever an entropy bonus or `top_entropy_quantile < 1` is on, as
   those are per-micro-batch terms; measured on a synthetic heavy-tailed round the PEAK micro-batch shrinks only about a quarter to a
-  third while padded totals shrink about threefold, so budget memory on the peak;
+  third while padded totals shrink about threefold, so budget memory on the peak; loss and gradients equal stock TRL's to float noise on
+  dense models, and on a hybrid (linear-attention) model everywhere except the decay gate (`A_log`, `dt_bias`, `in_proj_a`), whose
+  gradients depend on the amount of left padding by up to a few percent of their tiny scale in stock TRL as well (tested against a
+  no-padding reference, `test_on_a_hybrid_model_only_the_decay_gate_gradients_feel_the_padding`);
   `per_device_train_batch_size` stays 1 and accumulation 64 until a node measures memory headroom), logs per-episode exit reasons and
   `rollout/*_seconds`, hands `prompt_ids`, `logprobs` and `tool_mask` to the bank, and patches TRL's merged-LoRA weight sync (below).
 - **Token fidelity and sampling**: rollouts sample the full distribution, set explicitly (`temperature 1, top_p 1, top_k 0, min_p 0,
@@ -417,7 +420,7 @@ kept. Both parts read the Phase-0 bank (train split only) and train one LoRA ada
    verify it and its object appears in the transcript; nothing copied from the task spec; confidence from the held-out pass rate of
    the agent's original claim type (`hindsight.confidence: calibrated`, or `neutral`, which writes 0.5: both report tools require the
    argument, so it is never omitted). One flag is read, one-way: on a feasible outcome (`outcome.feasible`) no blocker and no abstention
-   is written, because there any named blocker is a decoy or the agent's own typo and the reward pays it less than saying nothing.
+   is written, because there any named blocker is a decoy or the agent's own typo and the reward pays it less than saying nothing. One bit is kept the other way: an original decline the grader scored `abstain_correct` keeps the category and target the agent wrote when that object is in the transcript or the instruction (categories such as `high_risk` cannot be checked from cached facts, and without this rule a correct abstention became plain "incomplete", 1.0 down to 0.25; final verifier, round 2).
    All rollouts of a leaky variant (an infeasible variant that cleanly passed) are dropped from both stages, and calibration ignores
    infeasible clean passes. Only the report tokens are trained. One epoch, low
    learning rate, so entropy survives for GRPO.
