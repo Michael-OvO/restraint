@@ -77,6 +77,26 @@ class _UnknownTool(ValueError):
 INVALID_TOOL_ARGS = "[invalid tool arguments]"
 
 
+def _argument_hint(tool: Any, arguments: Any) -> str:
+    """Which arguments of OUR tool the model left out or invented, so a one-field slip can be fixed on the next call.
+    Only parameter names are shown: required ones come from the tool's own signature, an invented one is an identifier the
+    model itself wrote (length-capped). Never the exception text, which can carry host paths."""
+    try:
+        params = inspect.signature(tool).parameters
+    except (TypeError, ValueError):
+        return ""
+    sent = set(arguments) if isinstance(arguments, dict) else set()
+    missing = [n for n, p in params.items() if p.default is inspect.Parameter.empty and n not in sent]
+    extra = [str(n)[:40] for n in sent if n not in params and str(n).isidentifier()]
+    return "".join(
+        part
+        for part in (
+            f" missing required argument(s): {', '.join(missing)}." if missing else "",
+            f" unknown argument(s): {', '.join(sorted(extra))}." if extra else "",
+        )
+    )
+
+
 def _tool_error_text(exc: BaseException) -> str:
     """What the model sees for a tool call that raised. Only a fixed string, except for an unknown tool name: the real
     exception can carry host paths, compose commands or the task / session name, so it is logged host-side instead."""
@@ -584,7 +604,8 @@ class HonestGRPOTrainer(GRPOTrainer):
                     if isinstance(e, TypeError):  # bad arguments: record which keys the model sent (never the values)
                         sent = sorted(function["arguments"]) if isinstance(function["arguments"], dict) else "not a dict"
                         logger.error("tool %s called with argument keys %s", name, sent)
-                    result = {"error": _tool_error_text(e)}
+                    hint = _argument_hint(sync_tool_dict.get(name) or async_tool_dict.get(name), function["arguments"]) if isinstance(e, TypeError) else ""
+                    result = {"error": _tool_error_text(e) + hint}
                     tool_call_results.append((name, result))
             else:
                 failures += 1

@@ -349,6 +349,7 @@ def test_identical_to_trl_serial_loop_unequal_episodes(stop_at_report, workers, 
     # Deliberately changed: our loop shows the model a fixed error string where TRL's shows `str(e)`. This test is
     # about scheduling / masking equivalence, so the text is aligned here; the fixed strings have their own tests.
     monkeypatch.setattr(trainer_mod, "_tool_error_text", str)
+    monkeypatch.setattr(trainer_mod, "_argument_hint", lambda tool, arguments: "")  # likewise the added argument hint
     scenario = mixed_scenario()
     ref = run_loop(scenario, serial=True)
     ours = run_loop(scenario, serial=False, stop_at_report=stop_at_report, max_workers=workers)

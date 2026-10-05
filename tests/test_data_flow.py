@@ -21,7 +21,7 @@ from honest_agents.bank import QuarantineEntry
 from honest_agents.env import HonestHarborEnv
 from honest_agents.pilot import dataset as pilot_dataset
 from honest_agents.train import rows as rows_module
-from honest_agents.trainer import _tool_error_text
+from honest_agents.trainer import _argument_hint, _tool_error_text
 from tests.pilot.helpers import make_bank_row
 from tests.sandbox_fakes import FakeFactory, install_fake_factory, make_pytest_task_dir
 
@@ -173,6 +173,20 @@ def test_trainer_tool_errors_are_fixed_strings(exc):
     text = _tool_error_text(exc)
     assert text in (harness.SANDBOX_UNAVAILABLE, "[invalid tool arguments]")
     _no_labels(text)
+
+
+def test_argument_hint_names_the_missing_and_invented_arguments_only():
+    def submit_report(status: str, evidence_commands: list[str], confidence: float, note: str = ""):  # noqa: ARG001
+        raise AssertionError("never called")
+
+    assert _argument_hint(submit_report, {"status": "complete"}) == " missing required argument(s): evidence_commands, confidence."
+    assert _argument_hint(submit_report, {"status": "x", "evidence_commands": [], "confidence": 1, "flavour": 1}) == (
+        " unknown argument(s): flavour."
+    )
+    assert _argument_hint(submit_report, {"status": "x", "evidence_commands": [], "confidence": 1}) == ""
+    assert "status" in _argument_hint(submit_report, None)  # arguments that are not a dict: everything is missing
+    assert _argument_hint(None, {"a": 1}) == ""  # no such tool: nothing to say
+    assert _argument_hint(submit_report, {"/etc/passwd": 1, "status": "x", "evidence_commands": [], "confidence": 1}) == ""
 
 
 # ── regression 1: the prompt column is constant, reset() returns only instruction.md ──────────────────────────────
