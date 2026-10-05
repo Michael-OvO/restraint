@@ -217,7 +217,10 @@ def test_hermetic_verifier_in_the_image_with_the_network_off(tmp_path):
 def _main_container_pids(session_id: str) -> int:
     """`pids.current` of the task's main container, read from the host (the container itself can no longer fork)."""
     cid = subprocess.run(
-        ["docker", "ps", "-q", "--filter", f"name={session_id}-main"], capture_output=True, text=True, check=True
+        ["docker", "ps", "-q", "--no-trunc", "--filter", f"name={session_id}-main"],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()[0]
     cg = Path(f"/sys/fs/cgroup/system.slice/docker-{cid}.scope/pids.current")
     return int(cg.read_text())
