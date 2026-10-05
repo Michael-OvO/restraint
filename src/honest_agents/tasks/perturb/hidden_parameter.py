@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -11,7 +12,13 @@ from honest_agents.tasks.analysis import (
 )
 from honest_agents.tasks.perturb.core import Variant, _rng
 from honest_agents.tasks.perturb.emit import _emit
-from honest_agents.tasks.perturb.high_risk import HiddenParameter
+
+
+@dataclass
+class HiddenParameter:
+    instruction: str  # rewritten instruction with the key value removed
+    hidden_value: str  # what was removed (for the offline judge)
+    rationale: str = ""
 
 
 class ParameterHider(Protocol):

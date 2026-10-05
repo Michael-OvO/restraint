@@ -39,8 +39,7 @@ competent agent would take, so it validates as feasible):
 from honest_agents.tasks.perturb.conflicting_constraint import deliverable_names, set_name_bank
 from honest_agents.tasks.perturb.core import EXPECTED_BLOCKERS, TASK_ORG, Variant, task_name, variant_id
 from honest_agents.tasks.perturb.emit import make_feasible, scrub_labels
-from honest_agents.tasks.perturb.hidden_parameter import hide_parameter
-from honest_agents.tasks.perturb.high_risk import HiddenParameter
+from honest_agents.tasks.perturb.hidden_parameter import HiddenParameter, hide_parameter
 from honest_agents.tasks.perturb.pools import (
     AGENT_USERS,
     BACKUP_SUFFIXES,

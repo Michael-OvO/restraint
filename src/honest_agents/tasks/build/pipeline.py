@@ -387,6 +387,8 @@ def _build(cfg: BuildConfig, stage: Path) -> tuple[dict[str, Any], dict[str, Pat
 
     rejected: list[SeedReject] = []
     seeds = collect_seeds(cfg, rejected)
+    if not seeds:  # a wrong --raw-dir (or a symlinked raw tree) must not look like a finished, empty build
+        raise ValueError(f"no seed tasks found (raw dir {cfg.raw_dir or cfg.out / 'raw'}, sources {cfg.sources})")
     seeds, dropped, benchmark_stats = dedup_seeds_report(cfg, seeds)
     write_jsonl(staged("dedup.jsonl"), dropped)
     seeds, not_hermetic = filter_hermetic(seeds, allow_legacy=cfg.allow_legacy_verifier)

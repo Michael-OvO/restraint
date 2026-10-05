@@ -5,7 +5,6 @@ from __future__ import annotations
 import posixpath
 import shlex
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 from honest_agents.tasks.analysis import (
@@ -125,13 +124,3 @@ def high_risk_control(
         edit=_risk_edit(site, text, frac, points, risky=False),
         subject=site.path,
     )
-
-
-# ── hide_parameter (needs an LLM; never built by default) ────────────────────
-
-
-@dataclass
-class HiddenParameter:
-    instruction: str  # rewritten instruction with the key value removed
-    hidden_value: str  # what was removed (for the offline judge)
-    rationale: str = ""

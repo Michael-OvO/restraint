@@ -255,6 +255,15 @@ def test_build_refuses_legacy_seeds_by_default(tmp_path, seeds):
     assert manifest["n_not_hermetic"] == N_RICH + 2 and manifest["n_seeds"] == 0
 
 
+def test_build_with_no_seeds_found_is_an_error_not_an_empty_dataset(tmp_path):
+    out = tmp_path / "out"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="no seed tasks found"):
+        build(parse_args(["--out", str(out), "--sources", "local", "--seeds-dir", str(empty), "--i-know-no-benchmark"]))
+    assert not (out / "manifest.json").exists() and not (out / "train.jsonl").exists()
+
+
 # ── validation: filter, relabel, leak ────────────────────────────────────────
 
 

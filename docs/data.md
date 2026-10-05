@@ -164,7 +164,7 @@ LIMIT=1500 scripts/build_dataset.sh data    # seeds -> hermetic conversion -> va
 and 60 val sources of 1,500), `HELDOUT` (`conflicting_constraint,no_network`), `MIXTURE` (`0.55,0.20,0.25`), `NEARDUP_THRESHOLD`,
 `QUARANTINE_FILE`, `DIFFICULTY_JSON`, `VALIDATE` (`auto` = if `docker info` works), `NO_ENFORCE_CUE_BAND`, `ALLOW_UNKNOWN_LICENSE`.
 Output: `{train,val,test,train_pool}.jsonl`, `test_ids.txt`, `manifest.json` (yield, training pairs per family, cue metrics, licences,
-pairing), `tasks/`, `dedup.jsonl`, `_rejected.jsonl`.
+pairing), `tasks/`, `dedup.jsonl`, `seeds/<source>/_rejected.jsonl` (written when the hermetic conversion refused a seed).
 
 - **Atomic**: every dataset file is written into a temporary sibling `.<out>.build-<pid>` and renamed into `--out` after every gate
   passed, manifest last. A failed gate or crash leaves no dataset file behind and a previous complete dataset stays. `seeds/`,
