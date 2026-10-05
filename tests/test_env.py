@@ -188,7 +188,8 @@ def test_reset_returns_before_boot_and_bash_waits(factory, task):
     assert re.fullmatch(r"ep[0-9a-f]{16}", fake.factory_kwargs["session_id"])
     assert "hello" not in fake.factory_kwargs["session_id"]
     assert fake.factory_kwargs["environment_dir"] == task.resolve() / "environment"
-    assert set(env._baseline.protected) == {"protected/tool"}  # baseline taken after start, before the agent acts
+    # taken after start, before the agent acts; the protected root is itself a DIR entry
+    assert set(env._baseline.protected) == {"protected", "protected/tool"}
 
 
 def test_reset_requires_task_dir():

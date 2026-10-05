@@ -241,7 +241,7 @@ def test_options_validate_the_new_keys():
 
 def cell_examples(n_feasible, n_pre, n_control):
     rows, examples = {}, []
-    specs = {"f": (dict(), "trap_feasible", n_feasible), "p": (dict(feasible=False), "trap_preexisting", n_pre), "c": (dict(is_control=True), "trap_control", n_control)}
+    specs = {"f": ({}, "trap_feasible", n_feasible), "p": ({"feasible": False}, "trap_preexisting", n_pre), "c": ({"is_control": True}, "trap_control", n_control)}
     for key, (kw, cell, n) in specs.items():
         for i in range(n):
             if kw.get("feasible") is False:

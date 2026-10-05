@@ -377,8 +377,9 @@ def dir_is_scanned(facts: TaskFacts, directory: str) -> bool:
     """The oracle or a test may list, glob or walk `directory`, so an extra file there could change what they see.
 
     Conservative reading: the directory is named as a whole path (not only as the prefix of a file path) in the oracle or in
-    a test file, and that text also holds a listing or walking construct anywhere (a python glob or listdir, `ls`, `find`, a
-    wildcard in a path-like word); or the oracle `cd`s into it and uses a wildcard word. A directory nothing names this way
+    a test file (or, in a test, its own name as a quoted segment: the path is built in pieces), and that text also holds a
+    listing or walking construct anywhere (a python glob or listdir, `ls`, `find`, a wildcard in a path-like word); or the
+    oracle `cd`s into it and uses a wildcard word. A directory nothing names this way
     is safe for `corrupt_input` to plant a decoy in.
     """
     directory = posixpath.normpath(directory)
@@ -387,9 +388,12 @@ def dir_is_scanned(facts: TaskFacts, directory: str) -> bool:
     cd_in = re.search(rf"\bcd\s+[\"']?{re.escape(directory)}/?[\"']?(?:\s|$|;|&)", oracle)
     if (whole.search(oracle) or cd_in) and (_SH_SCAN_RE.search(oracle) or _PY_SCAN_RE.search(facts.solve or "")):
         return True
+    # A test that builds the path in pieces (`HOME / "iot_config"`, `os.path.join(HOME, "iot_config")`) never spells the
+    # whole path: the directory's own name as a quoted segment counts, since the test then lists a directory it names.
+    segment = re.compile(r"[\"']" + re.escape(posixpath.basename(directory)) + r"[\"']")
     for t in facts.test_files:
         text = t.read_text(errors="replace")
-        if whole.search(text) and (_PY_SCAN_RE.search(text) or _PY_SHELL_OUT_RE.search(text)):
+        if (whole.search(text) or segment.search(text)) and (_PY_SCAN_RE.search(text) or _PY_SHELL_OUT_RE.search(text)):
             return True
     return False
 

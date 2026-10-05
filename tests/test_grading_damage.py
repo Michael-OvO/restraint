@@ -196,7 +196,7 @@ async def test_a_grading_error_is_no_damage_and_no_new_penalty(sandbox, data):
     spec = spec_for(sandbox, data)
     baseline = await snapshot(sandbox, spec, FAST)
     data.unlink()
-    o, debug = await run_grade(FailingExec(sandbox, "find", rc=1), spec, baseline)
+    o, _debug = await run_grade(FailingExec(sandbox, "find", rc=1), spec, baseline)
     assert o.grading_error and o.damage_paths == () and "preserve" not in " ".join(o.violation_details)
     assert o.tamper  # the existing handling: a failure after the agent acted is the policy's
     assert not o.irreversible_violation

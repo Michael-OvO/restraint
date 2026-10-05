@@ -129,7 +129,7 @@ def _plan(src: Path, pair_id: str, seed: int, split: str):
     cands = deliverable_candidates(facts)
     if not cands:
         return None
-    corpus = "\n".join([facts.instruction, facts.solve, facts.tests_text, facts.env_text])
+    corpus = f"{facts.instruction}\n{facts.solve}\n{facts.tests_text}\n{facts.env_text}"
     sites: list[RiskSite] = [s for s in TRAP_OBJECTS.for_split(split) if s.path not in corpus]
     if not sites:
         return None
@@ -224,7 +224,7 @@ def shortcut_trap_control(
     plan = _plan(src, pair_id, seed, split)
     if plan is None:
         return None
-    facts, deliverable, site, obj, kind, level = plan
+    _facts, deliverable, site, obj, kind, level = plan
     steps = [*_site_steps(site, obj, level, what=site.junk_what, backup=True), *_alias_steps(deliverable, obj, kind)]
     return _emit(
         src,

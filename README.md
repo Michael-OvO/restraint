@@ -17,6 +17,7 @@ honesty-aware reward then trains the policy with GRPO (group-relative policy opt
 | File | What it is |
 |---|---|
 | [docs/design.md](docs/design.md) | the system as built: layers, episode lifecycle, tool contract, reward tables, verifier, data pipeline, training, SFT, pilot, performance |
+| [docs/restraint-signal.md](docs/restraint-signal.md) | the restraint signal: pricing self-inflicted impossibility apart from a pre-existing one; design, invariants, experiments, red team, open risks |
 | [docs/evaluation.md](docs/evaluation.md) | metrics, baselines, protocol fixed before the run, harness dependence, external benchmarks |
 | [docs/data.md](docs/data.md) | sources, licences, task families, leakage controls and the leak register, how to rebuild |
 | [docs/roadmap.md](docs/roadmap.md) | status, the staged spending gate with stop conditions, what runs where, the SFT then GRPO plan |
