@@ -25,7 +25,7 @@ Tooling and pure-Python utilities follow the latest release the resolver allows.
 | uv_build (build backend) | `>=0.12.23,<0.13.0` (was `>=0.11.32,<0.12.0`) | 0.12.23 | bumped | Build isolation fetches it; `uv sync` builds the package fine. |
 | uv (the tool) | 0.11.32 on the dev Mac | 0.12.23 | not installed | Installing software is out of scope for the unattended run; the lock and `uv lock --check` work with 0.11.32. Run `uv self update` on the node and the Mac. |
 | torch | 2.13.0 (via vllm 0.30.0) | 2.14.1 | kept | vllm pins `torch==2.13.0` exactly. |
-| flash-linear-attention | not in the lock | 0.5.2 | kept out | See the node re-check list. |
+| flash-linear-attention | 0.5.2 (train extra) | 0.5.2 | current | Imports and runs under vLLM 0.30.0 / torch 2.13.0 on the Blackwell node. |
 | `python:3.12-slim-bookworm` (OpenEnv image) | tag | `3.12-slim-trixie` exists | kept | The Dockerfile installs Docker's apt repo for bookworm; moving to trixie needs a Docker build to verify. |
 | `alpine:3.23.4@sha256:5b10...` (`scripts/probe_node.sh`) | digest | Harbor 0.24.0 uses the identical digest | kept | Must equal Harbor's `_EGRESS_CONTROL_KERNEL_PROBE_IMAGE` (unchanged 0.23.0 to 0.24.0). |
 | agentic-abstention `ebbf1f5...` | commit | HEAD is the same commit (2026-09-28) | current | |
@@ -59,11 +59,9 @@ Wheels of both versions were unpacked and the modules this repo imports or relie
 1. Run `scripts/probe_node.sh` and a one-task `scripts/smoke_test.sh`: Harbor 0.24.0 was only exercised with fakes on the
    Mac (no Docker). Specifically a real `DockerEnvironment` start, exec, upload, download, stop with egress control on,
    and the verifier-in-place grading path.
-2. `flash-linear-attention` (latest 0.5.2, depends on `fla-core==0.5.2` and `transformers>=4.45`): not in `uv.lock` and not
-   installed by `setup_node.sh`, so Qwen3.5 runs about 20x slower without it. Install it after `uv sync`
-   (`uv pip install flash-linear-attention==0.5.2`) and confirm `import fla` works, that Triton compiles for the H100, and
-   that the model logs the fast path rather than the torch fallback. If it pulls a different torch, stop: vLLM 0.30.0
-   needs `torch==2.13.0` exactly.
+2. `flash-linear-attention` 0.5.2 (depends on `fla-core==0.5.2` and `transformers>=4.45`) is in the `train` extra and the lock,
+   and did not change torch. Still to confirm on the training GPU: that Triton compiles for it and that the model logs the
+   fast path rather than the torch fallback.
 3. CUDA and torch: vLLM 0.30.0's wheel is built against torch 2.13.0; check `nvidia-smi` driver support for the CUDA
    build that wheel names, and that `torch.cuda.is_available()` is true before the first run.
 4. TRL source fingerprints (the trainer checks them at construction) and the startup probe for vLLM logprob handling

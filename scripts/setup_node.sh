@@ -33,11 +33,8 @@ uv sync --frozen --extra train --extra eval
 # The hermetic verifier's vendored pytest bundle (cache dir outside the venv; needs network once).
 "$REPO_ROOT/scripts/build_verifier_bundle.sh"
 
-# Qwen3.5 Gated DeltaNet kernels (imported as `fla`); not in uv.lock, so install into the venv on the node only.
-if ! uv run --frozen --extra train python -c "import fla" 2>/dev/null; then
-  echo "NOTE: flash-linear-attention is not installed. Qwen3.5 training is ~20x slower without it:"
-  echo "      uv pip install flash-linear-attention   (or add it to pyproject's train extra)"
-fi
+# Qwen3.5 Gated DeltaNet kernels (imported as `fla`) come with the train extra; Qwen3.5 is ~20x slower without them.
+uv run --frozen --extra train python -c "import fla" || { echo "flash-linear-attention failed to import" >&2; exit 1; }
 
 if ! uv run --frozen --extra train python -c "from huggingface_hub import get_token; import sys; sys.exit(get_token() is None)"; then
   echo "NOTE: no Hugging Face token found; run 'uv run hf auth login' if model/dataset downloads are gated or rate limited."

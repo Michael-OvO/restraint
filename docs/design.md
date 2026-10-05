@@ -467,7 +467,7 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
 
 - **Model**: bring-up `Qwen/Qwen3-4B` (`configs/base.yaml`); headline `Qwen/Qwen3.5-4B` (`configs/qwen35_4b.yaml`), non-thinking
   mode, LoRA r=32 restricted to the language model. Qwen3.5 is a VLM wrapper around a hybrid gated-DeltaNet LM and needs
-  `flash-linear-attention` (about 20x slower without it; not in `uv.lock`, `setup_node.sh` only warns). The rollout chat template
+  `flash-linear-attention` (about 20x slower without it; pinned in the `train` extra, `setup_node.sh` checks the import). The rollout chat template
   is checked at startup with the real tokenizer (known and prefix-preserving for the tool flow; Qwen3.5's templates are, hybrid
   Qwen3's is not and TRL swaps it for `qwen3_training_chat_template`). LoRA targets must cover both members of each vLLM-fused
   pair (`models.lora_target_modules`).

@@ -54,6 +54,14 @@ else
   bad "could not install an nftables fib rule (or apk could not reach the network)"
 fi
 
+echo "== Docker network pool (every sandbox gets its own compose network; the default pool holds about 30)"
+pools=$(docker info --format '{{json .DefaultAddressPools}}' 2>/dev/null)
+if [[ "$pools" == "null" || -z "$pools" ]]; then
+  bad "default address pool is Docker's stock one (~30 networks): 64+ concurrent sandboxes fail with 'all predefined address pools have been fully subnetted'. Add {\"default-address-pools\":[{\"base\":\"10.128.0.0/9\",\"size\":24}]} to /etc/docker/daemon.json and restart docker"
+else
+  ok "custom address pools: $pools"
+fi
+
 echo "== Capacity (each task container: ~1 CPU, 2 GB; up to 64 agent + 64 grading containers)"
 cpus=$(nproc); mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
 (( cpus >= 96 )) && ok "$cpus CPUs" || warn "$cpus CPUs: lower env.max_concurrent_boots / batch size"

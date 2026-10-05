@@ -39,7 +39,9 @@ neither replaces the checks on the H100 box.
 ```bash
 git clone <repo> && cd restraint            # or rsync this tree
 scripts/setup_node.sh --install-docker      # uv, Docker, nftables check, model weights, verifier bundle; --pull-images DIR prebuilds images
-uv pip install flash-linear-attention       # NOT done by setup_node.sh (it only warns). Qwen3.5 is ~20x slower without it. Not in uv.lock
+# flash-linear-attention is in the train extra (uv.lock); setup_node.sh checks that `import fla` works. Qwen3.5 is ~20x slower without it
+# Docker's stock network pool holds ~30 networks and every sandbox takes one; widen it before any real run:
+#   /etc/docker/daemon.json: "default-address-pools": [{"base": "10.128.0.0/9", "size": 24}]   then: systemctl restart docker
 scripts/probe_node.sh                       # GPUs, Docker, compose v2, Harbor egress-control kernel support, capacity; fails loudly
 env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval pytest -m docker   # the docker-marked tests are the first checklist
 ```
