@@ -554,10 +554,10 @@ def end_of_turn_failures(
         "add_generation_prompt": False,
         "chat_template_kwargs": dict(chat_template_kwargs or {}),
     }
-    eos = getattr(processing_class, "eos_token_id", None)
+    tokenizer = getattr(processing_class, "tokenizer", processing_class)  # a multimodal processor keeps eos on its tokenizer
+    eos = getattr(tokenizer, "eos_token_id", None)
     if eos is None:
         return ["the tokenizer has no eos_token_id"]
-    tokenizer = getattr(processing_class, "tokenizer", processing_class)
     flow = tool_flow_messages()
     cases = {
         "a plain reply": [*flow[:2], {"role": "assistant", "content": "done"}],

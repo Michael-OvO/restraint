@@ -836,6 +836,17 @@ def test_end_of_turn_check_accepts_a_template_that_ends_turns_with_the_eos():
     assert models.check_end_of_turn_token(SimpleNamespace(processing_class=tok)) == []
 
 
+def test_end_of_turn_check_reads_eos_from_the_tokenizer_inside_a_processor():
+    tok = _ChatTokenizer(end="\u2603", eos="\u2603")
+
+    class Processor:  # Qwen3.5 loads as a multimodal processor: no eos_token_id of its own
+        tokenizer = tok
+        apply_chat_template = tok.apply_chat_template
+
+    assert not hasattr(Processor(), "eos_token_id")
+    assert models.end_of_turn_failures(Processor()) == []
+
+
 def test_end_of_turn_check_refuses_a_tokenizer_whose_eos_is_not_the_turn_end():
     tok = _ChatTokenizer(end="\u2603", eos="\u2602")  # a base checkpoint: eos <|endoftext|>, turns end <|im_end|>
     failures = models.end_of_turn_failures(tok)
