@@ -1,0 +1,30 @@
+# Supervised stage, part 2 (reward-filtered best-of-N, one round of expert iteration): per variant, rank the banked
+# rollouts with the SAME reward the RL stage uses (reward.compute_reward from the stored outcome and config), keep the top
+# rollout(s) above the group mean that are not masked / tampered, and fine-tune on the WHOLE trajectory with only the
+# assistant tokens trained (system / user / tool turns masked). split == train only. Builder: honest_agents/sft/bestofn.py.
+#   python -m honest_agents.sft.train_sft --config configs/sft_bestofn.yaml [--dry-run] [key.path=value ...]
+#   scripts/run_sft.sh configs/sft_bestofn.yaml
+# Combo mode (hindsight report SFT on the other rows + best-of-N trajectories, ONE adapter):
+#   scripts/run_sft.sh configs/sft_bestofn.yaml kind=combo
+# Shared sections (model, lora, data.row_filter, train, guard) come from sft_hindsight.yaml.
+base: sft_hindsight.yaml
+kind: bestofn                        # bestofn | combo
+
+data:
+  max_length: 24576                  # whole trajectories are longer than report-only contexts
+  min_examples: 64
+
+bestofn:                             # read by the bestofn and combo stages (`bestofn.BestOfNOptions`)
+  top_k: 1                           # rollouts kept per variant
+  above_mean: true                   # keep only rollouts whose reward exceeds the group mean (+ min_margin)
+  min_margin: 0.0
+  min_group_size: 2                  # scored rollouts a variant needs to be ranked
+  require_pass_when_feasible: false  # stricter: on a feasible variant only a clean pass is imitated
+  reward: {}                         # RewardConfig overrides; empty = each row's own stored reward config
+  # combo only: hindsight report examples per best-of-N example (a real trajectory trains many more tokens than a report,
+  # so equal counts keep the report decision a minor share of the loss; read both means in the dry run's
+  # `mean_trained_tokens` log and tune). null = every hindsight example.
+  hindsight_per_bestofn: 1.0
+
+train:
+  learning_rate: 2.0e-5              # many more trained tokens per example than part 1

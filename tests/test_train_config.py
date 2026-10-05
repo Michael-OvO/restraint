@@ -16,7 +16,8 @@ from honest_agents import models, train, trl_rewards
 from honest_agents.models import ModelFamily
 
 REPO = Path(__file__).resolve().parents[1]
-CONFIGS = sorted(p for p in (REPO / "configs").glob("*.yaml") if not p.name.startswith("pilot"))
+# pilot and sft_ configs have their own schemas (tests/pilot and tests/sft load them)
+CONFIGS = sorted(p for p in (REPO / "configs").glob("*.yaml") if not p.name.startswith(("pilot", "sft_")))
 
 
 # ── fixtures: a dataset of task directories ─────────────────────────────────

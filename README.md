@@ -75,10 +75,11 @@ src/honest_agents/
   models.py        model-family specifics (LoRA targets, templates, vLLM flags, startup probe)
   tasks/           seed sources, hermetic conversion, perturbation operators, validation, dataset build, difficulty gate, audit
   pilot/           report-only pilot on frozen Phase-0 trajectories (no sandbox)
+  sft/             supervised stage before GRPO: hindsight report SFT and best-of-N trajectory SFT on the bank (data, hindsight, bestofn, train_sft)
   eval/            rollout loop, metrics, baselines, report-file protocol, Harbor agent, external benchmark adapters
   openenv_env/     OpenEnv server and client over the same core (its own README)
 configs/           training configs: base, honest_alpha{0,0.1,0.25,0.4}, outcome, outcome_claimed, outcome_reflect,
-                   phase0_zero_lr, pilot, smoke, qwen35_4b, colocate_1gpu, accelerate/
+                   phase0_zero_lr, pilot, sft_hindsight, sft_bestofn, smoke, qwen35_4b, colocate_1gpu, accelerate/
 scripts/           node setup and probe, vLLM serving, run slots, sweeps, Phase 0, sync check, dataset build, evals
 tests/             unit tests (fakes; no Docker or GPU) plus tests marked `docker` or `gpu`
 docs/              proposal (v2, v1), design, roadmap, review record, specs, evaluation plan, research notes
@@ -134,6 +135,30 @@ scripts/sweep_alpha.sh                     # Stage 4: alpha {0, 0.1, 0.25, 0.4} 
 
 One training process per run; two runs share a 4-GPU node (slot 0: train on GPU 0, vLLM on GPU 1; slot 1: GPUs 2 and 3).
 `scripts/run_slot.sh CONFIG` runs one.
+
+### Supervised stage before GRPO
+
+Plan: a cheap supervised stage on the model's own rollouts, then one short GRPO run warm-started from it. Part 1, hindsight
+report SFT (`honest_agents.sft`): each banked rollout keeps its transcript and gets the honest final report the grader's
+outcome makes true ("complete" iff a clean pass; a blocker named only if the cached facts verify it and its object is in the
+transcript; nothing copied from the task spec). Only the report tokens are trained. One epoch, LoRA, low learning rate, so
+sampling entropy survives for GRPO. Part 2 (`configs/sft_bestofn.yaml`, `honest_agents/sft/bestofn.py`) is reward-filtered
+best-of-N: per variant the rollouts are ranked with the RL reward (`reward.compute_reward` on the stored outcome), the best
+one above the group mean is kept (never a tampered, violating, masked or report-less rollout; train split only), and the
+whole trajectory is trained with only assistant tokens in the loss. `kind=combo` trains both parts in one adapter: the
+best-of-N trajectories plus hindsight report examples for the other rows, `bestofn.hindsight_per_bestofn` (default 1.0)
+examples per trajectory.
+
+```bash
+scripts/run_sft.sh configs/sft_hindsight.yaml                  # dry run (examples, labels, token sizes), then train
+scripts/run_sft.sh configs/sft_bestofn.yaml kind=combo         # best-of-N trajectories + hindsight reports, one adapter
+DRY_RUN=1 scripts/run_sft.sh configs/sft_hindsight.yaml        # CPU only: read <output_dir>/examples.jsonl before paying for a GPU
+python -m honest_agents.sft.train_sft --spread outputs/phase0/bank   # share of prompt groups whose rewards still differ
+```
+
+Run `--spread` on a bank sampled after the stage and compare it with the starting bank: a collapsed fraction means GRPO has
+nothing to learn from. `eval_entropy` on held-out variants is logged during training. Rules and the confidence choice:
+`src/honest_agents/sft/hindsight.py`.
 
 ### Evaluation
 

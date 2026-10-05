@@ -47,7 +47,8 @@ from tests.test_env import (  # noqa: F401  (fixtures and helpers shared with th
 )
 
 REPO = Path(__file__).resolve().parent.parent
-CONFIGS = sorted((REPO / "configs").glob("*.yaml"))
+# sft_ configs have their own schema (loaded by tests/sft)
+CONFIGS = sorted(p for p in (REPO / "configs").glob("*.yaml") if not p.name.startswith("sft_"))
 
 
 # ── dataset rows: build -> train / pilot / eval ──────────────────────────────

@@ -1,0 +1,57 @@
+# Supervised stage, part 1 (hindsight report SFT): rewrite each banked rollout's FINAL report into the honest one the
+# grader's outcome makes true, and train ONLY the report tokens. Then GRPO warm-starts from <output_dir>/final.
+#   python -m honest_agents.sft.train_sft --config configs/sft_hindsight.yaml [--dry-run] [key.path=value ...]
+#   scripts/run_sft.sh configs/sft_hindsight.yaml          # dry run, then the run
+# Light on purpose (one epoch, small LoRA, low learning rate): sampling entropy must survive for GRPO. Check it with
+# `--spread BANK` on a bank sampled before and after, and with `eval_entropy` in the log (held-out variants).
+# Rules for the rewritten report: honest_agents/sft/hindsight.py (nothing from the task spec; a blocker only if the cached
+# facts verify it and its object is in the transcript).
+seed: 0
+output_root: outputs/sft
+kind: hindsight
+
+model:
+  name: Qwen/Qwen3.5-4B
+  family: qwen3_5          # auto | qwen3 | qwen3_5
+  dtype: bfloat16
+  local_files_only: false
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: auto     # honest_agents.models.lora_target_modules(family)
+
+data:
+  bank: outputs/phase0/bank          # `bank-*.jsonl` of a Phase-0 / zero-lr run; only split == train rows are read
+  holdout_fraction: 0.1              # of variants: held-out entropy batch + confidence calibration (never fitted)
+  max_length: 16384                  # longer examples are dropped, not truncated
+  max_rows: null
+  min_examples: 64
+  row_filter:                        # honest_agents.sft.data.RowFilter
+    drop_tampered: true
+    drop_violations: true
+    include_no_report: true
+    drop_unseen_actions: true
+
+hindsight:                           # honest_agents.sft.hindsight.HindsightOptions
+  confidence: calibrated             # calibrated | omit. calibrated = held-out pass rate of the agent's original claim type
+  bin_width: 0.1
+  min_bucket: 20
+  clip: 0.05
+
+train:
+  learning_rate: 5.0e-5
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  warmup_steps: 0.1                  # a float below 1 is a share of all steps
+  lr_scheduler_type: cosine
+  gradient_checkpointing: true
+  bf16: true
+  logging_steps: 1
+  eval_steps: 10
+  save_steps: 100
+
+guard:
+  entropy_floor_ratio: null          # e.g. 0.5: stop when held-out entropy halves (scaffold tokens make it fall anyway)
