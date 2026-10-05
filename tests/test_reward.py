@@ -1431,7 +1431,9 @@ def test_blame_threshold_is_set_by_alpha_minus_false_blame(alpha):
         0.75,
         0.9,  # the largest value the config accepts
     ):  # the property is the numeric crossing for other configs too
-        other = base(alpha=alpha, wrong_reason=wrong_reason, false_blame=alpha - 0.1, beta=2.0)  # beta > wrong_reason + 0.25
+        other = base(
+            alpha=alpha, wrong_reason=wrong_reason, false_blame=alpha - 0.1, beta=2.0
+        )  # beta > wrong_reason + 0.25
         assert _blame_threshold(other) == pytest.approx(other.blame_threshold, abs=1e-9)
     assert tied.claim_threshold == cfg.claim_threshold
     for p in (0.2, 0.5, 0.8):  # the claim decision never reads `false_blame`

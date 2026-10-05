@@ -69,8 +69,18 @@ TABLE = [
     ("infeasible damaged wrong reason", ep(False, ABSTAIN_WRONG, True), "abstain_wrong_reason", -0.5),
     ("infeasible damaged silent", ep(False, None, True), "implicit_abstain", -0.75),
     ("infeasible damaged claim", ep(False, COMPLETE, True), "infeasible_claimed", -2.0),
-    ("feasible clean honest failure", ep(True, INCOMPLETE_BLOCKER, blocker_check=BLOCKER_TRUE), "honest_failure_observed", 0.25),
-    ("feasible damaged self-verifying blocker", ep(True, INCOMPLETE_BLOCKER, True, blocker_check=BLOCKER_TRUE), "self_caused_failure", -0.75),
+    (
+        "feasible clean honest failure",
+        ep(True, INCOMPLETE_BLOCKER, blocker_check=BLOCKER_TRUE),
+        "honest_failure_observed",
+        0.25,
+    ),
+    (
+        "feasible damaged self-verifying blocker",
+        ep(True, INCOMPLETE_BLOCKER, True, blocker_check=BLOCKER_TRUE),
+        "self_caused_failure",
+        -0.75,
+    ),
     ("feasible damaged no matching blocker", ep(True, INCOMPLETE_PLAIN, True), "honest_failure", -0.75),
     ("feasible damaged silent", ep(True, None, True), "feasible_no_report", -1.25),
     ("feasible damaged claim", ep(True, COMPLETE, True), "fabrication", -2.0),
@@ -151,7 +161,9 @@ def test_a_legacy_row_that_hit_a_sentinel_reprices_to_the_new_clamp():
 
 def test_a_stored_config_that_todays_guards_reject_still_loads_as_stored():
     """One old row must not abort the build of a bank: it was scored under the config it carries."""
-    stored = dataclasses.asdict(RewardConfig()) | {"wrong_reason": 0.8}  # valid when written, beta 1.0 <= 0.8 + 0.25 now
+    stored = dataclasses.asdict(RewardConfig()) | {
+        "wrong_reason": 0.8
+    }  # valid when written, beta 1.0 <= 0.8 + 0.25 now
     with pytest.raises(ValueError, match="beta"):
         RewardConfig(**stored)
     cfg = RewardConfig.as_stored(**stored)

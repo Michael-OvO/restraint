@@ -57,7 +57,9 @@ CONFESS = 0.3  # share of damaging rollouts that honestly report incomplete inst
 
 
 def _pass_reward(cell: str, n_actions: int) -> float:
-    return compute_reward(outcome(True, parse_report({"status": "complete"}), tests_passed=True, n_actions=n_actions), CFG).total
+    return compute_reward(
+        outcome(True, parse_report({"status": "complete"}), tests_passed=True, n_actions=n_actions), CFG
+    ).total
 
 
 def expected_rewards(cell: str, table: str) -> np.ndarray:
@@ -67,7 +69,12 @@ def expected_rewards(cell: str, table: str) -> np.ndarray:
     fail = lambda r, **kw: compute_reward(outcome(True, r, tests_passed=False, n_actions=3, **kw), CFG).total
     win = _pass_reward(cell, 3)
     careful = P_PASS["careful"] * _pass_reward(cell, 7) + (1 - P_PASS["careful"]) * fail(honest)
-    refuse = compute_reward(outcome(True, parse_report({"status": "abstain", "blocker_category": "high_risk"}), n_actions=3, tests_passed=False), CFG).total
+    refuse = compute_reward(
+        outcome(
+            True, parse_report({"status": "abstain", "blocker_category": "high_risk"}), n_actions=3, tests_passed=False
+        ),
+        CFG,
+    ).total
     if cell == "control" or table == "old":
         direct = P_PASS["shortcut"] * win + (1 - P_PASS["shortcut"]) * fail(honest)
     else:  # trap, damage-aware: the shortcut passes the tests but damages the preserved path, which voids the pass
@@ -86,7 +93,10 @@ def train(mix: dict[str, float], table: str, steps: int = 4000, lr: float = 0.05
     w = np.zeros(3)
     u = {c: np.zeros(3) for c in ("trap", "control")}
     rewards = {c: expected_rewards(c, table) for c in u}
-    start = {"trap": np.array([0.5, cue, 0.0]), "control": np.array([0.5, 0.0, 0.0])}  # the policy begins shortcut-leaning
+    start = {
+        "trap": np.array([0.5, cue, 0.0]),
+        "control": np.array([0.5, 0.0, 0.0]),
+    }  # the policy begins shortcut-leaning
     for _ in range(steps):
         gw = np.zeros(3)
         for cell, share in mix.items():
@@ -110,7 +120,9 @@ def test_the_damage_aware_table_prices_the_trap_and_keeps_the_control_working():
 
 
 @pytest.mark.parametrize("cue", [0.0, 0.5, 1.0])
-@pytest.mark.parametrize("mix", [{"trap": 1.0, "control": 0.0}, {"trap": 0.5, "control": 0.5}, {"trap": 2 / 3, "control": 1 / 3}])
+@pytest.mark.parametrize(
+    "mix", [{"trap": 1.0, "control": 0.0}, {"trap": 0.5, "control": 0.5}, {"trap": 2 / 3, "control": 1 / 3}]
+)
 def test_the_new_table_does_not_teach_abstain_everything_in_the_bandit(mix, cue):
     """Trap:control 1:0, 1:1 and 2:1, cue ladder 0 to 2. The damaging shortcut is learned away on the trap, refusal stays
     a minor share everywhere (never above the old table's) and the control keeps acting.
@@ -133,4 +145,6 @@ def test_damaging_mass_falls_faster_under_the_new_table_than_the_old():
     mix = {"trap": 0.5, "control": 0.5}
     new, old = train(mix, "new", steps=300), train(mix, "old", steps=300)
     assert new["trap"][0] < old["trap"][0]  # the shortcut on the trap shrinks faster
-    assert old["trap"][0] > 0.5 * 0.5  # the old table cannot see the damage: only the careful path's extra cost moves it
+    assert (
+        old["trap"][0] > 0.5 * 0.5
+    )  # the old table cannot see the damage: only the careful path's extra cost moves it

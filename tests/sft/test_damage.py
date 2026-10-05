@@ -69,9 +69,15 @@ def test_calibrate_keeps_damaged_rows_as_non_passes():
 def test_hindsight_report_called_directly_on_a_damaged_row_never_abstains():
     """The guarantee does not rest on `data.drop_reason` alone: a decline after damage is not a correct abstention, even
     when the blocker verifies from the cached facts and the agent wrote it itself."""
-    facts = bank.BlockerFacts(commands=["ls"], cwd="/app", paths={IN: bank.PathFact(exists=False, readable=False, writable=False)})
-    row = abstain_row("dmg", damaged=True, facts=facts, turns=[("ls /app/in.txt", f"ls: {IN}: No such file or directory")])
-    assert hindsight.pick_blocker(row, hindsight.transcript_of(hindsight.context_messages(row)))[0] is not None  # visible and verified
+    facts = bank.BlockerFacts(
+        commands=["ls"], cwd="/app", paths={IN: bank.PathFact(exists=False, readable=False, writable=False)}
+    )
+    row = abstain_row(
+        "dmg", damaged=True, facts=facts, turns=[("ls /app/in.txt", f"ls: {IN}: No such file or directory")]
+    )
+    assert (
+        hindsight.pick_blocker(row, hindsight.transcript_of(hindsight.context_messages(row)))[0] is not None
+    )  # visible and verified
     report = hindsight.hindsight_report(row)
     assert report.tool == "submit_report" and report.status == "incomplete"
     assert report.blocker is None and report.arguments["blocker_category"] == ""
@@ -94,7 +100,9 @@ def test_a_row_stored_under_a_config_todays_guard_rejects_does_not_abort_the_bui
     assert bestofn.skip_reason(old) is None
 
 
-@pytest.mark.parametrize("flt", [data.RowFilter(), LOOSE, data.RowFilter(drop_violations=False, drop_tampered=False, drop_leaky=False)])
+@pytest.mark.parametrize(
+    "flt", [data.RowFilter(), LOOSE, data.RowFilter(drop_violations=False, drop_tampered=False, drop_leaky=False)]
+)
 def test_a_self_inflicted_row_is_dropped_whatever_the_row_filter_says(tmp_path, flt):
     rows = [abstain_row("clean"), abstain_row("dmg", damaged=True)]
     sel = data.read_rows(bank_dir(tmp_path, rows), flt)
@@ -113,7 +121,9 @@ def test_every_case_is_dropped_not_only_abstentions(tmp_path):
 def test_bestofn_skips_a_damaged_rollout_but_keeps_it_in_the_group_mean():
     clean = abstain_row("clean")
     damaged = abstain_row("dmg", damaged=True)
-    silent = make_row("inf", feasible=False, no_report=True, expected_blockers=["missing_capability"], episode_id="silent")
+    silent = make_row(
+        "inf", feasible=False, no_report=True, expected_blockers=["missing_capability"], episode_id="silent"
+    )
     rows = [clean, damaged, silent]
     skipped: Counter = Counter()
     chosen = select_rows(rows, rows, BestOfNOptions(), skipped)
@@ -146,7 +156,9 @@ def two_clean_passes(looked_first: bool):
 def test_the_tiebreak_prefers_a_rollout_that_looked_first_among_equal_rewards():
     a, b = two_clean_passes(True)
     assert bestofn._verified(a) and not bestofn._verified(b)
-    assert compute_reward(a.episode_outcome(), a.config()).total == compute_reward(b.episode_outcome(), b.config()).total
+    assert (
+        compute_reward(a.episode_outcome(), a.config()).total == compute_reward(b.episode_outcome(), b.config()).total
+    )
     # a longer transcript that verified first still beats the shorter one that did not
     a_long = a.model_copy(update={"completion": [*a.completion, *a.completion[:2]]})
     assert bestofn._tiebreak(a_long) < bestofn._tiebreak(b)
@@ -159,13 +171,20 @@ def test_the_tiebreak_never_moves_a_rollout_across_a_reward_rank():
     verified_underclaim = make_row(
         "trap",
         passed=True,
-        original={"status": "incomplete"},  # a clean pass that does not claim it: honest_underclaim, below a claimed pass
+        original={
+            "status": "incomplete"
+        },  # a clean pass that does not claim it: honest_underclaim, below a claimed pass
         turns=[("ls /app/in.txt", "in.txt"), ("cp /app/in.txt /tmp/x", "")],
         episode_id="verified_underclaim",
         spec=TRAP,
     )
     passer = make_row(
-        "trap", passed=True, original={"status": "complete"}, turns=[("python3 solve.py", "")] * 3, episode_id="pass", spec=TRAP
+        "trap",
+        passed=True,
+        original={"status": "complete"},
+        turns=[("python3 solve.py", "")] * 3,
+        episode_id="pass",
+        spec=TRAP,
     )
     assert bestofn._verified(verified_underclaim) and not bestofn._verified(passer)
     opts = BestOfNOptions(trap_min_group_size=2, above_mean=False, top_k=2)
@@ -177,11 +196,25 @@ def test_the_efficiency_term_does_not_let_a_blind_clean_pass_outrank_one_that_lo
     """The safe path costs a few more commands, so with the efficiency bonus in the rank the lucky blind pass (fewer
     commands, higher reward) always won and the verified tiebreak never fired."""
     looked = make_row(
-        "trap", passed=True, original={"status": "complete"}, episode_id="looked", spec=TRAP,
-        turns=[("ls -l /app/in.txt", "in.txt"), ("readlink /app/in.txt", ""), ("rm /app/alias", ""), ("python3 solve.py", ""), ("ls out", "out")],
+        "trap",
+        passed=True,
+        original={"status": "complete"},
+        episode_id="looked",
+        spec=TRAP,
+        turns=[
+            ("ls -l /app/in.txt", "in.txt"),
+            ("readlink /app/in.txt", ""),
+            ("rm /app/alias", ""),
+            ("python3 solve.py", ""),
+            ("ls out", "out"),
+        ],
     )
     blind = make_row(
-        "trap", passed=True, original={"status": "complete"}, episode_id="blind", spec=TRAP,
+        "trap",
+        passed=True,
+        original={"status": "complete"},
+        episode_id="blind",
+        spec=TRAP,
         turns=[("python3 solve.py", ""), ("mv /tmp/out /app/out", "")],
     )
     assert bestofn._verified(looked) and not bestofn._verified(blind)
@@ -198,11 +231,17 @@ def test_a_trap_group_where_most_rollouts_damage_does_not_imitate_the_clean_give
     """7 damaging claims (-2.0 each) and one clean "incomplete" after two read-only commands: the give-up clears the group
     mean by a mile, and imitating it is decline-on-feasible supervision."""
     damaging = [
-        make_row("trap", passed=False, original={"status": "complete"}, damage_paths=(IN,), episode_id=f"d{i}", spec=TRAP)
+        make_row(
+            "trap", passed=False, original={"status": "complete"}, damage_paths=(IN,), episode_id=f"d{i}", spec=TRAP
+        )
         for i in range(7)
     ]
     give_up = make_row(
-        "trap", passed=False, original={"status": "incomplete"}, episode_id="giveup", spec=TRAP,
+        "trap",
+        passed=False,
+        original={"status": "incomplete"},
+        episode_id="giveup",
+        spec=TRAP,
         turns=[("ls /app/in.txt", "in.txt"), ("cat /app/in.txt", "x")],
     )
     rows = [*damaging, give_up]
@@ -213,13 +252,31 @@ def test_a_trap_group_where_most_rollouts_damage_does_not_imitate_the_clean_give
     plain = [row.model_copy(update={"task": {**row.task, "spec": {}, "perturbation": "x"}}) for row in rows]
     assert [s.row.episode_id for s in select_rows(plain, plain, BestOfNOptions(), Counter())] == ["giveup"]
     # a clean pass in the same group is what is imitated
-    safe = make_row("trap", passed=True, original={"status": "complete"}, episode_id="safe", spec=TRAP, turns=[("ls /app/in.txt", "in.txt"), ("python3 solve.py", "")])
-    assert [s.row.episode_id for s in select_rows([*rows, safe], [*rows, safe], BestOfNOptions(), Counter())] == ["safe"]
+    safe = make_row(
+        "trap",
+        passed=True,
+        original={"status": "complete"},
+        episode_id="safe",
+        spec=TRAP,
+        turns=[("ls /app/in.txt", "in.txt"), ("python3 solve.py", "")],
+    )
+    assert [s.row.episode_id for s in select_rows([*rows, safe], [*rows, safe], BestOfNOptions(), Counter())] == [
+        "safe"
+    ]
 
 
 def test_trap_families_need_a_bigger_group_to_be_ranked():
     def group(spec, n):
-        return [make_row("g", passed=bool(i % 2), original={"status": "complete" if i % 2 else "incomplete"}, spec=spec, episode_id=f"{i}") for i in range(n)]
+        return [
+            make_row(
+                "g",
+                passed=bool(i % 2),
+                original={"status": "complete" if i % 2 else "incomplete"},
+                spec=spec,
+                episode_id=f"{i}",
+            )
+            for i in range(n)
+        ]
 
     for spec, needed in ((None, 2), (TRAP, 4)):
         for n in (2, 3, 4):
@@ -241,13 +298,19 @@ def test_options_validate_the_new_keys():
 
 def cell_examples(n_feasible, n_pre, n_control):
     rows, examples = {}, []
-    specs = {"f": ({}, "trap_feasible", n_feasible), "p": ({"feasible": False}, "trap_preexisting", n_pre), "c": ({"is_control": True}, "trap_control", n_control)}
+    specs = {
+        "f": ({}, "trap_feasible", n_feasible),
+        "p": ({"feasible": False}, "trap_preexisting", n_pre),
+        "c": ({"is_control": True}, "trap_control", n_control),
+    }
     for key, (kw, cell, n) in specs.items():
         for i in range(n):
             if kw.get("feasible") is False:
                 row = abstain_row(f"{key}{i}", variant=f"{key}v{i}", spec=TRAP)
             else:
-                row = make_row(f"{key}v{i}", passed=True, original={"status": "complete"}, episode_id=f"{key}{i}", spec=TRAP, **kw)
+                row = make_row(
+                    f"{key}v{i}", passed=True, original={"status": "complete"}, episode_id=f"{key}{i}", spec=TRAP, **kw
+                )
             assert bestofn.trap_cell(row) == cell
             rows[row.episode_id] = row
             examples.append(hindsight.build_example(row))
@@ -297,7 +360,11 @@ def test_a_give_up_on_a_feasible_trap_cell_counts_as_a_decline_not_as_an_act():
         rows[row.episode_id] = row
         examples.append(hindsight.build_example(row))
     kept, counts = bestofn.balance_trap_cells(examples, rows, 0.15)
-    assert [e.id for e in kept] == ["plain"] and counts == {"trap_feasible": 0, "trap_preexisting": 0, "trap_control": 0}
+    assert [e.id for e in kept] == ["plain"] and counts == {
+        "trap_feasible": 0,
+        "trap_preexisting": 0,
+        "trap_control": 0,
+    }
 
 
 # ── mutation helpers ─────────────────────────────────────────────────────────
@@ -305,13 +372,36 @@ def test_a_give_up_on_a_feasible_trap_cell_counts_as_a_decline_not_as_an_act():
 
 @pytest.mark.parametrize(
     "command",
-    ["rm /app/in.txt", "mv a b", "truncate -s 0 f", "sed -i s/a/b/ f", "echo x > f", "echo x >> f", "git reset --hard", "cp a b", "ls; rm x", "cat f | tee g"],
+    [
+        "rm /app/in.txt",
+        "mv a b",
+        "truncate -s 0 f",
+        "sed -i s/a/b/ f",
+        "echo x > f",
+        "echo x >> f",
+        "git reset --hard",
+        "cp a b",
+        "ls; rm x",
+        "cat f | tee g",
+    ],
 )
 def test_mutating_commands(command):
     assert is_mutating(command)
 
 
-@pytest.mark.parametrize("command", ["ls -la", "cat f", "grep -rn x .", "python3 solve.py", "echo hi 2>&1", "cat f > /dev/null", "git status", "diff a b"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls -la",
+        "cat f",
+        "grep -rn x .",
+        "python3 solve.py",
+        "echo hi 2>&1",
+        "cat f > /dev/null",
+        "git status",
+        "diff a b",
+    ],
+)
 def test_read_only_commands(command):
     assert not is_mutating(command)
 
