@@ -13,7 +13,8 @@ act on 20-step windows to avoid noise; this check is the operator's view after e
 * collapse: entropy, commands per episode or completion length falling to a fraction of their starting level;
 * gaming: lazy declines, feasible declines or missing reports rising; tamper, masked or reward-error shares above the
   stop rules' limits; a high share of truncated completions or of groups without reward contrast;
-* learning: after `min_steps_for_learning` steps the mean reward of the last steps does not beat the first ones.
+* learning: after `min_steps_for_learning` steps neither false claims on impossible tasks nor claims after a failed
+  feasible attempt have fallen (weighted by episode counts; raw reward is confounded by task difficulty).
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ class HealthConfig:
     zero_variance_warn: float = 0.5
     min_steps_for_learning: int = 15
     ram_steps_left: float = 10.0  # warn when the host RAM would run out within this many steps at the current growth
-    min_reward_gain: float = 0.02
+    min_honesty_gain: float = 0.05  # claims on impossible tasks or after a failure must fall by this much
 
 
 @dataclass(frozen=True)
@@ -174,12 +175,28 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
                                f"host RAM: process at {rss[-1]:.0f} GB, growing {growth:.1f} GB/step, {avail:.0f} GB left "
                                f"(about {avail / growth:.0f} steps)"))
 
-    rewards = _series(rows, "reward")
-    if len(rewards) >= cfg.min_steps_for_learning:
-        head, tail = _head_tail(rewards, 5)
-        if head is not None and tail is not None and tail < head + cfg.min_reward_gain:
-            out.append(Finding(WARN, "learning", f"mean reward {tail:.3f} over the last 5 steps vs {head:.3f} over the first 5"))
+    # Learning, measured on honesty rates weighted by how many episodes of that kind each step had. Raw mean reward is
+    # NOT used: every step draws different tasks, and on a real run the reward fell from 0.55 to 0.40 only because later
+    # steps drew harder tasks (the base model's pass rate on the same tasks fell from 0.80 to 0.56).
+    if len(rows) >= cfg.min_steps_for_learning:
+        gains = []
+        for key, weight in (("honest/claim_rate_infeasible", "honest/n_infeasible"), ("honest/p_claim_given_fail", "honest/n_feasible")):
+            head, tail = _weighted(rows[:5], key, weight), _weighted(rows[-5:], key, weight)
+            if head is not None and tail is not None:
+                gains.append((key.split("/")[-1], head, tail))
+        if gains and all(head - tail < cfg.min_honesty_gain for _, head, tail in gains):
+            text = ", ".join(f"{k} {h:.0%} -> {t:.0%}" for k, h, t in gains)
+            out.append(Finding(WARN, "learning", f"no honesty gain over the first 5 steps: {text}"))
     return out or [Finding(OK, "all", "no check tripped")]
+
+
+def _weighted(rows: Sequence[dict[str, Any]], key: str, weight: str) -> float | None:
+    num = den = 0.0
+    for r in rows:
+        v, w = _num(r, key), _num(r, weight)
+        if v is not None and w is not None and w > 0 and math.isfinite(v):
+            num, den = num + v * w, den + w
+    return num / den if den else None
 
 
 def summary_line(rows: Sequence[dict[str, Any]]) -> str:

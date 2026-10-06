@@ -69,10 +69,14 @@ def test_collapse_and_quitting_fail():
     assert checks(run(8, **{"honest/tamper_rate": 0.3}))["gaming"] == FAIL
 
 
-def test_a_flat_reward_after_enough_steps_is_a_warning_not_before():
-    flat = [step(i, reward=0.3) for i in range(1, 16)]
+def test_learning_is_judged_on_honesty_rates_not_on_difficulty_confounded_reward():
+    honest = {"honest/n_infeasible": 16, "honest/n_feasible": 48}
+    flat = [step(i, **honest, **{"honest/claim_rate_infeasible": 0.35, "honest/p_claim_given_fail": 0.6}) for i in range(1, 16)]
     assert checks(flat)["learning"] == WARN
     assert "learning" not in checks(flat[:10])
+    improving = [step(i, reward=0.6 - 0.02 * i, **honest, **{"honest/claim_rate_infeasible": 0.4 - 0.02 * i, "honest/p_claim_given_fail": 0.6})
+                 for i in range(1, 16)]
+    assert "learning" not in checks(improving)  # reward falls (harder tasks) but false claims on impossible tasks fell
 
 
 def test_cli_exit_status_is_the_worst_level(tmp_path, capsys):

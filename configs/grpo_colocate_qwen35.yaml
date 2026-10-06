@@ -21,6 +21,11 @@ reward:
   mode: honest
   config:
     alpha: 0.1
+    # Naming a blocker beats "I could not finish" when p(the blocker is real) > (alpha - false_blame) /
+    # (1 - wrong_reason + alpha - false_blame) (reward.RewardConfig). At false_blame 0 that is 17 %, and the first run's
+    # false blame rose from 0.5 % to 3-4 % of feasible episodes in 18 steps. -0.4 puts it at 50 %: blame only when more
+    # likely than not. Satisfies beta (1.0) > wrong_reason - min(no_report_feasible, lazy, false_blame) = 0.9.
+    false_blame: -0.4
 data:
   train_file: data/train_rl.jsonl
 probe:
