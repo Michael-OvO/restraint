@@ -88,7 +88,11 @@ _TIMEOUT_CODES = (124, 137)  # GNU timeout: 124 = timed out, 137 = had to SIGKIL
 _ABS_PATH = re.compile(r"(?<![\w.~$])/[\w.+\-]+(?:/[\w.+\-]+)*")
 _MAX_FACT_PATHS = 40
 DEFAULT_PIDS_LIMIT = 1024  # fork-bomb guard; Harbor's Docker backend sets only cpus and memory
-_PIDS_COMPOSE = "services:\n  main:\n    pids_limit: {limit}\n"
+# Largest single file a sandbox process may write (RLIMIT_FSIZE, hard, so the agent cannot raise it without
+# CAP_SYS_RESOURCE). Seen on a real node: one episode's script appended to a log in a loop and wrote 63 GB in minutes,
+# filling the host disk and killing every run on it. ext4 has no per-container quota, so a single-file cap is what is
+# available; the base images' tasks write well under this.
+DEFAULT_MAX_FILE_BYTES = 1 << 30
 
 
 class HonestHarborEnv(ReportTools, HarborEnv):
@@ -103,6 +107,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         enforce_network_policy: bool = True,
         command_timeout_sec: int | None = None,
         pids_limit: int | None = DEFAULT_PIDS_LIMIT,
+        max_file_bytes: int | None = DEFAULT_MAX_FILE_BYTES,
     ):
         super().__init__(environment_type=environment_type)
         self._reward_config = reward_config or RewardConfig()
@@ -112,6 +117,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
             self._budget = EpisodeBudget(**{**self._budget.__dict__, "command_timeout_sec": command_timeout_sec})
         self._enforce_network = enforce_network_policy
         self._pids_limit = pids_limit
+        self._max_file_bytes = max_file_bytes
         self._boot: concurrent.futures.Future | None = None
         self._spec: HonestTaskSpec | None = None
         self._task_dir: Path | None = None
@@ -255,11 +261,18 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         return self._plan.verifier_phase
 
     def _write_pids_override(self) -> Path | None:
-        """Compose overlay with a pids limit for the main service, when Harbor's Docker backend can take one."""
-        if not self._pids_limit or self._environment_type != "docker":
+        """Compose overlay with a pids limit and a single-file size cap for the main service (Harbor's Docker backend sets
+        neither), when either is configured."""
+        if (not self._pids_limit and not self._max_file_bytes) or self._environment_type != "docker":
             return None
+        lines = ["services:", "  main:"]
+        if self._pids_limit:
+            lines.append(f"    pids_limit: {int(self._pids_limit)}")
+        if self._max_file_bytes:
+            size = int(self._max_file_bytes)
+            lines += ["    ulimits:", "      fsize:", f"        soft: {size}", f"        hard: {size}"]
         path = self._paths.trial_dir / "docker-compose.pids.yaml"
-        path.write_text(_PIDS_COMPOSE.format(limit=int(self._pids_limit)))
+        path.write_text("\n".join(lines) + "\n")
         return path
 
     async def _boot_episode(self) -> None:

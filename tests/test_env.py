@@ -325,10 +325,16 @@ def test_pids_limit_goes_through_a_compose_override(factory, task):
     (override,) = fake.factory_kwargs["config"].extra_docker_compose
     text = Path(override).read_text()
     assert "pids_limit: 321" in text and text.startswith("services:\n  main:")
-    off = new_env(pids_limit=None)
+    assert "fsize:\n        soft: 1073741824\n        hard: 1073741824" in text  # one runaway log cannot fill the host disk
+    off = new_env(pids_limit=None, max_file_bytes=None)
     off.reset(task_dir=str(task))
     off.bash("true")
     assert factory.created[1].factory_kwargs["config"].extra_docker_compose == []
+    only_cap = new_env(pids_limit=None, max_file_bytes=1000)
+    only_cap.reset(task_dir=str(task))
+    only_cap.bash("true")
+    capped = Path(factory.created[2].factory_kwargs["config"].extra_docker_compose[0]).read_text()
+    assert "pids_limit" not in capped and "soft: 1000" in capped
 
 
 def test_second_reset_stops_previous_sandbox_and_clears_episode(factory, task):

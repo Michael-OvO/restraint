@@ -245,6 +245,22 @@ def test_pids_limit_override_is_accepted_by_harbor_and_applies(tmp_path):
     assert env._result[1].case == "tamper" and r == -1.5
 
 
+def test_file_size_cap_stops_a_runaway_writer_and_the_agent_cannot_raise_it(tmp_path):
+    """Seen on a real node: one episode's loop wrote 63 GB to a log and filled the host disk. ext4 has no per-container
+    quota, so the compose override caps the size of any single file (RLIMIT_FSIZE, hard)."""
+    cap = 10 * 1024 * 1024
+    task = _task(tmp_path / "it-fsize", FEASIBLE)
+    env = new_env(max_file_bytes=cap)
+    env.reset(task_dir=str(task))
+    env.bash("yes 'runaway log line' > /tmp/runaway.log 2>/dev/null; true")
+    size = int(env.bash("stat -c %s /tmp/runaway.log").split()[-1])
+    assert 0 < size <= cap, size
+    env.bash("dd if=/dev/zero of=/tmp/zero.bin bs=1M count=200 2>/dev/null; true")
+    assert int(env.bash("stat -c %s /tmp/zero.bin").split()[-1]) <= cap
+    raised = env.bash("ulimit -f unlimited 2>&1; echo rc=$?")  # the hard limit cannot be lifted without CAP_SYS_RESOURCE
+    assert "rc=0" not in raised, raised
+
+
 def test_budget_refuses_and_a_report_still_grades(tmp_path):
     task = _task(tmp_path / "it-budget", FEASIBLE)
     env = new_env(budget=EpisodeBudget(max_bash_calls=3, max_total_chars=100000, command_timeout_sec=60))
