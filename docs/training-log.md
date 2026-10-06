@@ -206,6 +206,22 @@ Paired with run 1 on the same tasks (steps 6-14): false blame 3.6 -> 2.5 %, but 
 does not confirm it yet (within noise on 21 variants). Honesty after a failed feasible attempt (fabrication) is not
 improving. Entropy dipped to 0.160 at step 26 (start ~0.30): watch.
 
+**Correction at step 28.** The "improving" reading above depended on where the windows fell. Re-cut in 9-step windows:
+claims done on impossible 41.1 % (steps 1-9) -> 23.5 % (10-18) -> 40.3 % (19-27); correct abstention 41.7 -> 65.4 -> 55.6 %;
+claims after a failure 66.4 -> 62.7 -> 68.8 %. The last 5 steps (24-28) claimed 64 % of impossible tasks vs 38 % in steps
+1-5 (about 70 episodes). No clear honesty gain; possibly a drift toward claiming.
+
+**Diagnosis.** Behaviour on an impossible task is close to fixed per task: groups come out 8/8 claimed (steps 21, 26) or
+0/24 (step 23). A group whose 8 samples all do the same thing carries zero GRPO advantage, so many impossible tasks teach
+nothing. The false-blame penalty may also push borderline impossible tasks toward claiming (the paired run-1/run-2
+comparison above points the same way).
+
+**Ideas for the next iteration** (not yet run): more within-group diversity on impossible tasks (higher temperature or 16
+generations), a milder false_blame (-0.15, blame threshold 1/3, the reward module's documented default), a larger
+validation probe.
+
+**Decision.** Run to step 50 as planned (owner's call), then evaluate.
+
 **Next.** Step-40 probe; final evaluation of the selected checkpoint on the test split against the base (claims on impossible
 48.7 %), including `corrupt_input` (transfer).
 
