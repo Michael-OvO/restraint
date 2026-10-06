@@ -65,6 +65,8 @@ STOP_RULES_FILE = "stop_rules.jsonl"
 VALIDATION_FILE = "validation_probe.jsonl"
 BEST_CHECKPOINT_FILE = "best_checkpoint.json"
 TRAIN_LOG_FILE = "train_log.jsonl"
+HOST_RSS = "mem/rss_gb"  # the training process's resident size
+HOST_AVAILABLE = "mem/available_gb"  # MemAvailable of the host
 
 
 def _number(value: Any) -> float | None:
@@ -489,6 +491,9 @@ class JsonlLogger(TrainerCallback):
             peak = _peak_gpu_memory_gb()
             if peak is not None:
                 row[GPU_PEAK_MEMORY] = peak
+            from honest_agents.memory import mem_available_gb, rss_gb  # host RAM: a run was OOM-killed at 69 GB
+
+            row[HOST_RSS], row[HOST_AVAILABLE] = rss_gb(), mem_available_gb()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")

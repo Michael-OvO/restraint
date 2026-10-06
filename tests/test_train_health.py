@@ -86,3 +86,11 @@ def test_a_slow_rise_of_feasible_declines_is_flagged_before_it_reaches_the_ceili
     rows = [step(i, **{"honest/decline_rate_feasible": 0.005 + 0.006 * i}) for i in range(1, 16)]
     assert checks(rows)["gaming"] == WARN
     assert "gaming" not in checks(run(15))
+
+
+def test_host_ram_growth_warns_before_the_oom_killer():
+    rows = [step(i, **{"mem/rss_gb": 10.0 + 3.8 * i, "mem/available_gb": 60.0 - 3.8 * i}) for i in range(1, 8)]
+    assert checks(rows)["memory"] == WARN  # ~33 GB left at 3.8 GB/step: under 10 steps
+    rows = [step(i, **{"mem/rss_gb": 10.0 + 3.8 * i, "mem/available_gb": 60.0 - 3.8 * i}) for i in range(1, 15)]
+    assert checks(rows)["memory"] == FAIL  # ~7 GB left: about 2 steps
+    assert "memory" not in checks([step(i, **{"mem/rss_gb": 20.0, "mem/available_gb": 50.0}) for i in range(1, 8)])

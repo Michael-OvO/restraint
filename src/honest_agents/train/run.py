@@ -61,6 +61,10 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
     trainer.add_callback(JsonlLogger(out))
     if plan.eval_dataset is not None:
         trainer.add_callback(ValidationProbe(out, plan.cfg.probe.selection_metric))
+    from honest_agents.memory import MemoryDebug, mem_debug_enabled
+
+    if mem_debug_enabled():
+        trainer.add_callback(MemoryDebug(out))
 
 
 # Per-step wall-clock columns the run log carries for the Phase-0 trainer decision. The trainer logs

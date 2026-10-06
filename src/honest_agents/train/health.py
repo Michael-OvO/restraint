@@ -59,6 +59,7 @@ class HealthConfig:
     truncated_warn: float = 0.30
     zero_variance_warn: float = 0.5
     min_steps_for_learning: int = 15
+    ram_steps_left: float = 10.0  # warn when the host RAM would run out within this many steps at the current growth
     min_reward_gain: float = 0.02
 
 
@@ -164,6 +165,14 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
         v = recent(key)
         if v is not None and v > limit:
             out.append(Finding(level, "gaming" if level == FAIL else "signal", f"{label} {v:.0%} (limit {limit:.0%})"))
+
+    rss, avail = _series(rows, "mem/rss_gb"), _num(last, "mem/available_gb")
+    if len(rss) >= 2 and avail is not None:
+        growth = (rss[-1] - rss[0]) / (len(rss) - 1)
+        if growth > 0.2 and avail / growth < cfg.ram_steps_left:
+            out.append(Finding(FAIL if avail / growth < 3 else WARN, "memory",
+                               f"host RAM: process at {rss[-1]:.0f} GB, growing {growth:.1f} GB/step, {avail:.0f} GB left "
+                               f"(about {avail / growth:.0f} steps)"))
 
     rewards = _series(rows, "reward")
     if len(rewards) >= cfg.min_steps_for_learning:
