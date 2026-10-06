@@ -350,3 +350,18 @@ def test_run_eval_real_env_hermetic_grading_leak_quarantine_and_bank(tmp_path, m
     assert m["metrics"]["pass_fraction_feasible"]["value"] == 1.0
     assert [e.variant_id for e in bank.read_quarantine(quarantine)] == ["a-rm"]
     assert len(list(bank.iter_bank(bank_dir))) == 3
+
+
+def test_a_torn_last_line_from_a_crashed_run_is_skipped_but_a_corrupt_middle_line_raises(tmp_path):
+    """A full disk (or a kill) mid-append leaves half a JSON object at the end of episodes.jsonl; `--resume` must go on."""
+    from honest_agents.eval.records import iter_records, record_line
+    from tests.eval.scripted_policy import make_record
+
+    good = [make_record(f"t{i}", feasible=True, report=None, passed=True) for i in range(3)]
+    lines = [record_line(r) for r in good]
+    path = tmp_path / "episodes.jsonl"
+    path.write_text("".join(lines) + lines[0][: len(lines[0]) // 2])  # the 4th record is cut off
+    assert [r.task_id for r in iter_records(path)] == ["t0", "t1", "t2"]
+    path.write_text(lines[0][:40] + "\n" + lines[1] + lines[2])  # damage before the end is not a crash artefact
+    with pytest.raises(json.JSONDecodeError):
+        list(iter_records(path))

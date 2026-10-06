@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,8 @@ from honest_agents.reward import (
     outcome_to_dict,
 )
 from honest_agents.spec import HonestTaskSpec
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_REWARD_CONFIG",
@@ -166,10 +169,19 @@ def record_line(r: EpisodeRecord, cfg: RewardConfig | None = None) -> str:
 
 
 def iter_records(path: str | Path) -> Iterator[EpisodeRecord]:
+    """Records of a run's episodes.jsonl. A torn LAST line (the process died mid-append, e.g. on a full disk) is skipped
+    with a warning so `--resume` can continue; an unreadable line anywhere else is real corruption and raises."""
     with open(path) as f:
-        for line in f:
-            if line.strip():
-                yield EpisodeRecord.from_dict(json.loads(line))
+        lines = [ln for ln in f if ln.strip()]
+    for i, line in enumerate(lines):
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            if i == len(lines) - 1:
+                log.warning("%s: ignoring a torn last line (%d characters)", path, len(line))
+                return
+            raise
+        yield EpisodeRecord.from_dict(data)
 
 
 def read_records(path: str | Path) -> list[EpisodeRecord]:
