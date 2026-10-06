@@ -213,8 +213,26 @@ def test_commands_run_under_timeout_kill(factory, task):
     out = env.bash("sleep 10; echo never")
     assert "never" not in out and "timed out after 1s" in out and out.startswith("[exit code: 124]")
     (fake,) = factory.created
-    assert fake.calls[-1].command.startswith("timeout -k 5 1 bash -c ")
-    assert env._history[-1]["rc"] == 124
+    cmd = fake.calls[-1].command
+    assert cmd.startswith("bash -c ") and "timeout -k 5 1 bash -c " in cmd and "pipefail" in cmd
+    assert env._history[-1]["rc"] == 124  # pipefail keeps timeout's own code through the output cap
+
+
+def test_an_output_flood_is_cut_inside_the_sandbox_not_held_in_host_memory(factory, task):
+    """A run was OOM-killed at 69 GB: Harbor keeps a command's whole output in the host process. `yes` must stop at the
+    cap (SIGPIPE from `head -c`) instead of streaming for the full command timeout."""
+    import time
+
+    from honest_agents.env import MAX_CAPTURED_BYTES
+
+    env = new_env(budget=EpisodeBudget(command_timeout_sec=20))
+    env.reset(task_dir=str(task))
+    t0 = time.time()
+    out = env.bash("yes")
+    assert time.time() - t0 < 10  # without the cap this runs the full 20 s and buffers gigabytes
+    assert env._history[-1]["rc"] not in (0, 124) and "y" in out
+    (fake,) = factory.created
+    assert f"head -c {MAX_CAPTURED_BYTES + 1}" in fake.calls[-1].command
 
 
 def test_an_image_without_timeout_still_runs_commands(factory, task, tmp_path):

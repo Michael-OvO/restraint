@@ -19,3 +19,10 @@ def test_memory_debug_writes_one_attribution_row_per_step(tmp_path, monkeypatch)
     assert mem_debug_enabled()
     monkeypatch.setenv("HONEST_MEM_DEBUG", "0")
     assert not mem_debug_enabled()
+
+
+def test_release_freed_memory_is_safe_everywhere():
+    from honest_agents.memory import ReleaseFreedMemory, release_freed_memory
+
+    assert release_freed_memory() in (True, False)  # True on glibc (the node), False on macOS
+    ReleaseFreedMemory().on_step_end(None, SimpleNamespace(global_step=1), None)

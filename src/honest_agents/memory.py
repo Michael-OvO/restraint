@@ -48,6 +48,25 @@ def mem_available_gb() -> float | None:
     return None
 
 
+def release_freed_memory() -> bool:
+    """Ask glibc to return freed heap pages to the OS (`malloc_trim(0)`). True if it ran; a no-op off glibc."""
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+    except OSError:
+        return False
+    libc.malloc_trim(0)
+    return True
+
+
+class ReleaseFreedMemory(TrainerCallback):
+    """`malloc_trim(0)` after every optimizer step: the rollout threads free a lot that glibc would otherwise keep."""
+
+    def on_step_end(self, args, state, control, **kwargs):
+        release_freed_memory()
+
+
 def mem_debug_enabled() -> bool:
     return os.environ.get(MEM_DEBUG_ENV, "") not in ("", "0", "false")
 

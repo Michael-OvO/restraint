@@ -61,8 +61,9 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
     trainer.add_callback(JsonlLogger(out))
     if plan.eval_dataset is not None:
         trainer.add_callback(ValidationProbe(out, plan.cfg.probe.selection_metric))
-    from honest_agents.memory import MemoryDebug, mem_debug_enabled
+    from honest_agents.memory import MemoryDebug, ReleaseFreedMemory, mem_debug_enabled
 
+    trainer.add_callback(ReleaseFreedMemory())
     if mem_debug_enabled():
         trainer.add_callback(MemoryDebug(out))
 

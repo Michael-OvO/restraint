@@ -22,6 +22,9 @@ if [[ "${WAIT_VLLM:-1}" == 1 ]] && uses_vllm_server "$CONFIG" "${SLOT_OV[@]}" "$
 fi
 
 export CUDA_VISIBLE_DEVICES="$TRAIN_GPUS"
+# Dozens of tool-calling threads per step make glibc open many malloc arenas that keep freed memory: the trainer's
+# resident size crept up ~1 GB per step on the node (src/honest_agents/memory.py). Two arenas bound that.
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 FLAGS=()
 [[ "${RESUME:-0}" == 1 ]] && FLAGS+=(--resume)
 exec "${UV_RUN[@]}" accelerate launch --config_file "$ACCEL" --num_processes 1 \

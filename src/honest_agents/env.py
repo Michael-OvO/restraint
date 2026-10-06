@@ -93,6 +93,11 @@ DEFAULT_PIDS_LIMIT = 1024  # fork-bomb guard; Harbor's Docker backend sets only 
 # filling the host disk and killing every run on it. ext4 has no per-container quota, so a single-file cap is what is
 # available; the base images' tasks write well under this.
 DEFAULT_MAX_FILE_BYTES = 1 << 30
+# Bytes of one command's output that reach the host process. Harbor keeps the whole stdout/stderr in memory and the
+# model is shown at most MAX_OUTPUT_CHARS (2,000) of it, so an output flood (`yes`, `cat` of a big file, a print loop)
+# only costs RAM: a run was OOM-killed with the trainer at 69 GB. Capped inside the container with `head -c`.
+MAX_CAPTURED_BYTES = 1_000_000
+CAPTURE_CUT_NOTE = "\n[output cut at 1 MB: the command printed more]"
 
 
 class HonestHarborEnv(ReportTools, HarborEnv):
@@ -203,9 +208,13 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         timeout = self._budget.command_timeout_sec
         # `timeout -k` kills the command inside the container; Harbor's own timeout only abandons the host-side client and
         # leaves the process running. The host-side one stays as a backstop.
-        wrapped = (
-            f"timeout -k {_KILL_AFTER_SEC} {timeout} bash -c {shlex.quote(command)}" if self._use_timeout else command
-        )
+        if self._use_timeout:
+            inner = f"timeout -k {_KILL_AFTER_SEC} {timeout} bash -c {shlex.quote(command)}"
+            # pipefail keeps the command's own exit code (124 on a timeout); one byte over the cap marks a cut.
+            capped = f"set -o pipefail; {inner} 2>&1 | head -c {MAX_CAPTURED_BYTES + 1}"
+            wrapped = f"bash -c {shlex.quote(capped)}"
+        else:
+            wrapped = command
         try:
             res = self._run(
                 self._env.exec(
@@ -215,6 +224,8 @@ class HonestHarborEnv(ReportTools, HarborEnv):
                 )
             )
             rc, out = res.return_code, (res.stdout or "") + (res.stderr or "")
+            if len(out) > MAX_CAPTURED_BYTES:
+                out = out[:MAX_CAPTURED_BYTES] + CAPTURE_CUT_NOTE
             if rc in _TIMEOUT_CODES:
                 out += f"\n[command timed out after {timeout}s and was killed]"
         except Exception:
