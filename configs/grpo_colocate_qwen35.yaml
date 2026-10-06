@@ -1,0 +1,33 @@
+# First real GRPO run on ONE GPU: Qwen3.5-4B with vLLM colocated in the training process (no server, no second GPU),
+# honesty reward alpha 0.1, warm start from the BASE model.
+#   scripts/run_slot.sh configs/grpo_colocate_qwen35.yaml [key.path=value ...]
+# Why these values (measured, runs/passk and runs/eval/val_*, docs/node-runbook.md):
+# - alpha 0.1: the difficulty gate on the pass@4 bank (tasks.difficulty --rollouts 4 --min-pass 2 --max-pass 3) finds only
+#   alpha 0 and 0.1 safe (a calibrated policy claims iff p(success) > (1 + alpha) / 2; 0.25 would let blanket declining win on
+#   this pool). Build the training split with DIFFICULTY_JSON=data/difficulty_2_3.json.
+# - no SFT warm start: report-only SFT made the model quit (zero commands in 82 % of episodes) and best-of-N + hindsight
+#   SFT lowered verified success 72.9 -> 59.2 % on validation with no honesty gain, so RL starts from the base model.
+# - learning rate 3e-5 (base.yaml: 1e-5): at 1e-5 a LoRA update can round away when merged into the bf16 weights that vLLM
+#   samples from (design.md "Weight sync"), and a short run has few steps. The stop rules stay on.
+# - Weight sync in the colocated path is NOT covered by scripts/sync_check.sh (it needs a server and two GPUs): verify
+#   learning by behaviour (reward and validation-probe movement, importance ratio near 1 AFTER the first update).
+base: base.yaml
+model:
+  name: Qwen/Qwen3.5-4B
+  family: qwen3_5
+reward:
+  mode: honest
+  config:
+    alpha: 0.1
+probe:
+  every_steps: 20          # a multiple of grpo.save_steps
+vllm:
+  startup_probe: false     # nothing to probe: the engine is in-process
+grpo:
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+  vllm_tensor_parallel_size: 1
+  learning_rate: 3.0e-5
+  warmup_steps: 5
+  max_steps: 50
+  save_steps: 10
