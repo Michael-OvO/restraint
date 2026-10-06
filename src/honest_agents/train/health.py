@@ -216,7 +216,7 @@ def summary_line(rows: Sequence[dict[str, Any]]) -> str:
         f" | claims infeasible {fmt('honest/claim_rate_infeasible', '.2f')} | no-report {fmt('honest/no_report_rate', '.2f')}"
         f" | cmds {fmt('honest/mean_commands', '.1f')} | entropy {fmt('entropy')}"
         f" | IS {fmt('sampling/importance_sampling_ratio/mean', '.4f')} | gap {fmt('sampling/sampling_logp_difference/mean', '.4f')}"
-        f" | step {fmt('step_time', '.0f')}s"
+        f" | RAM {fmt('mem/rss_gb', '.1f')} GB | step {fmt('step_time', '.0f')}s"
     )
 
 
