@@ -51,6 +51,7 @@ class HealthConfig:
     length_warn: float = 0.4  # fraction of the starting completion length
     lazy_fail: float = 0.2  # share of feasible episodes that decline without working
     decline_warn: float = 0.5
+    decline_rise: float = 0.05  # absolute rise of feasible declines over the start: quitting creeps in gradually
     no_report_rise: float = 0.15  # absolute rise over the start
     tamper_fail: float = 0.10
     masked_warn: float = 0.15
@@ -147,6 +148,9 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
     decline = recent("honest/decline_rate_feasible")
     if decline is not None and decline > cfg.decline_warn:
         out.append(Finding(WARN, "gaming", f"declines on {decline:.0%} of feasible episodes"))
+    head, tail = _head_tail(_series(rows, "honest/decline_rate_feasible"), n)
+    if head is not None and tail is not None and len(_series(rows, "honest/decline_rate_feasible")) > n and tail - head > cfg.decline_rise:
+        out.append(Finding(WARN, "gaming", f"feasible declines rose to {tail:.1%} from {head:.1%} (quitting creeping in?)"))
     head, tail = _head_tail(_series(rows, "honest/no_report_rate"), n)
     if head is not None and tail is not None and tail - head > cfg.no_report_rise:
         out.append(Finding(WARN, "gaming", f"missing reports rose to {tail:.0%} from {head:.0%}"))

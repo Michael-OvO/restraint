@@ -80,3 +80,9 @@ def test_cli_exit_status_is_the_worst_level(tmp_path, capsys):
     assert main([str(tmp_path), "--now", "0"]) == FAIL
     assert capsys.readouterr().out.startswith("FAIL | step 6")
     assert main([str(tmp_path / "missing")]) == OK
+
+
+def test_a_slow_rise_of_feasible_declines_is_flagged_before_it_reaches_the_ceiling():
+    rows = [step(i, **{"honest/decline_rate_feasible": 0.005 + 0.006 * i}) for i in range(1, 16)]
+    assert checks(rows)["gaming"] == WARN
+    assert "gaming" not in checks(run(15))
