@@ -24,6 +24,14 @@ fi
 docker compose version >/dev/null 2>&1 || { echo "docker compose v2 plugin missing (apt install docker-compose-plugin)" >&2; exit 1; }
 docker info >/dev/null 2>&1 || { echo "cannot talk to the docker daemon (permissions? is it running?)" >&2; exit 1; }
 
+# Unattended OS upgrades replaced the NVIDIA userspace libraries under a loaded driver mid-run on the first node (580.178
+# libraries vs 580.95 kernel module: every CUDA call failed until the module was reloaded). A rented training box
+# should not change its own drivers.
+if systemctl list-unit-files 2>/dev/null | grep -q unattended-upgrades; then
+  systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+  echo "disabled unattended upgrades (driver stability)"
+fi
+
 if ! command -v uv >/dev/null; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
