@@ -91,6 +91,8 @@ def _head_tail(values: list[float], n: int) -> tuple[float | None, float | None]
 def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: HealthConfig | None = None) -> list[Finding]:
     """Findings for the per-step training rows of one run (oldest first)."""
     cfg = cfg or HealthConfig()
+    # Any logged row shows the run is alive (a validation probe between two steps logs its own row).
+    t_alive = max((t for r in rows if (t := _num(r, "time")) is not None), default=None)
     rows = [r for r in rows if is_train_log(r)]
     if not rows:
         return [Finding(OK, "start", "no training step logged yet")]
@@ -99,9 +101,8 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
     last = rows[-1]
 
     step_times = _series(rows, "step_time")
-    t_last = _num(last, "time")
-    if now is not None and t_last is not None and step_times:
-        idle, typical = now - t_last, statistics.median(step_times)
+    if now is not None and t_alive is not None and step_times:
+        idle, typical = now - t_alive, statistics.median(step_times)
         if idle > cfg.stall_factor * typical:
             out.append(Finding(FAIL, "stall", f"no step for {idle / 60:.0f} min (typical step {typical / 60:.1f} min)"))
 

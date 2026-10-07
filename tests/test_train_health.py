@@ -98,3 +98,10 @@ def test_host_ram_growth_warns_before_the_oom_killer():
     rows = [step(i, **{"mem/rss_gb": 10.0 + 3.8 * i, "mem/available_gb": 60.0 - 3.8 * i}) for i in range(1, 15)]
     assert checks(rows)["memory"] == FAIL  # ~7 GB left: about 2 steps
     assert "memory" not in checks([step(i, **{"mem/rss_gb": 20.0, "mem/available_gb": 50.0}) for i in range(1, 8)])
+
+
+def test_a_validation_probe_between_steps_is_not_a_stall():
+    rows = run(5)
+    probe = {"step": 5, "time": rows[-1]["time"] + 600.0, "eval_reward": 0.6}  # a 10-minute probe logs its own row
+    assert "stall" not in checks(rows + [probe], now=probe["time"] + 400)
+    assert checks(rows, now=rows[-1]["time"] + 1200)["stall"] == FAIL  # over 2.5 x the 400 s step
