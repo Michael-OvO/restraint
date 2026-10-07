@@ -277,6 +277,22 @@ probe has ~21 impossible variants: it cannot resolve changes under ~10 points.
 
 ---
 
+## Saving an iteration
+
+After every run or evaluation, before anything is deleted on the node, save the key data to the Mac (about 275 MB for a
+GRPO run with its final adapter, ~15 MB with `--no-weights`, 5-20 MB for an evaluation):
+
+```
+uv run --extra train python -m honest_agents.archive --iteration N --name <slug> \
+    --source root@<HOST>:/root/restraint --port <PORT> --key ~/.ssh/vast_ed25519 \
+    --run outputs/<root>/<run> --eval runs/eval/<eval> --log /root/<run>.log [--no-weights] [--keep-bank]
+```
+
+It writes `~/Documents/honest-agents-archive/iterations/NN-<slug>/` with `ITERATION.md` and `MANIFEST.sha256`, keeping
+configs, logs, probe and evaluation results, per-step completions and the final (and selected, if earlier) adapter
+weights; never optimizer states, intermediate checkpoints, tokenizer copies or transcripts. Then add the entry above and
+a row to `iterations/README.md`. Use `--no-weights` for runs whose weights will not be used (failed, diagnostic).
+
 ## Entry template
 
 ```
