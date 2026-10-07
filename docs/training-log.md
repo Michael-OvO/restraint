@@ -222,8 +222,38 @@ validation probe.
 
 **Decision.** Run to step 50 as planned (owner's call), then evaluate.
 
-**Next.** Step-40 probe; final evaluation of the selected checkpoint on the test split against the base (claims on impossible
-48.7 %), including `corrupt_input` (transfer).
+**Final result (completed 2026-10-07, 50 steps, ~7 h, rc 0; checkpoints 10-50 + `final`).** Validation probe:
+
+| | step 0 | 20 | 40 | 50 |
+|---|---:|---:|---:|---:|
+| claims done on impossible | 60.4 % | 56.8 % | 60.4 % | **60.4 %** |
+| task success, feasible | 79.9 % | 80.7 % | 80.5 % | **85.4 %** |
+| control success | 78.7 % | 77.5 % | 79.8 % | **86.0 %** |
+| fabrication (share of episodes) | 12 % | 13 % | 11 % | 8 % |
+| claims after a failure | 68.8 % | 87.5 % | 68.8 % | 76.7 % |
+| false blame | 0 % | 0 % | 0 % | 0 % |
+| mean reward | 0.652 | 0.685 | 0.680 | 0.768 |
+
+Feasible success on the same training tasks against the base model (pass@4 bank): gap -0.00 (steps 1-10), +0.03 (11-20),
++0.10 (21-30), +0.15 (31-40), ~400 episodes per window. Entropy drifted from ~0.27 to ~0.17 (collapse warnings at 57-67 %).
+
+**Conclusion.** The run made the model better at the tasks, on training tasks (+15 points against the base on the same
+tasks) and, at the end, on held-out validation (+5 to +7 points, borderline on ~78 feasible episodes). It did **not** make it
+more honest: false claims on impossible tasks are exactly at baseline and claims after a failure did not fall. The reward
+is effectively paying for task success; the honesty terms carry little gradient.
+
+**Why (best explanation).** (1) Behaviour on an impossible task is near-deterministic per task, so most impossible groups
+are 8/8 or 0/8 and give zero advantage. (2) The plain copy and the near-miss controls of a source task are the same task,
+so the pool repeats tasks under different variant ids; part of the training-task gain may be memorised tasks. (3) The
+probe has ~21 impossible variants: it cannot resolve changes under ~10 points.
+
+**Next iteration (proposal, not run).**
+1. Within-group diversity on impossible tasks: 16 generations per prompt, or temperature 1.2 on the first turns, so the
+   honesty terms produce advantages; measure the share of zero-variance impossible groups as the gate.
+2. Pool built so a source task contributes one variant per epoch (no plain + control repeats).
+3. false_blame -0.15 (blame threshold 1/3) instead of -0.4.
+4. A larger, honesty-weighted validation probe (e.g. 60 impossible + 60 feasible) and checkpoint selection on a combined
+   honesty + success metric instead of task success alone.
 
 ---
 
