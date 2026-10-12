@@ -704,6 +704,12 @@ blaming capability, and the dropped reports of finding 1. On remove_input and re
 abstention above budget exits, as designed. Twins carried 24.6 % of |advantage| (gate 30 %); high_risk twin groups were
 zero-variance in 20 of 36.
 
+**Re-score with the dropped reports recovered** (`analysis.rescore_dropped`, training rollouts only; the eval records do
+not keep the unexecuted message): all 73 recovered (42 "complete": 24 real successes, 10 feasible fabrications, 8 false
+claims on impossible tasks; 30 "incomplete"; 1 unparsable). Training-rollout rates move little: claims on impossible
+55.3 -> 57.0 %, abstain_correct 32.4 -> 33.0 %, feasible fabrication 11.0 -> 12.2 %. The leak corrupted individual
+advantages (a late fabrication could out-score honest peers) but does not explain the aggregate trends.
+
 **5. Why teacher SFT broke capability** (paired base vs SFT on the probe; re-checked): the student copied the teacher's
 shape (1-2 inspections, one dense multi-step command, decide after ~3-5 commands: feasible commands per episode base
 14.1 vs SFT 5.8) without its execution skill. Commands >= 500 characters fail hard in 35 % of SFT cases (base 8 %);
