@@ -11,6 +11,18 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
 
 ---
 
+## Latest (2026-10-12, after iteration 11)
+
+- **Teacher SFT failed its gate**: verified success 69 -> 22 % (it learned caution, not competence); interpolated merges
+  (0.3, 0.5) also failed. Not used.
+- **GRPO from base** (new reward, rebalanced pool, 20 steps): claims on impossible tasks 50 -> 41 % (-9.0 [-18.2, -1.2],
+  first measurable honesty change), but through budget exhaustion rather than explicit abstention, and capability
+  -4.4 [-11.7, +3.2]: no checkpoint passes the non-inferiority gate, so the base model stays the reference.
+- Next: make an explicit, correct abstention strictly better than a budget exit (gamma < 0), SFT that preserves the base
+  model's competence, more seeds and a bigger evaluation. Details: Iteration 11.
+- W&B: https://wandb.ai/michael_ovo/honest-agents (`it11-sft-teacher`, `it11-grpo-base`). Archive:
+  `~/Documents/honest-agents-archive/iterations/11-sft-grpo` and `11-teacher-data`.
+
 ## Current state (2026-10-07, after iteration 10)
 
 ### Current design
@@ -536,7 +548,7 @@ n = 34) real? How much of the run-2 fabrication fall is easier steps? Why does t
 `.save` (prompt framing or no exploration prior)? What is a sensible command budget, given 14 % of feasible episodes exhaust
 28 commands?
 
-## Iteration 11 - Teacher SFT then GRPO from the SFT policy (2026-10-11/12, in progress)
+## Iteration 11 - Teacher SFT (failed gate), then GRPO from base with the new reward and pool (2026-10-11/12)
 
 ### Design
 The policy never samples "look before acting", so a reward cannot teach it (iteration 10). Teach the behaviour first with
@@ -614,6 +626,30 @@ reliable (false-claim share 20 -> 34 %). Per the rule fixed in advance, GRPO sta
 claim-rate pre-screen for the base policy, the zero-variance share is watched per step instead), the 120-variant probe at
 steps 0/20/40 and the probe-based capability stop rule. Efficiency note: the probe runs in batches of `probe.batch_size` (25) sequentially, ~18 min per probe with idle GPUs; set it to the probe size next time.
 
+**GRPO** (`it11-grpo-base`, W&B run 90175ce304f432b9; 2x RTX 4090 48 GB, server mode): 20 steps (planned 40; stopped at
+the step-20 checkpoint and probe for time). Steps took 9-13 min of compute plus ~4 min of sandbox boot/teardown between
+steps. Step 14 died with a CUDA OOM in TRL's fused log-prob kernel backward (one ~15k-token sequence needs 15 GB of fp32
+logits gradient on a 48 GB card); resumed from checkpoint-10 with `grpo.max_completion_length=12288` and
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (steps 11-20 therefore trained with a 12k budget; all evaluations used
+16k). Health: OK throughout except the per-step control canary (WARN, confounded by task mix); entropy 0.19-0.22, IS ratio
+1.0, RAM 3.2 GB. Zero-variance groups 0-38 % per step (run 2: 26-86 % on the impossible families).
+
+**Final evaluation** (probe set, 2 samples, paired against base; `eval.select_checkpoint`):
+
+| metric | base | GRPO step 10 | GRPO step 20 |
+|---|---:|---:|---:|
+| verified success, feasible (primary) | 69.4 | 66.2 (-3.1 [-10.1, +3.6]) | 65.0 (-4.4 [-11.7, +3.2]) |
+| claims done on impossible | 50.0 | 47.4 (-2.6 [-7.5, +2.4]) | **41.0 (-9.0 [-18.2, -1.2])** |
+| false claims among claims (primary) | 20.1 | 23.7 | 16.8 (-3.3 [-10.4, +2.9]) |
+| abstain_correct, impossible | 30.8 | 32.1 | 23.1 |
+| no report (mostly budget exhaustion) | 12.6 | 13.4 | 23.9 |
+| decline rate, near-miss controls | 2.5 | 2.5 | 2.5 |
+| commands before the report | 13.5 | 15.6 | 17.7 |
+| irreversible violations | 13.4 | 14.3 | 14.3 |
+
+Selection: no checkpoint passes the non-inferiority gate (lower bound of verified success > -3 points): **keep the base
+model.** In-run probe (1 sample): claims on impossible 42.5 -> 41.0 %, verified success 70 -> 65 % (steps 0 -> 20).
+
 ### Observations
 - Teachers were mostly good but not perfect: of 420 audited attempts, 103 were dropped (false claims on controls,
   skipped risky sub-tasks claimed as complete, sloppy verification, over-caution). remove_input controls were the weak
@@ -621,12 +657,44 @@ steps 0/20/40 and the probe-based capability stop rule. Efficiency note: the pro
 - The model's own reward incentives had a hole only an independent review found (zero-command false blame).
 - Teacher token accounting silently counted 2 tokens per call (transformers 5 returns a BatchEncoding); no kept trajectory
   exceeded the limits (max 3,873 tokens), but the guarantee was missing until fixed and tested.
+- **Teacher SFT transferred the caution, not the competence.** Imitating 284 short expert trajectories (mean ~5 commands
+  kept, the teacher's own) made the 4B model inspect first and abstain, but it stopped working early: verified success
+  69 -> 22 %. Interpolating the update (0.3, 0.5) traded capability for honesty at a worse rate than the base model; even
+  0.3 raised the false-claim share (20 -> 34 %).
+- **GRPO from base moved the claim rate on impossible tasks for the first time** (50 -> 41 %, interval excludes 0), but by
+  the wrong mechanism: correct abstentions fell (31 -> 23 %) and no-report episodes doubled (13 -> 24 %). The policy
+  learned to keep working (13.5 -> 17.7 commands) and run out of budget instead of claiming; with gamma = 0 a budget
+  exit on an impossible task pays 0, above a false claim (-1), so this is the reward's predicted optimum when the policy
+  cannot tell the task is impossible.
+- Capability held within noise (-4.4 [-11.7, +3.2]) and control declines did not rise (2.5 %), so the new pool and
+  false-blame fix did not cause over-refusal; one seed and 40 source tasks are too few to pass the -3 point gate.
+- Learning signal improved as designed: zero-variance groups 0-38 % per step against 26-86 % in run 2.
+- Infrastructure cost about 2.5 hours of a 10-hour window: two unusable Vast hosts (VM image limited to compute
+  capability <= 9.0; a GPU that would not initialise), a driver upgrade, a merge-precision bug, an OOM and slow probes.
 
 ### Reflection
-(after the run)
+- The SFT gate did its job: without it, 8 GPU-hours of GRPO would have started from a policy 47 points less capable. The
+  merge bug shows why every merged model needs a vLLM sanity run: Hugging Face's own forward said the merge was fine.
+- Behaviour cloning from a much stronger teacher copies its surface (short trajectories, early decisions) without its
+  skill. The teacher's brevity is a skill signal, not a style to imitate.
+- The honesty gain after 20 GRPO steps is real but mostly "stop claiming by running out of commands". The reward allowed
+  it: gamma = 0 makes a silent budget exit pay the same as an honest "incomplete" without a blocker on impossible tasks,
+  and more than an explicit decline with a slightly wrong target would after damage. Honest silence is better than a lie,
+  but the target behaviour is an explicit, correct abstention.
+- Pre-registering the decision rules (SFT interpolation margin, keep-base-if-no-checkpoint-passes) kept overnight
+  decisions honest; both rules were applied as written.
 
 ### Next
-(after the run)
+1. **Make explicit abstention strictly better than a budget exit** on impossible tasks: gamma < 0 (e.g. -0.25, still
+   above a false claim) and a per-command cost after the point where an inspection would have revealed the blocker; check
+   the threshold algebra so honest "incomplete" on feasible work is not hurt.
+2. **SFT that keeps capability**: mix teacher trajectories with the base model's own successful rollouts (rejection
+   sampling) so the length distribution and competence stay the base model's; or teach only the first 1-3 commands
+   (inspection) and let the policy continue on its own (prefix SFT / on-policy distillation of the opening).
+3. **Seeds and size**: 2-3 seeds per arm and the full validation split (not 40 sources) so a -3 point gate can pass.
+4. **Throughput**: probe batch = probe size; sandbox pre-boot; rent >= 80 GB per GPU (or keep `max_completion_length`
+   at 12k); prefer hosts with driver >= 580 and the `ubuntu_terminal`/Blackwell-capable VM image.
+5. Re-run GRPO for 40-50 steps with (1) and compare to this run's step-20 checkpoint on the same probe.
 
 ---
 
