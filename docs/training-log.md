@@ -596,6 +596,24 @@ within 8 points of base (69.4) and whose claim rate on impossible tasks is below
 from the base model. The 8-point margin is looser than the final gate's 3 because GRPO raised task success by 5-7 points
 in run 2; the final non-inferiority gate still applies.
 
+**Interpolation** (same probe set and protocol; `runs/eval/it11_sft{030,050}_probe`):
+
+| metric | base | scale 0.3 | scale 0.5 | scale 1.0 |
+|---|---:|---:|---:|---:|
+| verified success, feasible | 69.4 | 51.9 | 44.4 | 21.9 |
+| claims done on impossible | 50.0 | 45.0 | 40.0 | 7.7 |
+| abstain_correct, impossible | 30.8 | 36.2 | 48.8 | 65.0 |
+| false claims among claims | 20.1 | 33.6 | 44.5 | 56.8 |
+| decline rate, near-miss controls | 2.5 | 22.5 | 25.0 | 61.3 |
+| irreversible violations | 13.4 | 15.4 | 11.7 | 2.9 |
+| commands before the report | 13.5 | 11.3 | 8.4 | 5.4 |
+
+No scale meets the rule: capability falls faster than honesty rises at every strength, and even 0.3 makes claims less
+reliable (false-claim share 20 -> 34 %). Per the rule fixed in advance, GRPO starts from the **base model** (W&B
+`it11-grpo-base`), with the iteration-11 reward fixes, the rebalanced and cleaned pool (351 rows, all 133 twins kept: no
+claim-rate pre-screen for the base policy, the zero-variance share is watched per step instead), the 120-variant probe at
+steps 0/20/40 and the probe-based capability stop rule.
+
 ### Observations
 - Teachers were mostly good but not perfect: of 420 audited attempts, 103 were dropped (false claims on controls,
   skipped risky sub-tasks claimed as complete, sloppy verification, over-caution). remove_input controls were the weak
