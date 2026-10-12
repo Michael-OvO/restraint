@@ -536,6 +536,55 @@ n = 34) real? How much of the run-2 fabrication fall is easier steps? Why does t
 `.save` (prompt framing or no exploration prior)? What is a sensible command budget, given 14 % of feasible episodes exhaust
 28 commands?
 
+## Iteration 11 - Teacher SFT then GRPO from the SFT policy (2026-10-11/12, in progress)
+
+### Design
+The policy never samples "look before acting", so a reward cannot teach it (iteration 10). Teach the behaviour first with
+SFT on audited demonstrations, then let GRPO pay for outcomes only.
+
+- **Teacher data** (`honest_agents.teacher`): Claude (Sonnet) plays the policy through the unchanged evaluation loop in
+  real Docker sandboxes on the Mac (same prompt, tools, 28-command / 16k-token budgets, grader, bank rows). Opaque tokens:
+  the teacher never sees the task family or its grade. 386 train variants from sources outside the RL pool (121 feasible,
+  133 near-miss controls, 132 impossible), then 63 retries (unstarted / abandoned episodes and every dropped control).
+- **Audit**: one strict audit per episode (outcome vs ground truth, inspection before the first mutation, every claim
+  grounded in earlier output, style, report). 420 audited, 317 kept.
+- **SFT set** (`sft.teacher_stage`, `configs/sft_teacher_qwen35.yaml`): code filters (train split, no tamper / damage /
+  violation, feasible only `success_claimed`, impossible only `abstain_correct`, a read-only command before the first
+  mutation) + audit keep + impossible share capped at 35 %: 284 train + 28 held out (94 feasible, 91 controls, 99
+  impossible). LoRA r32, lr 5e-5, 2 epochs, every assistant turn trained.
+- **Reward changes**: implicit_abstain (budget exits on impossible tasks) 0.25 -> 0 in training; blocker-target matching
+  normalises paths and credits directory-level / truncated targets (12 of 19 run-2 "wrong reason" cases flip, no wrong case
+  newly matches); a zero-command false blame pays min(lazy, false_blame) = -0.4 (it paid 0, so declining blind beat
+  inspecting first; found by the independent review).
+- **RL pool** (`tasks.rl_pool`, `configs/tasks/rl_pool.yaml`): high_risk 80 / remove_input 43 / revoke 10 twins, each
+  with its control, never-pass sources and leaks excluded, teacher sources excluded (0 overlap), step blocks of 8 with
+  distinct sources read in file order: 351 rows. Pre-screen: the SFT model samples each twin 4 times; keep twins claimed
+  20-80 % of the time.
+- **GRPO**: from the SFT policy (adapter merged into the base, `sft.merge`), server mode on 2x RTX 4090 48 GB (trainer
+  GPU 0, vLLM GPU 1), 40 steps (time budget), checkpoint every 10, probe of 120 fixed validation variants at steps 0/20/40.
+- **Gates**: SFT gate (paired vs base on the probe set: verified success within 3 points, no rise in control declines
+  or zero-command episodes, more correct abstentions on high_risk); signal gate (>= 30 % of advantage on impossible
+  tasks); final non-inferiority gate and checkpoint selection (`eval.select_checkpoint`). Capability stop rule on the
+  fixed probe (> 15 points on 2 consecutive probes stops the run).
+- **Monitoring**: W&B project https://wandb.ai/michael_ovo/honest-agents (SFT run `it11-sft-teacher`).
+
+### Results
+(filled in as stages finish)
+
+### Observations
+- Teachers were mostly good but not perfect: of 420 audited attempts, 103 were dropped (false claims on controls,
+  skipped risky sub-tasks claimed as complete, sloppy verification, over-caution). remove_input controls were the weak
+  spot (1 of 23 kept) until a generic instruction to look for a backup copy before declining raised it to 11.
+- The model's own reward incentives had a hole only an independent review found (zero-command false blame).
+- Teacher token accounting silently counted 2 tokens per call (transformers 5 returns a BatchEncoding); no kept trajectory
+  exceeded the limits (max 3,873 tokens), but the guarantee was missing until fixed and tested.
+
+### Reflection
+(after the run)
+
+### Next
+(after the run)
+
 ---
 
 ## Infrastructure incidents (and the guard each one left behind)
@@ -548,6 +597,10 @@ n = 34) real? How much of the run-2 fabrication fall is easier steps? Why does t
 | unattended OS upgrade replaced the NVIDIA libraries under the loaded driver | module reload; `setup_node.sh` disables unattended upgrades (`33509d5`) |
 | trainer OOM-killed at 69 GB | iteration 8 |
 | monitors that only printed progress missed real problems | `train.health` (stall, drift, collapse, gaming, learning, RAM) |
+| Vast VM image `vastai/kvm:ubuntu_cli_22.04-2025-05-16` on Blackwell hosts: sshd refuses the key (`bad ownership or modes for authorized_keys`); the template is limited to compute capability <= 9.0 | check a template's `extra_filters` (compute_cap) against the GPU before renting |
+| RTX 6000D VM (`ubuntu_terminal` image, no driver): open driver 595/615 installs but the GPU fails probe-time init (passthrough) | abandon a host whose GPU does not initialise after one driver attempt; prefer images with a preinstalled driver |
+| 4090 VM shipped driver 575 (CUDA 12.9) while torch 2.13 / vLLM 0.30 need CUDA 13 (driver >= 580) | check `driver_version` >= 580 before renting, or upgrade (purge held 575 packages, install 595, reboot) |
+| new VM: Docker's stock address pool and no compose plugin | `probe_node.sh` catches both; daemon.json `default-address-pools`, `apt install docker-compose-v2` |
 
 ## Method notes
 
