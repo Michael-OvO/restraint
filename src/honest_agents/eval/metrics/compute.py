@@ -7,7 +7,13 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from honest_agents.eval.metrics.bootstrap import bootstrap
-from honest_agents.eval.metrics.breakdown import blocker_breakdown, breakdown, leak_report, stop_reason_cases
+from honest_agents.eval.metrics.breakdown import (
+    blocker_breakdown,
+    breakdown,
+    family_kind_breakdown,
+    leak_report,
+    stop_reason_cases,
+)
 from honest_agents.eval.metrics.calibration import calibration
 from honest_agents.eval.metrics.episode import ratios, values
 from honest_agents.eval.metrics.paired import PAIRED_NAMES, paired_metrics
@@ -36,10 +42,12 @@ def compute_metrics(
     min_source_tasks: int | None = None,
     min_family_variants: int | None = None,
     protocol: EvalProtocol | None = None,
+    forced_attempt: bool = False,
 ) -> dict[str, Any]:
     """Everything `summary.render_summary` prints. `protocol` names the training and held-out families for the
     `transfer` table (default: `EvalProtocol()`). `references` adds the constant-policy reference rows and the
     confidence-threshold sweep (`honest_agents.eval.baselines`), computed with `compute_reward` on the same episodes.
+    `forced_attempt` marks a capability run (`run_eval --forced-attempt`) and adds the `capability` block.
     """
     from honest_agents.eval import baselines
 
@@ -120,6 +128,7 @@ def compute_metrics(
         "stop_reason_cases": stop_reason_cases(eps),
         "leaks": leak_report(eps, min_family_variants),
         "by_kind": breakdown(eps, lambda e: e.rec.kind),
+        "by_family_kind": family_kind_breakdown(eps, min_family_variants),
         "by_family": breakdown(
             eps, lambda e: e.rec.family or e.rec.perturbation or "(none)", min_family_variants, suppressed["by_family"]
         ),
@@ -133,6 +142,21 @@ def compute_metrics(
         "reward_by_alpha": reward_by_alpha(records, cfg, alphas),
         "infra_error_examples": [{"episode_id": r.episode_id, "error": r.infra_error} for r in errors[:20]],
     }
+    out["mode"] = "forced_attempt" if forced_attempt else "normal"
+    if forced_attempt:
+        n_abstain = sum(e.br.abstained for e in scored)
+        out["capability"] = {
+            "verified_pass_rate": entry("task_success"),
+            "verified_success_rate": entry("verified_success_rate"),
+            "decline_rate_feasible": entry("decline_rate_feasible"),
+            "n_infeasible_episodes": sum(not e.rec.feasible for e in scored),
+            "n_abstain_reports": n_abstain,
+        }
+        if n_abstain:
+            warnings.append(
+                f"{n_abstain} episodes report status abstain in a forced-attempt run (through submit_report): the "
+                "prompt did not hold for them; they count as declines and as non-passes where the tests failed"
+            )
     if references:
         # The same split as the policy's own row: a variant that leaked under the observed reports is void in every
         # reference row too (a rewritten report would otherwise turn the leak into an ordinary scored episode).

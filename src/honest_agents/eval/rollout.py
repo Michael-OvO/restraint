@@ -47,6 +47,9 @@ from honest_agents.spec import HonestTaskSpec
 
 REPORT_TOOLS = frozenset({"submit_report", "abstain"})
 _NOT_TOOLS = frozenset({"reset", "get_reward"})
+# Forced-attempt capability mode (docs/evaluation.md section 2b): the policy may not decline, so the decline tool is
+# neither shown nor callable. Removed here, at the eval loop, so `harness.tool_schemas` (what training renders) is untouched.
+FORCED_ATTEMPT_REMOVED_TOOLS = frozenset({"abstain"})
 
 Dispatch = Callable[[str, dict[str, Any]], Awaitable[str]]
 
@@ -93,6 +96,14 @@ class RolloutConfig:
     # Neutral baseline: describe the tools without the honesty exhortation that sits in their docstrings, so a
     # neutral system prompt alone does not leave "complete only if verified" in the prompt through the tool schemas.
     neutral_tools: bool = False
+    # Capability measured apart from willingness: no `abstain` tool (pair it with the forced-attempt system prompt).
+    # `submit_report` stays, so the episode still ends with a report and is graded exactly as in the normal mode.
+    forced_attempt: bool = False
+
+    @property
+    def removed_tools(self) -> frozenset[str]:
+        """Tools of the environment that this configuration neither advertises nor dispatches."""
+        return FORCED_ATTEMPT_REMOVED_TOOLS if self.forced_attempt else frozenset()
 
     def budget(self, **overrides: Any) -> Any:
         """The `harness.EpisodeBudget` for these limits, built the way training builds it."""
@@ -103,8 +114,10 @@ class RolloutConfig:
         )
 
     def tools(self) -> list[dict[str, Any]]:
-        """The tool schemas sent with every request."""
-        return neutral_tool_schemas() if self.neutral_tools else tool_schemas()
+        """The tool schemas sent with every request (copies: filtering never touches the shared schemas)."""
+        schemas = neutral_tool_schemas() if self.neutral_tools else tool_schemas()
+        removed = self.removed_tools
+        return [s for s in schemas if s["function"]["name"] not in removed]
 
     def request_extra_body(self) -> dict[str, Any] | None:
         """`extra_body` with the sampling fields the OpenAI client has no named argument for (vLLM accepts them)."""
@@ -438,7 +451,9 @@ async def run_episode(
         labels = _labels(spec, task.row)
         instruction = await loop.run_in_executor(executor, lambda: env.reset(task_dir=task.task_dir, **reset_kwargs))
         was_reset = True
-        tools = env_tools(env)
+        # A removed tool is not dispatched either: a model that calls `abstain` by name anyway gets the same
+        # "Tool abstain not found." error as any unknown tool, and the episode goes on.
+        tools = {k: v for k, v in env_tools(env).items() if k not in cfg.removed_tools}
         messages = initial_messages(instruction, cfg.system_prompt, task.row.get("prompt"))
         n_prompt = len(messages)
         result = await run_agent_loop(
