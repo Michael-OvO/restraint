@@ -43,6 +43,7 @@ def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16") -> dict:
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
     merged.save_pretrained(out_dir, safe_serialization=True)
+    restored = restore_base_tensors(base, out_dir, dtype)
     # Tokenizer, chat template and (for Qwen3.5) the processor files travel with the weights, so vLLM and the trainer
     # render prompts exactly as they would for the original checkpoint.
     try:
@@ -54,11 +55,52 @@ def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16") -> dict:
         if src.is_file() and not (out_dir / extra).exists():
             shutil.copy(src, out_dir / extra)
     info = {"base": base, "adapter": adapter, "architecture": arch, "lora_modules": len(lora_a),
-            "probe_param": probe_name, "probe_changed": bool(moved)}  # fmt: skip
+            "probe_param": probe_name, "probe_changed": bool(moved), **restored}  # fmt: skip
     (out_dir / "merge_info.json").write_text(json.dumps(info, indent=2))
     if not moved:
         raise SystemExit(f"merge left {probe_name} unchanged: the adapter did not apply ({info})")
     return info
+
+
+def restore_base_tensors(base: str, out_dir: Path, dtype: str) -> dict:
+    """Rewrite the merged checkpoint as the base checkpoint with only the LoRA-changed tensors replaced.
+
+    Loading in `dtype` and saving rounds every tensor the base stored in higher precision: Qwen3.5 keeps the Gated
+    DeltaNet `A_log` (the recurrence's decay) and the linear-attention norm weights in float32, and vLLM serving the
+    bf16-rounded copies produced garbled commands while Hugging Face's own forward (which rounds both to bf16) showed
+    the same loss as the adapter. Tensors the model class does not load (Qwen3.5's multi-token-prediction head) are
+    dropped by save_pretrained and come back here too. A tensor counts as changed when it differs from the base tensor
+    rounded to `dtype`, which is exactly what the LoRA merge touched.
+    """
+    import torch
+    from huggingface_hub import snapshot_download
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+
+    src = Path(base) if Path(base).is_dir() else Path(snapshot_download(base))
+    merged: dict[str, torch.Tensor] = {}
+    for f in sorted(out_dir.glob("*.safetensors")):
+        with safe_open(str(f), "pt") as h:
+            merged.update({k: h.get_tensor(k) for k in h.keys()})  # noqa: SIM118 - a safetensors handle, not a dict
+    target = getattr(torch, dtype)
+    tensors: dict[str, torch.Tensor] = {}
+    kept = changed = added = 0
+    for f in sorted(src.glob("*.safetensors")):
+        with safe_open(str(f), "pt") as h:
+            for k in h.keys():  # noqa: SIM118 - a safetensors handle, not a dict
+                orig = h.get_tensor(k)
+                new = merged.get(k)
+                if new is None:
+                    tensors[k], added = orig, added + 1
+                elif new.shape == orig.shape and torch.equal(new, orig.to(target)):
+                    tensors[k], kept = orig, kept + 1
+                else:
+                    tensors[k], changed = new, changed + 1
+    for f in out_dir.glob("*.safetensors"):
+        f.unlink()
+    (out_dir / "model.safetensors.index.json").unlink(missing_ok=True)
+    save_file(tensors, str(out_dir / "model.safetensors"), metadata={"format": "pt"})
+    return {"tensors_from_base": kept, "tensors_changed": changed, "tensors_added_back": added}
 
 
 def main(argv: list[str] | None = None) -> int:
