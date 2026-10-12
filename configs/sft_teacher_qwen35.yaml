@@ -43,9 +43,9 @@ train:
   warmup_steps: 0.1
   eval_steps: 5                      # the run is short; evaluate often enough to see the eval-loss curve
   save_steps: 50
-  # Every real run should log to the W&B dashboard: pass train.report_to=wandb on the node. Not the default here because
-  # wandb is not a project dependency yet (as in base.yaml), and the dry run / tests must not need it.
-  report_to: none
+  # W&B dashboard: the key comes from WANDB_API_KEY or ~/.netrc on the node, never from a config; WANDB_MODE=disabled
+  # turns it off (tests and the dry run do not open a run).
+  report_to: wandb
 
 guard:
   entropy_floor_ratio: null          # e.g. 0.5 to stop when held-out entropy halves
