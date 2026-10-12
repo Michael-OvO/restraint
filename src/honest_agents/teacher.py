@@ -155,6 +155,25 @@ def assign(args: argparse.Namespace) -> int:
     return 0
 
 
+def reassign(args: argparse.Namespace) -> int:
+    """A fresh attempt at the variants behind `tokens`, under new opaque tokens (the old episodes stay as they are; the
+    SFT stage treats every token as its own episode). Prints the new tokens, one per line."""
+    lay = Layout(Path(args.out))
+    data = json.loads(lay.assignments.read_text())
+    tokens = data["tokens"]
+    new: list[str] = []
+    for old in Path(args.tokens_file).read_text().split():
+        entry = tokens[old]
+        attempt = 2
+        while (tok := make_token(entry["variant_id"], f"{data['salt']}:attempt{attempt}")) in tokens:
+            attempt += 1
+        tokens[tok] = {**entry, "attempt": attempt, "retry_of": old}
+        new.append(tok)
+    _write_json(lay.assignments, data)
+    print("\n".join(new))
+    return 0
+
+
 # ── the stand-in model ───────────────────────────────────────────────────
 
 
@@ -430,6 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--keep-rl-sources", action="store_true", help="also use sources of the RL pool")
     a.add_argument("--force", action="store_true")
     a.set_defaults(fn=assign)
+
+    sp = sub.add_parser("reassign", help="new tokens for another attempt at the variants of the given tokens")
+    sp.add_argument("tokens_file", help="file with one old token per line")
+    sp.add_argument("--out", default=str(DEFAULT_OUT))
+    sp.set_defaults(fn=reassign)
 
     sp = sub.add_parser("prompt", help="print the system prompt and tool schemas the policy sees")
     sp.set_defaults(fn=prompt_cmd)
