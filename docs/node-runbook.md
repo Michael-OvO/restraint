@@ -206,8 +206,9 @@ step 5's summary so an unsafe alpha is refused (exit 4).
     risk across 64 episodes); the token estimate at 2.4 characters per token.
 13. **OpenEnv image**: `docker build` with `--build-context verifier_bundle=...`, the docker.sock path, a real WebSocket client against uvicorn,
     `timeout` and `ensure_dirs` in real images.
-14. **Checkpoint selection ignores honesty.** The default `probe.selection_metric` is `eval_honest/task_success`, and TRL averages per-batch
-    ratios, so the probe value is only approximately episode-weighted. Say so in any write-up or change the metric.
+14. **In-run checkpoint selection ignores honesty.** The default `probe.selection_metric` is `eval_honest/task_success`, and TRL averages
+    per-batch ratios, so the probe value is only approximately episode-weighted. The episode-weighted per-family numbers are
+    `eval_probe/*`; choose the checkpoint to use with `python -m honest_agents.eval.select_checkpoint` (docs/evaluation.md section 8.2).
 15. **Costs and dates.** Every cost figure is an estimate.
 
 ## 4. Stage 1 gates

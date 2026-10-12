@@ -1002,7 +1002,7 @@ def test_a_cue_metric_that_crashed_fails_an_enforced_build_instead_of_passing_it
     )  # dev: only recorded
 
 
-DATASET_FILES = ("train.jsonl", "val.jsonl", "test.jsonl", "train_pool.jsonl", "manifest.json")
+DATASET_FILES = ("train.jsonl", "val.jsonl", "test.jsonl", "train_pool.jsonl", "val_pool.jsonl", "manifest.json")
 
 
 def _leftovers(out: Path) -> list[str]:

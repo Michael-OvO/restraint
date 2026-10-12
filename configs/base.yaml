@@ -26,6 +26,7 @@ lora:
 data:
   train_file: data/train.jsonl
   eval_file: data/val.jsonl   # fixed validation split for the periodic probe; never the test split
+  probe_file: null            # fixed probe list (python -m honest_agents.tasks.probe_set); used whole, wins over eval_file
   max_rows: null
   pair_batches: true      # keep feasible/infeasible variants of a pair_id in the same prompt batch
   allow_legacy_verifier: false   # tasks must say [metadata.honest] verifier = "pytest"
@@ -52,12 +53,15 @@ vllm:
   max_model_len: null          # null = prompt reserve + max_completion_length + per-turn cap; asserted on the server
   startup_probe: true          # fail at start if the server cannot return token ids / processed logprobs / full distribution
 
-probe:                  # periodic held-out probe, TRL's evaluation loop over a fixed subset of data.eval_file
+probe:                  # periodic held-out probe, TRL's evaluation loop over data.probe_file or a fixed subset of data.eval_file
   every_steps: 50       # must be a multiple of grpo.save_steps: each probed step has a checkpoint
-  max_variants: 100
-  batch_size: 25
+  max_variants: 100     # size of the eval_file subset (a probe_file is used whole)
+  batch_size: 25        # episodes in flight; a multiple of samples_per_variant
   on_start: true        # baseline probe of the untrained policy
   selection_metric: eval_honest/task_success
+  samples_per_variant: 1  # episodes per variant; cost = rows x this per probe (`--dry-run` prints episodes_per_probe)
+  min_infeasible: 60    # floors for a probe_file: fewer impossible / feasible variants are refused
+  min_feasible: 60
 
 stop:                   # callbacks.StopRuleConfig (docs/design.md section 8)
   enabled: true

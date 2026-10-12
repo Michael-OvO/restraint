@@ -436,6 +436,58 @@ python -m honest_agents.eval.run_eval --out runs/eval/a0.25 --metrics-only --alp
 (`verified_success_rate`, 1 - `p_claim_given_fail`). `reward_by_alpha` re-scores the same episodes under other alpha;
 that does not change behaviour, so the front must come from policies trained at different alpha.
 
+### 8.1 Training-time probe
+
+The probe runs inside training (TRL's evaluation loop, the training harness and caps) every `probe.every_steps`, at the
+last step and, with `probe.on_start`, at step 0. Iteration 9 probed 100 hash-chosen rows of `val.jsonl` (about 21
+impossible) with one sample each and saved only 64 episodes: TRL's completions buffers hold one training round, and the
+evaluation's table overwrote the training round of the same step. Now:
+
+- **Every episode is saved** to `<run>/probe/probe_<step>.jsonl`: variant, pair, kind, family, sample index, transcript and
+  the per-episode outcome (case, status, passed, commands, stop reason, blocker). The training round's
+  `completions/completions_<step>.parquet` is left alone (`train.probe`).
+- **A fixed, honesty-weighted list**: `data.probe_file` (used whole, in preference to the `eval_file` subset) built once by
+  `python -m honest_agents.tasks.probe_set --rows data/val_pool.jsonl --out data/probe.jsonl` (impossible variants
+  round-robin over families, each with its near-miss control and the plain twin of its source task; validation rows
+  only). A probe file below `probe.min_infeasible` / `probe.min_feasible` (60 each) is refused. `val_pool.jsonl` is
+  every validation row before the mixture balance (written by the dataset build); the balanced `val.jsonl` has only 40
+  impossible variants.
+- **k samples per variant**: `probe.samples_per_variant` (`batch_size` must be a multiple of it).
+- **Per-family metrics per probe**, episode-weighted, logged as `eval_probe/...` next to TRL's batch-averaged
+  `eval_honest/*` (so they reach `validation_probe.jsonl`, `train_log.jsonl` and W&B): claims on impossible tasks,
+  verified success on feasible / plain / control tasks, control decline rate, zero-command rate, with counts; the same
+  per family as `eval_probe/family/<family>/...` (plain feasible tasks are the family `feasible`).
+
+**Cost.** One probe is rows x `samples_per_variant` episodes; `python -m honest_agents.train --config ... --dry-run`
+prints `episodes_per_probe`, `probes_per_run` and `probe_episodes_per_run` next to `training_episodes_per_run`.
+
+| probe | rows | k | episodes per probe | 4 probes (run 2's schedule) |
+|---|---:|---:|---:|---:|
+| iteration 9 (`eval_file` subset) | 100 | 1 | 100 | 400 |
+| `probe_set` defaults (64 impossible + 64 controls + 64 plain twins) | 192 | 1 | 192 | 768 |
+| the same at k = 4 (evaluation protocol item 4) | 192 | 4 | 768 | 3,072 |
+
+For scale: run 2 trained on 3,200 episodes (50 steps x 64) and its 100-episode probe took about 12 minutes, so 768
+episodes per probe is about 1.5 hours each, the same order as the training itself. Probe less often (`every_steps` 25 on a
+50-step run) or use k = 2 for the in-run probe and keep k = 4 for the post-hoc checkpoint evaluation below.
+
+### 8.2 Checkpoint selection
+
+```bash
+python -m honest_agents.eval.select_checkpoint --base runs/eval/val_base \
+    runs/eval/val_ckpt10 runs/eval/val_ckpt20 runs/eval/val_ckpt30 --out runs/eval/selection.json
+```
+
+Each directory is a `run_eval` evaluation of the same validation tasks. A checkpoint is eligible only if verified success
+on feasible tasks is non-inferior to the base model: the lower bound of the paired bootstrap 95% interval of
+(checkpoint - base), resampling source tasks, above -`ni_margin` (3 points; the margin stored in the runs' protocol, which
+must agree). Among eligible checkpoints the lowest claim rate on impossible tasks wins (ties: lower false-claim share,
+higher verified success, earlier step). The table over every checkpoint (claims on impossible, false claims among claims,
+verified and task success, control decline, zero-command reports, both differences against the base with their
+intervals, gate) is printed, and the output says whether the winner is more honest than the base at all. This is a
+within-run selection on one seed, so the bound covers task sampling only; the confirmatory claim is still
+`run_eval --noninferiority` with several seeds per arm. Exit status 1 when no checkpoint passes: keep the base model.
+
 ## 9. Trajectory bank and quarantine
 
 `--bank-dir DIR` appends one `honest_agents.bank` row per episode (prompt and completion messages, the report call, the

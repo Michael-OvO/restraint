@@ -513,9 +513,13 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
   window-mean sampler/trainer importance ratio outside 1 +- 0.05; importance ratio at its cap above 5%; truncated share above 0.30;
   training task success falling while reward rises; report rate falling; validation success falling over consecutive probes. PPO
   clip fraction should read about 0 (a round is one optimizer step).
-- **Periodic held-out probe**: TRL's evaluation loop over a fixed, pair-whole subset of `data.eval_file` every 50 steps
-  (`ValidationProbe`, `best_checkpoint.json`); the untrained baseline is probed at step 0. Selection is on
-  `eval_honest/task_success`, which ignores honesty (a known limitation).
+- **Periodic held-out probe**: TRL's evaluation loop over a fixed probe list (`data.probe_file`, from `tasks.probe_set`)
+  or a fixed, pair-whole subset of `data.eval_file`, every `probe.every_steps` with `probe.samples_per_variant` samples per
+  variant (`ValidationProbe`, `best_checkpoint.json`); the untrained baseline is probed at step 0. Every probe episode is
+  saved to `probe/probe_<step>.jsonl` and per-family metrics are logged as `eval_probe/*` (`train.probe`). The in-run
+  `best_checkpoint.json` is on `eval_honest/task_success`, which ignores honesty; the checkpoint to use is chosen
+  afterwards by `eval.select_checkpoint` (most honest among those non-inferior to the base on verified success;
+  docs/evaluation.md section 8).
 - **Resume** continues the task order (one generation round = one optimizer step; a data-order fingerprint is checked; resume also
   requires `steps_per_generation == gradient_accumulation_steps` and `num_iterations == 1`). Pair order is reshuffled per epoch.
 - **Weight sync.** TRL 1.14.1's synchronous trainer merges the LoRA adapter, yields parameters to vLLM's weight transfer and
