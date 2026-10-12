@@ -221,8 +221,10 @@ def test_every_report_satisfies_the_real_tool_schema(original, passed, feasible)
     r = report_of(row, hindsight.ConfidenceTable(by_claim={"complete": 0.7}))
     hindsight.check_arguments(r.tool, r.arguments)
     assert 0.0 <= r.arguments["confidence"] <= 1.0
+    # only the status (abstain: reason + blocker_category) is required since iteration 12's forgiving schema
+    required = "reason" if r.tool == "abstain" else "status"
     with pytest.raises(ValueError, match="missing"):
-        hindsight.check_arguments(r.tool, {k: v for k, v in r.arguments.items() if k != "confidence"})
+        hindsight.check_arguments(r.tool, {k: v for k, v in r.arguments.items() if k != required})
 
 
 def test_calibration_skips_masked_rows():

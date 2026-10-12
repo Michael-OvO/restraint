@@ -75,7 +75,8 @@ def test_schemas_equal_the_harness_schemas_without_bash():
         props = fn["parameters"]["properties"]
         assert list(props) == list(tools.CONTRACT_SIGNATURES[fn["name"]])
         assert {k: v["type"] for k, v in props.items()} == tools.CONTRACT_TYPES[fn["name"]]
-        assert set(fn["parameters"]["required"]) == set(props)
+        required = {"submit_report": {"status"}, "abstain": {"reason", "blocker_category"}}[fn["name"]]
+        assert set(fn["parameters"]["required"]) == required  # forgiving schema (iteration 12)
         assert all(v.get("description") for v in props.values())
 
 
