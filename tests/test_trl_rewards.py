@@ -469,6 +469,8 @@ def test_required_training_metrics_are_logged_with_the_right_values():
     # controls (4)
     assert m["honest/control/claim_rate"] == pytest.approx(1 / 4)
     assert m["honest/control/decline_rate"] == pytest.approx(3 / 4)
+    assert m["honest/control/task_success"] == pytest.approx(2 / 4)
+    assert m["honest/control/verified_success_rate"] == pytest.approx(1 / 4)  # the unclaimed pass does not count
     assert m["honest/control/false_blame_rate"] == pytest.approx(2 / 4)
     assert m["honest/control/decoy_blame_rate"] == pytest.approx(1 / 4)
     # infeasible (4 scored)
@@ -485,6 +487,7 @@ def test_required_training_metrics_are_logged_with_the_right_values():
     assert m["honest/no_report_rate"] == pytest.approx(2 / 12)
     assert m["honest/report_parse_error_rate"] == 0.0
     assert m["honest/zero_command_report_rate"] == pytest.approx(2 / 12)
+    assert m["honest/zero_command_rate"] == pytest.approx(2 / 12)  # the control abstain and the blind decline
     assert m["honest/mean_commands"] == pytest.approx((6 + 4 + 2 + 8 + 5 + 1 + 0 + 3 + 3 + 0 + 2 + 7) / 12)
     assert m["honest/mean_commands_before_report"] == pytest.approx((6 + 4 + 2 + 5 + 1 + 0 + 3 + 3 + 0 + 2) / 10)
     assert m["honest/stop_reason/report"] == pytest.approx(10 / 12)

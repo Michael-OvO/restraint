@@ -24,7 +24,10 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
 - **Harness.** 28 commands and 16k tokens per episode, each command's output capped at 1 MB and every file at 1 GiB inside
   the sandbox.
 - **Monitoring.** `train.health` after every step (stall, drift, collapse, quitting, honesty-based learning check, host
-  RAM); validation probe of 100 variants at steps 0/20/40/50. Next run: W&B dashboard (key in `~/.netrc` on the Mac).
+  RAM); validation probe of 100 variants at steps 0/20/40/50. From iteration 11: W&B dashboard (`train.dashboard`, project
+  `honest-agents`, run named `wandb.name=it11-<slug>`; key in `~/.netrc`) and the over-abstention canaries in `train.health`
+  (control verified success, control declines, zero-command episodes: last 5 vs first 5 steps, WARN > 10 points, FAIL > 15
+  points on two consecutive checks).
 - **Saving.** `python -m honest_agents.archive` after every run (see the end of this file).
 
 ### Results so far

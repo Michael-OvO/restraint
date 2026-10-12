@@ -22,6 +22,10 @@ from tests.sandbox_fakes import (
     make_test_bundle,
 )
 
+# No test reaches W&B: a config with `report_to: wandb` builds and dry-runs offline (subprocesses inherit this). Tests of
+# the dashboard itself delete it and pass a stand-in wandb module.
+os.environ.setdefault("WANDB_MODE", "disabled")
+
 # GNU `timeout [-k DUR] [-s SIG] DURATION CMD...` for macOS, which ships none: exit 124 on timeout, like the real one.
 _TIMEOUT_SHIM = r"""#!/usr/bin/perl
 while (@ARGV && $ARGV[0] =~ /^-/) { my $o = shift @ARGV; shift @ARGV if $o eq '-k' || $o eq '-s'; }

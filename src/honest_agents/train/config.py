@@ -157,6 +157,23 @@ class TrainerSection:
 
 
 @dataclass
+class WandbSection:
+    """The W&B dashboard (`train.dashboard`). On when `grpo.report_to` names `wandb` and `WANDB_MODE` is not `disabled`.
+
+    No credential lives here: the key comes from `WANDB_API_KEY` or `~/.netrc` on the machine, the entity from
+    `WANDB_ENTITY` (wandb's own variables), so a config, a run log or `run_config.json` never holds either.
+    """
+
+    project: str = "honest-agents"
+    # Run name on the dashboard: the iteration slug (`wandb.name=it11-inspect-first` on the command line), so runs of one
+    # iteration line up with docs/training-log.md and the archive's `NN-<slug>/` folders. None = the run's `run_name`.
+    name: str | None = None
+    group: str | None = None  # e.g. the iteration, to compare its arms side by side
+    tags: list[str] = field(default_factory=list)
+    health: bool = True  # log `train.health` levels per step (and alert once per check on its first FAIL)
+
+
+@dataclass
 class TrainRunConfig:
     model: ModelSection = field(default_factory=ModelSection)
     lora: LoraSection = field(default_factory=LoraSection)
@@ -169,6 +186,7 @@ class TrainRunConfig:
     stop: dict[str, Any] = field(default_factory=dict)  # `callbacks.StopRuleConfig` fields
     bank: BankSection = field(default_factory=BankSection)
     trainer: TrainerSection = field(default_factory=TrainerSection)
+    wandb: WandbSection = field(default_factory=WandbSection)
     grpo: dict[str, Any] = field(default_factory=dict)  # passed to trl.GRPOConfig (names validated)
     seed: int = 42
     output_root: str = "outputs"
@@ -190,6 +208,7 @@ class TrainRunConfig:
             "probe": ProbeSection,
             "bank": BankSection,
             "trainer": TrainerSection,
+            "wandb": WandbSection,
         }
         kwargs: dict[str, Any] = {}
         top = {f.name for f in dataclasses.fields(cls)}

@@ -160,6 +160,17 @@ Sample a bank from the adapter and run `python -m honest_agents.sft.train_sft --
 exists: `scripts/run_slot.sh configs/honest_alpha0.25.yaml <colocate overrides> grpo.max_steps=50`, with `PHASE0_SUMMARY` pointing at
 step 5's summary so an unsafe alpha is refused (exit 4).
 
+**Dashboard and health during every GRPO run.** `configs/grpo_colocate_qwen35.yaml` sets `grpo.report_to: wandb` (any config can with
+`grpo.report_to=wandb`). The run goes to project `honest-agents` under the entity in `WANDB_ENTITY` (`michael_ovo`), named after the
+iteration: pass `wandb.name=it11-<slug>` (and `wandb.group=it11`) so the dashboard lines up with docs/training-log.md and the archive's
+`NN-<slug>/` folders. The key is read by wandb from `WANDB_API_KEY` or `~/.netrc` on the node; it is never put in a config, an override or a
+log. `WANDB_MODE=disabled` turns the dashboard off (offline work, tests). Besides TRL's own numbers and the `honest/*` metrics, the dashboard
+gets host RAM (`mem/*`), `train.health` levels per step (`health/<check>`: 0 OK, 1 WARN, 2 FAIL; one W&B alert per check on its first FAIL),
+and the probe's checkpoint choice (`probe/best_*`). `--resume` continues the same dashboard run (`<output_dir>/wandb_run_id`).
+`python -m honest_agents.train.health <output_dir>` stays the operator's check after every step (exit 2 on a FAIL): stop and look when
+`capability` (verified success on near-miss controls), `over-refusal` (control declines) or `quitting` (zero-command episodes) FAILs, which
+means the last 5 steps sit more than 15 points from the first 5 on two consecutive checks.
+
 ## 3. What to verify in Docker, ordered by risk
 
 1. **The hermetic verifier inside real images.** Never run in Docker: `-I -S -B`, `env -i`, `-X pycache_prefix`; bundle and tests upload

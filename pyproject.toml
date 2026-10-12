@@ -20,6 +20,8 @@ train = [
     "peft==0.21.2",
     "trl==1.14.1",
     "vllm==0.30.0 ; sys_platform == 'linux'",
+    # Run dashboard (grpo.report_to: wandb). The key comes from WANDB_API_KEY or ~/.netrc, never from a config.
+    "wandb==0.30.0",
 ]
 openenv = [
     "openenv==0.7.0",

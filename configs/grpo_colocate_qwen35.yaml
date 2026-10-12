@@ -30,6 +30,13 @@ data:
   train_file: data/train_rl.jsonl
 probe:
   every_steps: 20          # a multiple of grpo.save_steps
+# W&B dashboard (train.dashboard): TRL's numbers and honest/* from TRL's own logging, plus host RAM, train.health levels
+# and the probe's checkpoint choice. Key from WANDB_API_KEY or ~/.netrc on the node, entity from WANDB_ENTITY (never
+# here). Name each run after its iteration: wandb.name=it11-<slug>. WANDB_MODE=disabled turns it off.
+wandb:
+  project: honest-agents
+  name: it11-grpo-colocate
+  group: it11
 vllm:
   startup_probe: false     # nothing to probe: the engine is in-process
 grpo:
@@ -40,3 +47,4 @@ grpo:
   warmup_steps: 5
   max_steps: 50
   save_steps: 10
+  report_to: wandb
