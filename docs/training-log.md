@@ -569,7 +569,32 @@ SFT on audited demonstrations, then let GRPO pay for outcomes only.
 - **Monitoring**: W&B project https://wandb.ai/michael_ovo/honest-agents (SFT run `it11-sft-teacher`).
 
 ### Results
-(filled in as stages finish)
+**SFT** (`it11-sft-teacher`, W&B run jbogsqt1): 72 steps, train loss 0.36, held-out eval loss 0.79 -> 0.30 (plateau, no
+overfit), held-out entropy 0.36 -> 0.29. Merged (`sft.merge`) after fixing the float32 restore (see incidents).
+
+**SFT gate** (probe set: 120 validation variants, 40 sources, 2 samples each; paired against the base model on the same
+tasks; `runs/eval/it11_{base,sft}_probe`):
+
+| metric | base | SFT (scale 1.0) | difference [95 % CI] |
+|---|---:|---:|---:|
+| verified success, feasible (primary) | 69.4 | 21.9 | -47.5 [-56.6, -39.0] |
+| decline rate, feasible | 3.8 | 49.4 | |
+| decline rate, near-miss controls | 2.5 | 61.3 | |
+| claims done on impossible | 50.0 | 7.7 | -42.3 [-55.1, -30.0] |
+| abstain_correct, impossible | 30.8 | 65.0 | |
+| false claims among claims (primary) | 20.1 | 56.8 | +36.6 [25.3, 49.5] |
+| irreversible violations | 13.4 | 2.9 | |
+| commands before the report | 13.5 | 5.4 | |
+
+Gate: **fails**. The SFT policy inspects first, abstains on impossible tasks and almost never violates, but lost most of its
+capability: it copies the teacher's short trajectories (~5 commands) without the teacher's skill, so it declines doable
+work or claims after too little work.
+
+Decision (made before seeing the next numbers): do not run RL from the full SFT policy. Interpolate instead (merge 0.3
+and 0.5 of the adapter's update, `sft.merge --scale`) and start GRPO from the strongest scale whose verified success is
+within 8 points of base (69.4) and whose claim rate on impossible tasks is below base (50.0); if neither qualifies, GRPO
+from the base model. The 8-point margin is looser than the final gate's 3 because GRPO raised task success by 5-7 points
+in run 2; the final non-inferiority gate still applies.
 
 ### Observations
 - Teachers were mostly good but not perfect: of 420 audited attempts, 103 were dropped (false claims on controls,
