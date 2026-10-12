@@ -10,7 +10,16 @@ from pathlib import Path
 import pytest
 
 from honest_agents import node as nd
-from honest_agents.node import Node, Secrets, pull_argv, read_secrets, remote_script, run_argv, sync_argv
+from honest_agents.node import (
+    Node,
+    Secrets,
+    pull_argv,
+    pull_plan,
+    read_secrets,
+    remote_script,
+    run_argv,
+    sync_argv,
+)
 
 WANDB = "wandb-test-key-0123456789abcdef"
 HF = "hf_testtoken_ABCDEF"
@@ -49,6 +58,7 @@ def test_sync_sends_the_tree_without_data_or_outputs_over_the_vast_key():
         "/.claude",
         "*.log",
         "/data",
+        ".env",
     } <= excl
     assert ".git" not in excl  # the node has no GitHub key: .git travels so git log and archive can name the commit
     assert "--dry-run" not in argv and "--delete" not in argv
@@ -63,11 +73,27 @@ def test_sync_with_data_and_dry_run():
 
 
 def test_pull_keeps_the_repo_relative_layout_in_staging(tmp_path):
-    argv = pull_argv(Node("h", 7), ["runs/eval/val", "/root/grpo.log"], staging=tmp_path)
-    assert "-azR" in argv
-    assert argv[-3:] == ["root@h:/root/restraint/./runs/eval/val", "root@h:/root/grpo.log", f"{tmp_path}/"]
-    with pytest.raises(ValueError):
-        pull_argv(Node("h"), [])
+    plan = pull_plan(Node("h", 7), ["runs/eval/val/", "/root/grpo.log"], staging=tmp_path)
+    assert plan == [("/root/restraint/runs/eval/val", tmp_path / "runs/eval"), ("/root/grpo.log", tmp_path / "root")]
+    argv = pull_argv(Node("h", 7), *plan[0], dry_run=True)
+    assert argv[-2:] == ["root@h:/root/restraint/runs/eval/val", f"{tmp_path}/runs/eval/"]
+    assert "-R" not in "".join(a for a in argv if a.startswith("-a"))  # openrsync ignores `/./`; no -R
+    for bad in ([], ["../secrets"], ["runs/../../etc"], ["/"]):
+        with pytest.raises(ValueError):
+            pull_plan(Node("h"), bad)
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed")
+def test_pull_layout_with_the_local_rsync(tmp_path):
+    """The plan's (source, parent dir) pairs give `staging/runs/eval/val/...` with whatever rsync the Mac has."""
+    node_root = tmp_path / "node"
+    (node_root / "runs/eval/val").mkdir(parents=True)
+    (node_root / "runs/eval/val/summary.json").write_text("{}")
+    staging = tmp_path / "staging"
+    for remote, local_dir in pull_plan(Node("h", dest=str(node_root)), ["runs/eval/val"], staging):
+        local_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["rsync", "-az", remote, f"{local_dir}/"], check=True, capture_output=True)
+    assert (staging / "runs/eval/val/summary.json").is_file()
 
 
 # ── secrets ──────────────────────────────────────────────────────────────────
@@ -83,6 +109,15 @@ def test_secrets_are_read_from_the_given_files_and_never_shown(secret_files, tmp
     assert none.names() == [] and none.stdin_payload() == "\n\n"
     with pytest.raises(ValueError):
         Secrets("a\nb").stdin_payload()
+
+
+def test_a_broken_netrc_is_reported_without_its_contents(tmp_path):
+    bad = tmp_path / "netrc"
+    bad.write_text(f"machine api.wandb.ai login u password {WANDB} bogus {WANDB}x\n")
+    bad.chmod(0o600)
+    with pytest.raises(SystemExit) as e:
+        read_secrets(bad, tmp_path / "missing")
+    assert WANDB not in str(e.value) and e.value.__cause__ is None and e.value.__suppress_context__
 
 
 # ── run ──────────────────────────────────────────────────────────────────────
@@ -145,6 +180,12 @@ def test_the_remote_script_exports_what_stdin_carries(tmp_path):
     assert done.stdout.endswith(f"{WANDB}|unset|{tmp_path.resolve()}") or done.stdout.endswith(
         f"{WANDB}|unset|{tmp_path}"
     )
+
+
+def test_a_custom_log_path_is_quoted_everywhere():
+    for mode in ("nohup", "tmux"):
+        script = remote_script("/r", "true", mode, "j", log="/tmp/a b$(x).log")
+        assert "$(x)" not in script.replace("'/tmp/a b$(x).log'", "")
 
 
 def test_run_argv_wraps_the_script_for_the_remote_shell():

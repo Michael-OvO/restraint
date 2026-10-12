@@ -46,8 +46,10 @@ WANDB_MACHINE = "api.wandb.ai"
 MODES = ("nohup", "tmux", "fg")
 # Never pushed: local environments and caches, and everything a run writes on the node (pushing an empty or stale
 # `outputs/` over the node's would be worse than useless). Leading `/` anchors a pattern at the repo root.
+# `.env` (gitignored) may hold keys and must never land on a box the next renter gets.
 EXCLUDES = (
-    ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".DS_Store", "*.log",
+    ".venv", "__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".DS_Store", "*.log",
+    ".env", ".env.*", ".coverage", "htmlcov", "*.egg-info",
     "/outputs", "/runs", "/wandb", "/.claude",
 )  # fmt: skip
 DATA_EXCLUDE = "/data"
@@ -104,19 +106,30 @@ def sync_argv(node: Node, src: Path = REPO, with_data: bool = False, dry_run: bo
     return argv
 
 
-def pull_argv(node: Node, paths: Sequence[str], staging: Path = DEFAULT_STAGING, dry_run: bool = False) -> list[str]:
-    """rsync of node paths into `staging`, keeping each path's layout below the repo root (`-R` with a `/./` marker):
-    `runs/eval/x` lands in `staging/runs/eval/x`. An absolute path (a log in /root) keeps its full path."""
+def pull_plan(node: Node, paths: Sequence[str], staging: Path = DEFAULT_STAGING) -> list[tuple[str, Path]]:
+    """(node path, local directory) per path, keeping each path's layout below the repo root: `runs/eval/x` lands in
+    `staging/runs/eval/x`; an absolute path (a log in /root) keeps its full path under `staging`.
+
+    One rsync per path into its parent directory rather than `rsync -R` with a `/./` marker: the Mac's stock rsync is
+    openrsync, which ignores the marker and would recreate `/root/restraint/...` under `staging`."""
     if not paths:
         raise ValueError("pull needs at least one path")
-    argv = ["rsync", "-azR", "--human-readable", "-e", node.rsync_shell()]
+    plan = []
+    for p in paths:
+        p = p.rstrip("/")
+        if not p or ".." in Path(p).parts:
+            raise ValueError(f"pull path {p!r}: give a path below --dest, or an absolute one, without '..'")
+        remote = p if p.startswith("/") else f"{node.dest.rstrip('/')}/{p}"
+        plan.append((remote, staging / Path(p.lstrip("/")).parent))
+    return plan
+
+
+def pull_argv(node: Node, remote: str, local_dir: Path, dry_run: bool = False) -> list[str]:
+    """rsync of one node path into `local_dir` (no trailing slash on the source, so a directory arrives as itself)."""
+    argv = ["rsync", "-az", "--human-readable", "-e", node.rsync_shell()]
     if dry_run:
         argv += ["--dry-run", "--itemize-changes"]
-    for p in paths:
-        rel = p if p.startswith("/") else f"{node.dest.rstrip('/')}/./{p}"
-        argv.append(f"{node.target}:{rel}")
-    argv.append(f"{staging}/")
-    return argv
+    return [*argv, f"{node.target}:{remote}", f"{local_dir}/"]
 
 
 # ── secrets ──────────────────────────────────────────────────────────────────
@@ -146,7 +159,10 @@ def read_secrets(netrc_path: Path = DEFAULT_NETRC, hf_token_path: Path = DEFAULT
     (what `hf auth login` writes). Either may be missing: the job then runs without it."""
     wandb = None
     if netrc_path.is_file():
-        auth = netrc.netrc(str(netrc_path)).authenticators(WANDB_MACHINE)
+        try:
+            auth = netrc.netrc(str(netrc_path)).authenticators(WANDB_MACHINE)
+        except netrc.NetrcParseError as e:  # its message can quote a token from the file, so it is not passed on
+            raise SystemExit(f"{netrc_path}: cannot parse (line {e.lineno}); fix it or pass --no-secrets") from None
         wandb = (auth[2] or None) if auth else None
     hf = (hf_token_path.read_text().strip() or None) if hf_token_path.is_file() else None
     return Secrets(wandb, hf)
@@ -156,7 +172,7 @@ def read_secrets(netrc_path: Path = DEFAULT_NETRC, hf_token_path: Path = DEFAULT
 
 
 def default_name() -> str:
-    return time.strftime("job-%Y%m%d-%H%M%S")
+    return time.strftime("job-%Y%m%d-%H%M%S", time.gmtime())
 
 
 def remote_script(dest: str, command: str, mode: str = "nohup", name: str = "job", log: str | None = None) -> str:
@@ -183,7 +199,7 @@ def remote_script(dest: str, command: str, mode: str = "nohup", name: str = "job
         body = [
             f'echo "== $(date -u +%FT%TZ) start: "{q(command)} >> {q(log)}',
             f"setsid nohup bash -lc {q(command)} >> {q(log)} 2>&1 < /dev/null &",
-            f'echo "started {name}: pid $! log {log}"',
+            f'echo "started {name}: pid $! log "{q(log)}',
         ]
         return "\n".join([*head, *body]) + "\n"
     # tmux: a server of its own (-L NAME), started right here, so it inherits the exported secrets
@@ -192,7 +208,7 @@ def remote_script(dest: str, command: str, mode: str = "nohup", name: str = "job
     body = [
         f"if tmux -L {q(name)} has-session 2>/dev/null; then echo 'tmux server {name} is running; pick another --name' >&2; exit 1; fi",
         f"tmux -L {q(name)} new-session -d -s {q(name)} {q('bash -lc ' + q(inner))}",
-        f'echo "started {name}: tmux -L {name} attach -t {name}; log {log}"',
+        f'echo "started {name}: tmux -L {name} attach -t {name}; log "{q(log)}',
     ]  # fmt: skip
     return "\n".join([*head, *body]) + "\n"
 
@@ -251,16 +267,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     node = Node(a.host, a.port, a.key, a.dest)
     if a.cmd == "sync":
-        cmd = sync_argv(node, a.src.expanduser(), with_data=a.with_data, dry_run=a.dry_run, delete=a.delete)
+        src = a.src.expanduser()
+        if (src / ".git").is_file():  # a git worktree: .git is a pointer to a gitdir on the Mac, useless on the node
+            print(f"warning: {src} is a git worktree; the node gets no usable .git (sync from the main checkout)",
+                  file=sys.stderr)  # fmt: skip
+        cmd = sync_argv(node, src, with_data=a.with_data, dry_run=a.dry_run, delete=a.delete)
         _print_argv(cmd)
         return subprocess.run(cmd, stdin=subprocess.DEVNULL, check=False).returncode
     if a.cmd == "pull":
-        staging = a.staging.expanduser()
-        cmd = pull_argv(node, a.paths, staging, dry_run=a.dry_run)
-        _print_argv(cmd)
-        if not a.dry_run:
-            staging.mkdir(parents=True, exist_ok=True)
-        return subprocess.run(cmd, stdin=subprocess.DEVNULL, check=False).returncode
+        rc = 0
+        for remote, local_dir in pull_plan(node, a.paths, a.staging.expanduser()):
+            cmd = pull_argv(node, remote, local_dir, dry_run=a.dry_run)
+            _print_argv(cmd)
+            if not a.dry_run:
+                local_dir.mkdir(parents=True, exist_ok=True)
+            rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, check=False).returncode or rc
+        return rc
     words = a.command[1:] if a.command[:1] == ["--"] else a.command
     if not words:
         raise SystemExit("run: give the command after `--`")

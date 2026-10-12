@@ -269,8 +269,9 @@ python -m honest_agents.node run --host HOST --port PORT --mode fg -- nvidia-smi
 python -m honest_agents.node pull --host HOST --port PORT outputs/phase0 /root/phase0.log
 ```
 
-* **sync** is an rsync of this checkout. It never sends `.venv`, caches, `*.log`, `outputs/`, `runs/`, `wandb/` or `.claude/`,
-  and sends `data/` only with `--with-data`. `--delete` (off by default) removes node files the Mac lacks; excluded paths are
+* **sync** is an rsync of this checkout. It never sends `.venv`, caches, `.env`, `*.log`, `outputs/`, `runs/`, `wandb/` or
+  `.claude/`, and sends `data/` only with `--with-data`. Run it from the main checkout: in a git worktree `.git` is only a
+  pointer to the Mac's repository, so the node would get no usable history (the tool warns). `--delete` (off by default) removes node files the Mac lacks; excluded paths are
   never deleted, so the node's runs survive it.
 * **run** reads the W&B key from the Mac's `~/.netrc` (`machine api.wandb.ai`, what `wandb login` writes) and the Hugging Face
   token from `~/.cache/huggingface/token` at call time, and writes them to ssh's stdin. A short remote script reads them with
@@ -281,4 +282,4 @@ python -m honest_agents.node pull --host HOST --port PORT outputs/phase0 /root/p
   tmux server would not pass the secrets on), `fg` (attached, for short checks). `--dry-run` prints the ssh command and the
   remote script; `--no-secrets` sends none.
 * **pull** copies node paths (relative to `--dest`, or absolute for logs) into `~/Documents/honest-agents-archive/staging`,
-  keeping their layout. It is the quick copy; the curated save of an iteration is still `python -m honest_agents.archive`.
+  keeping their layout (one rsync per path; the Mac's stock openrsync ignores `rsync -R`'s `/./` marker). It is the quick copy; the curated save of an iteration is still `python -m honest_agents.archive`.
