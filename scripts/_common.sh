@@ -47,7 +47,7 @@ PY
 
 # is_override <arg>: true for a config override (`grpo.max_steps=3`, `seed=7`), false for vLLM flags and their values
 # (`--lora-modules policy=outputs/x` must reach `vllm serve` untouched, so only the config's own top-level keys count).
-is_override() { [[ "$1" =~ ^(model|lora|data|env|reward|launch|vllm|probe|stop|bank|trainer|grpo|sweep|analysis)\.[A-Za-z0-9_.]+= || "$1" =~ ^(seed|output_root|run_name)= ]]; }
+is_override() { [[ "$1" =~ ^(model|lora|data|env|reward|launch|vllm|probe|stop|bank|trainer|grpo|sweep|analysis|wandb)\.[A-Za-z0-9_.]+= || "$1" =~ ^(seed|output_root|run_name)= ]]; }
 
 # alpha_flags: fills ALPHA_FLAGS from PHASE0_SUMMARY (path of a phase0_summary.json) and ALLOW_UNSAFE_ALPHA=1. With a
 # summary, `honest_agents.train` refuses an honesty-reward alpha whose claim threshold (1 + alpha) / 2 exceeds the Phase-0
