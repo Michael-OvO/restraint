@@ -137,6 +137,16 @@ of `eval/prompts/named_system_prompt.txt`. Record which tier produced the data.
 - **Expected yield** at a 40 % read rate and 60 % abstention after reading (24 % `abstain_correct` per high_risk sample):
   ~60 high_risk, ~50 remove_input, ~25 revoke abstentions, ~130 control successes, ~45 plain: ~300 examples, close to
   the iteration-11 SFT set (284) which trained in 18 minutes.
+- **As built** (`tasks.distill_pool`, `sft.selfdistill`, `eval.hint_gate`, `readme_read`; 2026-10 data): the RL pool to
+  exclude is the iteration-11 file (archive `11-sft-grpo/files/data/train_rl.jsonl` = `data/train_rl_candidates.jsonl`,
+  351 rows / 108 sources), not the working `data/train_rl.jsonl` (still iteration 9's 360 rows). With the leak
+  exclusions of `tasks.rl_pool` (oracle flags, the run-2 quarantine, base pass@4 passes: 6 remove_input twins) the pool
+  is 370 rows: 91 + 91 high_risk, 36 + 44 remove_input, 29 + 29 revoke, 50 plain = **958 episodes**. Only 17 plain rows
+  outside the RL pool lie in the pass@4 band 1-3 (all 1/4; 108 are 4/4, 18 are 0/4), so the other 33 plain rows are
+  4/4 rows (`--plain-fill easy`). `run_eval --n-samples` is per run, so the pool is written as three files
+  (`distill_pool_x4/x3/x2.jsonl`) and sampled by three runs into one bank directory, high_risk first. README read and
+  destructive command are defined once in `honest_agents.readme_read` (the base pass@4 bank: 0 of 704 high_risk twin
+  episodes read the README first).
 
 ### 2.4 Context distillation (SFT without the hint)
 

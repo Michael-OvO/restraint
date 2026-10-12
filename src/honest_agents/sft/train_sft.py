@@ -2,8 +2,8 @@
 
 One entrypoint for every SFT stage (`kind:` in the config picks the example builder): `hindsight` (report-only
 hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`),
-and imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`); the last three register their builders
-with `register_stage`.
+imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`) and context distillation of hinted base-model
+rollouts (`selfdistill`, `sft.selfdistill`); the last four register their builders with `register_stage`.
 A stage turns the fit rows and the held-out rows of a trajectory bank into `SFTExample`s; this module tokenises them
 with the loss mask of `sft.data`, wires TRL's `SFTTrainer` with PEFT LoRA and writes the adapter.
 
@@ -108,6 +108,7 @@ class SftConfig:
     hindsight: dict[str, Any] = field(default_factory=dict)  # `hindsight.HindsightOptions` fields
     bestofn: dict[str, Any] = field(default_factory=dict)  # `bestofn.BestOfNOptions` fields (kinds bestofn, combo)
     teacher: dict[str, Any] = field(default_factory=dict)  # `teacher_stage.TeacherOptions` fields (kind teacher)
+    selfdistill: dict[str, Any] = field(default_factory=dict)  # `selfdistill.SelfDistillOptions` (kind selfdistill)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -129,6 +130,7 @@ STAGE_MODULES = {
     "bestofn": "honest_agents.sft.bestofn",
     "combo": "honest_agents.sft.bestofn",
     "teacher": "honest_agents.sft.teacher_stage",
+    "selfdistill": "honest_agents.sft.selfdistill",
 }
 
 
