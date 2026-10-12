@@ -4,9 +4,13 @@
 # Why these values (measured, runs/passk and runs/eval/val_*, docs/node-runbook.md):
 # - alpha 0.1: the difficulty gate on the pass@4 bank (tasks.difficulty --rollouts 4 --min-pass 2 --max-pass 3) finds only
 #   alpha 0 and 0.1 safe (a calibrated policy claims iff p(success) > (1 + alpha) / 2; 0.25 would let blanket declining win on
-#   this pool). The pool is built by tasks.rl_pool: feasible rows gated by the difficulty file, a family-balanced sample of
-#   the impossible rows kept whole (the build's own difficulty filter dropped them with their easy plain twins: 32 rows).
-#     python -m honest_agents.tasks.rl_pool --pool data/train_pool.jsonl --difficulty data/difficulty_2_3.json --out data/train_rl.jsonl
+#   this pool). The pool is built by tasks.rl_pool: feasible rows gated by the difficulty file, never-passing feasible
+#   sources and leaky twins removed, impossible twins per family (high_risk and remove_input oversampled, revoke_permission
+#   capped), each with its near-miss control, written in step blocks of 8 rows with distinct sources:
+#     python -m honest_agents.tasks.rl_pool --config configs/rl_pool.yaml
+# - data order: TRL's RepeatSampler with shuffle_dataset false draws the rows in file order, 8 per optimizer step
+#   (generation_batch_size 1 x 64 = 64 // num_generations 8), so step k trains rows [8k, 8k + 8) of train_rl.jsonl.
+#   pair_batches false keeps that order (pair_batches would put a twin, its control and its plain copy in one step).
 # - no SFT warm start: report-only SFT made the model quit (zero commands in 82 % of episodes) and best-of-N + hindsight
 #   SFT lowered verified success 72.9 -> 59.2 % on validation with no honesty gain, so RL starts from the base model.
 # - learning rate 3e-5 (base.yaml: 1e-5): at 1e-5 a LoRA update can round away when merged into the bf16 weights that vLLM
@@ -28,11 +32,13 @@ reward:
     false_blame: -0.4
 data:
   train_file: data/train_rl.jsonl
+  pair_batches: false     # the order is tasks.rl_pool's step blocks (see the header)
 probe:
   every_steps: 20          # a multiple of grpo.save_steps
 vllm:
   startup_probe: false     # nothing to probe: the engine is in-process
 grpo:
+  shuffle_dataset: false   # draw train_rl.jsonl in file order (tasks.rl_pool block_size 8)
   vllm_mode: colocate
   vllm_gpu_memory_utilization: 0.3
   vllm_tensor_parallel_size: 1

@@ -1,0 +1,36 @@
+# RL pool for iteration 11 (tasks.rl_pool; why each key exists: the module docstring and docs/training-log.md iteration 10).
+#   python -m honest_agents.tasks.rl_pool --config configs/rl_pool.yaml [--out DIR/train_rl.jsonl] [key=value ...]
+# Paths are relative to the repo root. On the node the base pass@k bank is runs/passk/bank (--bank runs/passk/bank);
+# on the Mac it is the archived copy below. Flags and key=value overrides win over this file.
+pool: data/train_pool.jsonl
+difficulty: data/difficulty_2_3.json   # pass@4 band 2-3 of 4 (alpha 0.1 safe): gates the plain rows only
+out: data/train_rl.jsonl
+seed: 0
+
+# Impossible twins per family (null = every eligible twin; an unlisted family gets none). high_risk is the honesty
+# failure (94 % claims) and remove_input the other family with claims to unlearn; revoke_permission is solved in base
+# (1.4 % claims) and only keeps a few twins so the family is not forgotten.
+max_infeasible: null
+family_quotas:
+  high_risk: 80
+  remove_input: null
+  revoke_permission: 10
+require_control: true          # every twin keeps its near-miss control (over-refusal stays penalised)
+
+# Exclusions.
+bank:                          # 0 clean passes over >= min_bank_samples base episodes: label noise; impossible passes: leaks
+  - ~/Documents/honest-agents-archive/iterations/03-passk-bank/eval/passk/bank
+min_bank_samples: 4
+validation: data/validation.jsonl   # oracle leak flags
+quarantine:                    # quarantine.jsonl of earlier runs (leak entries; one run-2 leak is not in the bank)
+  - ~/Documents/honest-agents-archive/iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/quarantine.jsonl
+exclude_sources: null          # pair_ids of the SFT data, so SFT and RL stay disjoint
+
+# Pre-screen (measured on the GPU): keep twins whose base claim rate lies in the band. null = no filter.
+claim_rates: null
+claim_rate_band: [0.2, 0.8]
+
+# Step order: 8 prompts per optimizer step under configs/grpo_colocate_qwen35.yaml (64 // 8 generations); that config
+# sets grpo.shuffle_dataset and data.pair_batches to false so the trainer draws the rows in this order.
+block_size: 8
+steps: 50                      # report only: what a 50-step run sees
