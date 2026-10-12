@@ -331,6 +331,8 @@ def resolve_configs(
         {"command_timeout_sec": env_cfg["command_timeout_sec"]} if "command_timeout_sec" in env_cfg else {}
     )
     overrides.update(env_cfg.get("budget") or {})
+    if "report_turns" in env_cfg:  # the training run's reserve of report-only calls (train/config.py EnvSection)
+        overrides["report_turns"] = int(env_cfg["report_turns"])
     if args.command_timeout:
         overrides["command_timeout_sec"] = args.command_timeout
     budget = rollout_cfg.budget(**overrides)

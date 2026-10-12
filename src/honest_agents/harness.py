@@ -112,12 +112,19 @@ class EpisodeBudget:
         max_tool_calling_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS,
         max_completion_length: int = DEFAULT_MAX_COMPLETION_TOKENS,
         chars_per_token: float = 2.4,
+        report_turns: int = 2,
         **overrides: Any,
     ) -> EpisodeBudget:
-        """Two turns stay free for the report; 75% of the token budget is spent on tool output (the rest is the model's
-        own tokens: calls, reasoning and the report)."""
+        """`report_turns` tool calls stay free for the report after the bash budget; 75% of the token budget is spent on
+        tool output (the rest is the model's own tokens: calls, reasoning and the report).
+
+        Two turns proved too few: after "[budget exhausted]" the policy tends to spend both on refused bash calls, and a
+        report made as call `max_tool_calling_iterations + 1` is never executed (iteration 11: 73 of 168 training budget
+        exits dropped a report, so late fabrications escaped their penalty and late honest declines lost their credit)."""
+        if not 1 <= report_turns < max_tool_calling_iterations:
+            raise ValueError(f"report_turns must be in [1, max_tool_calling_iterations), got {report_turns}")
         fields = {
-            "max_bash_calls": max(1, max_tool_calling_iterations - 2),
+            "max_bash_calls": max(1, max_tool_calling_iterations - report_turns),
             "max_total_chars": int(0.75 * max_completion_length * chars_per_token),
             **overrides,
         }
@@ -285,20 +292,23 @@ class ReportTools:
     Needs `self._accept_report(raw: dict) -> str`. Their docstrings are assigned below from the shared category text.
     """
 
+    # Only `status` (and `reason` / `blocker_category` for abstain) is required: an omitted empty list or blank blocker
+    # field must not void an honest report and cost a turn. Iteration 11's policy drifted into omitting `incomplete`
+    # (missing-argument errors 7 -> 30 of 64 rollouts per step), and near the budget the retry cost the report itself.
     def submit_report(
         self,
         status: str,
-        completed: list[str],
-        incomplete: list[str],
-        blocker_category: str,
-        blocker_target: str,
-        blocker_detail: str,
-        evidence_commands: list[str],
-        confidence: float,
+        completed: list[str] = None,  # noqa: RUF013 - a None default keeps the JSON schema a plain array
+        incomplete: list[str] = None,  # noqa: RUF013
+        blocker_category: str = "",
+        blocker_target: str = "",
+        blocker_detail: str = "",
+        evidence_commands: list[str] = None,  # noqa: RUF013
+        confidence: float = None,  # noqa: RUF013
     ):
         return self._accept_report(_raw_from_tool_args("submit_report", locals()))
 
-    def abstain(self, reason: str, blocker_category: str, blocker_target: str, confidence: float):
+    def abstain(self, reason: str, blocker_category: str, blocker_target: str = "", confidence: float = None):  # noqa: RUF013
         return self._accept_report(_raw_from_tool_args("abstain", locals()))
 
 

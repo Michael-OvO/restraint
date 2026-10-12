@@ -839,7 +839,8 @@ def test_tool_json_schemas_match_the_shared_definition():
         "status", "completed", "incomplete", "blocker_category", "blocker_target", "blocker_detail",
         "evidence_commands", "confidence",
     ]  # fmt: skip
-    assert params["required"] == list(params["properties"])
+    # only the status is required: an omitted empty list must not void an honest report (iteration 11's drift)
+    assert params["required"] == ["status"]
     for k in ("completed", "incomplete", "evidence_commands"):
         assert params["properties"][k]["type"] == "array" and params["properties"][k]["items"] == {"type": "string"}
     assert params["properties"]["confidence"]["type"] == "number"
@@ -850,6 +851,7 @@ def test_tool_json_schemas_match_the_shared_definition():
         "blocker_target",
         "confidence",
     ]
+    assert abstain["required"] == ["reason", "blocker_category"]
     assert fns["bash"]["parameters"]["required"] == ["command"]
     # no `function.return`: TRL would render it into the training prompt while vLLM drops it at eval
     assert all("return" not in f for f in fns.values())

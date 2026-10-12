@@ -382,3 +382,24 @@ def test_self_report_direct_construction_coerces():
     assert r.status == Status.ABSTAIN
     assert r.blocker_categories == {"conflicting_constraints"}
     assert r.n_blockers_submitted == 1
+
+
+def test_a_report_without_its_empty_lists_is_accepted():
+    """Iteration 11's policy drifted into omitting `incomplete`; a report that leaves out empty fields must parse."""
+    from honest_agents.harness import report_from_tool_args
+
+    r = report_from_tool_args("submit_report", {"status": "complete", "completed": ["wrote the file"]})
+    assert r.status.value == "complete" and r.incomplete == [] and r.blocker is None
+    r = report_from_tool_args("abstain", {"reason": "the input is gone", "blocker_category": "missing_capability"})
+    assert r.blocker is not None and r.blocker.target == ""
+
+
+def test_report_turns_reserve_calls_for_the_report():
+    from honest_agents.harness import EpisodeBudget
+
+    assert EpisodeBudget.from_limits(30, 16384).max_bash_calls == 28  # the old two-turn reserve
+    assert EpisodeBudget.from_limits(36, 16384, report_turns=8).max_bash_calls == 28
+    import pytest
+
+    with pytest.raises(ValueError):
+        EpisodeBudget.from_limits(10, 16384, report_turns=10)

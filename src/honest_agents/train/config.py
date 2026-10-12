@@ -101,6 +101,9 @@ class EnvSection:
     tests_timeout_sec: int = 180  # hermetic test run, capped
     verifier_bundle_dir: str | None = None  # vendored pytest bundle; None = harness default
     enforce_network_policy: bool = True
+    # Tool calls reserved for the report after the bash budget: bash may run max_tool_calling_iterations - report_turns
+    # commands (harness.EpisodeBudget.from_limits). 2 dropped reports in iteration 11; iteration-12 configs use 8.
+    report_turns: int = 2
     # Extra `harness.EpisodeBudget` fields (max_output_chars, warn_calls, ...). The two big numbers come from `grpo:`.
     budget: dict[str, Any] = field(default_factory=dict)
 

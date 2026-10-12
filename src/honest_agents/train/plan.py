@@ -51,7 +51,7 @@ def build_budget(cfg: TrainRunConfig, limits: Limits):
             f"env.budget: {sorted(bad)} cannot be set; allowed {sorted(allowed)} (max_bash_calls and max_total_chars "
             "follow from grpo.max_tool_calling_iterations and grpo.max_completion_length)"
         )
-    return limits.budget(**overrides)
+    return limits.budget(report_turns=cfg.env.report_turns, **overrides)
 
 
 def build_grading_config(cfg: TrainRunConfig):
