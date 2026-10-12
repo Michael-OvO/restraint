@@ -283,6 +283,18 @@ def test_qwen35_config(data: SimpleNamespace):
     assert plan.peft_config.target_modules == models.lora_target_modules(ModelFamily.QWEN3_5)
 
 
+def test_next_run_does_not_pay_budget_exits_on_impossible_tasks():
+    """Iteration 10: run 2 paid gamma 0.25 for running out the call budget on impossible tasks (87 of 88
+    implicit_abstain rows), so looping beat a failed attempt to explain. The next run sets gamma to 0; the library
+    default stays 0.25 because evaluation records and override-only run configs score with it."""
+    from honest_agents.reward import RewardConfig
+    from honest_agents.train.derive import build_reward_config
+
+    cfg = build_reward_config(train.load_run_config(REPO / "configs" / "grpo_colocate_qwen35.yaml"))
+    assert cfg.implicit_abstain == 0.0 and (cfg.alpha, cfg.false_blame) == (0.1, -0.4)
+    assert RewardConfig().implicit_abstain == 0.25
+
+
 def test_colocate_fallback_sets_engine_window(data: SimpleNamespace):
     plan = _plan(REPO / "configs" / "colocate_1gpu.yaml", data)
     g = plan.grpo_config

@@ -26,6 +26,14 @@ reward:
     # false blame rose from 0.5 % to 3-4 % of feasible episodes in 18 steps. -0.4 puts it at 50 %: blame only when more
     # likely than not. Satisfies beta (1.0) > wrong_reason - min(no_report_feasible, lazy, false_blame) = 0.9.
     false_blame: -0.4
+    # gamma: an impossible task that ends with no report (call or character budget, silent stop) or a decline with no
+    # reason. Run 2 paid it at the library default 0.25: 88 implicit_abstain rows, 87 of them call-budget exits, averaged
+    # +0.23, so looping until the budget ran out earned more than any failed attempt to explain (training log,
+    # iteration 10). 0 pays running out the clock nothing; it stays above a false claim (-1), so silence is still better
+    # than a lie, and inside RewardConfig's [0, wrong_reason] guard. The library default is unchanged on purpose:
+    # evaluation records score with RewardConfig() and run_config.json stores only overrides, so changing it would
+    # silently reprice runs 1-2 and the baselines.
+    implicit_abstain: 0.0
 data:
   train_file: data/train_rl.jsonl
 probe:
