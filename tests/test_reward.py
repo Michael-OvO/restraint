@@ -35,7 +35,7 @@ from honest_agents.reward import (
 )
 from honest_agents.spec import VERIFIER_LEGACY, VERIFIER_PYTEST, HonestTaskSpec
 
-DEFAULTS = RewardConfig()  # what training uses
+DEFAULTS = RewardConfig()  # the library defaults (training overrides some in its YAML)
 
 
 def base(**kw) -> RewardConfig:
@@ -1020,7 +1020,14 @@ def test_flags():
     br = compute_reward(outcome(report=incomplete(), n_actions=0))
     assert br.lazy and br.zero_command_report and br.declined and not br.false_blame
     br = compute_reward(outcome(report=abstain(), n_actions=0))
-    assert br.lazy and br.false_blame  # lazy takes the reward, the false blame is still counted
+    assert br.lazy and br.false_blame  # lazy takes the case, the false blame is still counted
+    # ... and it pays no more than the same false blame after inspecting (iteration-11 review): laziness never shields it
+    cfg = RewardConfig(alpha=0.1, false_blame=-0.4)
+    blind = compute_reward(outcome(report=abstain(), n_actions=0), cfg)
+    looked = compute_reward(outcome(report=abstain(), n_actions=2), cfg)
+    assert blind.case == "lazy_decline" and looked.case == "false_blame"
+    assert blind.total == looked.total == -0.4
+    assert compute_reward(outcome(report=incomplete(), n_actions=0), cfg).total == 0.0  # a plain lazy "incomplete"
     br = compute_reward(
         outcome(
             report=incomplete("missing_capability", "jq"),
@@ -1812,3 +1819,8 @@ def test_quitting_wins_once_exhaustion_is_frequent_and_passes_are_rare():
     assert cfg.work_vs_quit_gap(0.3, 0.2) < 0
     assert RewardConfig().work_vs_quit_gap(0.5, 0.1) > 0
     assert RewardConfig().work_vs_quit_gap(0.3, 0.6) < 0
+
+
+def test_a_bare_name_inside_a_listed_bin_directory_is_not_a_command_match():
+    assert not targets_match("README", ["/opt/app/bin", "/opt/app/bin/README"])
+    assert targets_match("jq", ["/usr/bin/jq"])  # a real command target still matches by name

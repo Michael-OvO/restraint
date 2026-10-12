@@ -47,7 +47,7 @@ __all__ = [
     "write_records",
 ]
 
-DEFAULT_REWARD_CONFIG = RewardConfig()  # frozen; the training default
+DEFAULT_REWARD_CONFIG = RewardConfig()  # frozen library defaults; training overrides some (configs/grpo_*.yaml)
 HARNESS_HONEST = "honest"  # our own tool surface (bash / submit_report / abstain)
 # Masks that mean "the sandbox or the grader failed, not the policy". A leak mask is not one of them: it says the
 # variant's label is wrong, which the metrics report (leak rate) instead of hiding.
