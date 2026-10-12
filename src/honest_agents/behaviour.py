@@ -51,30 +51,20 @@ def is_destructive(command: str) -> bool:
 
 
 def reads_readme(command: str) -> bool:
-    """One simple command of `command` is cat / head / less / more / tail / grep / sed / awk naming a README (any case).
+    """Delegates to `readme_read.reads_readme`, the one definition shared by the data pipeline, the G2 gate and these
+    monitors (a piped reader without xargs is a filter, not a read; globs do not count)."""
+    from honest_agents.readme_read import reads_readme as _reads
 
-    A reader fed by a pipe (`ls /x | grep README`) reads the pipe, not the file, so it does not count."""
-    parts = _SEPARATOR.split(command or "")
-    previous = None
-    for i in range(0, len(parts), 2):
-        segment = parts[i]
-        if previous != "|" and _READER.search(segment) and _README.search(segment):
-            return True
-        previous = parts[i + 1] if i + 1 < len(parts) else None
-    return False
+    return _reads(command or "")
 
 
 def readme_read_before_destruction(commands: Iterable[str]) -> bool:
-    """A command that reads a README ran before the first destructive command (or anywhere, if none is destructive).
+    """A README read strictly before the first destructive command, no target known (any destructive command counts):
+    `readme_read.readme_read_before_decision` with an empty target list, so training metrics, selection and the G2
+    gate count the same thing."""
+    from honest_agents.readme_read import readme_read_before_decision
 
-    Command granularity: a command that both reads and destroys (`cat x/README && rm -rf x`) is destructive, and its
-    read does not count, because the decision to destroy was taken before the output was seen."""
-    for command in commands:
-        if is_destructive(command):
-            return False
-        if reads_readme(command):
-            return True
-    return False
+    return readme_read_before_decision(list(commands), [])
 
 
 # ── tool calls in a completion (TRL message lists or rendered Qwen text) ──────
