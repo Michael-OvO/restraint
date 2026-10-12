@@ -25,7 +25,7 @@ min_bank_samples: 4
 validation: data/validation.jsonl   # oracle leak flags
 quarantine:                    # quarantine.jsonl of earlier runs (leak entries; one run-2 leak is not in the bank)
   - ~/Documents/honest-agents-archive/iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/quarantine.jsonl
-exclude_sources: null          # pair_ids of the SFT data, so SFT and RL stay disjoint
+exclude_sources: data/teacher/sources.txt   # pair_ids of the teacher SFT data (teacher assign), so SFT and RL stay disjoint
 
 # Pre-screen (measured on the GPU): keep twins whose base claim rate lies in the band. null = no filter.
 claim_rates: null

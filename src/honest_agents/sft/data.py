@@ -272,7 +272,9 @@ def make_renderer(
     )
 
     if tools is None:
-        from honest_agents.harness import tool_schemas
+        # The order and shape the policy sees in RL (TRL renders environment tools alphabetically) and in evaluation:
+        # a different order would train on a system block the policy never sees at rollout time.
+        from honest_agents.eval.rollout import tool_schemas
 
         tools = tool_schemas()
     template = tokenizer.chat_template

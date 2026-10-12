@@ -147,6 +147,9 @@ def assign(args: argparse.Namespace) -> int:
         raise SystemExit(f"{lay.assignments} exists (use --force to replace it)")
     lay.out.mkdir(parents=True, exist_ok=True)
     _write_json(lay.assignments, {"salt": salt, "tokens": entries})
+    # The pair_ids played here: tasks.rl_pool excludes them (configs/tasks/rl_pool.yaml exclude_sources), so SFT and RL
+    # never share a source whatever pool is built later.
+    (lay.out / "sources.txt").write_text("\n".join(sorted({r["pair_id"] for r in entries.values()})) + "\n")
     order = list(entries)
     random.Random(0).shuffle(order)
     (lay.out / "tokens.txt").write_text("\n".join(order) + "\n")
@@ -192,10 +195,9 @@ class TokenCounter:
             tools=tools,
             add_generation_prompt=generation_prompt,
             tokenize=True,
+            return_dict=False,  # transformers 5 returns a BatchEncoding (2 keys) by default
             enable_thinking=False,
         )
-        if isinstance(ids, dict):  # BatchEncoding
-            ids = ids["input_ids"]
         return len(ids)
 
 
@@ -340,9 +342,11 @@ def _step(lay: Layout, token: str, act: dict[str, Any], timeout: float) -> str:
     seq = _latest_obs(box)
     if seq is None:
         return "error: episode not started (run `start` first)"
-    if (box / f"act-{seq}.json").exists():
+    try:  # exclusive create: of two clients acting on one turn, exactly one is sent
+        with open(box / f"act-{seq}.json", "x") as f:
+            f.write(json.dumps(act, default=str))
+    except FileExistsError:
         return "error: an action for this turn is already pending; wait for its output"
-    _write_json(box / f"act-{seq}.json", act)
     found = _wait_for([box / f"obs-{seq + 1}.json", box / "done.json"], timeout)
     if found is None:
         return f"error: no response within {timeout:.0f}s (the episode process may have died; see {box / 'serve.log'})"
