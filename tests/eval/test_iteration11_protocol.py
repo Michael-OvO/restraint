@@ -23,6 +23,7 @@ from honest_agents.eval.records import EpisodeRecord, read_records, write_record
 from honest_agents.eval.rollout import RolloutConfig, neutral_tool_schemas, tool_schemas
 from honest_agents.eval.summary import render_summary
 from honest_agents.reward import RewardConfig
+from honest_agents.tasks.build.splits import write_test_ids
 from tests.eval.scripted_policy import (
     ABSTAIN_ARGS,
     COMPLETE,
@@ -305,6 +306,8 @@ def test_noninferiority_cli_runs_the_gate(tmp_path, capsys):
     assert run_eval.main(["--noninferiority", str(f1), str(f2), "--out", str(out), "--n-boot", "200"]) == 0
     t = json.loads(out.read_text())
     assert t["capability_only"] is True and t["honesty"] == {} and t["passes"] is True
+    # capability apart from willingness: the verified pass rate, so passing work reported "incomplete" still counts
+    assert t["metric"] == "task_success"
     with pytest.raises(SystemExit, match="mix forced-attempt and normal"):
         run_eval.main(["--noninferiority", str(f1), str(ref)])
 
@@ -374,11 +377,47 @@ def test_probe_set_cli(tmp_path, capsys):
     split = tmp_path / "val.jsonl"
     split.write_text("".join(json.dumps(r) + "\n" for r in _rows()))
     out = tmp_path / "probe" / "probe.jsonl"
-    argv = ["--split", str(split), "--out", str(out), "--infeasible", "12", "--test-ids", str(tmp_path / "none.txt")]
+    ids = tmp_path / "test_ids.txt"
+    write_test_ids(ids, ["src/elsewhere"])
+    argv = ["--split", str(split), "--out", str(out), "--infeasible", "12", "--test-ids", str(ids)]
     assert probe_set.main(argv) == 0
     rows = [json.loads(line) for line in out.read_text().splitlines()]
     manifest = json.loads((tmp_path / "probe" / "probe.jsonl.manifest.json").read_text())
     assert len(rows) == 72 and manifest["counts"]["n_infeasible"] == 12 and manifest["below_protocol_minimum"]
     assert manifest["source"] == str(split) and len(manifest["source_sha256"]) == 64
+    assert manifest["test_ids_checked"] and manifest["test_ids_file"] == str(ids)
     with pytest.raises(SystemExit, match="cannot supply"):
-        probe_set.main(["--split", str(split), "--out", str(out), "--test-ids", str(tmp_path / "none.txt")])
+        probe_set.main(["--split", str(split), "--out", str(out), "--test-ids", str(ids)])
+    # a test-id file named on the command line but missing stops the build instead of skipping the check
+    with pytest.raises(SystemExit, match="does not exist"):
+        probe_set.main([*argv[:-1], str(tmp_path / "none.txt")])
+    # a listed source task stops it too
+    write_test_ids(ids, [_rows()[0]["pair_id"]])
+    with pytest.raises(SystemExit, match="held-out test id"):
+        probe_set.main(argv)
+
+
+def test_probe_set_default_test_ids_are_the_repositorys():
+    assert probe_set.DEFAULT_TEST_IDS.is_file() and probe_set.DEFAULT_TEST_IDS.parent.name == "configs"
+
+
+def test_forced_gate_reads_the_pass_rate_not_the_claim():
+    """Same work, but the candidate reports every pass as "incomplete": verified success falls 70 points, the verified
+    pass rate does not move. Capability is the second."""
+    ref = [make_record(f"f{k}", feasible=True, report=COMPLETE, passed=k < 70, source_task=f"s{k}") for k in range(100)]
+    cand = [
+        make_record(f"f{k}", feasible=True, report=INCOMPLETE, n_actions=5, passed=k < 70, source_task=f"s{k}")
+        for k in range(100)
+    ]
+    t = protocol_gate(cand, ref, CFG, SINGLE, capability_only=True)
+    assert t["metric"] == "task_success" and t["difference"] == APPROX(0.0) and t["passes"] is True
+    assert (
+        protocol_gate(cand, ref, CFG, SINGLE, capability_only=True, metric="verified_success_rate")["passes"] is False
+    )
+
+
+def test_honesty_metrics_protocol_field():
+    assert EvalProtocol(honesty_metrics="claim_rate_infeasible").honesty_metrics == ("claim_rate_infeasible",)
+    assert EvalProtocol.from_dict(EvalProtocol().to_dict()) == EvalProtocol()
+    with pytest.raises(ValueError, match="honesty_metrics"):
+        EvalProtocol(honesty_metrics=())

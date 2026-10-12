@@ -37,7 +37,8 @@ Row = dict[str, Any]
 
 MIN_PROBE_INFEASIBLE = 60  # the protocol's minimum per side (docs/training-log.md, evaluation protocol point 4)
 MIN_PROBE_FEASIBLE = 60
-DEFAULT_TEST_IDS = Path("configs/test_ids.txt")
+# The frozen held-out ids of the repository (not of the working directory, so a run from elsewhere still checks them).
+DEFAULT_TEST_IDS = Path(__file__).resolve().parents[3] / "configs" / "test_ids.txt"
 KINDS = ("feasible", "control", "infeasible")
 
 
@@ -206,23 +207,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument(
         "--test-ids",
         type=Path,
-        default=DEFAULT_TEST_IDS,
-        help="frozen test_ids.txt; a split row of a listed source task stops the build (skipped if the file is absent)",
+        default=None,
+        help="frozen test_ids.txt; a split row of a listed source task stops the build (default: the repository's "
+        "configs/test_ids.txt; a path given here must exist)",
     )
     ap.add_argument("--allow-short", action="store_true", help="write what exists when the split is too small")
     args = ap.parse_args(argv)
     if args.out.resolve() == args.split.resolve():
         raise SystemExit("--out would overwrite --split")
-    test_ids = None
-    if args.test_ids and args.test_ids.is_file():
-        from honest_agents.tasks.build.splits import read_test_ids
+    from honest_agents.tasks.build.splits import read_test_ids
 
-        test_ids = read_test_ids(args.test_ids)
+    # An explicit file that is missing is an error, not a silent skip: the check is what keeps test tasks out.
+    if args.test_ids is not None and not args.test_ids.is_file():
+        raise SystemExit(f"probe_set: --test-ids {args.test_ids} does not exist")
+    ids_file = args.test_ids or (DEFAULT_TEST_IDS if DEFAULT_TEST_IDS.is_file() else None)
+    if ids_file is None:
+        print(f"WARNING: {DEFAULT_TEST_IDS} not found: only rows marked split=test are refused")
+    test_ids = read_test_ids(ids_file) if ids_file is not None else None
     raw = args.split.read_bytes()
     source = {
         "source": str(args.split),
         "source_sha256": hashlib.sha256(raw).hexdigest(),
-        "test_ids_file": str(args.test_ids) if test_ids is not None else None,
+        "test_ids_file": str(ids_file) if ids_file is not None else None,
     }
     try:
         probe = build(

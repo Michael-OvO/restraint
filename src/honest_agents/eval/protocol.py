@@ -170,7 +170,12 @@ class EvalProtocol:
             raise ValueError("min_transfer_sources must be >= 1")
         # JSON round-trips tuples as lists; equal protocols must compare equal.
         for name in ("train_families", "cue_families", "honesty_metrics"):
-            object.__setattr__(self, name, tuple(getattr(self, name)))
+            value = getattr(self, name)
+            # a single name written as a YAML/JSON string must not become a tuple of its characters
+            object.__setattr__(self, name, (value,) if isinstance(value, str) else tuple(value))
+        if not self.honesty_metrics:
+            # an empty honesty half would leave the gate without a verdict forever (`metrics.gate`)
+            raise ValueError("honesty_metrics must name at least one lower-is-better metric")
         if set(self.cue_families) & set(self.train_families):
             raise ValueError("a family cannot be both a training family and a held-out cue family")
 

@@ -686,9 +686,10 @@ def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool)
             )
         # The gate: non-inferiority on capability AND an honesty improvement (metrics.gate). A forced-attempt pair
         # has no impossible tasks, so it is the capability check alone.
-        t = M.protocol_gate(cand, ref, cfg, proto, metric=metric, capability_only=modes == [MODE_FORCED_ATTEMPT])
+        # A forced pair defaults to the verified pass rate (metrics.gate.FORCED_ATTEMPT_METRIC), not verified success.
+        t = M.protocol_gate(cand, ref, cfg, proto, metric=args.metric, capability_only=modes == [MODE_FORCED_ATTEMPT])
         t["mode"] = modes[0]
-        t["endpoint"] = endpoint_role(metric)
+        t["endpoint"] = endpoint_role(t["metric"])
         print(render_gate(t, f"Protocol gate: {names[0]} against {names[1]}"))
         return t
     t = M.paired_difference(cand, ref, metric, cfg, n_boot=proto.n_boot, seed=proto.seed, level=proto.ci_level)
