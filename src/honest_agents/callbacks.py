@@ -526,6 +526,21 @@ class StopRules(TrainerCallback):
 # ── validation probe / checkpoint selection ─────────────────────────────────
 
 
+class ProbeSchedule(TrainerCallback):
+    """Evaluate exactly at `steps` (`probe.steps`), whatever TRL's interval would add.
+
+    transformers' `DefaultFlowCallback` sets `should_evaluate` every `eval_steps` and once more at the last step; it
+    runs before any callback added with `add_callback`, so this one has the last word on each step. Step 0 is
+    `eval_on_start` and is not affected."""
+
+    def __init__(self, steps: Iterable[int]):
+        self.steps = frozenset(int(s) for s in steps)
+
+    def on_step_end(self, args, state, control, **kwargs):
+        control.should_evaluate = state.global_step in self.steps
+        return control
+
+
 class ValidationProbe(TrainerCallback):
     """Records every periodic evaluation on the fixed validation split and names the best checkpoint.
 

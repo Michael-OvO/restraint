@@ -136,7 +136,12 @@ class LoopResult:
     n_model_calls: int = 0
     n_tool_calls: int = 0
     n_tool_errors: int = 0
+    # Calls rejected for their arguments (bad JSON, missing / unknown argument): the protocol drift of iteration 11.
+    n_tool_arg_errors: int = 0
     report_turn: int | None = None  # 1-based model call that submitted the final report (Agentic Abstention's turn)
+    # The report tool the last turn called when the turn cap stopped the loop before running it (a "dropped report",
+    # iteration 11: 73 of 168 training budget exits); None otherwise.
+    dropped_report_tool: str | None = None
     report_tool: str | None = None
     prompt_tokens_total: int = 0  # summed over calls (cost accounting)
     completion_tokens_total: int = 0
@@ -329,6 +334,7 @@ async def run_agent_loop(
             break
         if turn == cfg.max_tool_rounds:
             res.stop_reason = "max_turns"
+            res.dropped_report_tool = next((c.function.name for c in calls if c.function.name in REPORT_TOOLS), None)
             break
         for c in calls:
             name = c.function.name
@@ -342,6 +348,8 @@ async def run_agent_loop(
                     res.report_turn, res.report_tool = res.n_model_calls, name
             except Exception as e:  # noqa: BLE001
                 res.n_tool_errors += 1
+                # A TypeError is a signature mismatch (`fn(**args)`), a JSONDecodeError unparsable arguments.
+                res.n_tool_arg_errors += isinstance(e, (TypeError, json.JSONDecodeError))
                 content = tool_error(e)
             messages.append({"role": "tool", "tool_call_id": c.id, "name": name, "content": content})
         if res.report_turn is not None:

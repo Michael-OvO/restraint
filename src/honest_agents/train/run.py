@@ -56,9 +56,13 @@ def _last_checkpoint(out: Path) -> str | None:
 def add_callbacks(trainer: Any, plan: Plan) -> None:
     """Stop rules, the run log, the validation probe's checkpoint selection and, with W&B on, what the dashboard
     needs beyond TRL's own logs (`train.dashboard`; it reads the run log and the probe, so it comes after both)."""
-    from honest_agents.callbacks import JsonlLogger, StopRules, ValidationProbe
+    from honest_agents.callbacks import JsonlLogger, ProbeSchedule, StopRules, ValidationProbe
+    from honest_agents.train.grpo import probe_steps
 
     out = plan.grpo_config.output_dir
+    listed = probe_steps(plan.cfg) if plan.eval_dataset is not None else None
+    if listed is not None:
+        trainer.add_callback(ProbeSchedule(listed))  # first of ours: later callbacks see the final decision
     trainer.add_callback(StopRules(plan.stop_config, reward_mode=plan.cfg.reward.mode, output_dir=out))
     run_log = JsonlLogger(out)
     trainer.add_callback(run_log)

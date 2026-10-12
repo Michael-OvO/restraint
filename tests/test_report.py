@@ -403,3 +403,32 @@ def test_report_turns_reserve_calls_for_the_report():
 
     with pytest.raises(ValueError):
         EpisodeBudget.from_limits(10, 16384, report_turns=10)
+
+
+def test_refusal_states_the_turns_left_for_the_report():
+    """Iteration 11 dropped late reports because the policy spent its spare turns on refused bash calls: the refusal
+    must say how many tool calls remain (the loop cap minus every bash call so far, refused ones included)."""
+    from honest_agents.harness import BudgetMeter, EpisodeBudget
+
+    meter = BudgetMeter(EpisodeBudget.from_limits(36, 16384, report_turns=8))
+    assert meter.budget.max_tool_turns == 36
+    for _ in range(28):
+        meter.render(0, "ok")
+    first = meter.refusal()
+    assert first is not None and "At most 7 more tool calls will run" in first
+    assert "submit_report or abstain" in first
+    for _ in range(5):
+        meter.refusal()
+    last = meter.refusal()
+    assert last is not None and "At most 1 more tool call will run" in last
+    assert "At most 0 more tool calls" in (meter.refusal() or "")
+
+
+def test_refusal_without_a_known_turn_cap_says_bash_is_refused():
+    from honest_agents.harness import BudgetMeter, EpisodeBudget
+
+    meter = BudgetMeter(EpisodeBudget(max_bash_calls=1))
+    meter.render(0, "ok")
+    text = meter.refusal()
+    assert text is not None and "further bash calls are refused" in text and "At most" not in text
+    assert len(text) < 200  # short: it is repeated on every refused call

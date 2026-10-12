@@ -113,7 +113,7 @@ def test_cli_prints_the_table_and_writes_the_selection(tmp_path: Path, capsys):
     assert "**val_ckpt30**" in table and "FAIL" in table and "reference" in table
     assert "claims on impossible" in table and "verified success" in table
     saved = json.loads(out.read_text())
-    assert saved["selected"] == "val_ckpt30" and saved["margin"] == 0.03
+    assert saved["selected"] == "val_ckpt30" and saved["margin"] == 0.05  # the protocol default (no config.json)
     assert [c["step"] for c in saved["checkpoints"]] == [10, 20, 30]
 
 

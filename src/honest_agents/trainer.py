@@ -57,7 +57,7 @@ from trl import GRPOTrainer
 from trl.chat_template_utils import parse_response
 from trl.trainer.utils import split_pixel_values_by_grid, split_tensor_dict, unsplit_pixel_values_by_grid
 
-from honest_agents.harness import SANDBOX_UNAVAILABLE
+from honest_agents.harness import INVALID_TOOL_ARGS, SANDBOX_UNAVAILABLE
 from honest_agents.reward import (
     STOP_CALL_BUDGET,
     STOP_CHAR_BUDGET,
@@ -72,9 +72,6 @@ logger = logging.getLogger(__name__)
 
 class _UnknownTool(ValueError):
     """The model named a tool that does not exist; its own text is safe to show back (it only contains the name)."""
-
-
-INVALID_TOOL_ARGS = "[invalid tool arguments]"
 
 
 def _argument_hint(tool: Any, arguments: Any) -> str:

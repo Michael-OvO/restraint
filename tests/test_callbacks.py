@@ -473,6 +473,29 @@ def test_periodic_probe_on_a_real_trl_run(tmp_path: Path):
     assert any(VAL in r for r in logged)
 
 
+def test_probe_schedule_evaluates_only_the_listed_steps():
+    """`probe.steps: [10, 15, 20]` on TRL's interval of 5: transformers' flow callback asks for a probe every 5 steps
+    (and at the last step); ProbeSchedule, which runs after it, keeps only the listed ones."""
+    from transformers.trainer_callback import DefaultFlowCallback
+    from transformers.trainer_utils import IntervalStrategy, SaveStrategy
+
+    args = SimpleNamespace(
+        eval_strategy=IntervalStrategy.STEPS, eval_delay=0, logging_strategy=IntervalStrategy.STEPS,
+        logging_first_step=False, save_strategy=SaveStrategy.STEPS,
+    )  # fmt: skip
+    state = TrainerState(max_steps=22, eval_steps=5, save_steps=5, logging_steps=1)
+    flow, schedule = DefaultFlowCallback(), callbacks.ProbeSchedule([10, 15, 20])
+    probed = []
+    for step in range(1, 23):
+        state.global_step = step
+        control = TrainerControl()
+        flow.on_step_end(args, state, control)
+        schedule.on_step_end(args, state, control)
+        if control.should_evaluate:
+            probed.append(step)
+    assert probed == [10, 15, 20]
+
+
 # ── Phase 0 summary ──────────────────────────────────────────────────────────
 
 

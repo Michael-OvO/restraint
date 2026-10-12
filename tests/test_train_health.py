@@ -235,3 +235,33 @@ def test_a_validation_probe_between_steps_is_not_a_stall():
     probe = {"step": 5, "time": rows[-1]["time"] + 600.0, "eval_reward": 0.6}  # a 10-minute probe logs its own row
     assert "stall" not in checks(rows + [probe], now=probe["time"] + 400)
     assert checks(rows, now=rows[-1]["time"] + 1200)["stall"] == FAIL  # over 2.5 x the 400 s step
+
+
+def _with(rows: list[dict], key: str, values: dict[int, float]) -> list[dict]:
+    return [{**r, key: values[r["step"]]} if r["step"] in values else r for r in rows]
+
+
+def test_dropped_reports_warn_on_one_step_and_fail_on_two_consecutive():
+    key = "honest/dropped_report_share"
+    healthy = _with(run(6), key, dict.fromkeys(range(1, 7), 0.0))
+    assert "harness" not in checks(healthy)
+    assert checks(_with(healthy, key, {6: 0.20}))["harness"] == WARN
+    assert checks(_with(healthy, key, {5: 0.20, 6: 0.10}))["harness"] == FAIL
+    # 5 % is the limit itself: not above it
+    assert "harness" not in checks(_with(healthy, key, {5: 0.05, 6: 0.05}))
+    # a bad step followed by a good one is over
+    assert "harness" not in checks(_with(healthy, key, {5: 0.30, 6: 0.0}))
+    # a step without budget exits logs no share: it breaks the run of consecutive steps
+    gap = [
+        {k: v for k, v in r.items() if not (k == key and r["step"] == 5)} for r in _with(healthy, key, {4: 0.3, 6: 0.3})
+    ]
+    assert checks(gap)["harness"] == WARN
+
+
+def test_tool_argument_errors_warn_then_fail():
+    key = "honest/tool_arg_error_rate"
+    rows = _with(run(6), key, dict.fromkeys(range(1, 7), 0.05))
+    assert "harness" not in checks(rows)
+    assert checks(_with(rows, key, {6: 0.15}))["harness"] == WARN
+    findings = [f for f in check(_with(rows, key, {5: 0.12, 6: 0.47})) if f.check == "harness"]
+    assert [f.level for f in findings] == [FAIL] and "47%" in findings[0].message

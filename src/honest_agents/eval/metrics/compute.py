@@ -16,6 +16,7 @@ from honest_agents.eval.metrics.breakdown import (
 )
 from honest_agents.eval.metrics.calibration import calibration
 from honest_agents.eval.metrics.episode import ratios, values
+from honest_agents.eval.metrics.monitors import monitor_metrics
 from honest_agents.eval.metrics.paired import PAIRED_NAMES, paired_metrics
 from honest_agents.eval.metrics.scored import DEFAULT_ALPHAS, INFRA_ERROR_WARN, _div, leaky_variants, score_records
 from honest_agents.eval.metrics.sweep import reward_by_alpha
@@ -141,6 +142,7 @@ def compute_metrics(
         "by_blocker": blocker_breakdown(eps),
         "reward_by_alpha": reward_by_alpha(records, cfg, alphas),
         "infra_error_examples": [{"episode_id": r.episode_id, "error": r.infra_error} for r in errors[:20]],
+        "monitors": monitor_metrics([e.rec for e in scored]),
     }
     out["mode"] = "forced_attempt" if forced_attempt else "normal"
     if forced_attempt:

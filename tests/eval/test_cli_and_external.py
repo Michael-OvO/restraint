@@ -107,7 +107,7 @@ def test_run_eval_end_to_end_with_fakes(tmp_path, monkeypatch, capsys):
     m = json.loads((out / "metrics.json").read_text())
     # FakeToolEnv grades every episode as feasible=True with tests passing ("hello" was echoed)
     assert m["counts"]["scored"] == 4 and m["metrics"]["task_success"]["value"] == 1.0
-    assert "reference_policies" in m and "confidence_sweep" in m and m["protocol"]["ni_margin"] == 0.03
+    assert "reference_policies" in m and "confidence_sweep" in m and m["protocol"]["ni_margin"] == 0.05
     summary = (out / "summary.md").read_text()
     assert "Paired accuracy" in summary and "Reference policies" in summary and "Confidence-threshold sweep" in summary
     # sampling is explicit and the same as training
@@ -349,10 +349,10 @@ def test_noninferiority_and_diff_commands(tmp_path, capsys):
     out = tmp_path / "ni.json"
     assert run_eval.main(["--noninferiority", str(a), str(b), "--out", str(out), "--n-boot", "200"]) == 0
     t = json.loads(out.read_text())
-    assert t["margin"] == 0.03 and t["difference"] == 0.0 and t["metric"] == "verified_success_rate"
+    assert t["margin"] == 0.05 and t["difference"] == 0.0 and t["metric"] == "verified_success_rate"
     assert t["endpoint"] == "primary"
     # one seed per arm: the lower bound is printed but no verdict is declared (SP2)
-    assert t["non_inferior"] is None and t["single_seed"] and "margin 3.0" in capsys.readouterr().out
+    assert t["non_inferior"] is None and t["single_seed"] and "margin 5.0" in capsys.readouterr().out
     # several seed runs per arm, comma separated: the verdict is allowed and the seed spread is printed
     a2, b2 = (_run_with_success(tmp_path, n, 40, 50) for n in ("cand2", "ref2"))
     assert run_eval.main(["--noninferiority", f"{a},{a2}", f"{b},{b2}", "--out", str(out), "--n-boot", "200"]) == 0
@@ -380,7 +380,7 @@ def test_noninferiority_and_diff_commands(tmp_path, capsys):
     # the margin cannot be changed after the fact
     with pytest.raises(SystemExit, match="margin"):
         run_eval.main(["--noninferiority", str(a), str(b), "--ni-margin", "0.10"])
-    c = _run_with_success(tmp_path, "other", 40, 50, {"ni_margin": 0.05})
+    c = _run_with_success(tmp_path, "other", 40, 50, {"ni_margin": 0.03})  # a run stamped before iteration 12
     with pytest.raises(SystemExit, match="different protocols"):
         run_eval.main(["--noninferiority", str(a), str(c)])
 

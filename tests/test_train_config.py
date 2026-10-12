@@ -17,6 +17,7 @@ from honest_agents import models, train, trl_rewards
 from honest_agents.models import ModelFamily
 from honest_agents.train import run as run_module
 from honest_agents.train import startup as startup_module
+from honest_agents.train.derive import build_limits
 
 REPO = Path(__file__).resolve().parents[1]
 # pilot and sft_ configs have their own schemas (tests/pilot and tests/sft load them)
@@ -76,6 +77,8 @@ def data(tmp_path: Path) -> SimpleNamespace:
 def _cfg(config: Path, data: SimpleNamespace, *overrides: str) -> train.TrainRunConfig:
     plain = train.load_run_config(config)
     extra = [f"data.eval_file={data.val}"] if plain.data.eval_file else []
+    if plain.data.probe_file:  # a shipped probe list lives on the node; the fixture's validation rows stand in
+        extra.append("data.probe_file=null")
     return train.load_run_config(
         config, [f"data.train_file={data.train}", f"output_root={data.root / 'out'}", *extra, *overrides]
     )
@@ -118,7 +121,7 @@ def test_dry_run_builds(config: Path, data: SimpleNamespace):
     assert plan.cfg.launch.num_processes == 1
     # one source of truth for limits: environment budget, reward reference and server window all follow grpo:
     assert plan.limits.turn_max_tokens == g.generation_kwargs["max_tokens"]
-    assert plan.budget.max_bash_calls == g.max_tool_calling_iterations - 2
+    assert plan.budget.max_bash_calls == g.max_tool_calling_iterations - cfg.env.report_turns
     assert plan.reward_config.efficiency_ref_actions == plan.budget.max_bash_calls
     assert plan.environment_factory.keywords["budget"] is plan.budget
     assert plan.summary()["limits"]["max_model_len"] == (
@@ -497,6 +500,36 @@ def test_probe_must_have_a_checkpoint_to_select(data: SimpleNamespace):
     g = _plan(BASE, data, "probe.every_steps=75").grpo_config
     assert (g.eval_strategy, g.eval_steps, g.num_generations_eval, g.per_device_eval_batch_size) == ("steps", 75, 1, 25)
     assert g.eval_on_start is True
+
+
+def test_explicit_probe_steps(data: SimpleNamespace):
+    """`probe.steps` probes only the listed steps (plus step 0): iteration 12 probes at 0, 10, 15, 20."""
+    plan = _plan(BASE, data, "grpo.save_steps=5", "grpo.max_steps=20", "probe.steps=[20, 10, 15]")
+    assert plan.grpo_config.eval_steps == 5  # a divisor of every listed step; ProbeSchedule drops step 5
+    probe = plan.summary()["probe"]
+    assert probe["probes_per_run"] == 4 and probe["probe_episodes_per_run"] == 4 * probe["episodes_per_probe"]
+    assert train.grpo.probe_steps(plan.cfg) == [10, 15, 20]
+    with pytest.raises(ValueError, match="multiples of grpo.save_steps"):
+        _plan(BASE, data, "grpo.save_steps=10", "probe.steps=[10, 15]")
+    for bad in ("[]", "[0, 10]", "[10, 10]", "10"):
+        with pytest.raises(ValueError, match="probe.steps"):
+            _plan(BASE, data, "grpo.save_steps=5", f"probe.steps={bad}")
+
+
+def test_iteration_12_config():
+    """configs/grpo_it12.yaml: the fixed harness budget and the design's schedule (docs/iteration-12-design.md)."""
+    cfg = train.load_run_config(REPO / "configs" / "grpo_it12.yaml")
+    g = cfg.grpo
+    assert (g["max_tool_calling_iterations"], cfg.env.report_turns) == (36, 8)
+    budget = build_limits(cfg).budget(report_turns=cfg.env.report_turns)
+    assert (budget.max_bash_calls, budget.max_tool_turns) == (28, 36)
+    assert (g["vllm_mode"], cfg.vllm.startup_probe, g["max_completion_length"]) == ("server", True, 12288)
+    assert (g["max_steps"], g["save_steps"], cfg.probe.steps, cfg.probe.on_start) == (20, 5, [10, 15, 20], True)
+    assert (cfg.probe.batch_size, cfg.probe.samples_per_variant, cfg.probe.min_infeasible) == (120, 1, 40)
+    assert (cfg.data.train_file, cfg.data.probe_file) == ("data/train_rl.jsonl", "data/probe_v1.jsonl")
+    assert (cfg.output_root, cfg.wandb.name, cfg.wandb.group) == ("outputs/it12", "it12-grpo", "it12")
+    # the iteration-11 reward, unchanged
+    assert cfg.reward.config == {"alpha": 0.1, "false_blame": -0.4, "implicit_abstain": 0.0}
 
 
 def test_probe_uses_the_training_caps_and_sampling(data: SimpleNamespace):

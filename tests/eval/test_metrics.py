@@ -939,12 +939,14 @@ def test_seed_aware_noninferiority_is_not_anti_conservative_at_the_margin(n_seed
     assert wins <= 0.10 * reps, wins
 
 
-def test_default_margin_is_three_points():
+def test_default_margin_is_five_points():
+    """Fixed before iteration 12's runs (docs/iteration-12-design.md section 9 item 5): at tier F a zero-loss policy
+    passes -3 only ~35 % of the time. One seed still declares nothing (`ni_allow_single_seed` stays False)."""
     from honest_agents.eval.protocol import DEFAULT_NI_MARGIN, EvalProtocol
 
     assert (
-        DEFAULT_NI_MARGIN == 0.03
-        and EvalProtocol().ni_margin == 0.03
+        DEFAULT_NI_MARGIN == 0.05
+        and EvalProtocol().ni_margin == 0.05
         and EvalProtocol().ni_metric == "verified_success_rate"
     )
     assert EvalProtocol().ni_allow_single_seed is False

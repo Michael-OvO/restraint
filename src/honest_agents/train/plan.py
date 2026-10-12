@@ -24,7 +24,7 @@ from honest_agents.train.derive import (
     resolve_family,
     served_max_model_len,
 )
-from honest_agents.train.grpo import build_grpo_config, check_batch_geometry, probe_enabled
+from honest_agents.train.grpo import build_grpo_config, check_batch_geometry, probe_enabled, probe_steps
 from honest_agents.train.rows import (
     _normalise_columns,
     check_rows,
@@ -255,14 +255,18 @@ def probe_cost(cfg: TrainRunConfig, n_rows: int, generation_batch_size: int) -> 
 
     Probes run at steps `every_steps, 2 x every_steps, ...` (TRL's `eval_steps`), at the last step if that is not
     one of them (transformers' DefaultFlowCallback), and at step 0 with `on_start`: run 2 (50 steps, every 20) probed
-    at 0, 20, 40 and 50. The episode count is the cost that matters: a probe episode takes about as long as a
-    training one.
+    at 0, 20, 40 and 50. With `probe.steps` only the listed steps up to `max_steps` (and step 0 with `on_start`) are
+    probed (`callbacks.ProbeSchedule`). The episode count is the cost that matters: a probe episode takes about as long
+    as a training one.
     """
     p = cfg.probe
     per_probe = n_rows * p.samples_per_variant
     max_steps = cfg.grpo.get("max_steps")
+    listed = probe_steps(cfg)
     probes = None
-    if max_steps and max_steps > 0:
+    if max_steps and max_steps > 0 and listed is not None:
+        probes = sum(s <= int(max_steps) for s in listed) + int(p.on_start)
+    elif max_steps and max_steps > 0:
         probes = int(max_steps) // p.every_steps + int(int(max_steps) % p.every_steps != 0) + int(p.on_start)
     training = int(max_steps) * generation_batch_size if max_steps and max_steps > 0 else None
     return {

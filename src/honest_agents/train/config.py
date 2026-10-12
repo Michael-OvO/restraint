@@ -143,6 +143,11 @@ class ProbeSection:
     """
 
     every_steps: int = 50
+    # Explicit probe steps (plus step 0 with `on_start`), in place of every `every_steps`: iteration 12 probes at 0, 10,
+    # 15, 20 (docs/iteration-12-design.md section 9 item 7), which no single interval gives without an extra ~7-minute
+    # probe at step 5 that would also become a selectable checkpoint. Each must be a multiple of `grpo.save_steps`.
+    # `callbacks.ProbeSchedule` enforces the list on top of TRL's `eval_steps`.
+    steps: list[int] | None = None
     max_variants: int = 100  # fixed subset of `data.eval_file`, chosen by a hash of the pair id (pairs stay whole)
     batch_size: int = 25  # episodes in flight per evaluation batch; a multiple of samples_per_variant
     on_start: bool = True  # evaluate the untrained policy first, so a later fall has a baseline

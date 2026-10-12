@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any
 
 from honest_agents.models import (
@@ -115,6 +116,24 @@ def probe_enabled(cfg: TrainRunConfig) -> bool:
     return cfg.data.eval_file is not None or cfg.data.probe_file is not None
 
 
+def probe_steps(cfg: TrainRunConfig) -> list[int] | None:
+    """`probe.steps` sorted and checked (positive integers, no repeats), or None when the probe runs every
+    `probe.every_steps`. Step 0 is `probe.on_start`, never part of the list."""
+    steps = cfg.probe.steps
+    if steps is None:
+        return None
+    if (
+        not isinstance(steps, list)
+        or not steps
+        or any(isinstance(s, bool) or not isinstance(s, int) or s < 1 for s in steps)
+        or len(set(steps)) != len(steps)
+    ):
+        raise ValueError(
+            f"probe.steps must be a non-empty list of distinct steps >= 1 (step 0 is probe.on_start), got {steps!r}"
+        )
+    return sorted(steps)
+
+
 def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits | None = None):
     from trl import GRPOConfig
 
@@ -172,15 +191,24 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
         if p.min_infeasible < 0 or p.min_feasible < 0:
             raise ValueError("probe.min_infeasible and probe.min_feasible must be >= 0")
         save_steps = grpo.get("save_steps", 500)
-        if grpo.get("save_strategy", "steps") != "steps" or p.every_steps % int(save_steps):
+        steps = probe_steps(cfg)
+        bad = [s for s in steps or [p.every_steps] if s % int(save_steps)]
+        if grpo.get("save_strategy", "steps") != "steps" or bad:
+            what = (
+                f"probe.steps={steps} must be multiples"
+                if steps
+                else f"probe.every_steps={p.every_steps} must be a multiple"
+            )
             raise ValueError(
-                f"probe.every_steps={p.every_steps} must be a multiple of grpo.save_steps={save_steps} "
+                f"{what} of grpo.save_steps={save_steps} "
                 "(save_strategy: steps), so every probed step has a checkpoint to select"
             )
         derived.update(
             do_eval=True,
             eval_strategy="steps",
-            eval_steps=p.every_steps,
+            # With an explicit list TRL's interval only has to be a divisor of every listed step; `ProbeSchedule`
+            # switches off the evaluations it would add in between (and its extra one at the last step).
+            eval_steps=math.gcd(*steps) if steps else p.every_steps,
             eval_on_start=p.on_start,
             per_device_eval_batch_size=p.batch_size,
             num_generations_eval=p.samples_per_variant,  # k rollouts per variant, not a training group of 8

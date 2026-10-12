@@ -63,6 +63,9 @@ REPORT_DUPLICATE = "A final report was already submitted; only the first one cou
 # The only text a sandbox failure (boot, exec, timeout, trainer-level tool crash) may show the model. The real exception
 # carries compose commands, host paths and the task / session names, so it is logged host-side and never returned.
 SANDBOX_UNAVAILABLE = "[sandbox unavailable]"
+# What the trainer shows for a tool call whose arguments do not fit the tool (plus the names of the missing / unknown
+# ones). Here rather than in `trainer` so trl-free code (`behaviour`, the re-score) can count these errors.
+INVALID_TOOL_ARGS = "[invalid tool arguments]"
 
 _REPORT_KEYS = (
     "status",
@@ -105,6 +108,10 @@ class EpisodeBudget:
     warn_calls: int = 5  # remaining-budget line when <= this many calls remain
     warn_fraction: float = 0.25  # ... or <= this share of the character budget remains
     command_timeout_sec: int = 60  # each command runs under `timeout -k 5 <this>`
+    # The trainer's / eval loop's cap on tool-call turns (`max_tool_calling_iterations`) when the budget was built from
+    # it (`from_limits`). Only the refusal text reads it, to tell the policy how many turns are left for its report; a
+    # budget built by hand leaves it None and the refusal says so in general terms.
+    max_tool_turns: int | None = None
 
     @classmethod
     def from_limits(
@@ -126,6 +133,7 @@ class EpisodeBudget:
         fields = {
             "max_bash_calls": max(1, max_tool_calling_iterations - report_turns),
             "max_total_chars": int(0.75 * max_completion_length * chars_per_token),
+            "max_tool_turns": max_tool_calling_iterations,
             **overrides,
         }
         return cls(**fields)
@@ -158,18 +166,37 @@ class BudgetMeter:
             return STOP_CHAR_BUDGET
         return None
 
+    @property
+    def report_turns_left(self) -> int | None:
+        """Tool-call turns the loop will still execute after the current one, or None if the cap is unknown.
+
+        The meter sees only `bash` calls (executed and refused), one per turn as the policy makes them: a report call
+        that failed on its arguments also uses a turn (so the text says "at most"), and several calls in one turn make
+        the number an underestimate, the safe side."""
+        cap = self.budget.max_tool_turns
+        return None if cap is None else max(0, cap - self.calls - self.refusals)
+
     def refusal(self) -> str | None:
-        """Text to return instead of running a command, or None if the command may run."""
+        """Text to return instead of running a command, or None if the command may run.
+
+        Iteration 11: after "[budget exhausted] Call submit_report or abstain now" the policy kept calling bash up to the
+        loop's turn cap, and its report came one turn too late to be executed (73 of 168 budget exits). So the text says
+        that bash calls are now wasted and, when the cap is known, how many turns remain for the report."""
         which = self.exhausted
         if which is None:
             return None
         self.refusals += 1
         self.hit = self.hit or which
         what = "command" if which == STOP_CALL_BUDGET else "output"
-        return (
-            f"[budget exhausted: the {what} budget is used up and no more commands will run] "
-            "Call submit_report or abstain now."
-        )
+        left = self.report_turns_left
+        if left is None:
+            tail = "Only submit_report or abstain do anything now; further bash calls are refused."
+        else:
+            calls = "call" if left == 1 else "calls"
+            tail = (
+                f"At most {left} more tool {calls} will run, and only submit_report or abstain do anything: report now."
+            )
+        return f"[budget exhausted: the {what} budget is used up and no more commands will run] {tail}"
 
     def output_cap(self) -> int:
         """Characters of one output to keep: the full cap while at least half the budget remains, shrinking linearly to

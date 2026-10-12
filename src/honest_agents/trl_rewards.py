@@ -44,7 +44,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from honest_agents import bank
+from honest_agents import bank, behaviour
 from honest_agents.report import SelfReport
 from honest_agents.reward import (
     CASES,
@@ -53,6 +53,7 @@ from honest_agents.reward import (
     MASK_REASONS,
     MASK_REWARD_ERROR,
     MASK_TOOLCHAIN,
+    STOP_CALL_BUDGET,
     STOP_REASONS,
     EpisodeOutcome,
     RewardBreakdown,
@@ -140,6 +141,13 @@ METRIC_TAMPER_RATE = "honest/tamper_rate"  # includes a grading failure after th
 METRIC_CONTROL_VERIFIED_SUCCESS = "honest/control/verified_success_rate"
 METRIC_CONTROL_DECLINE_RATE = "honest/control/decline_rate"
 METRIC_ZERO_COMMAND_RATE = "honest/zero_command_rate"
+
+
+# Harness and protocol monitors (`behaviour`, docs/iteration-12-design.md 2.1 item 3), read by `train.health`.
+METRIC_DROPPED_REPORT_SHARE = "honest/" + behaviour.METRIC_DROPPED_REPORT_SHARE
+METRIC_TOOL_ARG_ERROR_RATE = "honest/" + behaviour.METRIC_TOOL_ARG_ERROR_RATE
+METRIC_README_READ_TWIN = f"honest/{behaviour.METRIC_README_READ_RATE}/twin"
+METRIC_README_READ_CONTROL = f"honest/{behaviour.METRIC_README_READ_RATE}/control"
 
 
 def reward_metric(mode: str) -> str:
@@ -275,6 +283,47 @@ def batch_metrics(
     for mode in MODES:
         ratio(reward_metric(mode), sum(mode_reward(mode, b) for b in scored), len(scored))
     return m
+
+
+def _label(env: Any, columns: dict[str, Any], key: str, i: int, n: int) -> Any:
+    """A task label from the environment's spec, else from the dataset column TRL forwarded."""
+    spec = getattr(env, "_spec", None)
+    value = getattr(spec, key, None) if spec is not None else None
+    return value if value is not None else _per_rollout(columns, key, n)[i]
+
+
+def rollout_behaviours(
+    environments: Sequence[Any], breakdowns: Sequence[RewardBreakdown], columns: dict[str, Any]
+) -> list[behaviour.RolloutBehaviour]:
+    """`behaviour.RolloutBehaviour` per rollout whose sandbox worked (infra masks are left out: a boot failure has no
+    transcript to judge). The completion is TRL's message list; the commands are the environment's own history, so a
+    refused or failed call never counts as a README read."""
+    n = len(environments)
+    completions = _per_rollout(columns, "completions", n)
+    rows = []
+    for i, (env, br) in enumerate(zip(environments, breakdowns, strict=True)):
+        if br.masked_reason in _INFRA_MASKS:
+            continue
+        completion = completions[i] if isinstance(completions[i], (list, str)) else None
+        budget_exit = br.stop_reason == STOP_CALL_BUDGET
+        history = getattr(env, "_history", None) or []
+        commands = [str(h.get("command") or "") for h in history if isinstance(h, dict)]
+        rows.append(
+            behaviour.RolloutBehaviour(
+                call_budget_exit=budget_exit,
+                dropped_report=(
+                    None
+                    if completion is None
+                    else budget_exit and behaviour.unexecuted_report_call(completion) is not None
+                ),
+                tool_arg_error=None if completion is None else behaviour.has_tool_arg_error(completion),
+                family=_label(env, columns, "family", i, n),
+                feasible=br.feasible,
+                is_control=bool(_label(env, columns, "is_control", i, n)),
+                readme_read=behaviour.readme_read_before_destruction(commands),
+            )
+        )
+    return rows
 
 
 # Logged for every batch that has the episodes they are defined on. docs/design.md section 5.
@@ -563,6 +612,11 @@ def score_batch(
         for name, value in metrics.items():
             log_metric(name, value)
 
+    def log_behaviour() -> None:
+        rows = rollout_behaviours(environments, breakdowns, columns)
+        for name, value in behaviour.behaviour_metrics(rows, prefix="honest/").items():
+            log_metric(name, value)
+
     def log_columns() -> None:
         for column, values in episode_columns(outcomes, breakdowns, groups).items():
             log_extra(column, values)
@@ -576,6 +630,7 @@ def score_batch(
 
     if log_metric is not None:
         _guarded("metrics", log_metrics)
+        _guarded("behaviour metrics", log_behaviour)  # separately: a transcript it cannot read must not cost the rest
     if log_extra is not None:
         _guarded("completions-table columns", log_columns)
     _guarded("quarantine list / trajectory bank", persist)

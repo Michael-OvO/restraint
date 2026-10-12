@@ -25,7 +25,10 @@ act on 20-step windows to avoid noise; this check is the operator's view after e
 * the same three rates per training step (`capability`, `over-refusal`, `quitting`), last `canary_window` (5) steps
   against the first 5, weighted by episode counts: WARN only, an early hint between probes. Every step draws
   different controls (with `shuffle_dataset: false`, a different block of the pool, base pass rates 0.25 to 1.0), so
-  an unchanged policy moves this comparison past 15 points in about 28 % of simulated runs: it cannot fail a run.
+  an unchanged policy moves this comparison past 15 points in about 28 % of simulated runs: it cannot fail a run;
+* harness (`honest/dropped_report_share`, `honest/tool_arg_error_rate`, from `behaviour`): budget exits whose report call
+  was never executed above 5 %, or rollouts with a tool-argument error above 10 %, WARN on one step and FAIL on two
+  consecutive steps (iteration 11: 43 % of budget-exit reports dropped, argument errors on up to 47 % of rows).
 """
 
 from __future__ import annotations
@@ -45,6 +48,8 @@ from honest_agents.callbacks import PROBE_CANARIES, TRAIN_LOG_FILE, is_probe_log
 from honest_agents.trl_rewards import (
     METRIC_CONTROL_DECLINE_RATE,
     METRIC_CONTROL_VERIFIED_SUCCESS,
+    METRIC_DROPPED_REPORT_SHARE,
+    METRIC_TOOL_ARG_ERROR_RATE,
     METRIC_ZERO_COMMAND_RATE,
 )
 
@@ -88,6 +93,12 @@ class HealthConfig:
     probe_warn: float = 0.10
     probe_fail: float = 0.15
     probe_patience: int = 2  # consecutive probes the fail-sized shift must hold for
+    # Harness / protocol monitors (docs/iteration-12-design.md 2.1 item 3): WARN on one step above the limit, FAIL on
+    # `harness_patience` consecutive steps. Iteration 11 dropped 73 of 168 budget-exit reports (43 %) and its argument
+    # errors climbed to 26-30 of 64 rows per step: both corrupt the reward rather than express the policy.
+    dropped_report_fail: float = 0.05  # share of call-budget exits whose report call was never executed
+    tool_arg_error_fail: float = 0.10  # share of rollouts with a tool call rejected for its arguments
+    harness_patience: int = 2
 
 
 @dataclass(frozen=True)
@@ -109,7 +120,7 @@ CANARIES = (
 
 # Every `Finding.check` a training run can produce (the dashboard plots one level per check, 0 when it did not trip).
 CHECKS = (
-    *("stall", "numbers", "drift", "collapse", "gaming", "signal", "memory", "learning"),
+    *("stall", "numbers", "drift", "collapse", "gaming", "signal", "memory", "learning", "harness"),
     *(c.check for c in CANARIES),
     *(c.check for c in PROBE_CANARIES),
 )
@@ -242,6 +253,7 @@ def check(
                 )
             )
 
+    out.extend(_harness(rows, cfg))
     out.extend(_canaries(rows, cfg))
     out.extend(_probe_canaries(probes, cfg))
 
@@ -261,6 +273,25 @@ def check(
             text = ", ".join(f"{k} {h:.0%} -> {t:.0%}" for k, h, t in gains)
             out.append(Finding(WARN, "learning", f"no honesty gain over the first 5 steps: {text}"))
     return out or [Finding(OK, "all", "no check tripped")]
+
+
+def _harness(rows: Sequence[dict[str, Any]], cfg: HealthConfig) -> list[Finding]:
+    """Dropped reports and tool-argument errors on the latest steps: FAIL when the limit is passed on each of the last
+    `harness_patience` steps, WARN when only the latest passes it. A step that did not log the rate (no budget exit in
+    the batch) breaks the run of consecutive steps rather than extending it."""
+    out: list[Finding] = []
+    k = max(1, cfg.harness_patience)
+    for key, limit, label in (
+        (METRIC_DROPPED_REPORT_SHARE, cfg.dropped_report_fail, "budget exits dropped their report"),
+        (METRIC_TOOL_ARG_ERROR_RATE, cfg.tool_arg_error_fail, "rollouts hit a tool-argument error"),
+    ):
+        latest = [_num(r, key) for r in rows[-k:]]
+        if latest[-1] is None or latest[-1] <= limit:
+            continue
+        run = len(latest) == k and all(v is not None and v > limit for v in latest)
+        level, when = (FAIL, f"on {k} consecutive steps") if run else (WARN, "this step")
+        out.append(Finding(level, "harness", f"{latest[-1]:.0%} of {label} {when} (limit {limit:.0%})"))
+    return out
 
 
 def _canary_shift(rows: Sequence[dict[str, Any]], c: Canary, w: int) -> tuple[float, float, float] | None:

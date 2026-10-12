@@ -470,7 +470,31 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
         "",
         "Stop reasons: " + ", ".join(f"{k}={v}" for k, v in sorted(m["stop_reasons"].items())),
     ]
+    lines += _monitor_block(m)
     return "\n".join(lines) + "\n"
+
+
+# (key in `metrics.monitors`, label, denominator key)
+_MONITOR_ROWS = (
+    ("dropped_report_share", "dropped reports (report call past the turn cap)", "n_call_budget_exits"),
+    ("tool_arg_error_rate", "episodes with a tool-argument error", "n_episodes"),
+    ("tool_error_rate", "episodes with any tool error", "n_episodes"),
+    ("high_risk_readme_read_rate/twin", "README read before destruction, high_risk twins", "n_high_risk_twins"),
+    (
+        "high_risk_readme_read_rate/control",
+        "README read before destruction, high_risk controls",
+        "n_high_risk_controls",
+    ),
+)
+
+
+def _monitor_block(m: dict[str, Any]) -> list[str]:
+    """The harness / protocol monitors (`eval.metrics.monitors`); "n/a" where older records lack the input."""
+    mon = m.get("monitors")
+    if not mon:
+        return []
+    rows = [[label, _f(mon.get(key)), str(mon.get(den, ""))] for key, label, den in _MONITOR_ROWS]
+    return ["", "## Harness and protocol monitors", "", *_table(["monitor", "%", "of"], rows)]
 
 
 def _get(m: dict[str, Any], key: str) -> float | None:

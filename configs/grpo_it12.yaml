@@ -1,0 +1,39 @@
+# Iteration 12 GRPO (docs/iteration-12-design.md 2.5 and section 9): the iteration-11 reward, pool, data order and seed,
+# with the fixed harness and the new monitors. Every iteration-12 run and evaluation passes this file as its training
+# config (`run_eval --train-config configs/grpo_it12.yaml`, design section 9 item 2), so the budget is the same
+# everywhere: 28 bash commands + 8 report-only tool calls.
+#   A3 (from the distilled policy): model.name=<merged selfdistill checkpoint> wandb.name=it12-grpo
+#   B0 (fallback, from base):       model.name stays Qwen/Qwen3.5-4B, wandb.name=it12-grpo-base
+# Server mode on 2 GPUs (trainer GPU 0, vLLM GPU 1: scripts/serve_vllm.sh); on a single >= 80 GB card run colocated
+# with grpo.vllm_mode=colocate vllm.startup_probe=false and drop to grpo.max_steps=15 (design section 6).
+base: grpo_colocate_qwen35.yaml
+output_root: outputs/it12
+data:
+  train_file: data/train_rl.jsonl   # the iteration-11 pool in the same file order (tasks.rl_pool step blocks)
+  probe_file: data/probe_v1.jsonl   # 120 validation variants (40 sources), the same probe as iteration 11
+env:
+  # Tool calls reserved for the report after the 28-command bash budget (harness.EpisodeBudget.from_limits): with 2,
+  # iteration 11 dropped 73 of 168 budget-exit reports. 36 - 8 = 28 bash commands, as before.
+  report_turns: 8
+vllm:
+  startup_probe: true     # a server: check its window, token ids and logprobs before the first step
+probe:
+  # Probes at 0 (on_start), 10, 15 and 20 (design section 9 item 7); selection is among these steps only. Each probe
+  # is 120 episodes (~7 min at batch size 120); an every-5 interval would add a step-5 probe that is also selectable.
+  steps: [10, 15, 20]
+  on_start: true
+  batch_size: 120         # = the probe size: one batch in flight (iteration 11: batches of 25 took ~18 min per probe)
+  samples_per_variant: 1
+  min_infeasible: 40      # probe_v1 has 40 impossible variants (20 high_risk, 6 remove_input, 14 revoke)
+wandb:
+  name: it12-grpo         # override per arm (it12-grpo-base for B0)
+  group: it12
+grpo:
+  vllm_mode: server
+  max_tool_calling_iterations: 36   # 28 bash + env.report_turns 8
+  # 48 GB cards: a ~15k-token sequence needs ~15 GB of fp32 logits gradient in TRL's fused log-prob backward and OOMed
+  # at step 14 of iteration 11 (16384); 12288 trained steps 11-20 there without one. Set 16384 on >= 80 GB cards.
+  # Launch with PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True.
+  max_completion_length: 12288
+  max_steps: 20
+  save_steps: 5

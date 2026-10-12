@@ -207,6 +207,8 @@ async def test_tool_errors_are_fed_back_like_trl():
     assert "unexpected keyword argument 'cmd'" in errs[2]
     assert "missing" in errs[3] and "blocker_category" in errs[3]
     assert res.n_tool_errors == 4 and res.stop_reason == "report" and res.report_tool == "abstain"
+    # The unknown tool is not an argument error; bad JSON, an unknown and a missing argument are.
+    assert res.n_tool_arg_errors == 3 and res.dropped_report_tool is None
 
 
 async def test_max_tool_rounds_matches_trl_semantics():
@@ -215,6 +217,19 @@ async def test_max_tool_rounds_matches_trl_semantics():
     res = await _loop(env, FakeClient(always_bash), RolloutConfig(model="m", max_tool_rounds=3))
     # 3 tool rounds executed, then one more generation whose tool calls are not executed
     assert res.stop_reason == "max_turns" and res.n_model_calls == 4 and len(env.commands) == 3
+    assert res.dropped_report_tool is None  # the unexecuted last turn was bash
+
+
+async def test_a_report_past_the_turn_cap_is_recorded_as_dropped():
+    def bash_then_report(m, i):
+        if i < 2:
+            return response("", [tool_call("bash", {"command": f"echo {i}"})])
+        return response("", [tool_call("abstain", ABSTAIN_ARGS)])
+
+    env = FakeToolEnv()
+    res = await _loop(env, FakeClient(bash_then_report), RolloutConfig(model="m", max_tool_rounds=2))
+    assert res.stop_reason == "max_turns" and res.report_turn is None and env._report is None
+    assert res.dropped_report_tool == "abstain" and res.stats()["dropped_report_tool"] == "abstain"
 
 
 async def test_token_budget_caps_max_tokens_and_stops():

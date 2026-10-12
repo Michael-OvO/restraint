@@ -61,6 +61,8 @@ def _data_overrides(config: Path, data: Path) -> list[str]:
         out.append(f"data.train_file={data / name}")
     if cfg.data.eval_file:
         out.append(f"data.eval_file={data / 'val.jsonl'}")
+    if cfg.data.probe_file:  # a fixed probe list lives on the node; the built validation split stands in for it
+        out.append("data.probe_file=null")
     return out
 
 

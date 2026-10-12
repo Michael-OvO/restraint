@@ -472,7 +472,8 @@ def test_every_training_config_loads_and_builds_its_limits(config):
     limits = train.build_limits(cfg)
     if config != "smoke.yaml":  # the smoke run uses smaller caps on purpose
         assert limits.turn_max_tokens == harness.DEFAULT_TURN_MAX_TOKENS
-        assert limits.max_tool_calling_iterations == harness.DEFAULT_MAX_TOOL_ITERATIONS
+        # The bash budget is the same everywhere (28); iteration-12 configs reserve more report-only turns on top.
+        assert limits.max_tool_calling_iterations - cfg.env.report_turns == harness.DEFAULT_MAX_TOOL_ITERATIONS - 2
     assert cfg.grpo.get("scale_rewards") in ("none", False)  # docs/design.md section 8
     assert cfg.reward.mode in trl_rewards.MODES
     assert cfg.launch.num_processes == 1

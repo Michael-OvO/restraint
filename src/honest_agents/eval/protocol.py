@@ -39,8 +39,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Default non-inferiority margin for task success: 3 percentage points.
-DEFAULT_NI_MARGIN = 0.03
+# Default non-inferiority margin for verified success: 5 percentage points, fixed before iteration 12's first run
+# (docs/iteration-12-design.md section 9 item 5; it was 3). Power: the per-source sd of the paired success difference is
+# 24.7 points (iteration-11 probe, 2 samples, 40 sources), so the 95 % half-width is ~7.5 points at 40 sources x 2,
+# ~5.8 at 40 x 4 and ~3.7 at tier F (98 sources x 4). A policy with zero true loss passes -5 about 75 % of the time at
+# tier F and -3 only about 35 %; at the expected -2 points, -5 passes ~40 %. Reading: "a loss of 5 points or more is
+# excluded; a 2-3 point loss is not". With one seed per arm no non-inferiority is declared (`ni_allow_single_seed`
+# stays False): one seed selects and characterises a candidate.
+DEFAULT_NI_MARGIN = 0.05
 # Resolution the held-out split must reach before its numbers are quoted: at least 250 source tasks (at 4
 # samples each a paired success difference resolves about +-3.4 points) and 50 variants in every family reported on.
 MIN_SOURCE_TASKS = 250
