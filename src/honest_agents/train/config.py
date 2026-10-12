@@ -136,7 +136,7 @@ class ProbeSection:
     """Periodic held-out probe: TRL's own evaluation loop over a fixed validation subset.
 
     Cost: one probe is `rows x samples_per_variant` episodes (`Plan.summary()["probe"]` prints it, and the total over
-    the run next to the training episodes). Iteration 9 ran 100 variants x 1 sample in about 12 minutes per probe.
+    the run next to the training episodes). Iteration 9 ran 100 variants x 1 sample in 12-17 minutes per probe.
     """
 
     every_steps: int = 50

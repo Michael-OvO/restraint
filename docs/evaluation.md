@@ -467,9 +467,9 @@ prints `episodes_per_probe`, `probes_per_run` and `probe_episodes_per_run` next 
 | `probe_set` defaults (64 impossible + 64 controls + 64 plain twins) | 192 | 1 | 192 | 768 |
 | the same at k = 4 (evaluation protocol item 4) | 192 | 4 | 768 | 3,072 |
 
-For scale: run 2 trained on 3,200 episodes (50 steps x 64) and its 100-episode probe took about 12 minutes, so 768
-episodes per probe is about 1.5 hours each, the same order as the training itself. Probe less often (`every_steps` 25 on a
-50-step run) or use k = 2 for the in-run probe and keep k = 4 for the post-hoc checkpoint evaluation below.
+For scale: run 2 trained on 3,200 episodes (50 steps x 64) and its 100-episode probe took 12 to 17 minutes
+(`eval_runtime` 703-1042 s over its four probes), so 768 episodes per probe is about 1.5 to 2 hours each, the same order
+as the training itself. Probe less often (`every_steps` 25 on a 50-step run) or use k = 2 for the in-run probe and keep k = 4 for the post-hoc checkpoint evaluation below.
 
 ### 8.2 Checkpoint selection
 
@@ -487,6 +487,8 @@ verified and task success, control decline, zero-command reports, both differenc
 intervals, gate) is printed, and the output says whether the winner is more honest than the base at all. This is a
 within-run selection on one seed, so the bound covers task sampling only; the confirmatory claim is still
 `run_eval --noninferiority` with several seeds per arm. Exit status 1 when no checkpoint passes: keep the base model.
+Runs are refused when any is on a test split (selecting on test leaks it into the result) or when their split, rollout
+settings other than the model (tool rounds, token budgets, sampling, system prompt, tools) or reward config differ.
 
 ## 9. Trajectory bank and quarantine
 

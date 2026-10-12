@@ -20,8 +20,9 @@ iteration 11"). The rule, fixed here rather than chosen after looking:
 This is a selection rule within one run, so it uses one seed per arm on purpose: the bound covers task sampling only,
 which is why the confirmatory non-inferiority claim (`run_eval --noninferiority`, several seeds) stays separate.
 The table of every checkpoint (honesty against success) is printed, not just the winner. Variants that leaked in any
-run are left out of every run, so all rates share their population. Exit status 0 when a checkpoint is selected, 1 when
-none passes the gate.
+run are left out of every run, so all rates share their population. Runs on a test split, or whose split, rollout
+settings (other than the model) or reward config differ, are refused (`check_comparable`). Exit status 0 when a
+checkpoint is selected, 1 when none passes the gate.
 """
 
 from __future__ import annotations
@@ -105,8 +106,12 @@ class Selection:
 
 
 def checkpoint_step(name: str) -> int | None:
-    """The training step in a run name such as `val_ckpt20` or `checkpoint-50`: its last number, or None."""
-    found = re.findall(r"\d+", name)
+    """The training step in a run name such as `val_ckpt20` or `checkpoint-50`, or None.
+
+    The number after `checkpoint` / `ckpt` / `step` wins, so `val_ckpt20_seed1` is step 20, not 1 (the step breaks ties
+    and orders the table); otherwise the name's last number."""
+    marked = re.findall(r"(?:checkpoint|ckpt|step)[-_]?(\d+)", name, flags=re.IGNORECASE)
+    found = marked or re.findall(r"\d+", name)
     return int(found[-1]) if found else None
 
 
@@ -252,6 +257,46 @@ def reward_config_of_run(run_dir: Path) -> RewardConfig:
     return RewardConfig(**{k: v for k, v in raw.items() if k in known})
 
 
+# Rollout settings that must agree across the compared runs: only the policy (`model`) may differ, or a checkpoint could
+# pass the gate because it was given more tool rounds, a longer budget or another prompt than the base.
+ROLLOUT_KEYS = (
+    "max_tool_rounds", "max_completion_tokens", "max_tokens_per_turn", "temperature", "top_p", "top_k", "min_p",
+    "repetition_penalty", "extra_body", "system_prompt", "neutral_tools",
+)  # fmt: skip
+
+
+def _is_test_split(split: Any) -> bool:
+    return isinstance(split, str) and any(part.lower().startswith("test") for part in Path(split).with_suffix("").parts)
+
+
+def check_comparable(dirs: Sequence[Path]) -> None:
+    """Refuse runs that cannot be compared or must not be used for selection (`config.json` of each run).
+
+    * a test split: choosing a checkpoint on test leaks the test set into the reported result;
+    * different splits, rollout settings (`ROLLOUT_KEYS`) or reward configs between runs: the paired difference would
+      measure the setting, not the checkpoint. A run without `config.json` is not checked (synthetic or legacy runs).
+    """
+    configs = {d: json.loads((d / "config.json").read_text()) for d in dirs if (d / "config.json").is_file()}
+    problems = [
+        f"{d}: split {c.get('split')!r} is a test split" for d, c in configs.items() if _is_test_split(c.get("split"))
+    ]
+    if configs:
+        ref_dir, ref = next(iter(configs.items()))
+        for d, c in configs.items():
+            diffs = [] if c.get("split") == ref.get("split") else [f"split {ref.get('split')!r} -> {c.get('split')!r}"]
+            diffs += [
+                f"rollout.{k} {(ref.get('rollout') or {}).get(k)!r} -> {(c.get('rollout') or {}).get(k)!r}"
+                for k in ROLLOUT_KEYS
+                if (ref.get("rollout") or {}).get(k) != (c.get("rollout") or {}).get(k)
+            ]
+            if (ref.get("reward") or {}) != (c.get("reward") or {}):
+                diffs.append("reward config differs")
+            if diffs:
+                problems.append(f"{d} against {ref_dir}: " + "; ".join(diffs))
+    if problems:
+        raise SystemExit("the evaluations cannot be compared for checkpoint selection:\n  " + "\n  ".join(problems))
+
+
 def shared_protocol(dirs: Sequence[Path]) -> EvalProtocol:
     """The protocol all runs were started under; refused when they differ (a margin cannot be picked per run)."""
     protos = [protocol_of_run(d) or EvalProtocol() for d in dirs]
@@ -275,8 +320,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     names = [d.name for d in dirs]
     if len(set(names)) != len(names):
         raise SystemExit(f"evaluation directory names must differ, got {names}")
+    check_comparable(dirs)
     proto = shared_protocol(dirs)
-    cfg = reward_config_of_run(args.base)
+    cfg = reward_config_of_run(args.base)  # the same in every run (check_comparable)
     sel = select(
         read_records(args.base / EPISODES_FILE),
         {d.name: read_records(d / EPISODES_FILE) for d in args.checkpoints},
