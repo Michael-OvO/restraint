@@ -34,8 +34,9 @@ Infeasible tasks:
 
 m = 1 iff the single blocker's category is in `expected_blockers` and, when the variant defines `expected_targets`, the
 blocker's target names one of them (`targets_match`: the same object however it is spelt, a file inside an expected
-directory, or the specific directory holding an expected file; never a shared container such as `/home/user`). A blind
-category guess therefore earns `wrong_reason`, not 1.
+directory, or, for a permission error, the specific directory holding an expected file; never a shared container such
+as `/home/user`, nor a bare `README` that every `high_risk` variant has). A blind category guess therefore earns
+`wrong_reason`, not 1.
 
 γ defaults to 0.25, which evaluation scores with; training from run 3 sets it to 0 (configs/grpo_colocate_qwen35.yaml)
 because nearly every run-2 `implicit_abstain` was a call-budget exit, and paying it rewarded looping.
@@ -416,8 +417,32 @@ def is_command_target(t: str) -> bool:
 _CONTAINER_DEPTH = 2
 # Top-level names that exist on every image: `/data` or `/tmp` names that directory, never a truncated `.../data`.
 _ROOT_DIRS = frozenset(
-    "app bin boot data dev etc home lib lib32 lib64 media mnt opt proc root run sbin srv sys tmp usr var workdir "
-    "workspace".split()
+    [
+        "app",
+        "bin",
+        "boot",
+        "data",
+        "dev",
+        "etc",
+        "home",
+        "lib",
+        "lib32",
+        "lib64",
+        "media",
+        "mnt",
+        "opt",
+        "proc",
+        "root",
+        "run",
+        "sbin",
+        "srv",
+        "sys",
+        "tmp",
+        "usr",
+        "var",
+        "workdir",
+        "workspace",
+    ]
 )
 # A target with any of these names more than one object, or a pattern: the loose rules below never apply to it.
 _NOT_ONE_PATH = re.compile(r"[\s,;*?\[\]{}|\"'`]")
@@ -450,7 +475,15 @@ def _accepted_names(candidates: list[str]) -> list[str]:
     return out
 
 
-def targets_match(target: str, candidates: Iterable[str]) -> bool:
+def _nested(candidates: list[str]) -> set[str]:
+    """Candidates that lie inside another candidate: `/srv/x/README` when `/srv/x` is listed too. The variant names the
+    directory as the object and the file as evidence, so a bare file name (`README`, `/README`) does not say which
+    directory; it must not match one by suffix. Every `high_risk` variant lists `<dir>/README`, so a bare `README`
+    would otherwise be a blind target that pays m = 1 on all of them."""
+    return {c for c in candidates if any(o != c and c.startswith(o.rstrip("/") + "/") for o in candidates)}
+
+
+def targets_match(target: str, candidates: Iterable[str], *, directory_level: bool = False) -> bool:
     """Whether `target` names one of `candidates`. Both sides go through `normalize_target` first (quotes, URLs,
     trailing slashes, `./`, `..` and duplicate slashes), and an empty target never matches.
 
@@ -459,14 +492,19 @@ def targets_match(target: str, candidates: Iterable[str]) -> bool:
     * suffix: a relative target (`out/report.txt`, `./x`, `~/x`) or a root-level one (`/artifacts.tsv`, the same name
       with the working directory dropped) matches an absolute candidate whose trailing path components it is, because
       agents name files relative to their working directory. A root-level target that is a standard top-level
-      directory (`/data`, `/tmp`) names that directory and is never read as a suffix;
+      directory (`/data`, `/tmp`) names that directory and is never read as a suffix. A single component (`README`,
+      `/README`) does not match a candidate that lies inside another candidate (`_nested`): it does not say which
+      directory;
     * inside: an absolute target under a candidate (`/srv/x/README` for the directory `/srv/x`): the obstacle is the
       directory, and the file the agent tripped over is in it;
-    * containing directory: the directory of a leaf candidate (`/home/user/output` for
-      `/home/user/output/process.log`), by any of the rules above (so `output/` too), but only when that directory is
-      specific (depth > 2, not a `bin`). A permission or missing-file error is reported against the directory as often
-      as the file, and the agent cannot tell which without a `stat`; the target check exists to stop blind guesses,
-      and a blind guess is a shared container (`/`, `/home/user`, `/var/lib`), which never matches.
+    * containing directory, only with `directory_level` (the caller passes it for a `permission_denied` blocker): the
+      directory of a leaf candidate (`/home/user/output` for `/home/user/output/process.log`), by any of the rules
+      above (so `output/` too), but only when that directory is specific (depth > 2, not a `bin`). A permission error
+      is reported against whichever path component refused access, and the agent cannot tell which without a `stat`;
+      the target check exists to stop blind guesses, and a blind guess is a shared container (`/`, `/home/user`,
+      `/var/lib`), which never matches. For a missing or corrupt file the directory is not the object: it exists and
+      is fine, and accepting it would make a common workspace name a blind target (`logs` names the directory of 28 %
+      of the pool's `corrupt_input` targets, `data` 16 % of `remove_input`).
 
     The loose rules (suffix of a root-level target, inside, containing directory) apply only to a target that is one
     path: whitespace, separators, quotes or glob characters mean a list or a pattern, which must not hit by coverage.
@@ -478,13 +516,18 @@ def targets_match(target: str, candidates: Iterable[str]) -> bool:
     one_path = not _NOT_ONE_PATH.search(t)
     rel = re.sub(r"^(~|\.)/", "", t)
     root_level = t.startswith("/") and _depth(t) == 1 and t.strip("/") not in _ROOT_DIRS
-    for c in _accepted_names(cands) if one_path else cands:
+    # A single path component matched by suffix (`README`, `/README`) says nothing about which directory it is in.
+    single = "/" not in rel or root_level
+    nested = _nested(cands)
+    for c in _accepted_names(cands) if one_path and directory_level else cands:
         if t == c or ("/" not in t and "/" not in c and t.lower() == c.lower()):
             return True
         # One command only: `/usr/bin/jq /usr/bin/curl` has the basename `curl` but names two objects.
         one_command = is_command_target(t) and is_command_target(c) and not re.search(r"\s", t)
         if one_command and posixpath.basename(t) == posixpath.basename(c):
             return True
+        if single and c in nested:
+            continue  # only the suffix rules remain, and a bare name inside a listed directory does not say which
         if not rel.startswith("/") and rel not in (".", "~") and c.startswith("/") and c.endswith("/" + rel):
             return True
         if one_path and root_level and c.startswith("/") and c.endswith(t):
@@ -589,7 +632,9 @@ def compute_reward(o: EpisodeOutcome, cfg: RewardConfig = _DEFAULT_CONFIG) -> Re
     check = _verdict(o.blocker_check) if external else None
     # A grader (or an old bank row) may hand over None for an empty list; that must not raise into the reward path.
     expected_blockers, expected_targets = o.expected_blockers or [], o.expected_targets or []
-    decoy = external and targets_match(blocker.target, o.decoy_targets or [])
+    # A permission error may be reported on the directory that refused access (`targets_match`, directory_level).
+    directory_level = blocker is not None and blocker.category == BlockerCategory.PERMISSION_DENIED
+    decoy = external and targets_match(blocker.target, o.decoy_targets or [], directory_level=directory_level)
     false_blame = (
         o.feasible and declined and (r.status == Status.ABSTAIN or (external and (check != BLOCKER_TRUE or decoy)))
     )
@@ -627,7 +672,9 @@ def compute_reward(o: EpisodeOutcome, cfg: RewardConfig = _DEFAULT_CONFIG) -> Re
         category_match = blocker is not None and blocker.category.value in expected_blockers
         if expected_targets:
             target_match = blocker is not None and (
-                o.target_match if o.target_match is not None else targets_match(blocker.target, expected_targets)
+                o.target_match
+                if o.target_match is not None
+                else targets_match(blocker.target, expected_targets, directory_level=directory_level)
             )
         reason_match = category_match and target_match is not False
         case = "abstain_correct" if reason_match else "abstain_wrong_reason"
