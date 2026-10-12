@@ -6,9 +6,10 @@ lives outside those logs, so no number reaches the dashboard twice:
 
 * the run log's own columns (`callbacks.JsonlLogger`): host RAM `mem/*` (a run was OOM-killed at 69 GB),
   `gpu/peak_memory_gb` and `wall_sec_since_last_log`;
-* `train.health` after every step: the worst level as `health/verdict` and one level per check as `health/<check>`
-  (0 OK, 1 WARN, 2 FAIL), the findings' text in the run summary, and one W&B alert the first time a check FAILs, so
-  an unattended run that is quietly getting worse reaches the phone, not only the log;
+* `train.health` after every step and every validation probe: the worst level as `health/verdict` and one level per
+  check as `health/<check>` (0 OK, 1 WARN, 2 FAIL), the findings' text in the run summary, and one W&B alert the first
+  time a check FAILs, so an unattended run that is quietly getting worse reaches the phone, not only the log (the
+  run itself is stopped by `callbacks.StopRules`, which judges the probe's capability the same way);
 * the validation probe's checkpoint choice (`probe/best_step`, `probe/best_value`), which only lives in
   `best_checkpoint.json` otherwise.
 
@@ -33,7 +34,7 @@ from typing import Any
 
 from transformers import TrainerCallback
 
-from honest_agents.callbacks import JsonlLogger, ValidationProbe, is_train_log, read_jsonl
+from honest_agents.callbacks import JsonlLogger, ValidationProbe, is_probe_log, is_train_log, read_jsonl
 from honest_agents.train import health
 from honest_agents.train.config import TrainRunConfig
 from honest_agents.train.derive import run_name
@@ -150,20 +151,26 @@ def findings_text(findings: Sequence[health.Finding]) -> str:
 
 
 def history(path: Path, resumed_at: int) -> list[dict[str, Any]]:
-    """The per-step rows a run resumed at step `resumed_at` already has, one per step, oldest first.
+    """The per-step rows and probe rows a run resumed at step `resumed_at` already has, one of each per step, oldest
+    first (a step's probe after its training row).
 
     The run log is append-only, so after a crash it also holds the steps past the last checkpoint, which the resumed run
-    trains again and logs a second time; keeping them would count those steps twice in the health windows. A fresh start
-    (step 0) into a directory with an old run log starts an empty history: the canaries' first window is this run's.
+    trains again and logs a second time; keeping them would count those steps twice in the health windows. The step-0
+    probe is kept: it is the baseline of the probe checks. A fresh start (step 0) into a directory with an old run log
+    starts an empty history: the canaries' first window and the probes' baseline must be this run's.
     """
     if resumed_at <= 0 or not path.is_file():
         return []
-    by_step: dict[int, dict[str, Any]] = {}
+    by_step: dict[tuple[int, int], dict[str, Any]] = {}
     for r in read_jsonl(path):
         step = r.get("step")
-        if is_train_log(r) and isinstance(step, int) and 0 < step <= resumed_at:
-            by_step[step] = r  # the latest life of a step wins
-    return [by_step[s] for s in sorted(by_step)]
+        if not isinstance(step, int) or step > resumed_at:
+            continue
+        if is_train_log(r) and step > 0:
+            by_step[(step, 0)] = r  # the latest life of a step wins
+        elif is_probe_log(r) and step >= 0:
+            by_step[(step, 1)] = r
+    return [by_step[k] for k in sorted(by_step)]
 
 
 class WandbMirror(TrainerCallback):
@@ -199,31 +206,40 @@ class WandbMirror(TrainerCallback):
         self.rows = history(self.run_log.path, int(getattr(state, "global_step", 0) or 0))
 
     def on_log(self, args, state, control, logs=None, **kwargs):
-        if not logs or not is_train_log(logs) or not getattr(state, "is_world_process_zero", True):
+        if not logs or not getattr(state, "is_world_process_zero", True):
+            return
+        train, probe = is_train_log(logs), is_probe_log(logs)
+        if not (train or probe):
             return
         try:
-            self._log_step(int(state.global_step), logs)
+            self._log_step(int(state.global_step), logs, probe=probe and not train)
         except Exception:  # the dashboard must never stop a run
             logger.warning("W&B: could not log step %s", state.global_step, exc_info=True)
 
-    def _log_step(self, step: int, logs: Mapping[str, Any]) -> None:
+    def _log_step(self, step: int, logs: Mapping[str, Any], *, probe: bool = False) -> None:
+        """A training step's extras and health levels; for a probe log (its numbers are TRL's `eval/...` already) only
+        the health levels, so a capability drop on the probe shows at once, not one step later."""
         last = self.run_log.last_row
         row = dict(last) if last is not None and last.get("step") == step else {"step": step, **logs}
         self.rows.append(row)
         run = self._run()
         if run is None:
             return
-        payload = run_log_extras(row, logs)
+        payload = {} if probe else run_log_extras(row, logs)
+        alerts: list[health.Finding] = []
         if self.health_checks:
             findings = health.check(self.rows, cfg=self.health_config)  # no `now`: a stall is seen from outside
             payload.update(health_metrics(findings))
             run.summary["health/findings"] = findings_text(findings)
-            for f in findings:
-                if f.level == health.FAIL and f.check not in self.alerted:
-                    self.alerted.add(f.check)
-                    run.alert(title=f"health FAIL: {f.check} (step {step})", text=f.message)
+            alerts = [f for f in findings if f.level == health.FAIL and f.check not in self.alerted]
         if payload:
-            run.log({**payload, STEP_KEY: step})
+            run.log({**payload, STEP_KEY: step})  # first: an alert that fails must not lose the step's numbers
+        for f in alerts:
+            self.alerted.add(f.check)
+            try:
+                run.alert(title=f"health FAIL: {f.check} (step {step})", text=f.message)
+            except Exception:
+                logger.warning("W&B: could not send the alert for %s at step %d", f.check, step, exc_info=True)
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if self.probe is None or self.probe.best is None or not getattr(state, "is_world_process_zero", True):

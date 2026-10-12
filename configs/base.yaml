@@ -81,6 +81,12 @@ stop:                   # callbacks.StopRuleConfig (docs/design.md section 8)
   report_rate_drop: 0.15
   val_task_success_drop: 0.05
   val_patience: 2
+  # Capability on the fixed probe, against the step-0 probe on the same variants (the evaluation protocol's stop rule):
+  # control verified success down, or control decline / zero-command rate up, by more than this on `patience`
+  # consecutive probes. ~8 points of noise at 64 controls x 1 sample, ~4 at 4 samples (callbacks.py derives it);
+  # train.health warns from 10 points. 1.0 turns the rule off; stop vs warn follows `action`.
+  probe_capability_drop: 0.15
+  probe_capability_patience: 2
 
 bank:
   enabled: false        # Phase 0 turns it on

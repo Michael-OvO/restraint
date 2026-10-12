@@ -116,21 +116,59 @@ def test_the_mirror_sends_only_what_trl_does_not_log(tmp_path, fake_memory):
     assert len(fake.run.logged) == 2
 
 
-def test_a_sustained_control_drop_reaches_the_dashboard_as_a_fail_and_one_alert(tmp_path, fake_memory):
+def probe_logs(success: float) -> dict:
+    """An evaluation log with the probe's per-family rates (train.probe) for the same 192 variants every time."""
+    return {"eval_honest/task_success": 0.6, "eval_probe/verified_success_control": success,
+            "eval_probe/control_decline_rate": 0.03, "eval_probe/zero_command_rate": 0.02, "eval_probe/n_variants": 192.0}  # fmt: skip
+
+
+def drive(run_log: JsonlLogger, mirror: WandbMirror, steps: range, probes: dict[int, float], late_success: float) -> None:
+    for i in steps:
+        logs = train_logs(i, **({"honest/control/verified_success_rate": late_success} if i >= 8 else {}))
+        for cb in (run_log, mirror):
+            cb.on_log(None, state(i), None, logs=logs)
+        if i in probes:
+            for cb in (run_log, mirror):
+                cb.on_log(None, state(i), None, logs=probe_logs(probes[i]))
+
+
+def test_a_per_step_control_drop_only_warns_and_a_sustained_probe_drop_fails_with_one_alert(tmp_path, fake_memory):
     fake = FakeWandb()
     fake.init()
     run_log = JsonlLogger(tmp_path)
     mirror = WandbMirror(run_log, wandb_module=fake)
     for cb in (run_log, mirror):
         cb.on_train_begin(None, state(0), None)
-    for i in range(1, 15):
-        logs = train_logs(i, **({"honest/control/verified_success_rate": 0.5} if i >= 8 else {}))
-        run_log.on_log(None, state(i), None, logs=logs)
-        mirror.on_log(None, state(i), None, logs=logs)
+    for cb in (run_log, mirror):
+        cb.on_log(None, state(0), None, logs=probe_logs(0.78))  # the step-0 probe: the baseline
+    drive(run_log, mirror, range(1, 15), {}, late_success=0.5)
     last = fake.run.logged[-1]
-    assert last["health/capability"] == health.FAIL and last["health/verdict"] == health.FAIL
-    assert len(fake.run.alerts) == 1 and fake.run.alerts[0][0].startswith("health FAIL: capability")
-    assert "verified success on controls fell" in fake.run.summary["health/findings"]
+    assert last["health/capability"] == health.WARN and last["health/verdict"] == health.WARN
+    assert fake.run.alerts == [] and "verified success on controls fell" in fake.run.summary["health/findings"]
+    drive(run_log, mirror, range(15, 31), {20: 0.60, 30: 0.58}, late_success=0.5)
+    last = fake.run.logged[-1]
+    assert last[STEP_KEY] == 30 and last["health/probe-capability"] == health.FAIL  # judged at the probe, not a step later
+    assert "mem/rss_gb" not in last  # a probe log carries only the health levels
+    assert len(fake.run.alerts) == 1 and fake.run.alerts[0][0].startswith("health FAIL: probe-capability (step 30)")
+
+
+def test_a_failing_alert_does_not_lose_the_steps_numbers(tmp_path, fake_memory, caplog):
+    fake = FakeWandb()
+    fake.init()
+
+    def broken(title, text):
+        raise ConnectionError("W&B alert refused")
+
+    fake.run.alert = broken
+    run_log = JsonlLogger(tmp_path)
+    mirror = WandbMirror(run_log, wandb_module=fake)
+    for cb in (run_log, mirror):
+        cb.on_train_begin(None, state(0), None)
+    logs = train_logs(1, loss=float("nan"))  # a FAIL on the first step
+    for cb in (run_log, mirror):
+        cb.on_log(None, state(1), None, logs=logs)
+    assert fake.run.logged[-1]["health/numbers"] == health.FAIL and fake.run.logged[-1][STEP_KEY] == 1
+    assert "could not send the alert for numbers" in caplog.text
 
 
 def test_a_resumed_run_continues_its_health_history_from_the_run_log(tmp_path):
@@ -139,6 +177,19 @@ def test_a_resumed_run_continues_its_health_history_from_the_run_log(tmp_path):
     mirror = WandbMirror(JsonlLogger(tmp_path), wandb_module=FakeWandb())
     mirror.on_train_begin(None, state(5), None)
     assert [r["step"] for r in mirror.rows] == [1, 2, 3, 4, 5]
+
+
+def test_a_resume_keeps_the_probes_including_the_step_0_baseline(tmp_path):
+    rows = [{"step": 0, "time": 0.0, **probe_logs(0.78)}]
+    for i in range(1, 7):
+        rows.append({"step": i, "time": 1.0 * i, **train_logs(i)})
+        if i in (4, 6):
+            rows.append({"step": i, "time": 1.5 * i, **probe_logs(0.7)})
+    (tmp_path / TRAIN_LOG_FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    mirror = WandbMirror(JsonlLogger(tmp_path), wandb_module=FakeWandb())
+    mirror.on_train_begin(None, state(5), None)
+    assert [(r["step"], "eval_probe/n_variants" in r) for r in mirror.rows] == [
+        (0, True), (1, False), (2, False), (3, False), (4, False), (4, True), (5, False)]  # fmt: skip
 
 
 def test_a_resume_drops_the_steps_past_its_checkpoint_and_a_fresh_start_ignores_an_old_log(tmp_path):
