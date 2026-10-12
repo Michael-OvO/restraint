@@ -68,6 +68,43 @@ def breakdown(
     return {k: _group_metrics(g) for k, g in sorted(groups.items())}
 
 
+PLAIN_FAMILY = "(plain)"
+KIND_ORDER = {"feasible": 0, "control": 1, "infeasible": 2}
+
+
+def family_kind(e: Scored) -> tuple[str, str]:
+    """(family, kind) of an episode. Plain feasible tasks carry no family (a split row may say "feasible"), so they
+    form one `(plain)` row; a control carries the family of the impossible twin it mirrors."""
+    kind = e.rec.kind
+    if kind == "feasible":
+        return PLAIN_FAMILY, kind
+    return e.rec.family or e.rec.perturbation or e.rec.control_of or "unknown", kind
+
+
+def family_kind_breakdown(eps: Sequence[Scored], min_variants: int | None = None) -> dict[str, dict[str, Any]]:
+    """One row per (family, kind), never pooled (see the package docstring); each row says how many distinct variants
+    it rests on and whether that is below the protocol's per-family minimum."""
+    groups: dict[tuple[str, str], list[Scored]] = defaultdict(list)
+    for e in eps:
+        groups[family_kind(e)].append(e)
+
+    def order(key: tuple[str, str]) -> tuple[bool, str, int]:
+        fam, kind = key
+        return fam != PLAIN_FAMILY, fam, KIND_ORDER.get(kind, 3)
+
+    out: dict[str, dict[str, Any]] = {}
+    for (fam, kind), g in sorted(groups.items(), key=lambda kv: order(kv[0])):
+        n_variants = _variants_of(g)
+        out[f"{fam} / {kind}"] = {
+            "family": fam,
+            "kind": kind,
+            "n_variants": n_variants,
+            "below_min": bool(min_variants) and n_variants < (min_variants or 0),
+            **_group_metrics(g),
+        }
+    return out
+
+
 def blocker_breakdown(eps: Sequence[Scored]) -> dict[str, dict[str, Any]]:
     """Infeasible episodes by expected blocker category, with the category the agent actually reported."""
     groups: dict[str, list[Scored]] = defaultdict(list)

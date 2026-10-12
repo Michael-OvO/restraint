@@ -17,11 +17,17 @@ Baselines without training:
   --system-prompt-file FILE / --neutral-prompt   replace the system prompt (the 2×2 of {base, trained} × {prompt})
   the confidence-threshold sweep is part of every metrics.json
 
+Capability apart from willingness (docs/evaluation.md section 2b):
+  --forced-attempt              feasible tasks only, no `abstain` tool, a system prompt that requires the attempt
+                                (prompts/forced_attempt_system_prompt.txt); still ends with submit_report. The verified
+                                pass rate is the capability number; compare it only with another forced-attempt run
+
 Other modes:
   --metrics-only                recompute metrics.json / summary.md from an existing episodes.jsonl
   --compare DIR [DIR ...]       comparison table + Pareto front over finished runs
-  --noninferiority CAND REF     non-inferiority of CAND against REF on verified success (the primary endpoint), margin
-                                from the protocol; each side may be several seed runs, comma separated (a,b,c)
+  --noninferiority CAND REF     the protocol gate: non-inferiority of CAND against REF on verified success (the primary
+                                endpoint, margin from the protocol) AND an improvement on the honesty endpoints, both
+                                paired by source task; each side may be several seed runs, comma separated (a,b,c)
   --diff CAND REF --metric M    paired difference CAND − REF on any metric (H1 direction check)
   --transfer TRAINED BASE [PROMPT_ONLY]
                                 the pre-registered transfer comparison (honest_agents.eval.protocol): trained minus base
@@ -52,10 +58,19 @@ from honest_agents.eval.records import (
     write_records,
 )
 from honest_agents.eval.rollout import RolloutConfig, Task, load_split, run_rollouts
-from honest_agents.eval.summary import render_comparison, render_summary, render_test, render_transfer_delta
+from honest_agents.eval.summary import (
+    render_comparison,
+    render_gate,
+    render_summary,
+    render_test,
+    render_transfer_delta,
+)
 from honest_agents.reward import RewardConfig
 
 NEUTRAL_PROMPT_FILE = Path(__file__).parent / "prompts" / "neutral_system_prompt.txt"
+FORCED_ATTEMPT_PROMPT_FILE = Path(__file__).parent / "prompts" / "forced_attempt_system_prompt.txt"
+MODE_NORMAL = "normal"
+MODE_FORCED_ATTEMPT = "forced_attempt"
 _UNSET: Any = object()
 
 
@@ -137,6 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--neutral-tools",
         action="store_true",
         help="neutral tool descriptions only (implied by --neutral-prompt)",
+    )
+    p.add_argument(
+        "--forced-attempt",
+        action="store_true",
+        help=f"capability mode: feasible tasks only, no `abstain` tool, the shipped {FORCED_ATTEMPT_PROMPT_FILE.name}",
     )
     p.add_argument("--request-timeout", type=float, default=600.0)
     p.add_argument("--environment-type", default="docker")
@@ -264,7 +284,14 @@ def resolve_configs(
     gen = grpo.get("generation_kwargs") or {}
     if args.system_prompt_file and args.neutral_prompt:
         raise SystemExit("--system-prompt-file and --neutral-prompt are mutually exclusive")
+    if args.forced_attempt and (args.system_prompt_file or args.neutral_prompt):
+        raise SystemExit("--forced-attempt brings its own system prompt: drop --system-prompt-file / --neutral-prompt")
+    if args.forced_attempt and getattr(args, "bank_dir", None):
+        # The bank feeds training (pilot, SFT); trajectories without the decline option must not end up there.
+        raise SystemExit("--forced-attempt episodes are not banked: drop --bank-dir")
     prompt_file = NEUTRAL_PROMPT_FILE if args.neutral_prompt else args.system_prompt_file
+    if args.forced_attempt:
+        prompt_file = FORCED_ATTEMPT_PROMPT_FILE
     sampling: dict[str, Any] = {
         "temperature": _pick(args.temperature, grpo.get("temperature"), 1.0),
         "top_p": _pick(args.top_p, grpo.get("top_p"), gen.get("top_p"), 1.0),
@@ -295,6 +322,7 @@ def resolve_configs(
         extra_body={"chat_template_kwargs": {"enable_thinking": False}} if args.no_thinking else None,
         system_prompt=Path(prompt_file).read_text() if prompt_file else None,
         neutral_tools=bool(args.neutral_prompt or args.neutral_tools),
+        forced_attempt=bool(args.forced_attempt),
         **sampling,
     )
     # The environment's own limits, as `train.build_budget` applies them: the command timeout and any `env.budget`.
@@ -345,6 +373,27 @@ def _excluded(args: argparse.Namespace) -> set[str]:
 # ── outputs ──────────────────────────────────────────────────────────────
 
 
+def run_mode(run_dir: str | Path) -> str:
+    """`forced_attempt` or `normal`, as stamped into a run's config.json (a run from before the mode existed is normal)."""
+    p = Path(run_dir) / "config.json"
+    if not p.is_file():
+        return MODE_NORMAL
+    return json.loads(p.read_text()).get("mode") or MODE_NORMAL
+
+
+def task_feasible(task: Task) -> bool:
+    """The task's label: the split row's `feasible` column, else `[metadata.honest]`. An unreadable task counts as
+    feasible so it still runs (and fails visibly in its episode, as in the normal mode)."""
+    if "feasible" in task.row:
+        return bool(task.row["feasible"])
+    try:
+        from honest_agents.spec import HonestTaskSpec
+
+        return HonestTaskSpec.from_task_dir(task.task_dir).feasible
+    except (OSError, ValueError):
+        return True
+
+
 def write_metrics(out: Path, cfg: RewardConfig, args: argparse.Namespace, title: str | None = None) -> dict:
     records = read_records(out / "episodes.jsonl")
     proto = _protocol(args, out)
@@ -358,6 +407,7 @@ def write_metrics(out: Path, cfg: RewardConfig, args: argparse.Namespace, title:
         min_source_tasks=proto.min_source_tasks,
         min_family_variants=proto.min_family_variants,
         protocol=proto,
+        forced_attempt=run_mode(out) == MODE_FORCED_ATTEMPT,
     )
     m["protocol"] = proto.to_dict()
     (out / "metrics.json").write_text(json.dumps(m, indent=2, default=str))
@@ -488,6 +538,9 @@ def _check_resumable(out: Path, args: argparse.Namespace, rollout_cfg: RolloutCo
         for k in ("model", "system_prompt", "neutral_tools", "max_tool_rounds", "max_completion_tokens", "temperature")
         if k in old.get("rollout", {}) and old["rollout"][k] != now[k]
     ]
+    old_forced = bool(old.get("rollout", {}).get("forced_attempt", False))
+    if old_forced != rollout_cfg.forced_attempt:
+        diffs.append(f"forced_attempt: {old_forced!r} -> {rollout_cfg.forced_attempt!r}")
     if old.get("split") != args.split:
         diffs.append(f"split: {old.get('split')!r} -> {args.split!r}")
     if diffs:
@@ -500,6 +553,13 @@ def evaluate(args: argparse.Namespace) -> dict:
     rollout_cfg, reward_cfg, budget = resolve_configs(args)
     proto = _protocol(args, out if args.resume else None)  # a resumed run keeps the protocol it started under
     tasks = load_split(args.split)[: args.limit]
+    n_skipped_infeasible = 0
+    if rollout_cfg.forced_attempt:
+        # Capability is measured on the feasible tasks (plain and controls) only: requiring completion of an
+        # impossible task measures nothing and, on a high-risk variant, asks for the destructive action.
+        feasible = [t for t in tasks if task_feasible(t)]
+        n_skipped_infeasible = len(tasks) - len(feasible)
+        tasks = feasible
     by_id = {t.task_id: t for t in tasks}
     episodes = out / "episodes.jsonl"
     skip: set[tuple[str, int]] = set()
@@ -517,6 +577,10 @@ def evaluate(args: argparse.Namespace) -> dict:
                 "split": args.split,
                 "base_url": args.base_url,
                 "harness": "honest",
+                "mode": MODE_FORCED_ATTEMPT if rollout_cfg.forced_attempt else MODE_NORMAL,
+                "forced_attempt": rollout_cfg.forced_attempt,
+                "removed_tools": sorted(rollout_cfg.removed_tools),
+                "n_infeasible_skipped": n_skipped_infeasible,
                 "n_tasks": len(tasks),
                 "n_samples": args.n_samples,
                 "rollout": dataclasses.asdict(rollout_cfg),
@@ -525,7 +589,11 @@ def evaluate(args: argparse.Namespace) -> dict:
                 "protocol": proto.to_dict(),
                 "train_config": args.train_config,
                 "system_prompt_source": (
-                    "neutral" if args.neutral_prompt else args.system_prompt_file or "harness.SYSTEM_PROMPT / row"
+                    MODE_FORCED_ATTEMPT
+                    if args.forced_attempt
+                    else "neutral"
+                    if args.neutral_prompt
+                    else args.system_prompt_file or "harness.SYSTEM_PROMPT / row"
                 ),
                 "environment_type": args.environment_type,
                 "argv": sys.argv,
@@ -610,24 +678,24 @@ def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool)
     metric = args.metric or proto.ni_metric
     names = [",".join(d.name for d in arm) for arm in arms]
     if noninferiority:
-        t = M.noninferiority(
-            cand,
-            ref,
-            cfg,
-            margin=proto.ni_margin,
-            metric=metric,
-            alpha=proto.ni_alpha,
-            n_boot=proto.n_boot,
-            seed=proto.seed,
-            allow_single_seed=proto.ni_allow_single_seed,
-        )
-        title = f"Non-inferiority: {names[0]} against {names[1]}"
-    else:
-        t = M.paired_difference(cand, ref, metric, cfg, n_boot=proto.n_boot, seed=proto.seed, level=proto.ci_level)
-        t.pop("samples")
-        title = f"Paired difference: {names[0]} − {names[1]}"
+        modes = sorted({run_mode(d) for arm in arms for d in arm})
+        if len(modes) > 1:
+            raise SystemExit(
+                "the runs mix forced-attempt and normal evaluations: capability is compared forced against forced, "
+                "the protocol gate normal against normal"
+            )
+        # The gate: non-inferiority on capability AND an honesty improvement (metrics.gate). A forced-attempt pair
+        # has no impossible tasks, so it is the capability check alone.
+        # A forced pair defaults to the verified pass rate (metrics.gate.FORCED_ATTEMPT_METRIC), not verified success.
+        t = M.protocol_gate(cand, ref, cfg, proto, metric=args.metric, capability_only=modes == [MODE_FORCED_ATTEMPT])
+        t["mode"] = modes[0]
+        t["endpoint"] = endpoint_role(t["metric"])
+        print(render_gate(t, f"Protocol gate: {names[0]} against {names[1]}"))
+        return t
+    t = M.paired_difference(cand, ref, metric, cfg, n_boot=proto.n_boot, seed=proto.seed, level=proto.ci_level)
+    t.pop("samples")
     t["endpoint"] = endpoint_role(metric)
-    print(render_test(t, title))
+    print(render_test(t, f"Paired difference: {names[0]} − {names[1]}"))
     return t
 
 

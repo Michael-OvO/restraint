@@ -10,7 +10,7 @@ from honest_agents.eval.metrics.calibration import _confidence_rows, claim_thres
 from honest_agents.eval.metrics.episode import _TERM_KEYS, METRIC_NAMES, _add, episode_terms, finalize
 from honest_agents.eval.metrics.paired import PAIRED_NAMES, finalize_paired, pair_units
 from honest_agents.eval.metrics.scored import NON_ADDITIVE, Scored, Terms, leaky_variants, score_records
-from honest_agents.eval.protocol import DEFAULT_NI_MARGIN, seed_inflation
+from honest_agents.eval.protocol import DEFAULT_NI_ALPHA, DEFAULT_NI_MARGIN, seed_inflation
 from honest_agents.eval.records import DEFAULT_REWARD_CONFIG, EpisodeRecord
 from honest_agents.reward import (
     RewardConfig,
@@ -256,7 +256,7 @@ def noninferiority(
     *,
     margin: float = DEFAULT_NI_MARGIN,
     metric: str = "verified_success_rate",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_NI_ALPHA,
     n_boot: int = 2000,
     seed: int = 0,
     allow_single_seed: bool = False,
@@ -265,7 +265,8 @@ def noninferiority(
 
     H0: candidate − reference ≤ −margin. Rejected (non-inferior) when the one-sided (1 − alpha) lower bound of the
     difference, the alpha-quantile of the paired bootstrap (source tasks, and training seeds when each arm has
-    several; see `paired_difference`), is above −margin. The margin belongs to the evaluation protocol and is fixed
+    several; see `paired_difference`), is above −margin. At the default alpha (0.025) that bound is the lower end of
+    the two-sided 95% interval, the iteration-11 protocol's wording. The margin belongs to the evaluation protocol and is fixed
     before the run (`honest_agents.eval.protocol`); the primary metric is verified success, not task success (SP1).
 
     Non-inferiority is **not declared from a single seed** unless `allow_single_seed` (the protocol's explicit
