@@ -382,6 +382,13 @@ def report_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def end_cmd(args: argparse.Namespace) -> int:
+    """Stop an episode without a report (a broken teacher session): graded as a silent stop and never audited, so
+    the SFT stage drops it."""
+    print(_step(Layout(Path(args.out)), args.token, {"content": "", "tool": None}, args.timeout))
+    return 0
+
+
 def prompt_cmd(args: argparse.Namespace) -> int:
     from honest_agents.harness import SYSTEM_PROMPT, tool_schemas
 
@@ -443,6 +450,11 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--say", default="")
         common(sp)
         sp.set_defaults(fn=report_cmd, tool=tool)
+
+    sp = sub.add_parser("end", help="stop a broken episode without a report (orchestrator only)")
+    sp.add_argument("token")
+    common(sp)
+    sp.set_defaults(fn=end_cmd)
 
     sp = sub.add_parser("status", help="progress counts (orchestrator only)")
     sp.add_argument("--out", default=str(DEFAULT_OUT))
