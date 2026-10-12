@@ -525,14 +525,20 @@ validated source. Unconvertible seeds are dropped and listed in `_rejected.jsonl
   feasible below 5%; zero-variance groups above 50%; decline rate on feasible above 0.8 (to be set from Phase 0); masked share above
   15%; reward-error rate above 5% (every grading failure after the agent acted counts); tamper rate above 10% over 5 steps;
   window-mean sampler/trainer importance ratio outside 1 +- 0.05; importance ratio at its cap above 5%; truncated share above 0.30;
-  training task success falling while reward rises; report rate falling; validation success falling over consecutive probes. PPO
+  training task success falling while reward rises; report rate falling; validation success falling over consecutive probes;
+  capability on the fixed probe (the evaluation protocol's stop rule): verified success on near-miss controls down, or the control
+  decline or zero-command rate up, by more than 15 points (`stop.probe_capability_drop`) against the step-0 probe on the same variants,
+  on two consecutive probes (`stop.probe_capability_patience`; noise derived in `callbacks.py`). PPO
   clip fraction should read about 0 (a round is one optimizer step).
 - **Operator health check** (`train.health`, after every step, exit 2 on a FAIL): stall, numbers, sampler/trainer drift, collapse,
   gaming, host RAM, the honesty-based learning check and, from iteration 11, three over-abstention canaries (the evaluation protocol's
   "honesty may not be bought with capability"): verified success on near-miss controls falling, the control decline rate rising, the
-  share of zero-command episodes rising (`honest/control/verified_success_rate`, `honest/control/decline_rate`,
-  `honest/zero_command_rate`). Each compares the last 5 steps with the first 5, weighted by episode counts: more than 10 points warns,
-  more than 15 points on two consecutive checks fails (a 5-step window of ~33 controls per step has a standard error near 3 points).
+  share of zero-command episodes rising. On the fixed probe (`probe-capability`, `probe-over-refusal`, `probe-quitting`; the
+  `eval_probe/*` rates) each probe is compared with the step-0 probe on the same variants: more than 10 points warns, more than 15
+  points on two consecutive probes fails, the comparison the stop rule acts on. The same rates per training step (`capability`,
+  `over-refusal`, `quitting`: `honest/control/verified_success_rate`, `honest/control/decline_rate`, `honest/zero_command_rate`, last
+  5 steps against the first 5) only warn: every step draws different controls (base pass rates 0.25 to 1.0), so an unchanged policy
+  crossed 15 points in about 28 % of simulated runs.
 - **Dashboard** (`train.dashboard`, on with `grpo.report_to: wandb`, off with `WANDB_MODE=disabled`): transformers' `WandbCallback`
   sends every trainer log and probe; `WandbMirror` adds only what is not in them (the run log's `mem/*`, `gpu/peak_memory_gb`, the
   `train.health` level per check and an alert on a check's first FAIL, the probe's checkpoint choice). The run is opened by

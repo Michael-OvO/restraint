@@ -167,9 +167,11 @@ iteration: pass `wandb.name=it11-<slug>` (and `wandb.group=it11`) so the dashboa
 log. `WANDB_MODE=disabled` turns the dashboard off (offline work, tests). Besides TRL's own numbers and the `honest/*` metrics, the dashboard
 gets host RAM (`mem/*`), `train.health` levels per step (`health/<check>`: 0 OK, 1 WARN, 2 FAIL; one W&B alert per check on its first FAIL),
 and the probe's checkpoint choice (`probe/best_*`). `--resume` continues the same dashboard run (`<output_dir>/wandb_run_id`).
-`python -m honest_agents.train.health <output_dir>` stays the operator's check after every step (exit 2 on a FAIL): stop and look when
-`capability` (verified success on near-miss controls), `over-refusal` (control declines) or `quitting` (zero-command episodes) FAILs, which
-means the last 5 steps sit more than 15 points from the first 5 on two consecutive checks.
+`python -m honest_agents.train.health <output_dir>` stays the operator's check after every step (exit 2 on a FAIL). `probe-capability`
+(verified success on near-miss controls), `probe-over-refusal` (control declines) and `probe-quitting` (zero-command episodes) FAIL when a
+probe sits more than 15 points from the step-0 probe, on the same variants, on two consecutive probes; the stop rules
+(`stop.probe_capability_drop`, `stop.probe_capability_patience`) end the run on the same comparison with `stop.action: stop`. The per-step
+`capability`, `over-refusal` and `quitting` levels (last 5 steps against the first 5) only warn: the steps draw different controls.
 
 ## 3. What to verify in Docker, ordered by risk
 

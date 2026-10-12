@@ -217,10 +217,11 @@ The protocol of docs/training-log.md ("Evaluation protocol from iteration 11") a
   decline rate on near-miss controls), lazy and zero-command declines, commands before the report, declined although
   passed (`underclaim_rate_feasible`) and `honest_underclaim_rate_feasible`, violation rate. Rows are never pooled; rows
   below `min_family_variants` are marked descriptive only.
-* **Fixed paired probe set** (`python -m honest_agents.eval.probe_set --split data/val.jsonl --out PATH`): impossible
+* **Fixed paired probe set** (`python -m honest_agents.eval.probe_set --split data/val.jsonl --out data/probe_v1.jsonl`; under
+  `data/`, which `node sync --with-data` sends, never `runs/`, which is not pushed): impossible
   variants round-robin over families up to `--infeasible` (60), each with its near-miss control and plain twin, topped
   up with plain tasks to `--feasible` (60); deterministic (sha256 ranks of seed and variant id), refuses test rows and
-  test source tasks (the repository's `configs/test_ids.txt`, or `--test-ids`, which must exist), writes `PATH.manifest.json`. The current val split has only 40 impossible
+  test source tasks (the repository's `configs/test_ids.txt`, or `--test-ids`, which must exist), writes `<out>.manifest.json`. The current val split has only 40 impossible
   variants (20 `high_risk`, 14 `revoke_permission`, 6 `remove_input`), so the build stops short of 60 unless
   `--allow-short` (which records the shortfall); reaching 60 needs more validated variants of the val source tasks.
 
@@ -482,7 +483,8 @@ evaluation's table overwrote the training round of the same step. Now:
   the per-episode outcome (case, status, passed, commands, stop reason, blocker). The training round's
   `completions/completions_<step>.parquet` is left alone (`train.probe`).
 - **A fixed, honesty-weighted list**: `data.probe_file` (used whole, in preference to the `eval_file` subset) built once by
-  `python -m honest_agents.tasks.probe_set --rows data/val_pool.jsonl --out data/probe.jsonl` (impossible variants
+  `python -m honest_agents.tasks.probe_set --rows data/val_pool.jsonl --out data/probe.jsonl` (under `data/` so
+  `node sync --with-data` takes it to the node; its sha256 is in the plan summary; impossible variants
   round-robin over families, each with its near-miss control and the plain twin of its source task; validation rows
   only). A probe file below `probe.min_infeasible` / `probe.min_feasible` (60 each) is refused. `val_pool.jsonl` is
   every validation row before the mixture balance (written by the dataset build); the balanced `val.jsonl` has only 40

@@ -1,7 +1,10 @@
 """Fixed paired probe set for the iteration-11 protocol: at least 60 impossible and 60 feasible variants from the val split.
 
-    python -m honest_agents.eval.probe_set --split data/val.jsonl --out runs/probe/probe_v1.jsonl \\
+    python -m honest_agents.eval.probe_set --split data/val.jsonl --out data/probe_v1.jsonl \\
         [--infeasible 60] [--feasible 60] [--seed 0] [--test-ids configs/test_ids.txt] [--allow-short]
+
+Write it under `data/`, next to the split it is drawn from: `node sync --with-data` sends `data/` to a node, while
+`runs/` and `outputs/` are never pushed, so a probe list written there on the Mac would not exist on the node.
 
 Why (docs/training-log.md, iteration 10 and "Evaluation protocol from iteration 11"): a 100-variant probe with about 21
 impossible tasks cannot resolve changes under ~10 points, and per-family results need every family on the same tasks for

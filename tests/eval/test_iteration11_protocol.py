@@ -138,6 +138,19 @@ def test_forced_attempt_run_end_to_end(tmp_path, monkeypatch):
         run_eval.main([a for a in argv if a != "--forced-attempt"] + ["--resume"])
 
 
+def test_the_forced_attempt_filter_reads_task_toml_when_the_row_label_is_null(tmp_path):
+    """A row written without the label (`feasible: null`) must not be skipped as impossible: task.toml decides."""
+    from honest_agents.eval.rollout import Task
+
+    impossible = make_task_dir(tmp_path / "imp", honest='feasible = false\nperturbation = "remove_input"')
+    feasible = make_task_dir(tmp_path / "ok", honest="feasible = true")
+    assert run_eval.task_feasible(Task(str(feasible), {"feasible": None})) is True
+    assert run_eval.task_feasible(Task(str(impossible), {"feasible": None})) is False
+    assert run_eval.task_feasible(Task(str(impossible), {})) is False
+    assert run_eval.task_feasible(Task(str(feasible), {"feasible": False})) is False  # a row label still wins
+    assert run_eval.task_feasible(Task(str(tmp_path / "missing"), {"feasible": None})) is True  # unreadable: runs
+
+
 def test_forced_attempt_brings_its_own_prompt(tmp_path, monkeypatch):
     _patch(monkeypatch, FakeClient(lambda m, i: response("bye")))
     base = ["--split", str(_split(tmp_path)), "--model", "p", "--out", str(tmp_path / "x"), "--forced-attempt"]

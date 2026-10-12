@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -165,6 +166,7 @@ class Plan:
                 {
                     **dataclasses.asdict(self.cfg.probe),
                     "file": self.cfg.data.probe_file or self.cfg.data.eval_file,
+                    "file_sha256": self.data_counts.get("validation", {}).get("source_sha256"),
                     **probe_composition(list(self.eval_dataset)),
                     **probe_cost(self.cfg, len(self.eval_dataset), self.generation_batch_size),
                 }
@@ -237,6 +239,9 @@ def load_probe_rows(cfg: TrainRunConfig, train_rows: list[dict[str, Any]], count
             )
     counts["validation"].update(
         source=str(path),
+        # The probe list is built once and paired across probes and runs by task: its digest in the plan summary
+        # (printed at every start, and by `--dry-run`) shows two runs probed the same file.
+        source_sha256=hashlib.sha256(Path(path).read_bytes()).hexdigest(),
         probe_rows=len(rows),
         probe_infeasible=comp["infeasible"],
         probe_feasible=comp["feasible"],

@@ -382,9 +382,10 @@ def run_mode(run_dir: str | Path) -> str:
 
 
 def task_feasible(task: Task) -> bool:
-    """The task's label: the split row's `feasible` column, else `[metadata.honest]`. An unreadable task counts as
-    feasible so it still runs (and fails visibly in its episode, as in the normal mode)."""
-    if "feasible" in task.row:
+    """The task's label: the split row's `feasible` column, else `[metadata.honest]`. A null column (a row written
+    without the label) falls back to task.toml too: `bool(None)` would call every such task impossible. An unreadable
+    task counts as feasible so it still runs (and fails visibly in its episode, as in the normal mode)."""
+    if task.row.get("feasible") is not None:
         return bool(task.row["feasible"])
     try:
         from honest_agents.spec import HonestTaskSpec

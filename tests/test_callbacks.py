@@ -321,6 +321,92 @@ def test_validation_recovery_resets_the_strikes():
     assert stop.state.val_strikes == 0
 
 
+# ── capability on the fixed probe ────────────────────────────────────────────
+
+P_SUCCESS = "eval_probe/verified_success_control"
+P_DECLINE = "eval_probe/control_decline_rate"
+P_ZERO = "eval_probe/zero_command_rate"
+
+
+def probe(success: float = 0.78, decline: float = 0.03, zero: float = 0.02, n_variants: int = 192) -> dict:
+    """The eval_probe/* rates train.probe logs for one probe of the same 192-variant list."""
+    return {P_SUCCESS: success, P_DECLINE: decline, P_ZERO: zero, "eval_probe/n_variants": float(n_variants),
+            "eval_probe/n_control": 64.0, VAL: 0.6}  # fmt: skip
+
+
+def run_probes(stop: StopRules, probes: list[tuple[int, dict]]) -> TrainerControl:
+    control = TrainerControl()
+    for step, metrics in probes:
+        stop.on_evaluate(SimpleNamespace(), TrainerState(global_step=step), control, metrics=metrics)
+    return control
+
+
+def test_probe_metric_names_are_the_ones_train_probe_logs():
+    from honest_agents.train.probe import METRIC_PREFIX, _block
+
+    assert callbacks.PROBE_METRIC_PREFIX == METRIC_PREFIX
+    names = {METRIC_PREFIX + k for k in _block([])} | {METRIC_PREFIX + "n_variants"}
+    assert {c.key for c in callbacks.PROBE_CANARIES} | {callbacks.PROBE_N_VARIANTS} <= names
+
+
+def test_a_sustained_capability_drop_on_the_probe_stops_the_run(tmp_path: Path):
+    stop = StopRules(StopRuleConfig(), "honest", output_dir=tmp_path)
+    control = run_probes(stop, [(0, probe()), (20, probe(success=0.60))])
+    assert control.should_training_stop is False  # one fail-sized probe is not yet sustained
+    control = run_probes(stop, [(40, probe(success=0.58))])
+    assert control.should_training_stop is True and stop.stopped
+    lines = [json.loads(line) for line in (tmp_path / callbacks.STOP_RULES_FILE).read_text().splitlines()]
+    assert [line["rule"] for line in lines] == ["probe_control_success_falling"]
+    assert lines[0]["step"] == 40 and lines[0]["threshold"] == pytest.approx(0.78 - 0.15)
+    assert "from 78.0% at step 0" in lines[0]["detail"]
+
+
+def test_rising_declines_or_zero_command_episodes_on_the_probe_stop_the_run():
+    stop = rules()
+    run_probes(stop, [(0, probe()), (20, probe(decline=0.25))])
+    assert run_probes(stop, [(40, probe(decline=0.30))]).should_training_stop is True
+    stop = rules()
+    run_probes(stop, [(0, probe()), (20, probe(zero=0.30))])
+    assert run_probes(stop, [(40, probe(zero=0.40))]).should_training_stop is True
+
+
+def test_noise_sized_probe_changes_never_stop_the_run():
+    stop = rules()
+    noise = [(0, probe()), (20, probe(success=0.70, decline=0.10)), (40, probe(success=0.66, zero=0.12)),
+             (60, probe(success=0.72)), (80, probe(success=0.64, decline=0.15, zero=0.15))]  # fmt: skip
+    assert run_probes(stop, noise).should_training_stop is False and not stop.state.fired
+    # a fail-sized drop that recovers in between is not sustained either
+    stop = rules()
+    flicker = [(0, probe()), (20, probe(success=0.55)), (40, probe(success=0.70)), (60, probe(success=0.55))]
+    assert run_probes(stop, flicker).should_training_stop is False
+    # rising success and falling declines are improvements, not drops
+    stop = rules()
+    better = [(0, probe()), (20, probe(success=0.99, decline=0.0)), (40, probe(success=0.99, decline=0.0))]
+    assert run_probes(stop, better).should_training_stop is False
+
+
+def test_the_probe_rule_honours_warn_patience_and_a_changed_variant_set(tmp_path: Path):
+    drop = [(0, probe()), (20, probe(success=0.50)), (40, probe(success=0.50))]
+    stop = StopRules(StopRuleConfig(action="warn"), "honest", output_dir=tmp_path)
+    assert run_probes(stop, drop).should_training_stop is False and "probe_control_success_falling" in stop.state.fired
+    assert run_probes(rules(probe_capability_patience=1), drop[:2]).should_training_stop is True
+    assert run_probes(rules(probe_capability_drop=1.0), drop).should_training_stop is False  # turned off
+    other = [(0, probe()), (20, probe(success=0.50, n_variants=100)), (40, probe(success=0.50, n_variants=100))]
+    assert run_probes(rules(), other).should_training_stop is False  # another probe list: no paired baseline
+    with pytest.raises(ValueError):
+        StopRuleConfig(probe_capability_patience=0)
+
+
+def test_a_resumed_run_keeps_its_step_0_probe_as_the_baseline():
+    history = [{"step": 0, **probe()}, *({"step": i, **healthy()} for i in range(1, 21)), {"step": 20, **probe(success=0.6)}]
+    stop = rules()
+    args, state, control = _handler_inputs(20)
+    state.log_history = history
+    stop.on_train_begin(args, state, control)
+    assert [s for s, _ in stop.state.probe_rates] == [0, 20] and control.should_training_stop is False
+    assert run_probes(stop, [(40, probe(success=0.6))]).should_training_stop is True
+
+
 # ── the probe on a real TRL run ──────────────────────────────────────────────
 
 

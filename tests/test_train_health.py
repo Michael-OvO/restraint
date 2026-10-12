@@ -117,30 +117,93 @@ def test_flat_over_abstention_canaries_trip_nothing():
     assert checks(rows) == {"all": OK}
 
 
-def test_control_success_drop_warns_past_10_points_and_fails_past_15_on_two_consecutive_checks():
-    warn = canary_run(12, SUCCESS, 0.80, 0.68, from_step=8)  # last 5 at 0.68 vs first 5 at 0.80: 12 points
-    assert checks(warn)["capability"] == WARN
+def test_per_step_canaries_only_warn_however_large_the_shift():
+    # The steps draw different controls (base pass rates 0.25 to 1.0), so the per-step comparison is a hint, never a FAIL.
+    assert checks(canary_run(12, SUCCESS, 0.80, 0.68, from_step=8))["capability"] == WARN  # 12 points
     assert "capability" not in checks(canary_run(12, SUCCESS, 0.80, 0.72, from_step=8))  # 8 points: noise
-    # 20 points, but the previous check (rows up to step 11) saw only 4 of the 5 late steps: 16 points -> both > 15
-    fail = canary_run(12, SUCCESS, 0.80, 0.60, from_step=8)
-    assert checks(fail)["capability"] == FAIL
-    # a single fail-sized check (the step before was still below 15 points) is only a warning
-    one = canary_run(10, SUCCESS, 0.80, 0.60, from_step=10)[:-1] + [step(10, **{"honest/n_control": 33, SUCCESS: 0.0})]
-    assert checks(one)["capability"] == WARN
-    assert checks(canary_run(11, SUCCESS, 0.80, 0.0, from_step=10))["capability"] == FAIL
+    assert checks(canary_run(12, SUCCESS, 0.80, 0.60, from_step=8))["capability"] == WARN
+    assert checks(canary_run(14, SUCCESS, 0.80, 0.0, from_step=6))["capability"] == WARN
+    assert "per-step hint" in next(f.message for f in check(canary_run(12, SUCCESS, 0.8, 0.6, 8)) if f.check == "capability")
 
 
 def test_canaries_need_two_disjoint_windows():
     assert "capability" not in checks(canary_run(9, SUCCESS, 0.80, 0.0, from_step=6))  # first 5 and last 5 overlap
-    assert checks(canary_run(10, SUCCESS, 0.80, 0.0, from_step=6))["capability"] == WARN  # one check only
+    assert checks(canary_run(10, SUCCESS, 0.80, 0.0, from_step=6))["capability"] == WARN
 
 
 def test_rising_control_declines_and_zero_command_episodes_are_flagged():
     assert checks(canary_run(12, DECLINE, 0.02, 0.14, from_step=8))["over-refusal"] == WARN
-    assert checks(canary_run(14, DECLINE, 0.02, 0.30, from_step=8))["over-refusal"] == FAIL
+    assert checks(canary_run(14, DECLINE, 0.02, 0.30, from_step=8))["over-refusal"] == WARN
     assert "over-refusal" not in checks(canary_run(14, DECLINE, 0.30, 0.02, from_step=8))  # falling declines are fine
-    assert checks(canary_run(14, ZERO, 0.01, 0.40, from_step=8))["quitting"] == FAIL
+    assert checks(canary_run(14, ZERO, 0.01, 0.40, from_step=8))["quitting"] == WARN
     assert "quitting" not in checks(canary_run(14, ZERO, 0.01, 0.05, from_step=8))
+
+
+def test_an_unchanged_policy_on_a_shifting_task_mix_does_not_fail():
+    """The review's simulation: control base pass rates 0.25-1.0, a different block of 33 every step, the policy
+    unchanged, 50 steps probed at 0, 20 and 40 on the same 64 controls with one sample each. The per-step canary may
+    warn but never FAILs; the probe check FAILs on well under 2 % of runs (two fail-sized probes in a row)."""
+    import random
+
+    rng = random.Random(0)
+    pool = [rng.uniform(0.25, 1.0) for _ in range(400)]
+    controls = pool[:64]
+    probe_fails = 0
+    trials = 200
+    for trial in range(trials):
+        rows = [probe_row(0, success=sum(rng.random() < p for p in controls) / 64)]
+        for i in range(1, 51):
+            start = (i * 33 + trial * 7) % 360
+            block = pool[start : start + 33]
+            rate = sum(rng.random() < p for p in block) / len(block)
+            rows.append(step(i, **{"honest/n_control": len(block), "honest/n_scored": 64, SUCCESS: rate}))
+            if i % 20 == 0:
+                rows.append(probe_row(i, success=sum(rng.random() < p for p in controls) / 64))
+        found = checks(rows)
+        assert found.get("capability", OK) < FAIL
+        probe_fails += found.get("probe-capability", OK) == FAIL
+    assert probe_fails / trials < 0.02
+
+
+P_SUCCESS = "eval_probe/verified_success_control"
+P_DECLINE = "eval_probe/control_decline_rate"
+P_ZERO = "eval_probe/zero_command_rate"
+
+
+def probe_row(i: int, success: float = 0.78, decline: float = 0.03, zero: float = 0.02, n_variants: int = 192) -> dict:
+    return {"step": i, "time": 1000.0 + 400.0 * i + 1.0, "eval_honest/task_success": 0.6, P_SUCCESS: success,
+            P_DECLINE: decline, P_ZERO: zero, "eval_probe/n_variants": float(n_variants)}  # fmt: skip
+
+
+def probed_run(*probes: dict, n: int = 60) -> list[dict]:
+    """`n` healthy steps with the probe rows placed after their step's training row."""
+    rows = [probe_row(0, **probes[0])] if probes else []
+    later = {20 * k: p for k, p in enumerate(probes[1:], start=1)}
+    for i in range(1, n + 1):
+        rows.append(step(i))
+        if i in later:
+            rows.append(probe_row(i, **later[i]))
+    return rows
+
+
+def test_the_probe_check_compares_each_probe_with_the_step_0_probe_on_the_same_variants():
+    assert "probe-capability" not in checks(probed_run({}, {"success": 0.70}))  # 8 points: noise
+    assert checks(probed_run({}, {"success": 0.66}))["probe-capability"] == WARN  # 12 points
+    assert checks(probed_run({}, {"success": 0.60}))["probe-capability"] == WARN  # 18 points, one probe
+    fail = check(probed_run({}, {"success": 0.60}, {"success": 0.58}))
+    found = next(f for f in fail if f.check == "probe-capability")
+    assert found.level == FAIL and "at step 0" in found.message and "2 consecutive probes" in found.message
+    assert "probe-capability" not in checks(probed_run({}, {"success": 0.60}, {"success": 0.75}))  # recovered
+    assert checks(probed_run({}, {"decline": 0.25}, {"decline": 0.30}))["probe-over-refusal"] == FAIL
+    assert checks(probed_run({}, {"zero": 0.25}, {"zero": 0.30}))["probe-quitting"] == FAIL
+    other = probed_run({}, {"success": 0.5, "n_variants": 100}, {"success": 0.5, "n_variants": 100})
+    assert "probe-capability" not in checks(other)  # a different probe list has no paired baseline
+
+
+def test_a_re_probed_step_counts_once_with_its_latest_life():
+    rows = probed_run({}, {"success": 0.60}, {"success": 0.58})
+    rows.append(probe_row(40, success=0.78))  # the step-40 probe ran again after a resume and recovered
+    assert "probe-capability" not in checks(rows)
 
 
 def test_canaries_weight_steps_by_their_control_count():

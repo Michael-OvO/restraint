@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from honest_agents.eval.metrics.calibration import _confidence_rows, claim_threshold
@@ -143,6 +143,7 @@ def paired_difference(
     n_boot: int = 2000,
     seed: int = 0,
     level: float = 0.95,
+    exclude_variants: Iterable[str] = (),
 ) -> dict[str, Any]:
     """candidate − reference on `metric`, with a bootstrap over the source tasks all runs evaluated.
 
@@ -152,14 +153,16 @@ def paired_difference(
     interval covers which tasks were drawn and which seeds were run (SP2). The seed component is widened by
     `protocol.seed_inflation` (a bootstrap of 2-3 seeds understates seed variance); read `seed_sd_*` and size the
     margin on them. Variants
-    that leaked in any run are void in all, so the rates share their denominators' population. `metric` is any
-    additive, derived or paired metric (not the AUROC of confidence or the diagnostic confidence cut).
+    that leaked in any run are void in all, so the rates share their denominators' population; `exclude_variants`
+    voids more (the leaks of runs outside this pair, when several are compared on one population, as checkpoint
+    selection does). `metric` is any additive, derived or paired metric (not the AUROC of confidence or the
+    diagnostic confidence cut).
     """
     import numpy as np
 
     arms = [_as_runs(candidate), _as_runs(reference)]
     scored = [[score_records(r, cfg) for r in runs] for runs in arms]
-    void = set().union(*(leaky_variants(e) for runs in scored for e in runs))
+    void = set(exclude_variants).union(*(leaky_variants(e) for runs in scored for e in runs))
     terms = [[cluster_terms(score_records(r, cfg, exclude_variants=void)) for r in runs] for runs in arms]
     per_arm = [set().union(*map(set, runs)) for runs in terms]
     shared = sorted(set.intersection(*(set(t) for runs in terms for t in runs)))
@@ -260,6 +263,7 @@ def noninferiority(
     n_boot: int = 2000,
     seed: int = 0,
     allow_single_seed: bool = False,
+    exclude_variants: Iterable[str] = (),
 ) -> dict[str, Any]:
     """One-sided non-inferiority test of `candidate` against `reference` on `metric` (higher is better).
 
@@ -275,7 +279,10 @@ def noninferiority(
     """
     import numpy as np
 
-    d = paired_difference(candidate, reference, metric, cfg, n_boot=n_boot, seed=seed, level=1 - 2 * alpha)
+    d = paired_difference(
+        candidate, reference, metric, cfg, n_boot=n_boot, seed=seed, level=1 - 2 * alpha,
+        exclude_variants=exclude_variants,
+    )  # fmt: skip
     samples = d.pop("samples")
     lower = float(np.quantile(samples, alpha)) if len(samples) >= 0.9 * n_boot and samples else None
     single = min(d["n_seeds_candidate"], d["n_seeds_reference"]) < 2

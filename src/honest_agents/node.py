@@ -7,7 +7,8 @@
 Why this exists. The node is a short-lived rental (docs/node-runbook.md): giving it a GitHub deploy key means one more
 credential to create, scope and revoke for every box, so the code goes over rsync from the Mac instead, `.git` included
 (so `git log` on the node and `honest_agents.archive` can still name the commit). Datasets are gitignored and large, so
-they travel only when asked (`--with-data`). Training needs the W&B key (and the Hugging Face token for gated weights);
+they travel only when asked (`--with-data`; the probe lists of `tasks.probe_set` / `eval.probe_set` live there too, so the
+first sync of a node, which needs `data/` anyway, carries them). Training needs the W&B key (and the Hugging Face token for gated weights);
 writing them into a file on the node or onto a command line (which every user on the box sees in `ps`, and which shell
 history keeps) leaks them to whoever rents the machine next. `run` therefore reads them on the Mac at call time
 (`~/.netrc`, machine `api.wandb.ai`; `~/.cache/huggingface/token`) and sends them through ssh's stdin to a small remote
