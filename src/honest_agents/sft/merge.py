@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 
 
-def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16") -> dict:
+def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16", scale: float = 1.0) -> dict:
     import torch
     import transformers
     from peft import PeftModel
@@ -34,6 +34,13 @@ def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16") -> dict:
         raise SystemExit(f"no LoRA weights loaded from {adapter} onto {arch}: module names do not match")
     # One adapted layer, to check the merge really moved it: `...<module>.lora_A.default.weight` adapts
     # `...<module>.base_layer.weight`, which becomes `<module>.weight` after merge_and_unload.
+    if scale != 1.0:
+        # Merge a fraction of the update: W + scale * (B A) * alpha/r, an interpolation between the base and the SFT
+        # policy (scaling B alone scales the product).
+        with torch.no_grad():
+            for n, p in peft_model.named_parameters():
+                if "lora_B" in n:
+                    p.mul_(scale)
     module = lora_a[0].split(".lora_A.")[0]
     params = dict(peft_model.named_parameters())
     before = params[f"{module}.base_layer.weight"].detach().clone()
@@ -55,7 +62,7 @@ def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16") -> dict:
         if src.is_file() and not (out_dir / extra).exists():
             shutil.copy(src, out_dir / extra)
     info = {"base": base, "adapter": adapter, "architecture": arch, "lora_modules": len(lora_a),
-            "probe_param": probe_name, "probe_changed": bool(moved), **restored}  # fmt: skip
+            "probe_param": probe_name, "probe_changed": bool(moved), "scale": scale, **restored}  # fmt: skip
     (out_dir / "merge_info.json").write_text(json.dumps(info, indent=2))
     if not moved:
         raise SystemExit(f"merge left {probe_name} unchanged: the adapter did not apply ({info})")
@@ -109,8 +116,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--adapter", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--dtype", default="bfloat16")
+    p.add_argument("--scale", type=float, default=1.0, help="fraction of the adapter's update to merge (1 = all)")
     args = p.parse_args(argv)
-    print(json.dumps(merge(args.base, args.adapter, args.out, args.dtype), indent=2))
+    print(json.dumps(merge(args.base, args.adapter, args.out, args.dtype, args.scale), indent=2))
     return 0
 
 
