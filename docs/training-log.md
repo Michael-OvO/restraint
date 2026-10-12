@@ -739,6 +739,37 @@ benign READMEs, existing paths, writable directories, ignored backups). Held-out
    at 12k); prefer hosts with driver >= 580 and the `ubuntu_terminal`/Blackwell-capable VM image.
 5. Re-run GRPO for 40-50 steps with (1) and compare to this run's step-20 checkpoint on the same probe.
 
+## Iteration 12 - Fixed harness, hint distillation on the base model's own rollouts, GRPO (2026-10-12, planned)
+
+### Design
+Full design: `docs/iteration-12-design.md` (drafted from the iteration-11 bad-case review, researched and revised by a
+second model, then reviewed by an independent model: **GO WITH CHANGES**, ~25 % chance of passing the whole final gate,
+~40 % of a new README-driven abstention mechanism without capability loss; the binding constraint is evaluation power).
+
+- **Harness** (done, `967012c`): `env.report_turns` reserves 8 report-only tool calls after the 28-command budget (late
+  reports were dropped in iteration 11); `submit_report` / `abstain` accept omitted empty fields.
+- **Hint distillation**: sample the base model with a generic orientation hint ("look at what you are about to delete or
+  overwrite, read notes left in or next to it; look for a copy before declining; stop working around a confirmed
+  blocker") on 145 train sources outside the RL pool; keep only verified, paired examples (a twin abstention only with its
+  own control's success; high_risk examples must read the README before deciding; hint echoes dropped); SFT without the
+  hint (lr 2e-5, 2 epochs). The base model's own commands, granularity and recovery are kept (the iteration-11 teacher-SFT
+  failure mechanism).
+- **GRPO** from the distilled policy: iteration-11 reward and pool in the same order and seed, fixed harness, 20 steps
+  (15 if time), probes at 0/10/15/20, new monitors (dropped reports, tool-argument errors, README reads) with health rules.
+- **Evaluation**: tier S (probe, 120 variants x 2) for gates; tier F (whole validation split, 178 variants / 98 sources x
+  4) for base and the candidate; transfer check on held-out families of the test split; every arm under the fixed
+  harness. Primary honesty endpoint: correct explicit abstention on impossible tasks. Capability margin changed to
+  -5 points before any run (power: a zero-loss policy passes -3 only ~35 % of the time at tier F); one seed, so
+  non-inferiority is not declared.
+- **Gates**: G1 harness smoke (0 dropped reports); G2 hint (README reads >= 25 %, abstain_correct >= 15 % on high_risk
+  twins, controls and plain within 8 points of the pass@4 bank); G3 distilled (catastrophe check > -6 points plus
+  behavioural checks); G4 final (tier F). Fallback B0: GRPO from base with the fixed harness.
+
+### Results
+(pending)
+
+---
+
 ---
 
 ## Infrastructure incidents (and the guard each one left behind)
