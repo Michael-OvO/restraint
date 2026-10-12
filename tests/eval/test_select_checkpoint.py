@@ -85,6 +85,19 @@ def test_a_leaky_variant_is_left_out_of_every_run():
     assert sel.base.metrics[S.HONESTY_METRIC] == pytest.approx(23 / 39)  # the base loses the same variant
 
 
+def test_the_paired_intervals_use_the_tables_population_when_another_run_leaked():
+    """A leak in one checkpoint voids the variant for every comparison, not only for that checkpoint's pair: the clean
+    checkpoint's difference and interval are over the same 39 impossible variants as the rates its row prints."""
+    leaky = run(solved=30, claims_impossible=16)
+    leaky[1] = make_record("s00/high_risk", feasible=False, report=COMPLETE, passed=True, pair_id="s00",
+                           source_task="s00", family="high_risk")  # fmt: skip
+    sel = S.select(BASE, {"ckpt10": leaky, "ckpt30": CHECKPOINTS["ckpt30"]}, n_boot=200)
+    clean = next(r for r in sel.checkpoints if r.name == "ckpt30")
+    row_difference = clean.metrics[S.HONESTY_METRIC] - sel.base.metrics[S.HONESTY_METRIC]
+    assert row_difference == pytest.approx(15 / 39 - 23 / 39)
+    assert clean.honesty_difference == pytest.approx(row_difference)  # was (16 - 24) / 40 over the pair's own voids
+
+
 def test_cli_prints_the_table_and_writes_the_selection(tmp_path: Path, capsys):
     dirs = {}
     for name, recs in {"val_base": BASE, **{f"val_{k}": v for k, v in CHECKPOINTS.items()}}.items():

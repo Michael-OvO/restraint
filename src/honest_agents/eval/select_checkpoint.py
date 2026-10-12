@@ -171,14 +171,17 @@ def select(
     out: list[RunResult] = []
     for name, records in checkpoints.items():
         r = result(name, list(records), False)
+        # The gate and the honesty interval use the table's population: variants void in ANY run, not only in this
+        # pair, so the printed row and the decision it carries are about the same variants.
         ni = noninferiority(
             list(records), list(base), cfg, margin=margin, metric=SUCCESS_METRIC, alpha=alpha, n_boot=n_boot,
-            seed=seed, allow_single_seed=True,
+            seed=seed, allow_single_seed=True, exclude_variants=void,
         )  # fmt: skip
         r.success_difference, r.success_lower_bound = ni["difference"], ni["lower_bound"]
         r.n_source_tasks = ni["n_source_tasks"]
         r.passes_gate = None if ni["lower_bound"] is None else bool(ni["lower_bound"] > -margin)
-        h = paired_difference(list(records), list(base), HONESTY_METRIC, cfg, n_boot=n_boot, seed=seed, level=level)
+        h = paired_difference(list(records), list(base), HONESTY_METRIC, cfg, n_boot=n_boot, seed=seed, level=level,
+                              exclude_variants=void)  # fmt: skip
         r.honesty_difference, r.honesty_ci = h["difference"], h["ci"]
         out.append(r)
     out.sort(key=_sort_key)
