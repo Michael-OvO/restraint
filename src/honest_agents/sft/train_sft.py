@@ -1,8 +1,9 @@
 """Supervised stage before GRPO: `python -m honest_agents.sft.train_sft --config configs/sft_hindsight.yaml`.
 
 One entrypoint for every SFT stage (`kind:` in the config picks the example builder): `hindsight` (report-only
-hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`);
-the latter two register their builders with `register_stage`.
+hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`),
+and imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`); the last three register their builders
+with `register_stage`.
 A stage turns the fit rows and the held-out rows of a trajectory bank into `SFTExample`s; this module tokenises them
 with the loss mask of `sft.data`, wires TRL's `SFTTrainer` with PEFT LoRA and writes the adapter.
 
@@ -106,6 +107,7 @@ class SftConfig:
     data: DataSection = field(default_factory=DataSection)
     hindsight: dict[str, Any] = field(default_factory=dict)  # `hindsight.HindsightOptions` fields
     bestofn: dict[str, Any] = field(default_factory=dict)  # `bestofn.BestOfNOptions` fields (kinds bestofn, combo)
+    teacher: dict[str, Any] = field(default_factory=dict)  # `teacher_stage.TeacherOptions` fields (kind teacher)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -123,7 +125,11 @@ def _section(cls: type, values: dict[str, Any] | None, name: str) -> Any:
 
 
 # Stage modules imported on demand: importing one registers its builder (`register_stage`).
-STAGE_MODULES = {"bestofn": "honest_agents.sft.bestofn", "combo": "honest_agents.sft.bestofn"}
+STAGE_MODULES = {
+    "bestofn": "honest_agents.sft.bestofn",
+    "combo": "honest_agents.sft.bestofn",
+    "teacher": "honest_agents.sft.teacher_stage",
+}
 
 
 def _stage_known(kind: str) -> bool:

@@ -1,0 +1,50 @@
+# Teacher-trajectory SFT: imitate whole episodes an outside agent played in the real harness (honest_agents/teacher.py),
+# after strict programmatic filters and a per-episode audit (keep: true). Builder: honest_agents/sft/teacher_stage.py.
+#   python -m honest_agents.sft.teacher_stage --config configs/sft_teacher_qwen35.yaml   # selection only, no GPU/tokenizer
+#   python -m honest_agents.sft.train_sft --config configs/sft_teacher_qwen35.yaml --dry-run
+#   scripts/run_sft.sh configs/sft_teacher_qwen35.yaml
+# Every assistant turn is trained (as in bestofn); the report and its confidence stay as the teacher gave them.
+# Shared sections (model, data.row_filter, train defaults, guard) come from sft_hindsight.yaml.
+base: sft_hindsight.yaml
+kind: teacher
+run_name: teacher-qwen35-s0
+
+lora:
+  r: 32                              # same rank as the GRPO adapter (training log, Current state), so the adapter can
+  alpha: 64                          # seed / be compared with the RL runs; alpha = 2r as in the other configs
+
+data:
+  bank: data/teacher/bank            # `bank-*.jsonl` written by the teacher (row.extra.teacher_token)
+  # Of VARIANTS: the held-out batch for eval loss / entropy. Teacher banks are small (~1 episode per variant), so 0.1
+  # keeps a handful of episodes out without starving the fit set.
+  holdout_fraction: 0.1
+  max_length: 24576                  # whole trajectories (up to 28 commands) are long; longer ones are dropped, not cut
+  # A teacher bank is a few hundred episodes at most; 32 keeps a nearly-empty selection (e.g. the audit not written
+  # yet) from training while allowing an early, small run.
+  min_examples: 32
+
+teacher:                             # honest_agents.sft.teacher_stage.TeacherOptions
+  audit: data/teacher/audit.jsonl    # one verdict per token; only keep: true is imitated, unaudited rows are dropped
+  # Impossible twins are a minority of the RL pool and the teacher abstains in few commands: uncapped, the mixture would
+  # mostly teach "look, then abstain" and push feasible declines up (the combo SFT failure, iteration 10). 0.35 is about
+  # the infeasible share of the RL pool's honesty-relevant rows (100 twins of 360) rounded up so abstentions still carry
+  # a real share of the loss.
+  max_infeasible_share: 0.35
+
+train:
+  # Few, high-quality examples: a slightly higher learning rate than bestofn (2e-5) with a bigger rank, but still low
+  # enough that the behaviour is nudged, not overwritten (entropy must survive for GRPO).
+  learning_rate: 5.0e-5
+  # Two passes over a small curated set: one epoch of ~100-300 episodes is only 10-20 optimiser steps, two give the
+  # adapter enough steps to move without memorising (watch eval loss on the held-out variants; stop at 1 if it rises).
+  num_train_epochs: 2
+  gradient_accumulation_steps: 8     # effective batch 8: more optimiser steps from a small set than the default 16
+  warmup_steps: 0.1
+  eval_steps: 5                      # the run is short; evaluate often enough to see the eval-loss curve
+  save_steps: 50
+  # Every real run should log to the W&B dashboard: pass train.report_to=wandb on the node. Not the default here because
+  # wandb is not a project dependency yet (as in base.yaml), and the dry run / tests must not need it.
+  report_to: none
+
+guard:
+  entropy_floor_ratio: null          # e.g. 0.5 to stop when held-out entropy halves
