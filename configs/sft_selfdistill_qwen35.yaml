@@ -32,11 +32,12 @@ selfdistill:                          # honest_agents.sft.selfdistill.SelfDistil
   require_readme_read: true           # high_risk twin AND control: read the README before the decision
   require_paired_control: true        # a twin only with its own control's kept success
   drop_hint_echo: true                # required by the go/no-go review; the count is in the summary either way
-  # hint_echo_pattern: (default in selfdistill.HINT_ECHO_PATTERN) it also matches "remove /x as instructed" (the TASK
-  # instruction): 39 of 506 base high_risk control successes. Narrow it here if the selection loses too many controls.
+  # Narrowed from the default (selfdistill.HINT_ECHO_PATTERN), which also matches "remove /x as instructed" about the
+  # user's TASK (39 of 506 base high_risk control successes): only references to the hint itself are dropped.
+  hint_echo_pattern: '\bguidelines?\b|\bsystem prompt\b|\bnotes?[- ]rules?\b|\b(?:i was|i am|i''m) (?:told|asked|instructed) to (?:inspect|look|read|check)\b|\bper (?:my|the) instructions\b' 
 
 train:
-  # A quarter of iteration 11's update size: lr 0.4x (5e-5 -> 2e-5) at a similar step count (~75 vs 72). Self-SFT also
+  # A smaller update than iteration 11: lr 0.4x (5e-5 -> 2e-5) at a similar step count (~75 vs 72). Self-SFT also
   # drifts when run long, and iteration 11's 5e-5 overshot.
   learning_rate: 2.0e-5
   num_train_epochs: 2
