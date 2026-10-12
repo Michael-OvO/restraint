@@ -1,7 +1,7 @@
 """RL training pool: gate the feasible side by difficulty, clean the pool, set the impossible-twin mix per family, and
 write the rows in the order the trainer will draw them.
 
-    python -m honest_agents.tasks.rl_pool --config configs/rl_pool.yaml [--out DIR/train_rl.jsonl] [key=value ...]
+    python -m honest_agents.tasks.rl_pool --config configs/tasks/rl_pool.yaml [--out DIR/train_rl.jsonl] [key=value ...]
     python -m honest_agents.tasks.rl_pool --pool data/train_pool.jsonl --difficulty data/difficulty_2_3.json \\
         --out data/train_rl.jsonl [--max-infeasible 100] [--seed 0]          # the iteration-9 pool (legacy defaults)
 
@@ -49,12 +49,13 @@ steps_per_generation = gradient_accumulation_steps, num_generations 8, num_itera
 `data.pair_batches: false` must be set (`pair_batches` would re-order the rows by `pair_id`, putting the twin, its
 control and its plain copy in the same step: the opposite of what this order is for).
 
-**The configured pool** (configs/rl_pool.yaml on the 2026-10 data, no claim-rate file yet): 411 rows from 151 sources =
-64 plain feasible + 193 near-miss controls + 154 impossible twins (80 `high_risk` of 158 eligible, all 64 eligible
+**The configured pool** (configs/tasks/rl_pool.yaml, 2026-10 data, no claim-rate file yet): 408 rows from 148 sources =
+64 plain feasible + 190 near-miss controls + 154 impossible twins (80 `high_risk` of 158 eligible, all 64 eligible
 `remove_input`, 10 `revoke_permission` of 72), against 75 + 185 + 100 (34 / 33 / 33) in the iteration-9 pool. Left out:
 18 never-passing sources (62 rows), 30 never-passing controls and the 23 twins they leave without a control, 11 leaky
-`remove_input` twins (7 from the bank, 4 from the run-2 quarantine). Twin share 37.5 % of rows (28 % before): 3 twins in
-every step (4 in one), 51 steps per pass, so a 50-step run sees 400 distinct rows.
+`remove_input` twins (7 from the bank, 4 from the run-2 quarantine). Twin share 37.7 % of rows (28 % before): 3 twins in
+every step (4 in one), 51 steps per pass with no untrained tail, so a 50-step run sees 400 distinct rows. The legacy
+flags (`--pool --difficulty --out`, no config) still rebuild the iteration-9 data/train_rl.jsonl byte for byte.
 
 **Gate.** The pool is meant to move the impossible-twin share of the summed |advantage| from ~12 % to at least **30 %**
 (measure it on the run's rollouts, as in iteration 10; this builder cannot predict it). The row share of twins is only an
@@ -260,8 +261,8 @@ def plan_pool(
                 drop(r, EXCL_CLAIM_RATE)
                 continue
         by_family[r["family"]].append(r)
-    for fam in sorted(by_family):
-        rng.shuffle(by_family[fam])
+    for family_rows in by_family.values():  # first-appearance order, as iteration 9 did: same seed, same sample
+        rng.shuffle(family_rows)
     available = {f: len(v) for f, v in sorted(by_family.items())}
 
     if family_quotas is None:
@@ -445,7 +446,7 @@ def summarize(rows: Sequence[Row], block_size: int | None = None, steps: int | N
 
 @dataclass
 class PoolOptions:
-    """Everything the CLI reads: the keys of a `--config` YAML (configs/rl_pool.yaml), overridden by flags."""
+    """Everything the CLI reads: the keys of a `--config` YAML (configs/tasks/rl_pool.yaml), overridden by flags."""
 
     pool: str | None = None  # train_pool.jsonl of a dataset build
     difficulty: str | None = None  # difficulty.json of tasks.difficulty (`keep_pairs`)
@@ -488,10 +489,16 @@ def collect_exclusions(opts: PoolOptions) -> Exclusions:
         leaks = validation_leaks(read_jsonl(opts.validation))
         ex.update(Exclusions(infeasible_variants=dict.fromkeys(leaks, EXCL_LEAK_VALIDATION)))
     for q in opts.quarantine:
-        leaks = quarantined_variants(Path(q).expanduser())
+        qpath = Path(q).expanduser()
+        if not qpath.is_file():  # `quarantined_variants` reads a missing list as empty: a typo would let leaks back in
+            raise FileNotFoundError(f"quarantine file {qpath} does not exist")
+        leaks = quarantined_variants(qpath)
         ex.update(Exclusions(infeasible_variants=dict.fromkeys(leaks, EXCL_LEAK_QUARANTINE)))
     if opts.bank:
-        ex.update(bank_exclusions(read_bank_stats(opts.bank), min_samples=opts.min_bank_samples))
+        stats = read_bank_stats(opts.bank)
+        if not stats:  # an empty or wrong directory would silently skip every never-pass and leak exclusion
+            raise ValueError(f"bank {opts.bank} has no train-split rows")
+        ex.update(bank_exclusions(stats, min_samples=opts.min_bank_samples))
     return ex
 
 
@@ -536,7 +543,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     from honest_agents.train.config import apply_overrides, load_config_dict
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", type=Path, help="YAML of PoolOptions keys (configs/rl_pool.yaml); flags win")
+    ap.add_argument("--config", type=Path, help="YAML of PoolOptions keys (configs/tasks/rl_pool.yaml); flags win")
     ap.add_argument("--pool", help="train_pool.jsonl of a dataset build")
     ap.add_argument("--difficulty", help="difficulty.json of tasks.difficulty")
     ap.add_argument("--out")
@@ -562,7 +569,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     opts = PoolOptions.from_dict(d)
     try:
         report = run(opts)
-    except (ValueError, RuntimeError) as e:
+    except (ValueError, RuntimeError, OSError) as e:
         print(f"rl_pool: {e}", file=sys.stderr)
         raise SystemExit(2) from e
     print(json.dumps({k: v for k, v in report.items() if k not in ("excluded_ids", "options")}))

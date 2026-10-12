@@ -100,6 +100,43 @@ def test_infeasible_sample_is_balanced_over_families_deterministic_and_keeps_poo
             )
 
 
+def iteration9_sample(rows: list[dict], max_infeasible: int, seed: int) -> set[str]:
+    """The iteration-9 builder's twin sample (git 361de8f): families shuffled in first-appearance order, one rng."""
+    import random
+
+    rng = random.Random(seed)
+    by_family: dict[str, list[dict]] = {}
+    for r in rows:
+        if r["kind"] == "infeasible":
+            by_family.setdefault(r["family"], []).append(r)
+    for family_rows in by_family.values():
+        rng.shuffle(family_rows)
+    chosen: list[dict] = []
+    queues = [by_family[f] for f in sorted(by_family)]
+    while queues and len(chosen) < max_infeasible:
+        for q in list(queues):
+            if len(chosen) >= max_infeasible:
+                break
+            chosen.append(q.pop())
+            if not q:
+                queues.remove(q)
+    return {r["variant_id"] for r in chosen}
+
+
+def test_legacy_defaults_draw_the_iteration9_sample_when_families_are_not_in_sorted_order():
+    """data/train_rl.jsonl of iteration 9 must be rebuildable: the pool lists revoke_permission before remove_input, so
+    shuffling families in sorted order would draw a different sample from the same seed."""
+    rows = []
+    for i in range(12):
+        for fam in ("revoke_permission", "high_risk", "remove_input"):
+            rows += [row(f"s{i:02d}", "control", fam), row(f"s{i:02d}", "infeasible", fam)]
+    for seed in range(5):
+        twins = {
+            r["variant_id"] for r in build_pool(rows, set(), max_infeasible=7, seed=seed) if r["kind"] == "infeasible"
+        }
+        assert twins == iteration9_sample(rows, 7, seed)
+
+
 def test_cli_without_config_writes_rows_unchanged_in_pool_order(tmp_path, capsys):
     (tmp_path / "pool.jsonl").write_text("".join(json.dumps(r) + "\n" for r in pool()))
     (tmp_path / "diff.json").write_text(json.dumps({"keep_pairs": ["src/a"]}))
@@ -278,7 +315,7 @@ def test_training_config_uses_the_pool_order_and_the_same_block_size():
     g = cfg.grpo
     prompts_per_step = g["per_device_train_batch_size"] * cfg.launch.num_processes * g["gradient_accumulation_steps"]
     prompts_per_step //= g["num_generations"]
-    pool_cfg = yaml.safe_load((REPO / "configs" / "rl_pool.yaml").read_text())
+    pool_cfg = yaml.safe_load((REPO / "configs" / "tasks" / "rl_pool.yaml").read_text())
     assert pool_cfg["block_size"] == prompts_per_step == 8
     assert pool_cfg["family_quotas"]["revoke_permission"] <= 10 and pool_cfg["max_infeasible"] is None
     assert pool_cfg["require_control"] is True
@@ -336,6 +373,24 @@ def test_cli_with_config_reads_every_exclusion_source(tmp_path, capsys):
     printed = json.loads(capsys.readouterr().out)
     assert printed["summary"] == summarize(out, 8, 5) and "excluded_ids" not in printed
     assert read_bank_stats([bank_dir])["src__s01__remove_input"].passes == 4
+
+
+def test_cli_refuses_a_missing_quarantine_file_or_an_empty_bank(tmp_path, capsys):
+    """Both would silently drop exclusions: the quarantine reader treats a missing list as empty, and an empty bank
+    directory yields no statistics."""
+    (tmp_path / "pool.jsonl").write_text("".join(json.dumps(r) + "\n" for r in pool()))
+    (tmp_path / "diff.json").write_text(json.dumps({"keep_pairs": ["src/a"]}))
+    (tmp_path / "bank").mkdir()
+    base = ["--pool", str(tmp_path / "pool.jsonl"), "--difficulty", str(tmp_path / "diff.json"),
+            "--out", str(tmp_path / "rl.jsonl")]  # fmt: skip
+    for extra, message in (
+        (["--quarantine", str(tmp_path / "nope.jsonl")], "does not exist"),
+        (["--bank", str(tmp_path / "bank")], "no train-split rows"),
+    ):
+        with pytest.raises(SystemExit):
+            main(base + extra)
+        assert message in capsys.readouterr().err
+    assert not (tmp_path / "rl.jsonl").exists()
 
 
 def test_cli_rejects_unknown_config_keys(tmp_path):

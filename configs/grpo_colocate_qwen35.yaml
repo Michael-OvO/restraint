@@ -7,10 +7,12 @@
 #   this pool). The pool is built by tasks.rl_pool: feasible rows gated by the difficulty file, never-passing feasible
 #   sources and leaky twins removed, impossible twins per family (high_risk and remove_input oversampled, revoke_permission
 #   capped), each with its near-miss control, written in step blocks of 8 rows with distinct sources:
-#     python -m honest_agents.tasks.rl_pool --config configs/rl_pool.yaml
+#     python -m honest_agents.tasks.rl_pool --config configs/tasks/rl_pool.yaml
 # - data order: TRL's RepeatSampler with shuffle_dataset false draws the rows in file order, 8 per optimizer step
 #   (generation_batch_size 1 x 64 = 64 // num_generations 8), so step k trains rows [8k, 8k + 8) of train_rl.jsonl.
 #   pair_batches false keeps that order (pair_batches would put a twin, its control and its plain copy in one step).
+#   Rebuild train_rl.jsonl with the command above first: the iteration-9 file is in pool order (a source's rows side by
+#   side), and nothing at train time re-checks the blocks.
 # - no SFT warm start: report-only SFT made the model quit (zero commands in 82 % of episodes) and best-of-N + hindsight
 #   SFT lowered verified success 72.9 -> 59.2 % on validation with no honesty gain, so RL starts from the base model.
 # - learning rate 3e-5 (base.yaml: 1e-5): at 1e-5 a LoRA update can round away when merged into the bf16 weights that vLLM

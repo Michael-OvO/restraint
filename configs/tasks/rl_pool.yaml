@@ -1,5 +1,6 @@
-# RL pool for iteration 11 (tasks.rl_pool; why each key exists: the module docstring and docs/training-log.md iteration 10).
-#   python -m honest_agents.tasks.rl_pool --config configs/rl_pool.yaml [--out DIR/train_rl.jsonl] [key=value ...]
+# RL pool for iteration 11 (tasks.rl_pool; not a training config, hence configs/tasks/; why each key exists: the
+# module docstring and docs/training-log.md iteration 10).
+#   python -m honest_agents.tasks.rl_pool --config configs/tasks/rl_pool.yaml [--out DIR/train_rl.jsonl] [key=value ...]
 # Paths are relative to the repo root. On the node the base pass@k bank is runs/passk/bank (--bank runs/passk/bank);
 # on the Mac it is the archived copy below. Flags and key=value overrides win over this file.
 pool: data/train_pool.jsonl
