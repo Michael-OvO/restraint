@@ -37,7 +37,7 @@ neither replaces the checks on the H100 box.
 `R` is `env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval`; the scripts add it themselves. On the fresh VM:
 
 ```bash
-git clone <repo> && cd restraint            # or rsync this tree
+git clone <repo> && cd restraint            # or, with no GitHub key on the node, push from the Mac: section 5
 scripts/setup_node.sh --install-docker      # uv, Docker, nftables check, model weights, verifier bundle; --pull-images DIR prebuilds images
 # flash-linear-attention is in the train extra (uv.lock); setup_node.sh checks that `import fla` works. Qwen3.5 is ~20x slower without it
 # Docker's stock network pool holds ~30 networks and every sandbox takes one; widen it before any real run:
@@ -253,3 +253,32 @@ top without a measured step time to justify more.
 
 Then Stage 2 is `scripts/run_pilot.sh configs/pilot.yaml` (use `SLOT=0 SHARD=0/2` and `SLOT=1 SHARD=1/2` for the two run slots), whose last
 line is `PILOT GO`, `PILOT NO-GO` or `PILOT INCONCLUSIVE`; run `scripts/sync_check.sh` first, because the pilot is the first run that learns.
+
+## 5. Code, results and secrets without a GitHub key on the node
+
+The node never gets a GitHub key or a stored secret: one less credential to create and revoke per rental, and nothing for the
+next renter of the box to find. `python -m honest_agents.node` (from the Mac) does the three transfers; `--host` takes the
+node address (user `root` unless given as `user@host`), `--port` the ssh port, `--key` defaults to `~/.ssh/vast_ed25519`,
+`--dest` to `/root/restraint`.
+
+```bash
+python -m honest_agents.node sync --host HOST --port PORT --dry-run          # itemised list of what would change; nothing sent
+python -m honest_agents.node sync --host HOST --port PORT --with-data        # the tree, .git included, plus data/ (datasets, tasks)
+python -m honest_agents.node run --host HOST --port PORT --name phase0 -- scripts/phase0.sh configs/phase0_colocate.yaml
+python -m honest_agents.node run --host HOST --port PORT --mode fg -- nvidia-smi
+python -m honest_agents.node pull --host HOST --port PORT outputs/phase0 /root/phase0.log
+```
+
+* **sync** is an rsync of this checkout. It never sends `.venv`, caches, `*.log`, `outputs/`, `runs/`, `wandb/` or `.claude/`,
+  and sends `data/` only with `--with-data`. `--delete` (off by default) removes node files the Mac lacks; excluded paths are
+  never deleted, so the node's runs survive it.
+* **run** reads the W&B key from the Mac's `~/.netrc` (`machine api.wandb.ai`, what `wandb login` writes) and the Hugging Face
+  token from `~/.cache/huggingface/token` at call time, and writes them to ssh's stdin. A short remote script reads them with
+  `read -r`, exports `WANDB_API_KEY` and `HF_TOKEN` (an absent one stays unset), changes to `--dest` and starts the command in a
+  login shell. They never appear on a command line (`ps`), in a file on the node, or in this tool's output (it prints the
+  names it sends). Modes: `nohup` (default; detached with `setsid`, output appended to `/root/NAME.log`, prints the pid),
+  `tmux` (a tmux server of its own, `tmux -L NAME attach -t NAME`; a name already in use is refused, because a running
+  tmux server would not pass the secrets on), `fg` (attached, for short checks). `--dry-run` prints the ssh command and the
+  remote script; `--no-secrets` sends none.
+* **pull** copies node paths (relative to `--dest`, or absolute for logs) into `~/Documents/honest-agents-archive/staging`,
+  keeping their layout. It is the quick copy; the curated save of an iteration is still `python -m honest_agents.archive`.
