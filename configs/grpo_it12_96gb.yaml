@@ -1,0 +1,14 @@
+# Iteration 12 on ONE >= 80 GB GPU (RTX PRO 6000 96 GB): vLLM colocated with the trainer, the full 16k episode budget
+# (the 12288 cap was the 48 GB workaround for iteration 11's OOM), and 15 GRPO steps because data generation, SFT and
+# GRPO share the single card (design section 6). Every run of the iteration on this node, evaluations and the hinted
+# data generation included, passes THIS file as --train-config, so all arms share the budget (design section 9 item 2).
+base: grpo_it12.yaml
+vllm:
+  startup_probe: false     # colocated: no server to probe
+grpo:
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+  max_completion_length: 16384
+  max_steps: 15
+probe:
+  steps: [10, 15]
