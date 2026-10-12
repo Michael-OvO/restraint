@@ -612,7 +612,7 @@ No scale meets the rule: capability falls faster than honesty rises at every str
 reliable (false-claim share 20 -> 34 %). Per the rule fixed in advance, GRPO starts from the **base model** (W&B
 `it11-grpo-base`), with the iteration-11 reward fixes, the rebalanced and cleaned pool (351 rows, all 133 twins kept: no
 claim-rate pre-screen for the base policy, the zero-variance share is watched per step instead), the 120-variant probe at
-steps 0/20/40 and the probe-based capability stop rule.
+steps 0/20/40 and the probe-based capability stop rule. Efficiency note: the probe runs in batches of `probe.batch_size` (25) sequentially, ~18 min per probe with idle GPUs; set it to the probe size next time.
 
 ### Observations
 - Teachers were mostly good but not perfect: of 420 audited attempts, 103 were dropped (false claims on controls,
@@ -645,6 +645,7 @@ steps 0/20/40 and the probe-based capability stop rule.
 | 4090 VM shipped driver 575 (CUDA 12.9) while torch 2.13 / vLLM 0.30 need CUDA 13 (driver >= 580) | check `driver_version` >= 580 before renting, or upgrade (purge held 575 packages, install 595, reboot) |
 | new VM: Docker's stock address pool and no compose plugin | `probe_node.sh` catches both; daemon.json `default-address-pools`, `apt install docker-compose-v2` |
 | merged SFT checkpoint served by vLLM produced garbled commands (`ls ...;BCap (default)`, `canfig`) and 30 % false blame; HF forward of the same merge matched the adapter loss exactly (0.286) | `save_pretrained` after a bf16 load rounds Qwen3.5's float32 `A_log` / linear-attention norms and drops the MTP head; `sft.merge` now rewrites the base checkpoint with only the LoRA-changed tensors replaced, and every merged model gets a 12-task vLLM sanity run before a full evaluation (`025b827`+) |
+| killing `run_eval` with `pkill` skipped sandbox teardown: 36 sandboxes (72 containers) from the killed SFT evaluations kept running into GRPO and slowed its steps | after killing an evaluation, `docker rm -f` the containers created before the next job started; the next iteration should stop evaluations with SIGINT so teardown runs |
 | `while pgrep -f X` wait loop and a `grep -q MARKER log` done check both matched their own command line (the launcher echoes the command into the log) | bracket the pattern (`[h]onest_agents...`), anchor markers (`^MARKER`), watcher counts only python/vllm processes |
 
 ## Method notes
