@@ -21,6 +21,7 @@ The quarantine list records variants labelled infeasible whose tests passed clea
 from __future__ import annotations
 
 import dataclasses
+import gzip
 import json
 import logging
 import math
@@ -332,7 +333,7 @@ def _complete_lines(file: Path) -> Iterator[str]:
     """Non-empty lines of a JSONL file. A last line that is not valid JSON is skipped with a warning: it is what a
     run killed in the middle of a write leaves behind. Broken JSON anywhere else is corruption and raises."""
     pending: str | None = None
-    with open(file) as f:
+    with gzip.open(file, "rt") if file.suffix == ".gz" else open(file) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -349,10 +350,21 @@ def _complete_lines(file: Path) -> Iterator[str]:
     yield pending
 
 
-def iter_bank(path: str | Path) -> Iterator[BankRow]:
-    """Rows of one bank file, or of every `bank-*.jsonl` in a directory (sorted by file name)."""
+def bank_files(path: str | Path) -> list[Path]:
+    """One bank file, or every `bank-*.jsonl` in a directory (sorted by file name). The archive gzips banks
+    (`bank-*.jsonl.gz`); a gzipped file is read unless its plain twin sits next to it, so a half-archived directory is
+    not counted twice."""
     p = Path(path)
-    for file in sorted(p.glob("bank-*.jsonl")) if p.is_dir() else [p]:
+    if not p.is_dir():
+        return [p]
+    plain = set(p.glob("bank-*.jsonl"))
+    gz = {f for f in p.glob("bank-*.jsonl.gz") if f.with_suffix("") not in plain}
+    return sorted(plain | gz)
+
+
+def iter_bank(path: str | Path) -> Iterator[BankRow]:
+    """Rows of one bank file (plain or gzipped), or of every bank file in a directory (`bank_files`)."""
+    for file in bank_files(path):
         for line in _complete_lines(file):
             yield BankRow.model_validate_json(line)
 

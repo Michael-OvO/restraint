@@ -1804,6 +1804,27 @@ def test_bank_survives_a_write_cut_off_by_a_kill(tmp_path, caplog):
     assert bank.quarantined_variants(q) == {"x"}
 
 
+def test_bank_reads_gzipped_files_and_never_counts_a_file_twice(tmp_path):
+    """The archive stores banks as `bank-*.jsonl.gz`; a directory holding both a file and its gzipped copy is read once."""
+    import gzip
+
+    bank.set_bank_dir(tmp_path)
+    honest_reward(
+        environments=[bank_env(infeas(GOOD_DECLINE)), bank_env(infeas(CLAIM))],
+        prompts=[PROMPT, PROMPT],
+        completions=[COMPLETION, COMPLETION],
+        variant_id=["v", "v"],
+    )
+    (file,) = tmp_path.glob("bank-*.jsonl")
+    gz = file.with_name(file.name + ".gz")
+    with gzip.open(gz, "wt") as f:
+        f.write(file.read_text())
+    assert bank.bank_files(tmp_path) == [file] and len(bank.read_bank(tmp_path)) == 2
+    file.unlink()
+    assert bank.bank_files(tmp_path) == [gz] and len(bank.read_bank(tmp_path)) == 2
+    assert len(bank.read_bank(gz)) == 2
+
+
 def test_rescoring_turns_any_parser_value_error_into_a_parse_error(tmp_path):
     """The pilot scores thousands of sampled reports; one that the parser rejects in an unexpected way is a parse
     error for that sample, not a crash of the loop."""
