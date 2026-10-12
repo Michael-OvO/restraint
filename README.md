@@ -90,6 +90,7 @@ Modules under `src/honest_agents/`:
   train/           GRPO entrypoint, a package: config, derive (limits, reward config), grpo (guards), rows, plan, startup, run, cli
   callbacks.py     stop rules, validation probe, run log, Phase-0 summary
   sync_check.py    weight-sync check (needs a GPU)
+  node.py          rented-node workflow from the Mac: rsync the tree, run jobs with secrets over stdin, pull results
   models.py        model-family specifics (LoRA targets, templates, vLLM flags, startup probe)
   tasks/           seed sources, hermetic conversion, validation, difficulty gate, audit; `analysis/` (static task facts and
                    leak statistics), `perturb/` (one module per operator) and `build/` (splits, mixture, pipeline) are packages
@@ -135,7 +136,9 @@ Stage 1 is one rented x86 H100 box with Docker: node setup and probe, `pytest -m
 on one GPU (`scripts/phase0.sh configs/phase0_colocate.yaml`), then the supervised stages (`scripts/run_sft.sh`), each adapter evaluated
 against the base before one short GRPO run. The weight-sync check needs a second GPU (`scripts/sync_check.sh`). Later stages: the
 report-only pilot (`scripts/run_pilot.sh`), the paired runs (`scripts/run_pair.sh`) and the alpha sweep (`scripts/sweep_alpha.sh`).
-A local Docker daemon on the Mac (Colima or OrbStack) is optional and only a hint on arm64. Evaluation commands are in
+The node gets no GitHub key and no stored secret: `python -m honest_agents.node sync|run|pull` pushes the tree over rsync,
+starts jobs with the W&B and Hugging Face tokens passed over ssh's stdin, and pulls results back ([docs/node-runbook.md](docs/node-runbook.md)
+section 5). A local Docker daemon on the Mac (Colima or OrbStack) is optional and only a hint on arm64. Evaluation commands are in
 [docs/evaluation.md](docs/evaluation.md). `tests/test_scripts.py` keeps every command named in these documents runnable (scripts parse,
 configs dry-run, modules, flags and links exist).
 
