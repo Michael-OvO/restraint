@@ -11,6 +11,7 @@ from honest_agents.models import (
     family_spec,
 )
 from honest_agents.train.config import _DERIVED_GRPO_FIELDS, REWARD_MODES, Limits, TrainRunConfig
+from honest_agents.train.dashboard import resolve_report_to
 from honest_agents.train.derive import build_limits, output_dir, reward_weights, run_name, served_max_model_len
 
 # ── guards on the GRPO section ──────────────────────────────────────────────
@@ -138,6 +139,8 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
     check_checkpointing(grpo)
     check_launch_layout(grpo, cfg.launch.num_processes)
     limits = limits or build_limits(cfg)
+    if "report_to" in grpo:  # WANDB_MODE=disabled drops wandb here, before transformers would import it
+        grpo["report_to"] = resolve_report_to(grpo["report_to"])
 
     spec = family_spec(family)
     grpo.setdefault("chat_template_kwargs", dict(spec.chat_template_kwargs))

@@ -16,6 +16,7 @@ from honest_agents.models import (
     family_spec,
     flash_linear_attention_available,
 )
+from honest_agents.train.dashboard import WandbMirror, init_run, wandb_enabled
 from honest_agents.train.plan import Plan, bank_dir, quarantine_file
 from honest_agents.train.rows import check_resume_order
 from honest_agents.train.startup import check_lm_head_cast, check_prompt_budget, startup_probe
@@ -53,14 +54,20 @@ def _last_checkpoint(out: Path) -> str | None:
 
 
 def add_callbacks(trainer: Any, plan: Plan) -> None:
-    """Stop rules, the validation probe's checkpoint selection and the run log."""
+    """Stop rules, the run log, the validation probe's checkpoint selection and, with W&B on, what the dashboard
+    needs beyond TRL's own logs (`train.dashboard`; it reads the run log and the probe, so it comes after both)."""
     from honest_agents.callbacks import JsonlLogger, StopRules, ValidationProbe
 
     out = plan.grpo_config.output_dir
     trainer.add_callback(StopRules(plan.stop_config, reward_mode=plan.cfg.reward.mode, output_dir=out))
-    trainer.add_callback(JsonlLogger(out))
+    run_log = JsonlLogger(out)
+    trainer.add_callback(run_log)
+    probe = None
     if plan.eval_dataset is not None:
-        trainer.add_callback(ValidationProbe(out, plan.cfg.probe.selection_metric))
+        probe = ValidationProbe(out, plan.cfg.probe.selection_metric)
+        trainer.add_callback(probe)
+    if wandb_enabled(plan.grpo_config.report_to):
+        trainer.add_callback(WandbMirror(run_log, probe, health_checks=plan.cfg.wandb.health))
     from honest_agents.memory import MemoryDebug, ReleaseFreedMemory, mem_debug_enabled
 
     trainer.add_callback(ReleaseFreedMemory())
@@ -214,11 +221,24 @@ def train(plan: Plan, resume: bool = False) -> bool:
     if int(os.environ.get("RANK", "0")) == 0:
         out.mkdir(parents=True, exist_ok=True)
         (out / "run_config.json").write_text(json.dumps(dataclasses.asdict(plan.cfg), indent=2, default=str))
-    trainer = make_trainer(plan)
-    report = getattr(trainer.model, "print_trainable_parameters", None)
-    if trainer.accelerator.is_main_process and report is not None:
-        report()
-    trainer.train(resume_from_checkpoint=ckpt)
+    # The dashboard run opens before the model loads: a missing key or an unreachable W&B fails in seconds, not after
+    # minutes of loading, and transformers' WandbCallback later finds this run instead of starting its own.
+    dashboard = None
+    if wandb_enabled(plan.grpo_config.report_to) and int(os.environ.get("RANK", "0")) == 0:
+        dashboard = init_run(plan.cfg, out, resuming=ckpt is not None)
+    try:
+        trainer = make_trainer(plan)
+        report = getattr(trainer.model, "print_trainable_parameters", None)
+        if trainer.accelerator.is_main_process and report is not None:
+            report()
+        trainer.train(resume_from_checkpoint=ckpt)
+    except BaseException:
+        if dashboard is not None:
+            dashboard.finish(exit_code=1)
+        raise
+    if dashboard is not None:
+        dashboard.summary["stopped_by_rule"] = stopped_by_rule(trainer)
+        dashboard.finish()
     trainer.save_model(str(out / "final"))
     best = out / "best_checkpoint.json"
     if best.is_file():

@@ -476,6 +476,7 @@ class JsonlLogger(TrainerCallback):
     def __init__(self, output_dir: str | Path):
         self.path = Path(output_dir) / TRAIN_LOG_FILE
         self._last: float | None = None
+        self.last_row: dict[str, Any] | None = None  # the row just written (`train.dashboard` mirrors its extra columns)
 
     def on_train_begin(self, args, state, control, **kwargs):
         self._last = time.time()
@@ -494,6 +495,7 @@ class JsonlLogger(TrainerCallback):
             from honest_agents.memory import mem_available_gb, rss_gb  # host RAM: a run was OOM-killed at 69 GB
 
             row[HOST_RSS], row[HOST_AVAILABLE] = rss_gb(), mem_available_gb()
+        self.last_row = row
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")

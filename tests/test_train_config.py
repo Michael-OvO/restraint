@@ -1294,6 +1294,60 @@ def test_a_run_stopped_by_a_rule_exits_with_its_own_status(stub_trainer, data: S
                        f"output_root={data.root / 'out2'}"]) == train.EXIT_STOPPED_BY_RULE  # fmt: skip
 
 
+def test_train_opens_the_dashboard_run_and_mirrors_after_the_run_log_and_probe(stub_trainer, data, monkeypatch):
+    import sys
+
+    from honest_agents import callbacks
+    from honest_agents.train.dashboard import RUN_ID_FILE, WandbMirror
+    from tests.test_dashboard import FakeWandb
+
+    fake = FakeWandb()
+    monkeypatch.setitem(sys.modules, "wandb", fake)
+    monkeypatch.delenv("WANDB_MODE", raising=False)
+    plan = _plan(BASE, data, "grpo.report_to=wandb", "wandb.name=it11-test")
+    train.train(plan)
+    kinds = [type(c) for c in stub_trainer.instances[-1].callbacks]
+    assert kinds[:4] == [callbacks.StopRules, callbacks.JsonlLogger, callbacks.ValidationProbe, WandbMirror]
+    assert fake.init_kwargs["name"] == "it11-test" and fake.init_kwargs["project"] == "honest-agents"
+    assert fake.run.finished == 0 and fake.run.summary["stopped_by_rule"] is False
+    assert (Path(plan.grpo_config.output_dir) / RUN_ID_FILE).is_file()
+
+    monkeypatch.setenv("WANDB_MODE", "disabled")  # the off switch: no run, no mirror, wandb never imported
+    monkeypatch.delitem(sys.modules, "wandb")
+    plan = _plan(BASE, data, "grpo.report_to=wandb", "seed=9")
+    assert plan.grpo_config.report_to == []
+    train.train(plan)
+    assert WandbMirror not in [type(c) for c in stub_trainer.instances[-1].callbacks]
+    assert "wandb" not in sys.modules
+
+
+def test_a_crashed_run_closes_its_dashboard_run_as_failed(stub_trainer, data, monkeypatch):
+    import sys
+
+    from tests.test_dashboard import FakeWandb
+
+    fake = FakeWandb()
+    monkeypatch.setitem(sys.modules, "wandb", fake)
+    monkeypatch.delenv("WANDB_MODE", raising=False)
+
+    def crash(self, resume_from_checkpoint=None):
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr(_StubTrainer, "train", crash)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        train.train(_plan(BASE, data, "grpo.report_to=wandb"))
+    assert fake.run.finished == 1
+
+    # The run opens before the model loads, so a failure while building the trainer also closes it as failed.
+    def broken_init(self, **kwargs):
+        raise RuntimeError("model download failed")
+
+    monkeypatch.setattr(_StubTrainer, "__init__", broken_init)
+    with pytest.raises(RuntimeError, match="download failed"):
+        train.train(_plan(BASE, data, "grpo.report_to=wandb", "seed=7"))
+    assert fake.run.finished == 1 and fake.init_kwargs["name"]
+
+
 def test_train_refuses_to_resume_a_different_task_order(stub_trainer, data: SimpleNamespace):
     out = Path(_plan(BASE, data).grpo_config.output_dir)
     train.train(_plan(BASE, data))

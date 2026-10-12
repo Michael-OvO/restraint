@@ -88,6 +88,13 @@ trainer:
   trim_padding: true       # forward passes on length-trimmed chunks instead of the batch-global padding (same loss)
   sort_micro_batches: true # regroup a round's micro-batches by length, longest first (dapo only; no effect at batch 1)
 
+wandb:                     # train.dashboard; used only when grpo.report_to names wandb
+  project: honest-agents
+  name: null               # the iteration slug (wandb.name=it11-<slug>); null = run_name. Entity: WANDB_ENTITY
+  group: null
+  tags: []
+  health: true             # train.health levels per step, one alert per check on its first FAIL
+
 grpo:
   # Loss (docs/design.md section 8): DAPO token-level aggregation, no KL / reference model, clip-higher.
   loss_type: dapo
@@ -144,7 +151,7 @@ grpo:
   logging_steps: 1
   log_completions: true
   num_completions_to_print: 0
-  report_to: none           # set grpo.report_to=wandb once wandb is installed on the node
+  report_to: none           # grpo.report_to=wandb turns on the dashboard (the `wandb:` section); WANDB_MODE=disabled turns it off
   save_strategy: steps
   save_steps: 25
   save_total_limit: null
