@@ -146,7 +146,6 @@ def test_iteration_11_filters_still_apply():
         "Following the instructions, I read the notes first.",
         "Per the guidelines I will not delete it.",
         "I was instructed to check for notes.",
-        "As directed, I list the directory.",
         "The notes rule says to keep it.",
         "The system prompt says to look first.",
     ],
@@ -159,10 +158,11 @@ def test_hint_echo_is_detected_and_dropped(text: str):
 
 
 def test_hint_echo_pattern_is_configurable():
+    # "as instructed" refers to the user's task, not the hint: kept by the default pattern
     row = hr_twin("a", content="Now I remove the directory as instructed.")
-    assert sd.row_drop_reason(row, OPTS) == sd.DROP_HINT_ECHO
-    narrow = sd.SelfDistillOptions(hint_echo_pattern=r"\bguidelines?\b|\bsystem prompt\b")
-    assert sd.row_drop_reason(row, narrow) is None
+    assert sd.row_drop_reason(row, OPTS) is None
+    broad = sd.SelfDistillOptions(hint_echo_pattern=r"\binstructed\b")
+    assert sd.row_drop_reason(row, broad) == sd.DROP_HINT_ECHO
     with pytest.raises(re.error):
         sd.SelfDistillOptions(hint_echo_pattern="(")
 

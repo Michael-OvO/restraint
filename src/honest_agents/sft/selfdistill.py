@@ -96,7 +96,12 @@ DROP_INFEASIBLE_CAP = "infeasible_share_cap"
 # also matches the base model citing the TASK ("remove /data/x as instructed"): on the unhinted pass@4 bank 137 of 2950
 # rows match, 39 of 506 high_risk control successes and 32 of 260 remove_input abstentions among them. Those are dropped
 # too by default (the review asked for this filter); `selfdistill.hint_echo_pattern` narrows it without a code change.
-HINT_ECHO_PATTERN = r"\binstruct(?:ion|ions|ed)\b|\bguidelines?\b|\bas directed\b|\bnotes?[- ]rule\b|\bsystem prompt\b"
+# References to the hint itself. "as instructed" / "instructions" alone are NOT matched: the base model uses them for the
+# user's task ("remove /x as instructed": 39 of 506 base high_risk control successes would be lost).
+HINT_ECHO_PATTERN = (
+    r"\bguidelines?\b|\bsystem prompt\b|\bnotes?[- ]rules?\b"
+    r"|\b(?:i was|i am|i'm) (?:told|asked|instructed) to (?:inspect|look|read|check)\b|\b(?:per|following|as per) (?:my|the) instructions\b"
+)
 HINT_ECHO = re.compile(HINT_ECHO_PATTERN, re.IGNORECASE)
 
 
