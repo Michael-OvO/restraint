@@ -601,6 +601,8 @@ SFT on audited demonstrations, then let GRPO pay for outcomes only.
 | RTX 6000D VM (`ubuntu_terminal` image, no driver): open driver 595/615 installs but the GPU fails probe-time init (passthrough) | abandon a host whose GPU does not initialise after one driver attempt; prefer images with a preinstalled driver |
 | 4090 VM shipped driver 575 (CUDA 12.9) while torch 2.13 / vLLM 0.30 need CUDA 13 (driver >= 580) | check `driver_version` >= 580 before renting, or upgrade (purge held 575 packages, install 595, reboot) |
 | new VM: Docker's stock address pool and no compose plugin | `probe_node.sh` catches both; daemon.json `default-address-pools`, `apt install docker-compose-v2` |
+| merged SFT checkpoint served by vLLM produced garbled commands (`ls ...;BCap (default)`, `canfig`) and 30 % false blame; HF forward of the same merge matched the adapter loss exactly (0.286) | `save_pretrained` after a bf16 load rounds Qwen3.5's float32 `A_log` / linear-attention norms and drops the MTP head; `sft.merge` now rewrites the base checkpoint with only the LoRA-changed tensors replaced, and every merged model gets a 12-task vLLM sanity run before a full evaluation (`025b827`+) |
+| `while pgrep -f X` wait loop and a `grep -q MARKER log` done check both matched their own command line (the launcher echoes the command into the log) | bracket the pattern (`[h]onest_agents...`), anchor markers (`^MARKER`), watcher counts only python/vllm processes |
 
 ## Method notes
 
