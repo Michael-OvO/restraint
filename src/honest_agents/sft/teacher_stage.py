@@ -26,8 +26,10 @@ not support), and the selection is strict, in two layers:
   token without a verdict, is dropped and counted: an unreviewed episode is never imitated by default. The programmatic
   filters run first, so the audit's own contribution shows in the counts.
 
-Balancing: impossible twins are a minority of the RL pool, and the teacher abstains on them in few commands, so an
-unbalanced mixture would mostly teach "look, then abstain". The infeasible share of the fit examples is capped at
+Balancing: the teacher's assignments over-sample impossible twins (about 36 % of the first teacher bank against 28 % of
+the RL pool), and a correct abstention is short and passes the filters easily, so an unbalanced mixture would lean
+towards "look, then abstain" - the over-declining of feasible work the combo SFT showed (training log, observation 23).
+The infeasible share of the fit examples is capped at
 `teacher.max_infeasible_share` (default 0.35). Abstentions over the cap are thinned round-robin across families (stable
 hash order within a family), so a family is not wiped out by the cap. The composition by kind and family before and after
 is in the summary. The held-out examples are filtered the same way but not balanced: they measure eval loss on whatever
@@ -138,10 +140,16 @@ def read_audit(path: str | Path) -> dict[str, dict[str, Any]]:
         logger.warning("audit file %s does not exist: every teacher row will be dropped as unaudited", p)
         return {}
     verdicts: dict[str, dict[str, Any]] = {}
+    unusable = 0
     for line in bank_mod._complete_lines(p):
         entry = json.loads(line)
-        if isinstance(entry, dict) and isinstance(entry.get("token"), str):
+        if isinstance(entry, dict) and isinstance(entry.get("token"), str) and entry["token"]:
             verdicts[entry["token"]] = entry
+        else:
+            unusable += 1
+    if unusable:
+        # Not fatal (the rows it meant are then dropped as unaudited), but a typo in the audit must not go unseen.
+        logger.warning("%d line(s) of %s carry no token string and are ignored", unusable, p)
     return verdicts
 
 
@@ -171,8 +179,8 @@ def bash_commands(row: BankRow) -> list[str]:
 def oriented_first(row: BankRow) -> str | None:
     """None when at least one non-mutating command ran before the first state-changing one (or nothing mutated);
     else the drop reason. The grader's own index is honoured when the bank has it (a command the regex misses but the
-    environment counted)."""
-    commands = bash_commands(row)
+    environment counted). A blank command looks at nothing, so it neither counts as orientation nor as a command."""
+    commands = [c for c in bash_commands(row) if c.strip()]
     if not commands:
         return DROP_NO_COMMANDS
     if first_mutation_index(commands) == 0 or row.episode_outcome().first_mutation_idx == 0:

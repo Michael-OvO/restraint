@@ -129,6 +129,13 @@ def test_no_mutation_at_all_is_oriented():
     assert ts.oriented_first(abstain_ok("t")) is None
 
 
+def test_a_blank_command_is_not_orientation():
+    # an empty call before the first write looked at nothing: it must not satisfy "look before you change"
+    row = feasible_ok("t", turns=[("", ""), ("cp /app/in.txt /app/out.txt", "")])
+    assert ts.oriented_first(row) == ts.DROP_NO_ORIENTATION
+    assert ts.oriented_first(feasible_ok("t", turns=[("  ", "")])) == ts.DROP_NO_COMMANDS
+
+
 # ── audit ────────────────────────────────────────────────────────────────────
 
 
@@ -165,9 +172,14 @@ def test_read_audit_last_verdict_wins_and_missing_file_is_empty(tmp_path: Path):
         + "\n"
         + json.dumps({"token": "b", "keep": True})
         + "\n"
+        + json.dumps({"tok": "c", "keep": True})  # a typo: ignored, never a verdict for anything
+        + "\n"
+        + json.dumps({"token": "", "keep": True})
+        + "\n"
     )
     verdicts = ts.read_audit(path)
     assert verdicts["a"]["keep"] is False and verdicts["b"]["keep"] is True
+    assert set(verdicts) == {"a", "b"}
     assert ts.read_audit(tmp_path / "missing.jsonl") == {}
 
 
