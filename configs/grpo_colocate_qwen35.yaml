@@ -47,10 +47,11 @@ probe:
   every_steps: 20          # a multiple of grpo.save_steps
 # W&B dashboard (train.dashboard): TRL's numbers and honest/* from TRL's own logging, plus host RAM, train.health levels
 # and the probe's checkpoint choice. Key from WANDB_API_KEY or ~/.netrc on the node, entity from WANDB_ENTITY (never
-# here). Name each run after its iteration: wandb.name=it11-<slug>. WANDB_MODE=disabled turns it off.
+# here). Name each run after its iteration: pass wandb.name=it11-<slug> on every launch (the name below is only a
+# fallback; two runs left on it share one dashboard name). WANDB_MODE=disabled turns it off.
 wandb:
   project: honest-agents
-  name: it11-grpo-colocate
+  name: it11-grpo-colocate   # override per run: wandb.name=it11-<slug>
   group: it11
 vllm:
   startup_probe: false     # nothing to probe: the engine is in-process
