@@ -141,6 +141,20 @@ def test_a_resumed_run_continues_its_health_history_from_the_run_log(tmp_path):
     assert [r["step"] for r in mirror.rows] == [1, 2, 3, 4, 5]
 
 
+def test_a_resume_drops_the_steps_past_its_checkpoint_and_a_fresh_start_ignores_an_old_log(tmp_path):
+    # First life crashed at step 7 after a checkpoint at 5; second life was resumed at 5 and crashed at 6; now at 5 again.
+    lives = [*range(1, 8), 6]
+    rows = [{"step": s, "time": float(t), **train_logs(s, loss=float(t))} for t, s in enumerate(lives)]
+    (tmp_path / TRAIN_LOG_FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    mirror = WandbMirror(JsonlLogger(tmp_path), wandb_module=FakeWandb())
+    mirror.on_train_begin(None, state(5), None)
+    assert [r["step"] for r in mirror.rows] == [1, 2, 3, 4, 5]  # steps 6 and 7 are trained (and logged) again
+    mirror.on_train_begin(None, state(6), None)
+    assert [r["step"] for r in mirror.rows] == [1, 2, 3, 4, 5, 6] and mirror.rows[-1]["loss"] == 7.0  # latest life
+    mirror.on_train_begin(None, state(0), None)
+    assert mirror.rows == []  # a fresh start: the canaries' first window must be this run's
+
+
 def test_the_probe_choice_is_logged_and_a_dashboard_error_never_stops_the_run(tmp_path, fake_memory, caplog):
     fake = FakeWandb()
     fake.init()

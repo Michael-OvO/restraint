@@ -221,20 +221,23 @@ def train(plan: Plan, resume: bool = False) -> bool:
     if int(os.environ.get("RANK", "0")) == 0:
         out.mkdir(parents=True, exist_ok=True)
         (out / "run_config.json").write_text(json.dumps(dataclasses.asdict(plan.cfg), indent=2, default=str))
-    trainer = make_trainer(plan)
-    report = getattr(trainer.model, "print_trainable_parameters", None)
-    if trainer.accelerator.is_main_process and report is not None:
-        report()
+    # The dashboard run opens before the model loads: a missing key or an unreachable W&B fails in seconds, not after
+    # minutes of loading, and transformers' WandbCallback later finds this run instead of starting its own.
     dashboard = None
     if wandb_enabled(plan.grpo_config.report_to) and int(os.environ.get("RANK", "0")) == 0:
-        dashboard = init_run(plan.cfg, out, resuming=ckpt is not None)  # before TRL's callback would start its own
+        dashboard = init_run(plan.cfg, out, resuming=ckpt is not None)
     try:
+        trainer = make_trainer(plan)
+        report = getattr(trainer.model, "print_trainable_parameters", None)
+        if trainer.accelerator.is_main_process and report is not None:
+            report()
         trainer.train(resume_from_checkpoint=ckpt)
     except BaseException:
         if dashboard is not None:
             dashboard.finish(exit_code=1)
         raise
     if dashboard is not None:
+        dashboard.summary["stopped_by_rule"] = stopped_by_rule(trainer)
         dashboard.finish()
     trainer.save_model(str(out / "final"))
     best = out / "best_checkpoint.json"

@@ -149,6 +149,23 @@ def findings_text(findings: Sequence[health.Finding]) -> str:
     return "; ".join(tripped) or "OK"
 
 
+def history(path: Path, resumed_at: int) -> list[dict[str, Any]]:
+    """The per-step rows a run resumed at step `resumed_at` already has, one per step, oldest first.
+
+    The run log is append-only, so after a crash it also holds the steps past the last checkpoint, which the resumed run
+    trains again and logs a second time; keeping them would count those steps twice in the health windows. A fresh start
+    (step 0) into a directory with an old run log starts an empty history: the canaries' first window is this run's.
+    """
+    if resumed_at <= 0 or not path.is_file():
+        return []
+    by_step: dict[int, dict[str, Any]] = {}
+    for r in read_jsonl(path):
+        step = r.get("step")
+        if is_train_log(r) and isinstance(step, int) and 0 < step <= resumed_at:
+            by_step[step] = r  # the latest life of a step wins
+    return [by_step[s] for s in sorted(by_step)]
+
+
 class WandbMirror(TrainerCallback):
     """Sends the run log's extra columns, `train.health` and the probe's checkpoint choice to the open W&B run.
 
@@ -179,9 +196,7 @@ class WandbMirror(TrainerCallback):
         return self._wandb.run
 
     def on_train_begin(self, args, state, control, **kwargs):
-        # A resumed run continues its health history from the run log (the health windows span the whole run).
-        path = self.run_log.path
-        self.rows = [r for r in read_jsonl(path) if is_train_log(r)] if path.is_file() else []
+        self.rows = history(self.run_log.path, int(getattr(state, "global_step", 0) or 0))
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         if not logs or not is_train_log(logs) or not getattr(state, "is_world_process_zero", True):
