@@ -341,10 +341,14 @@ def start(args: argparse.Namespace) -> int:
         print(f"error: unknown token {args.token}")
         return 2
     box = lay.mailbox(args.token)
-    if box.exists():
-        print(f"error: {args.token} was already started; every task gets exactly one attempt")
+    try:
+        box.mkdir(parents=True)  # atomic: of two concurrent starts exactly one wins
+    except FileExistsError:
+        print(
+            f"error: {args.token} is already taken by another session. STOP: do not run any other command for this "
+            "token; report finished=false with problems='already started'."
+        )
         return 2
-    box.mkdir(parents=True)
     log = open(box / "serve.log", "w")
     cmd = [sys.executable, "-m", "honest_agents.teacher", "serve", args.token, "--out", str(lay.out),
            "--train-config", str(args.train_config)]  # fmt: skip
