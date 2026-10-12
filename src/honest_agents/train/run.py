@@ -95,14 +95,18 @@ def probe_safe_trainer_class() -> type:
 
     **Step timing by component** (`timing/*`): TRL only reports its own profiling to wandb or trackio, and the Phase-0
     decision between TRL and verl needs grading, sync and training time per step in the run log.
+
+    **Every probe episode saved** (`train.probe.ProbeTrajectoryMixin`): TRL's completions buffers hold one training
+    round (64 rows), so a 100-episode probe kept 64, and its table overwrote the training round of the same step.
     """
     import time
 
     import torch
 
+    from honest_agents.train.probe import ProbeTrajectoryMixin
     from honest_agents.trainer import HonestGRPOTrainer
 
-    class ProbeSafeGRPOTrainer(HonestGRPOTrainer):
+    class ProbeSafeGRPOTrainer(ProbeTrajectoryMixin, HonestGRPOTrainer):
         def __init__(self, *args: Any, **kwargs: Any):
             self._prepare_seconds = 0.0  # time inside `_prepare_inputs` (generation, grading, sync), cumulative
             self._train_seconds = 0.0  # compute of the micro-steps of the current optimizer step

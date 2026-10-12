@@ -334,6 +334,8 @@ def _select_split_rows(
     splits_pool = list(splits["train"])
     # Phase 0 measures a sample of the pool, so every train pair is listed here before the gate and the mixture.
     write_jsonl(staged("train_pool.jsonl"), [row_dict(r) for r in splits["train"]])
+    # The training-time probe list (`tasks.probe_set`) needs more impossible variants than the balanced val.jsonl keeps.
+    write_jsonl(staged("val_pool.jsonl"), [row_dict(r) for r in splits["val"]])
     gate = DifficultyGate.load(cfg.difficulty_json) if cfg.difficulty_json else None
     n_difficulty_dropped = 0
     if gate is not None:  # the training split only: test metrics stay unfiltered

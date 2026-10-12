@@ -521,6 +521,46 @@ def test_select_probe_rows_is_fixed_and_pair_whole(data: SimpleNamespace):
     assert len(train.select_probe_rows(rows, 4)) == 4
 
 
+def _probe_file(data: SimpleNamespace, n: int) -> Path:
+    """`n` validation rows, a quarter impossible (make_rows' pattern), as a probe list."""
+    return write_jsonl(data.root / "probe.jsonl", make_rows(data.root, "q", n, "validation"))
+
+
+def test_probe_file_is_used_whole_with_k_samples_and_its_cost_is_printed(data: SimpleNamespace):
+    """A fixed probe list replaces the hash subset of eval_file: every row, k samples each, and the episode cost of the
+    probe next to the training episodes (iteration 9's 100-variant probe could not resolve honesty changes)."""
+    probe = _probe_file(data, 160)  # 40 impossible, 120 feasible
+    plan = _plan(BASE, data, f"data.probe_file={probe}", "probe.samples_per_variant=4", "probe.batch_size=24",
+                 "probe.min_infeasible=40", "probe.min_feasible=60", "probe.max_variants=10", "grpo.max_steps=120")  # fmt: skip
+    assert len(plan.eval_dataset) == 160  # whole: max_variants applies to the eval_file subset only
+    g = plan.grpo_config
+    assert (g.num_generations_eval, g.per_device_eval_batch_size) == (4, 24)
+    p = plan.summary()["probe"]
+    assert (p["file"], p["infeasible"], p["feasible"]) == (str(probe), 40, 120)
+    assert p["episodes_per_probe"] == 640
+    assert p["probes_per_run"] == 4  # steps 0 (on_start), 50, 100 and the last step, 120
+    assert p["probe_episodes_per_run"] == 2560 and p["training_episodes_per_run"] == 120 * 64
+    assert plan.data_counts["validation"]["probe_infeasible"] == 40
+
+
+def test_a_short_probe_file_is_refused(data: SimpleNamespace):
+    probe = _probe_file(data, 160)
+    with pytest.raises(ValueError, match="below probe.min_infeasible=60"):
+        _plan(BASE, data, f"data.probe_file={probe}")  # 40 impossible < the default floor of 60
+    with pytest.raises(ValueError, match="multiple of probe.samples_per_variant"):
+        _plan(BASE, data, f"data.probe_file={probe}", "probe.min_infeasible=0", "probe.samples_per_variant=4")
+
+
+def test_a_probe_file_gets_the_validation_guards(data: SimpleNamespace, tmp_path: Path):
+    rows = make_rows(data.root, "x", 8, "test")
+    probe = write_jsonl(tmp_path / "probe_test.jsonl", rows)
+    with pytest.raises(ValueError, match="validation probe"):
+        _plan(BASE, data, f"data.probe_file={probe}", "probe.min_infeasible=0", "probe.min_feasible=0")
+    overlap = write_jsonl(tmp_path / "probe_overlap.jsonl", make_rows(data.root, "t", 8, "validation"))
+    with pytest.raises(ValueError, match="share"):
+        _plan(BASE, data, f"data.probe_file={overlap}", "probe.min_infeasible=0", "probe.min_feasible=0")
+
+
 def test_cast_lm_head_needs_untied_embeddings(data: SimpleNamespace, monkeypatch):
     import transformers
 

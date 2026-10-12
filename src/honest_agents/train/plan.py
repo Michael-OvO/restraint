@@ -161,7 +161,16 @@ class Plan:
             "use_vllm": g.use_vllm,
             "vllm_mode": g.vllm_mode,
             "vllm_server": _server_url(self.cfg) if g.use_vllm and g.vllm_mode == "server" else None,
-            "probe": dataclasses.asdict(self.cfg.probe) if self.eval_dataset is not None else None,
+            "probe": (
+                {
+                    **dataclasses.asdict(self.cfg.probe),
+                    "file": self.cfg.data.probe_file or self.cfg.data.eval_file,
+                    **probe_composition(list(self.eval_dataset)),
+                    **probe_cost(self.cfg, len(self.eval_dataset), self.generation_batch_size),
+                }
+                if self.eval_dataset is not None
+                else None
+            ),
             "stop_rules": dataclasses.asdict(self.stop_config),
             "bank_dir": str(bank_dir(self.cfg)) if self.cfg.bank.enabled else None,
             "quarantine_file": str(quarantine_file(self.cfg)),
@@ -198,6 +207,67 @@ def build_stop_config(cfg: TrainRunConfig) -> StopRuleConfig:
     return StopRuleConfig(**cfg.stop)
 
 
+def probe_composition(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Impossible, feasible (plain and control) and control variants of the probe rows."""
+    infeasible = sum(1 for r in rows if r.get("feasible") is False)
+    control = sum(1 for r in rows if r.get("feasible") is not False and r.get("is_control"))
+    return {"infeasible": infeasible, "feasible": len(rows) - infeasible, "control": control}
+
+
+def load_probe_rows(cfg: TrainRunConfig, train_rows: list[dict[str, Any]], counts: dict[str, Any]) -> list[dict]:
+    """The probe's rows: `data.probe_file` whole, else the fixed hash subset of `data.eval_file`.
+
+    Both go through the validation guards (validation split only, labels agree with task.toml, no test id) and share
+    nothing with training. A probe file must reach `probe.min_infeasible` / `probe.min_feasible`: it exists to make
+    the probe large enough to resolve honesty changes, and a short one would look like it did. Fills `counts`.
+    """
+    path = cfg.data.probe_file or cfg.data.eval_file
+    rows = load_rows(path, allow_custom_system_prompt=cfg.data.allow_custom_system_prompt)
+    counts["validation"] = check_rows(rows, cfg, role="validation")
+    check_split_isolation(train_rows, rows)
+    if cfg.data.probe_file is None:
+        rows = select_probe_rows(rows, cfg.probe.max_variants)
+    comp = probe_composition(rows)
+    if cfg.data.probe_file is not None:
+        p = cfg.probe
+        if comp["infeasible"] < p.min_infeasible or comp["feasible"] < p.min_feasible:
+            raise ValueError(
+                f"data.probe_file {path}: {comp['infeasible']} impossible and {comp['feasible']} feasible variants, "
+                f"below probe.min_infeasible={p.min_infeasible} / probe.min_feasible={p.min_feasible}"
+            )
+    counts["validation"].update(
+        source=str(path),
+        probe_rows=len(rows),
+        probe_infeasible=comp["infeasible"],
+        probe_feasible=comp["feasible"],
+        probe_control=comp["control"],
+    )
+    return rows
+
+
+def probe_cost(cfg: TrainRunConfig, n_rows: int, generation_batch_size: int) -> dict[str, Any]:
+    """Episodes one probe costs and how many probes the run makes, next to the training episodes.
+
+    Probes run at steps `every_steps, 2 x every_steps, ...` (TRL's `eval_steps`), at the last step if that is not
+    one of them (transformers' DefaultFlowCallback), and at step 0 with `on_start`: run 2 (50 steps, every 20) probed
+    at 0, 20, 40 and 50. The episode count is the cost that matters: a probe episode takes about as long as a
+    training one.
+    """
+    p = cfg.probe
+    per_probe = n_rows * p.samples_per_variant
+    max_steps = cfg.grpo.get("max_steps")
+    probes = None
+    if max_steps and max_steps > 0:
+        probes = int(max_steps) // p.every_steps + int(int(max_steps) % p.every_steps != 0) + int(p.on_start)
+    training = int(max_steps) * generation_batch_size if max_steps and max_steps > 0 else None
+    return {
+        "episodes_per_probe": per_probe,
+        "probes_per_run": probes,
+        "probe_episodes_per_run": per_probe * probes if probes is not None else None,
+        "training_episodes_per_run": training,
+    }
+
+
 def build_plan(cfg: TrainRunConfig) -> Plan:
     from datasets import Dataset
 
@@ -219,11 +289,7 @@ def build_plan(cfg: TrainRunConfig) -> Plan:
     counts["train"]["epochs"] = epochs_needed(cfg, len(base_rows), round_size) if cfg.data.pair_batches else None
     eval_ds = None
     if probe_enabled(cfg):
-        eval_rows = load_rows(cfg.data.eval_file, allow_custom_system_prompt=cfg.data.allow_custom_system_prompt)
-        counts["validation"] = check_rows(eval_rows, cfg, role="validation")
-        check_split_isolation(train_rows, eval_rows)
-        eval_rows = select_probe_rows(eval_rows, cfg.probe.max_variants)
-        counts["validation"]["probe_rows"] = len(eval_rows)
+        eval_rows = load_probe_rows(cfg, train_rows, counts)
         eval_ds = Dataset.from_list(_normalise_columns(eval_rows))
     return Plan(
         cfg=cfg,

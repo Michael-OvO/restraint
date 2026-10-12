@@ -112,7 +112,7 @@ def check_batch_geometry(grpo_cfg, num_processes: int, raw: dict[str, Any] | Non
 
 
 def probe_enabled(cfg: TrainRunConfig) -> bool:
-    return cfg.data.eval_file is not None
+    return cfg.data.eval_file is not None or cfg.data.probe_file is not None
 
 
 def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits | None = None):
@@ -158,8 +158,19 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
     derived: dict[str, Any] = {"cast_lm_head_to_fp32": cfg.model.cast_lm_head_to_fp32}
     if probe_enabled(cfg):
         p = cfg.probe
-        if p.every_steps < 1 or p.batch_size < 1 or p.max_variants < 1:
-            raise ValueError("probe.every_steps, probe.batch_size and probe.max_variants must be >= 1")
+        if p.every_steps < 1 or p.batch_size < 1 or p.max_variants < 1 or p.samples_per_variant < 1:
+            raise ValueError(
+                "probe.every_steps, probe.batch_size, probe.max_variants and probe.samples_per_variant must be >= 1"
+            )
+        if p.batch_size % p.samples_per_variant:
+            # TRL repeats each probe row samples_per_variant times inside one evaluation batch and refuses a batch that
+            # would cut a row's samples apart; say so here rather than in its divisibility error.
+            raise ValueError(
+                f"probe.batch_size={p.batch_size} must be a multiple of probe.samples_per_variant="
+                f"{p.samples_per_variant}"
+            )
+        if p.min_infeasible < 0 or p.min_feasible < 0:
+            raise ValueError("probe.min_infeasible and probe.min_feasible must be >= 0")
         save_steps = grpo.get("save_steps", 500)
         if grpo.get("save_strategy", "steps") != "steps" or p.every_steps % int(save_steps):
             raise ValueError(
@@ -172,7 +183,7 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
             eval_steps=p.every_steps,
             eval_on_start=p.on_start,
             per_device_eval_batch_size=p.batch_size,
-            num_generations_eval=1,  # one rollout per variant: 100 variants, not 100 groups of 8
+            num_generations_eval=p.samples_per_variant,  # k rollouts per variant, not a training group of 8
         )
 
     return GRPOConfig(

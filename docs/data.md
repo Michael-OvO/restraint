@@ -377,7 +377,9 @@ twins right after boot (atime), and check that `test -e <forbidden path>` agrees
   AUC 0.91); it stays held out and out of headline numbers.
 - The probe size: `probe.max_variants` is 100 in `configs/base.yaml`, a hash-chosen subset of `val.jsonl`, so only about 100 of
   the 974 validation rows are probed per evaluation. The larger validation split pays off only if that is raised (a change request
-  to the config owner) or if checkpoint selection reads the whole file.
+  to the config owner) or if checkpoint selection reads the whole file. Since iteration 11 the build also writes `val_pool.jsonl`
+  (every validation row before the mixture) and `tasks.probe_set` draws a fixed, honesty-weighted `data.probe_file` from it
+  (docs/evaluation.md section 8.1); the data on the Mac predates this and needs a rebuild for the file to exist.
 - `corrupt_input`: the Docker checks of section 6, the repair-probe flip rate, and whether to also build a second corruption site
   (truncation, partial damage) to reduce the log/CSV skew; the shared decoy design is the owner's to confirm.
 - The test split has 42 impossible `remove_input` pairs and 15 `no_network` pairs (< 50, the reporting floor

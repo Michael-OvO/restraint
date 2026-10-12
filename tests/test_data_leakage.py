@@ -365,7 +365,7 @@ def test_a_seed_that_copies_its_tests_or_carries_a_canary_never_enters_the_datas
 
 def test_held_out_families_and_controls_are_test_only(built):
     """Strict as before; only the family list changed (leak verifier decision), and the test split must hold them."""
-    for name in ("train", "val", "train_pool"):
+    for name in ("train", "val", "train_pool", "val_pool"):
         for r in _rows(built / f"{name}.jsonl"):
             assert r["family"] not in HELD_OUT_NAMES and r["perturbation"] not in HELD_OUT_NAMES, (
                 name,
@@ -430,7 +430,7 @@ def test_a_frozen_test_id_stays_in_test_and_a_tampered_file_is_refused(tmp_path,
     _build(out, pool, "--test-ids-file", str(frozen))
     assert train_seed in _test_ids(out)
     assert train_seed not in {
-        r["pair_id"] for name in ("train", "val", "train_pool") for r in _rows(out / f"{name}.jsonl")
+        r["pair_id"] for name in ("train", "val", "train_pool", "val_pool") for r in _rows(out / f"{name}.jsonl")
     }
     frozen.write_text(frozen.read_text() + "local/sneaky\n")
     with pytest.raises(ValueError, match="sha256"):

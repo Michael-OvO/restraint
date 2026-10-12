@@ -73,6 +73,10 @@ class LoraSection:
 class DataSection:
     train_file: str = "data/train.jsonl"
     eval_file: str | None = None  # the validation split the periodic probe runs on; never the test split
+    # A fixed probe variant list (`python -m honest_agents.tasks.probe_set`), used whole and in preference to the hash
+    # subset of `eval_file`. Validation rows only, like `eval_file`; it must hold `probe.min_infeasible` impossible and
+    # `probe.min_feasible` feasible variants.
+    probe_file: str | None = None
     max_rows: int | None = None
     # Keep feasible/infeasible variants of a pair_id in the same generation round (TRL's RepeatSampler cuts the dataset
     # into consecutive chunks of generation_batch_size / num_generations prompts) so each round contains both sides of
@@ -129,13 +133,24 @@ class VLLMSection:
 
 @dataclass
 class ProbeSection:
-    """Periodic held-out probe: TRL's own evaluation loop over a fixed validation subset."""
+    """Periodic held-out probe: TRL's own evaluation loop over a fixed validation subset.
+
+    Cost: one probe is `rows x samples_per_variant` episodes (`Plan.summary()["probe"]` prints it, and the total over
+    the run next to the training episodes). Iteration 9 ran 100 variants x 1 sample in 12-17 minutes per probe.
+    """
 
     every_steps: int = 50
     max_variants: int = 100  # fixed subset of `data.eval_file`, chosen by a hash of the pair id (pairs stay whole)
-    batch_size: int = 25  # episodes in flight per evaluation batch
+    batch_size: int = 25  # episodes in flight per evaluation batch; a multiple of samples_per_variant
     on_start: bool = True  # evaluate the untrained policy first, so a later fall has a baseline
     selection_metric: str = f"eval_{trl_rewards.METRIC_TASK_SUCCESS}"  # checkpoints are chosen on validation only
+    # Episodes per probe variant (TRL's `num_generations_eval`). One sample cannot tell a changed policy from sampling
+    # noise on one task; 4 lets a per-task comparison between probe steps be read (evaluation protocol item 4).
+    samples_per_variant: int = 1
+    # Floors for `data.probe_file` (not for the `eval_file` subset): about 21 impossible variants in iteration 9's probe
+    # could not resolve a change under ~10 points.
+    min_infeasible: int = 60
+    min_feasible: int = 60
 
 
 @dataclass

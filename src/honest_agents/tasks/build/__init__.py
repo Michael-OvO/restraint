@@ -7,6 +7,7 @@ Layout written under --out:
     seeds/<source>/<task>/          normalised feasible seed tasks
     tasks/<variant_id>/             plain feasible copies, infeasible variants and their near-miss controls
     train_pool.jsonl                every train row before the difficulty gate and the mixture (what Phase 0 can sample)
+    val_pool.jsonl                  every val row before the mixture (what `tasks.probe_set` draws the probe list from)
     {train,val,test}.jsonl          rows for TRL / the pilot / evaluation (docs/design.md section 3 columns)
     split_seeds.json                seed group -> split, kept across rebuilds so a test seed never reaches training
                                     (`--split-seeds-file` / `--split-seeds` reuses one when building into a fresh --out)
