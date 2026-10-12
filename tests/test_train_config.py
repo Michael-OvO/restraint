@@ -1287,7 +1287,10 @@ def test_train_wires_the_callbacks_bank_and_task_order(stub_trainer, data: Simpl
     (t,) = stub_trainer.instances
     assert t.kwargs["model"] == "Qwen/Qwen3-4B" and t.kwargs["environment_factory"] is plan.environment_factory
     assert t.kwargs["reward_funcs"] == plan.reward_funcs and t.kwargs["args"].reward_weights == [1.0]
-    assert [type(c) for c in t.callbacks] == [callbacks.StopRules, callbacks.JsonlLogger]  # no validation split
+    from honest_agents.memory import ReleaseFreedMemory
+
+    # no validation split, no dashboard; freed memory is handed back to the OS after every step
+    assert [type(c) for c in t.callbacks] == [callbacks.StopRules, callbacks.JsonlLogger, ReleaseFreedMemory]
     assert bank.bank_dir() == Path(plan.grpo_config.output_dir) / "bank"
     assert bank.quarantine_file() == Path(plan.grpo_config.output_dir) / "quarantine.jsonl"
     out = Path(plan.grpo_config.output_dir)
