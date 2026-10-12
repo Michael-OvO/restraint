@@ -72,6 +72,21 @@ def test_sync_with_data_and_dry_run():
     assert argv[-1] == "me@h:/srv/r/"
 
 
+def test_the_documented_probe_lists_travel_with_data():
+    """The probe lists' documented `--out` is under data/ (sent by --with-data), never under a path sync never sends."""
+    import re
+
+    from honest_agents.eval import probe_set as eval_probe_set
+    from honest_agents.tasks import probe_set as tasks_probe_set
+
+    always = {e for e in nd.EXCLUDES if e.startswith("/")}
+    for module in (eval_probe_set, tasks_probe_set):
+        out = re.search(r"--out (\S+)", module.__doc__ or "")
+        assert out, module.__name__
+        top = "/" + Path(out.group(1)).parts[0]
+        assert top == nd.DATA_EXCLUDE and top not in always, (module.__name__, out.group(1))
+
+
 def test_pull_keeps_the_repo_relative_layout_in_staging(tmp_path):
     plan = pull_plan(Node("h", 7), ["runs/eval/val/", "/root/grpo.log"], staging=tmp_path)
     assert plan == [("/root/restraint/runs/eval/val", tmp_path / "runs/eval"), ("/root/grpo.log", tmp_path / "root")]

@@ -3,6 +3,7 @@ random-init configs on meta, datasets are task directories with a task.toml, the
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -541,6 +542,8 @@ def test_probe_file_is_used_whole_with_k_samples_and_its_cost_is_printed(data: S
     assert p["probes_per_run"] == 4  # steps 0 (on_start), 50, 100 and the last step, 120
     assert p["probe_episodes_per_run"] == 2560 and p["training_episodes_per_run"] == 120 * 64
     assert plan.data_counts["validation"]["probe_infeasible"] == 40
+    digest = hashlib.sha256(probe.read_bytes()).hexdigest()  # which probe list a run used, next to its path
+    assert p["file_sha256"] == plan.data_counts["validation"]["source_sha256"] == digest
 
 
 def test_a_short_probe_file_is_refused(data: SimpleNamespace):

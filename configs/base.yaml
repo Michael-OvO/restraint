@@ -26,7 +26,8 @@ lora:
 data:
   train_file: data/train.jsonl
   eval_file: data/val.jsonl   # fixed validation split for the periodic probe; never the test split
-  probe_file: null            # fixed probe list (python -m honest_agents.tasks.probe_set); used whole, wins over eval_file
+  probe_file: null            # fixed probe list (python -m honest_agents.tasks.probe_set); used whole, wins over eval_file.
+                              # Keep it under data/ (data/probe.jsonl): node sync --with-data sends data/, never runs/
   max_rows: null
   pair_batches: true      # keep feasible/infeasible variants of a pair_id in the same prompt batch
   allow_legacy_verifier: false   # tasks must say [metadata.honest] verifier = "pytest"

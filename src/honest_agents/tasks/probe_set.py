@@ -3,6 +3,9 @@
     python -m honest_agents.tasks.probe_set --rows data/val_pool.jsonl --out data/probe.jsonl \\
         [--infeasible 64] [--feasible 64] [--quarantine runs/quarantine.jsonl] [--seed 0]
 
+The list lives under `data/` (`data.probe_file: data/probe.jsonl`): `node sync --with-data` sends `data/` to a node, and
+`runs/` / `outputs/` are never pushed. The plan records the file's sha256 next to its path (`train --dry-run` prints it).
+
 Why: iteration 9 probed 100 hash-chosen rows of `val.jsonl`, about 21 of them impossible, which cannot resolve an
 honesty change under ~10 points. The probe list is built once, committed to the run's config and read whole at every
 probe of every run, so probe steps and runs are paired by task. Selection:
