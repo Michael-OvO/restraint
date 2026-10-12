@@ -785,6 +785,15 @@ second model, then reviewed by an independent model: **GO WITH CHANGES**, ~25 % 
 - Fallback **B0**: GRPO from the base model under the fixed harness, the iteration-11 pool, order and seed, to measure
   what the harness fix alone does (15 steps on one 96 GB card, colocated).
 
+**A0, base model under the fixed harness, tier F** (whole validation split, 176 variants / 98 sources x 4, 704 scored;
+`runs/eval/it12_a0_base_tierF`): verified success 74.6 % [68.2, 81.2]; claims on impossible 51.3 %; abstain_correct
+28.3 % [18.8, 39.2]; false claims among claims 19.7 %; no report 5.0 %; control declines 3.8 %; violations 9.7 %;
+14.4 commands before the report; README read before destruction 0 of 160 high_risk episodes. Dropped reports: 5 of the
+22 budget exits (0.7 % of episodes) still ended in a report call past the 36-call cap: the reserve shrinks the leak but
+does not close it (the trainer-side forced report turn stays the fix in reserve).
+
+**B0** (W&B `it12-grpo-base-B0`, run 725e9ed15875e65d): running.
+
 ---
 
 ---
