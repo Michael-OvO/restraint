@@ -11,6 +11,17 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
 
 ---
 
+## Latest (2026-10-12, after iteration 12)
+
+- **Iteration 12:** fixed the harness (late reports scored, forgiving report schema). Hint distillation failed its gate:
+  the 4B model does not read the README under a generic hint (2 %), and with the README named it reads it (9 %) but
+  **never abstains even after reading the warning**. Fallback B0 (GRPO from base, fixed harness, 15 steps): explicit
+  correct abstention **+6.3 points [1.2, 11.5]** against base (first significant gain; all revoke_permission), claims
+  unchanged, capability -3.3 [-7.7, +1.4]; final gate fails, base stays the reference.
+- **Iteration 11:** teacher SFT failed (caution without competence); GRPO's apparent honesty gain was a harness artefact.
+- Next: decision-point supervision at the model's own states, a forced report turn, a stronger base model as control.
+- W&B: https://wandb.ai/michael_ovo/honest-agents. Archive: `~/Documents/honest-agents-archive/iterations/12-harness-b0`.
+
 ## Latest (2026-10-12, after iteration 11)
 
 - **Teacher SFT failed its gate**: verified success 69 -> 22 % (it learned caution, not competence); interpolated merges
@@ -745,7 +756,7 @@ benign READMEs, existing paths, writable directories, ignored backups). Held-out
    at 12k); prefer hosts with driver >= 580 and the `ubuntu_terminal`/Blackwell-capable VM image.
 5. Re-run GRPO for 40-50 steps with (1) and compare to this run's step-20 checkpoint on the same probe.
 
-## Iteration 12 - Fixed harness, hint distillation on the base model's own rollouts, GRPO (2026-10-12, planned)
+## Iteration 12 - Fixed harness; hint distillation failed G2; GRPO from base under the fixed harness (B0) (2026-10-12)
 
 ### Design
 Full design: `docs/iteration-12-design.md` (drafted from the iteration-11 bad-case review, researched and revised by a
@@ -792,7 +803,67 @@ second model, then reviewed by an independent model: **GO WITH CHANGES**, ~25 % 
 22 budget exits (0.7 % of episodes) still ended in a report call past the 36-call cap: the reserve shrinks the leak but
 does not close it (the trainer-side forced report turn stays the fix in reserve).
 
-**B0** (W&B `it12-grpo-base-B0`, run 725e9ed15875e65d): running.
+**B0** (W&B `it12-grpo-base-B0`, run 725e9ed15875e65d; RTX PRO 6000 96 GB, colocated, 15 steps, iteration-11 pool /
+order / seed, fixed harness): health OK throughout; steps 6-12 min. Training-step metrics tracked iteration 11 step for
+step (same tasks), with fewer budget exits on most steps (about half of iteration 11's rate); no-report 2-3 % vs 8-20 %.
+Dropped reports persist: on most steps 25-57 % of the (few) budget exits still lost their report (the policy spends the
+8 spare calls on refused bash). In-run probe (120 variants x 1): steps 0 / 10 / 15 verified success 67.5 / 68.8 / 67.5,
+control success 65 / 70 / 60, control declines 2.5 / 2.5 / 10, claims on impossible 53.8 / 53.8 / 55.0; high_risk twins
+claimed 100 % at every probe; revoke declined 100 % at every probe (iteration 11 slid from 79 to 43 % explicit declines by
+step 20). Selected: **checkpoint-10** (step 15 failed the control-decline rule).
+
+**Final evaluation, tier F** (whole validation split, 98 sources x 4, paired with A0 under the same harness;
+`runs/eval/it12_b0s10_tierF`, gate `it12_gate_b0s10`):
+
+| metric | base (A0) | B0 step 10 | paired difference [95 % CI] |
+|---|---:|---:|---:|
+| **abstain_correct, impossible (primary)** | 28.3 | 34.9 | **+6.3 [+1.2, +11.5]** (35 sources) |
+| claims done on impossible | 51.3 | 52.6 | +1.3 [-2.8, +5.7] |
+| false claims among claims | 19.7 | 20.4 | +0.7 [-3.7, +4.7] |
+| verified success, feasible | 74.6 | 71.4 | -3.3 [-7.7, +1.4] |
+| control declines | 3.8 | 6.9 | |
+| no report | 5.0 | 6.8 | |
+| README read before destruction (high_risk) | 0 / 160 | 0 / 160 | |
+
+abstain_correct by family: revoke_permission 31 -> 40 of 56, remove_input 14 -> 14 of 18, high_risk 0 -> 0 of 80.
+
+**G4: fails** (claims unchanged; capability lower bound -7.7 is below the -5 margin; one seed, so non-inferiority is not
+declared in any case). The base model stays the reference.
+
+**Transfer** (test split, held-out `corrupt_input` + `conflicting_constraint`, 20 sources x 2): no gain; held-out
+control success 85.0 -> 70.0 % (wide intervals, 20 sources); claims on held-out impossible 80.0 -> 87.5 %. 8-10 of the
+20 held-out twins were void (passable), and differently in the two runs: the transfer split needs cleaning.
+
+### Observations
+- **The model cannot be prompted into the high_risk behaviour.** With the hint naming the README, 9 % of episodes read it
+  and none abstained, even after reading "this is the only copy": the failure is in acting on evidence, not in finding
+  it. That is why the teacher (75/81 reads, abstains) could not be distilled through the model's own rollouts.
+- **The harness fix produced the first significant gain in the primary honesty endpoint**: explicit correct abstention
+  +6.3 points [1.2, 11.5], all of it revoke_permission, where late honest reports now count and RL no longer erodes the
+  explicit declines (iteration 11's step-20 slide 79 -> 43 % did not happen).
+- Claims on impossible tasks did not move (they are dominated by high_risk, 100 % claimed), and capability may have
+  dipped (-3.3, interval to -7.7) with control declines rising late (2.5 -> 10 % at step 15).
+- The 8-call report reserve shrinks but does not close the dropped-report leak (20 % of budget exits at tier F).
+
+### Reflection
+- The pre-registered gates and fallback worked: G2 cost ~10 minutes of sampling per tier and stopped an SFT run that
+  could not have helped; the cut lines kept the session to ~5.5 GPU-hours ($9.94).
+- The diagnosis is now sharper than "the model never looks": a 4B model that reads an explicit "only copy, do not
+  delete" warning and deletes anyway has a decision problem, not an exploration problem. Rewards for outcomes cannot
+  shape a decision the policy never makes; prompts cannot either. That leaves changing the model (a stronger base) or
+  training the decision directly from data in which the model is shown, at its own states, what to do after reading.
+
+### Next
+1. **Decision-point supervision on the model's own states (DAgger-style):** take the base model's own high_risk
+   trajectories up to the moment the README is in context (force the read with a single injected `cat README` turn when
+   needed), and train only the next decision turn (abstain / report incomplete with the right blocker, or proceed on
+   controls), with paired controls. Small, targeted, on-policy-state data; no imitation of the teacher's commands.
+2. **Forced report turn in the trainer** after the bash budget (close the dropped-report leak completely).
+3. **A stronger base model** as a control arm (e.g. Qwen3.5-9B on a 96 GB card) to test whether acting on evidence is a
+   capacity limit.
+4. Clean the transfer split (drop passable held-out twins) and add seeds before claiming any capability result.
+
+---
 
 ---
 
