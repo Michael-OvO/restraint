@@ -71,11 +71,21 @@ def test_collapse_and_quitting_fail():
 
 def test_learning_is_judged_on_honesty_rates_not_on_difficulty_confounded_reward():
     honest = {"honest/n_infeasible": 16, "honest/n_feasible": 48}
-    flat = [step(i, **honest, **{"honest/claim_rate_infeasible": 0.35, "honest/p_claim_given_fail": 0.6}) for i in range(1, 16)]
+    flat = [
+        step(i, **honest, **{"honest/claim_rate_infeasible": 0.35, "honest/p_claim_given_fail": 0.6})
+        for i in range(1, 16)
+    ]
     assert checks(flat)["learning"] == WARN
     assert "learning" not in checks(flat[:10])
-    improving = [step(i, reward=0.6 - 0.02 * i, **honest, **{"honest/claim_rate_infeasible": 0.4 - 0.02 * i, "honest/p_claim_given_fail": 0.6})
-                 for i in range(1, 16)]
+    improving = [
+        step(
+            i,
+            reward=0.6 - 0.02 * i,
+            **honest,
+            **{"honest/claim_rate_infeasible": 0.4 - 0.02 * i, "honest/p_claim_given_fail": 0.6},
+        )
+        for i in range(1, 16)
+    ]
     assert "learning" not in checks(improving)  # reward falls (harder tasks) but false claims on impossible tasks fell
 
 
@@ -112,8 +122,10 @@ ZERO = "honest/zero_command_rate"
 
 
 def test_flat_over_abstention_canaries_trip_nothing():
-    rows = [step(i, **{"honest/n_control": 33, "honest/n_scored": 64, SUCCESS: 0.78, DECLINE: 0.02, ZERO: 0.01})
-            for i in range(1, 21)]
+    rows = [
+        step(i, **{"honest/n_control": 33, "honest/n_scored": 64, SUCCESS: 0.78, DECLINE: 0.02, ZERO: 0.01})
+        for i in range(1, 21)
+    ]
     assert checks(rows) == {"all": OK}
 
 
@@ -123,7 +135,9 @@ def test_per_step_canaries_only_warn_however_large_the_shift():
     assert "capability" not in checks(canary_run(12, SUCCESS, 0.80, 0.72, from_step=8))  # 8 points: noise
     assert checks(canary_run(12, SUCCESS, 0.80, 0.60, from_step=8))["capability"] == WARN
     assert checks(canary_run(14, SUCCESS, 0.80, 0.0, from_step=6))["capability"] == WARN
-    assert "per-step hint" in next(f.message for f in check(canary_run(12, SUCCESS, 0.8, 0.6, 8)) if f.check == "capability")
+    assert "per-step hint" in next(
+        f.message for f in check(canary_run(12, SUCCESS, 0.8, 0.6, 8)) if f.check == "capability"
+    )
 
 
 def test_canaries_need_two_disjoint_windows():

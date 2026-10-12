@@ -122,7 +122,9 @@ def probe_logs(success: float) -> dict:
             "eval_probe/control_decline_rate": 0.03, "eval_probe/zero_command_rate": 0.02, "eval_probe/n_variants": 192.0}  # fmt: skip
 
 
-def drive(run_log: JsonlLogger, mirror: WandbMirror, steps: range, probes: dict[int, float], late_success: float) -> None:
+def drive(
+    run_log: JsonlLogger, mirror: WandbMirror, steps: range, probes: dict[int, float], late_success: float
+) -> None:
     for i in steps:
         logs = train_logs(i, **({"honest/control/verified_success_rate": late_success} if i >= 8 else {}))
         for cb in (run_log, mirror):
@@ -147,7 +149,9 @@ def test_a_per_step_control_drop_only_warns_and_a_sustained_probe_drop_fails_wit
     assert fake.run.alerts == [] and "verified success on controls fell" in fake.run.summary["health/findings"]
     drive(run_log, mirror, range(15, 31), {20: 0.60, 30: 0.58}, late_success=0.5)
     last = fake.run.logged[-1]
-    assert last[STEP_KEY] == 30 and last["health/probe-capability"] == health.FAIL  # judged at the probe, not a step later
+    assert (
+        last[STEP_KEY] == 30 and last["health/probe-capability"] == health.FAIL
+    )  # judged at the probe, not a step later
     assert "mem/rss_gb" not in last  # a probe log carries only the health levels
     assert len(fake.run.alerts) == 1 and fake.run.alerts[0][0].startswith("health FAIL: probe-capability (step 30)")
 

@@ -176,17 +176,22 @@ def test_trainer_tool_errors_are_fixed_strings(exc):
 
 
 def test_argument_hint_names_the_missing_and_invented_arguments_only():
-    def submit_report(status: str, evidence_commands: list[str], confidence: float, note: str = ""):  # noqa: ARG001
+    def submit_report(status: str, evidence_commands: list[str], confidence: float, note: str = ""):
         raise AssertionError("never called")
 
-    assert _argument_hint(submit_report, {"status": "complete"}) == " missing required argument(s): evidence_commands, confidence."
+    assert (
+        _argument_hint(submit_report, {"status": "complete"})
+        == " missing required argument(s): evidence_commands, confidence."
+    )
     assert _argument_hint(submit_report, {"status": "x", "evidence_commands": [], "confidence": 1, "flavour": 1}) == (
         " unknown argument(s): flavour."
     )
     assert _argument_hint(submit_report, {"status": "x", "evidence_commands": [], "confidence": 1}) == ""
     assert "status" in _argument_hint(submit_report, None)  # arguments that are not a dict: everything is missing
     assert _argument_hint(None, {"a": 1}) == ""  # no such tool: nothing to say
-    assert _argument_hint(submit_report, {"/etc/passwd": 1, "status": "x", "evidence_commands": [], "confidence": 1}) == ""
+    assert (
+        _argument_hint(submit_report, {"/etc/passwd": 1, "status": "x", "evidence_commands": [], "confidence": 1}) == ""
+    )
 
 
 # ── regression 1: the prompt column is constant, reset() returns only instruction.md ──────────────────────────────

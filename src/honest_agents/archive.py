@@ -55,11 +55,17 @@ def select_run_files(paths: Sequence[str], best_checkpoint: str | None = None, w
         top, _, rest = p.partition("/")
         if not rest:
             keep.append(p)  # top-level file
-        elif top == "completions":
-            keep.append(p)
-        elif weights and top == "final" and rest in ADAPTER_FILES:
-            keep.append(p)
-        elif weights and best and top == best and not best_is_last and rest in ADAPTER_FILES:
+        elif (
+            top == "completions"
+            or weights
+            and top == "final"
+            and rest in ADAPTER_FILES
+            or weights
+            and best
+            and top == best
+            and not best_is_last
+            and rest in ADAPTER_FILES
+        ):
             keep.append(p)
     return sorted(keep)
 

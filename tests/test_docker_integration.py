@@ -257,7 +257,9 @@ def test_file_size_cap_stops_a_runaway_writer_and_the_agent_cannot_raise_it(tmp_
     assert 0 < size <= cap, size
     env.bash("dd if=/dev/zero of=/tmp/zero.bin bs=1M count=200 2>/dev/null; true")
     assert int(env.bash("stat -c %s /tmp/zero.bin").split()[-1]) <= cap
-    raised = env.bash("ulimit -f unlimited 2>&1; echo rc=$?")  # the hard limit cannot be lifted without CAP_SYS_RESOURCE
+    raised = env.bash(
+        "ulimit -f unlimited 2>&1; echo rc=$?"
+    )  # the hard limit cannot be lifted without CAP_SYS_RESOURCE
     assert "rc=0" not in raised, raised
 
 

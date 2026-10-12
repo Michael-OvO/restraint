@@ -554,7 +554,9 @@ def end_of_turn_failures(
         "add_generation_prompt": False,
         "chat_template_kwargs": dict(chat_template_kwargs or {}),
     }
-    tokenizer = getattr(processing_class, "tokenizer", processing_class)  # a multimodal processor keeps eos on its tokenizer
+    tokenizer = getattr(
+        processing_class, "tokenizer", processing_class
+    )  # a multimodal processor keeps eos on its tokenizer
     eos = getattr(tokenizer, "eos_token_id", None)
     if eos is None:
         return ["the tokenizer has no eos_token_id"]

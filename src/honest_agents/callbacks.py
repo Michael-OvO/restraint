@@ -621,7 +621,9 @@ class JsonlLogger(TrainerCallback):
     def __init__(self, output_dir: str | Path):
         self.path = Path(output_dir) / TRAIN_LOG_FILE
         self._last: float | None = None
-        self.last_row: dict[str, Any] | None = None  # the row just written (`train.dashboard` mirrors its extra columns)
+        self.last_row: dict[str, Any] | None = (
+            None  # the row just written (`train.dashboard` mirrors its extra columns)
+        )
 
     def on_train_begin(self, args, state, control, **kwargs):
         self._last = time.time()

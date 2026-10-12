@@ -398,7 +398,11 @@ def test_the_probe_rule_honours_warn_patience_and_a_changed_variant_set(tmp_path
 
 
 def test_a_resumed_run_keeps_its_step_0_probe_as_the_baseline():
-    history = [{"step": 0, **probe()}, *({"step": i, **healthy()} for i in range(1, 21)), {"step": 20, **probe(success=0.6)}]
+    history = [
+        {"step": 0, **probe()},
+        *({"step": i, **healthy()} for i in range(1, 21)),
+        {"step": 20, **probe(success=0.6)},
+    ]
     stop = rules()
     args, state, control = _handler_inputs(20)
     state.log_history = history

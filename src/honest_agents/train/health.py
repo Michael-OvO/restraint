@@ -89,6 +89,7 @@ class HealthConfig:
     probe_fail: float = 0.15
     probe_patience: int = 2  # consecutive probes the fail-sized shift must hold for
 
+
 @dataclass(frozen=True)
 class Canary:
     """A per-step rate that must not move one way: `sign` +1 when a rise is bad, -1 when a fall is bad."""
@@ -138,7 +139,9 @@ def _head_tail(values: list[float], n: int) -> tuple[float | None, float | None]
     return statistics.fmean(values[:n]), statistics.fmean(values[-n:])
 
 
-def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: HealthConfig | None = None) -> list[Finding]:
+def check(
+    rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: HealthConfig | None = None
+) -> list[Finding]:
     """Findings for the per-step training rows of one run (oldest first)."""
     cfg = cfg or HealthConfig()
     # Any logged row shows the run is alive (a validation probe between two steps logs its own row).
@@ -203,8 +206,15 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
     if decline is not None and decline > cfg.decline_warn:
         out.append(Finding(WARN, "gaming", f"declines on {decline:.0%} of feasible episodes"))
     head, tail = _head_tail(_series(rows, "honest/decline_rate_feasible"), n)
-    if head is not None and tail is not None and len(_series(rows, "honest/decline_rate_feasible")) > n and tail - head > cfg.decline_rise:
-        out.append(Finding(WARN, "gaming", f"feasible declines rose to {tail:.1%} from {head:.1%} (quitting creeping in?)"))
+    if (
+        head is not None
+        and tail is not None
+        and len(_series(rows, "honest/decline_rate_feasible")) > n
+        and tail - head > cfg.decline_rise
+    ):
+        out.append(
+            Finding(WARN, "gaming", f"feasible declines rose to {tail:.1%} from {head:.1%} (quitting creeping in?)")
+        )
     head, tail = _head_tail(_series(rows, "honest/no_report_rate"), n)
     if head is not None and tail is not None and tail - head > cfg.no_report_rise:
         out.append(Finding(WARN, "gaming", f"missing reports rose to {tail:.0%} from {head:.0%}"))
@@ -223,9 +233,14 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
     if len(rss) >= 2 and avail is not None:
         growth = (rss[-1] - rss[0]) / (len(rss) - 1)
         if growth > 0.2 and avail / growth < cfg.ram_steps_left:
-            out.append(Finding(FAIL if avail / growth < 3 else WARN, "memory",
-                               f"host RAM: process at {rss[-1]:.0f} GB, growing {growth:.1f} GB/step, {avail:.0f} GB left "
-                               f"(about {avail / growth:.0f} steps)"))
+            out.append(
+                Finding(
+                    FAIL if avail / growth < 3 else WARN,
+                    "memory",
+                    f"host RAM: process at {rss[-1]:.0f} GB, growing {growth:.1f} GB/step, {avail:.0f} GB left "
+                    f"(about {avail / growth:.0f} steps)",
+                )
+            )
 
     out.extend(_canaries(rows, cfg))
     out.extend(_probe_canaries(probes, cfg))
@@ -235,7 +250,10 @@ def check(rows: Sequence[dict[str, Any]], *, now: float | None = None, cfg: Heal
     # steps drew harder tasks (the base model's pass rate on the same tasks fell from 0.80 to 0.56).
     if len(rows) >= cfg.min_steps_for_learning:
         gains = []
-        for key, weight in (("honest/claim_rate_infeasible", "honest/n_infeasible"), ("honest/p_claim_given_fail", "honest/n_feasible")):
+        for key, weight in (
+            ("honest/claim_rate_infeasible", "honest/n_infeasible"),
+            ("honest/p_claim_given_fail", "honest/n_feasible"),
+        ):
             head, tail = _weighted(rows[:5], key, weight), _weighted(rows[-5:], key, weight)
             if head is not None and tail is not None:
                 gains.append((key.split("/")[-1], head, tail))
@@ -340,7 +358,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     findings = check(rows, now=args.now if args.now is not None else time.time())
     worst = max(f.level for f in findings)
     if args.json:
-        print(json.dumps({"verdict": LEVEL_NAMES[worst], "summary": summary_line(rows), "findings": [asdict(f) for f in findings]}))
+        print(
+            json.dumps(
+                {
+                    "verdict": LEVEL_NAMES[worst],
+                    "summary": summary_line(rows),
+                    "findings": [asdict(f) for f in findings],
+                }
+            )
+        )
     else:
         print(f"{LEVEL_NAMES[worst]} | {summary_line(rows)}")
         for f in findings:

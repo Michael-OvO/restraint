@@ -52,7 +52,9 @@ def test_mailbox_client_round_trip(tmp_path: Path):
     def teacher_side():
         while not (tmp_path / "obs-0.json").exists():
             time.sleep(0.01)
-        (tmp_path / "act-0.json").write_text(json.dumps({"content": "look", "tool": "bash", "arguments": {"command": "ls"}}))
+        (tmp_path / "act-0.json").write_text(
+            json.dumps({"content": "look", "tool": "bash", "arguments": {"command": "ls"}})
+        )
 
     threading.Thread(target=teacher_side).start()
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "task"}]

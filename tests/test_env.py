@@ -343,7 +343,9 @@ def test_pids_limit_goes_through_a_compose_override(factory, task):
     (override,) = fake.factory_kwargs["config"].extra_docker_compose
     text = Path(override).read_text()
     assert "pids_limit: 321" in text and text.startswith("services:\n  main:")
-    assert "fsize:\n        soft: 1073741824\n        hard: 1073741824" in text  # one runaway log cannot fill the host disk
+    assert (
+        "fsize:\n        soft: 1073741824\n        hard: 1073741824" in text
+    )  # one runaway log cannot fill the host disk
     off = new_env(pids_limit=None, max_file_bytes=None)
     off.reset(task_dir=str(task))
     off.bash("true")

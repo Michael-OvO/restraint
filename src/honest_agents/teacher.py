@@ -154,7 +154,9 @@ def assign(args: argparse.Namespace) -> int:
     random.Random(0).shuffle(order)
     (lay.out / "tokens.txt").write_text("\n".join(order) + "\n")
     kinds = Counter(f"{r['kind']}/{r['family']}" for r in entries.values())
-    print(json.dumps({"n": len(entries), "by_kind": dict(sorted(kinds.items())), "tokens": str(lay.out / "tokens.txt")}))
+    print(
+        json.dumps({"n": len(entries), "by_kind": dict(sorted(kinds.items())), "tokens": str(lay.out / "tokens.txt")})
+    )
     return 0
 
 
@@ -275,10 +277,9 @@ class MailboxClient:
 def _eval_args(out: Path, train_config: Path) -> argparse.Namespace:
     from honest_agents.eval import run_eval
 
-    return run_eval.build_parser().parse_args(
-        ["--split", str(out / "assignments.json"), "--out", str(out), "--model", TEACHER_MODEL,
-         "--train-config", str(train_config), "--no-thinking"]  # fmt: skip
-    )
+    argv = ["--split", str(out / "assignments.json"), "--out", str(out), "--model", TEACHER_MODEL,
+            "--train-config", str(train_config), "--no-thinking"]  # fmt: skip
+    return run_eval.build_parser().parse_args(argv)
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -372,7 +373,7 @@ def start(args: argparse.Namespace) -> int:
             "token; report finished=false with problems='already started'."
         )
         return 2
-    log = open(box / "serve.log", "w")
+    log = open(box / "serve.log", "w")  # noqa: SIM115 - handed to the detached episode process, which outlives this call
     cmd = [sys.executable, "-m", "honest_agents.teacher", "serve", args.token, "--out", str(lay.out),
            "--train-config", str(args.train_config)]  # fmt: skip
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=REPO, start_new_session=True)

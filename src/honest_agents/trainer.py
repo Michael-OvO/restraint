@@ -602,9 +602,15 @@ class HonestGRPOTrainer(GRPOTrainer):
                 except Exception as e:  # noqa: BLE001 — as TRL: a failing tool is shown to the model, not raised
                     failures += 1
                     if isinstance(e, TypeError):  # bad arguments: record which keys the model sent (never the values)
-                        sent = sorted(function["arguments"]) if isinstance(function["arguments"], dict) else "not a dict"
+                        sent = (
+                            sorted(function["arguments"]) if isinstance(function["arguments"], dict) else "not a dict"
+                        )
                         logger.error("tool %s called with argument keys %s", name, sent)
-                    hint = _argument_hint(sync_tool_dict.get(name) or async_tool_dict.get(name), function["arguments"]) if isinstance(e, TypeError) else ""
+                    hint = (
+                        _argument_hint(sync_tool_dict.get(name) or async_tool_dict.get(name), function["arguments"])
+                        if isinstance(e, TypeError)
+                        else ""
+                    )
                     result = {"error": _tool_error_text(e) + hint}
                     tool_call_results.append((name, result))
             else:
