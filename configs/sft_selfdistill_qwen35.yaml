@@ -1,0 +1,54 @@
+# Iteration 12, context distillation (docs/iteration-12-design.md sections 2.3-2.4): imitate the base model's OWN rollouts
+# sampled with the hint (eval/prompts/hint_tier1.txt) on the distillation pool (tasks.distill_pool), trained WITHOUT the
+# hint (the system message is replaced by harness.SYSTEM_PROMPT). Builder: honest_agents/sft/selfdistill.py.
+#   python -m honest_agents.sft.selfdistill --config configs/sft_selfdistill_qwen35.yaml   # selection only, no GPU
+#   python -m honest_agents.sft.train_sft --config configs/sft_selfdistill_qwen35.yaml --dry-run
+#   scripts/run_sft.sh configs/sft_selfdistill_qwen35.yaml
+# After training: `--spread data/distill/bank` (the share of groups with reward variance must not fall by more than a
+# third), `sft.merge`, the 12-task vLLM sanity run, then G3.
+# Shared sections (model, data.row_filter, train defaults) come from sft_hindsight.yaml.
+base: sft_hindsight.yaml
+kind: selfdistill
+run_name: it12-sft-selfdistill        # also the W&B run name
+
+lora:
+  r: 32                               # the RL adapter's rank, as in iteration 11
+  alpha: 64
+
+data:
+  bank: data/distill/bank             # run_eval --bank-dir of the A1 (hinted) runs: bank-<pid>.jsonl, one per run
+  holdout_fraction: 0.1               # of VARIANTS: held-out eval loss / entropy
+  max_length: 24576                   # whole trajectories (up to 28 + 8 report calls); longer ones are dropped, not cut
+  # Expected yield ~300 examples (design 2.3); a selection far below that means the hint failed G2, not that training
+  # should go ahead on a handful.
+  min_examples: 64
+
+selfdistill:                          # honest_agents.sft.selfdistill.SelfDistillOptions
+  per_twin_variant: 2
+  per_control_variant: 1
+  per_plain_variant: 1
+  max_infeasible_share: 0.35          # feasible share >= 65 %: the iteration-5 over-refusal guard
+  min_high_risk_share: 0.5            # of the twin examples: the README habit is the thing to distil
+  require_readme_read: true           # high_risk twin AND control: read the README before the decision
+  require_paired_control: true        # a twin only with its own control's kept success
+  drop_hint_echo: true                # required by the go/no-go review; the count is in the summary either way
+  # hint_echo_pattern: selfdistill.HINT_ECHO_PATTERN (references to the hint itself, not to the user's task)
+
+train:
+  # A smaller update than iteration 11: lr 0.4x (5e-5 -> 2e-5) at a similar step count (~75 vs 72). Self-SFT also
+  # drifts when run long, and iteration 11's 5e-5 overshot.
+  learning_rate: 2.0e-5
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8      # effective batch 8
+  lr_scheduler_type: cosine
+  warmup_steps: 0.1
+  eval_steps: 5
+  save_steps: 50
+  # W&B: the key comes from WANDB_API_KEY or ~/.netrc on the node; WANDB_MODE=disabled turns it off.
+  report_to: wandb
+  extra:
+    run_name: it12-sft-selfdistill    # the W&B run name (TrainingArguments.run_name), not the output path
+
+guard:
+  entropy_floor_ratio: 0.8            # stop if held-out entropy falls below 0.8x its start: GRPO needs the spread
