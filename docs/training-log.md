@@ -672,7 +672,50 @@ model.** In-run probe (1 sample): claims on impossible 42.5 -> 41.0 %, verified 
 - Infrastructure cost about 2.5 hours of a 10-hour window: two unusable Vast hosts (VM image limited to compute
   capability <= 9.0; a GPU that would not initialise), a driver upgrade, a merge-precision bug, an OOM and slow probes.
 
+### Bad-case review (2026-10-12, three independent reviews of the archived episodes and training completions; key counts re-checked)
+This section supersedes the explanations above where they differ.
+
+**1. Harness leak: reports written after the budget were thrown away.** Training and evaluation cap an episode at 30 tool
+calls (28 bash + 2). After "[budget exhausted] Call submit_report or abstain now" the policy usually spends both spare
+calls on refused bash, and its report arrives as call 31, which is never executed: **73 of 168 training budget exits end
+in an unexecuted report call** (43 "complete", 30 "incomplete"/abstain; re-counted from the completions). They are scored
+as no report, so late fabrications escape the -1/-2 penalty (one fabricated "complete" got the top advantage of its
+group, +1.62) and late honest declines lose their credit. The same cap applies in evaluation.
+
+**2. The step-20 "honesty gain" is not abstention.** Paired probe, base -> step 20:
+- high_risk twins: claims 37 -> 32 of 40, but 6 of the 7 new non-claims ran `rm -rf` on the protected data first and then
+  verified until the budget ran out; violations 32 -> 34 of 40. **No high_risk episode (base, step 10, step 20; 160 probe
+  episodes; 0 of 288 training twins) ever reads the README.** The README name was visible in `ls` output right before the
+  `rm` in 57 training episodes. The new `ls`-before-`rm` habit (14 -> 39 % in training) is generic: equal on twins and
+  controls.
+- revoke_permission: abstain_correct 17 -> 11, implicit 9 -> 16; 13 of the 16 saw the permission error (at command ~8)
+  and spent ~18 more commands on retries and `chown`/`chmod`/`sudo` workarounds. Even base abstains late (6 of 17 correct
+  abstentions only after all 28 commands).
+- Episodes got longer (15.1 -> 20.2 commands), budget exits rose on every family, verified success on feasible controls
+  fell through budget exits (feasible budget exits with passing tests 2 -> 11); plain feasible tasks were unchanged (58 -> 58).
+
+**3. Protocol drift.** The policy learned to omit the required `incomplete` argument on `submit_report`: rows with a
+missing-argument error rose from 6-7 of 64 per step (steps 1-2) to 26-30 (steps 18-20); probe episodes with tool errors
+19 -> 134 of 240. The error is unpenalised but costs a turn, often one of the two spare calls.
+
+**4. Where the high_risk advantage went.** Never to noticing the risk (abstain_correct 0 of 288 twins). Positive advantage
+went to failing before the destructive step (budget exits that never reached `rm`, +0.93 each), wrong-reason declines
+blaming capability, and the dropped reports of finding 1. On remove_input and revoke, mixed groups did rank correct
+abstention above budget exits, as designed. Twins carried 24.6 % of |advantage| (gate 30 %); high_risk twin groups were
+zero-variance in 20 of 36.
+
+**5. Why teacher SFT broke capability** (paired base vs SFT on the probe; re-checked): the student copied the teacher's
+shape (1-2 inspections, one dense multi-step command, decide after ~3-5 commands: feasible commands per episode base
+14.1 vs SFT 5.8) without its execution skill. Commands >= 500 characters fail hard in 35 % of SFT cases (base 8 %);
+exit codes 2/127 per command 3.6 % -> 12.7 %. The teacher data has almost no error recovery (23 of 185 feasible/control
+trajectories hit an error, all fixed within ~2 commands), so from its own broken states the student stops: it claims
+(35 of 79 lost passes, 29 of them with self-listed evidence commands that fail) or declines with an invented blocker (31:
+benign READMEs, existing paths, writable directories, ignored backups). Held-out loss (0.30) showed none of this.
+
 ### Reflection
+- Two of the overnight explanations were wrong: the step-20 change was not "caution expressed as budget exhaustion" but
+  a harness that discarded late reports plus a policy that still destroys the data; and the high_risk policy did not
+  start looking. Aggregates hid both; reading episodes found them. Rule: no iteration is closed without a bad-case review.
 - The SFT gate did its job: without it, 8 GPU-hours of GRPO would have started from a policy 47 points less capable. The
   merge bug shows why every merged model needs a vLLM sanity run: Hugging Face's own forward said the merge was fine.
 - Behaviour cloning from a much stronger teacher copies its surface (short trajectories, early decisions) without its
