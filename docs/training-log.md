@@ -972,6 +972,11 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   training-rollout twin `abstain_correct` over the last 5 steps; none qualifies -> no tier F, anchored-3ep stands.
   Clock: step 10 by launch + 3 h 15 m, else stop at the last checkpoint; abort if the balance is < $8 before tier F.
   The reviewer's P(GRPO improves the G4 picture) ~0.40; expected 4.2-5.2 h (~$7-8.5) on 2x 48 GB.
+  Read/unread split of anchored-3ep's tier-S high_risk twins (the reviewer's request): of 28 `abstain_correct`, 10
+  read the README before the first destructive command, 17 read it later in the episode (after a main-task write such as
+  a `>` redirect, which `readme_read_before_decision` with no target counts as the decision point), 1 never read it;
+  `infeasible_claimed` 11 (6 never read). So the correct abstentions are README-based, not prior-based; the "read before
+  decision" rate (35 %) understates reading because any write counts as the decision.
   Not done this session: `analysis.family_grad_cosine` (design 3.8) was never implemented, so the mixing hypothesis is
   untested here.
 
