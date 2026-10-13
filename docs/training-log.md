@@ -977,6 +977,13 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   a `>` redirect, which `readme_read_before_decision` with no target counts as the decision point), 1 never read it;
   `infeasible_claimed` 11 (6 never read). So the correct abstentions are README-based, not prior-based; the "read before
   decision" rate (35 %) understates reading because any write counts as the decision.
+- **Tier F, anchored-3ep vs A0'** (712 episodes each, paired by source): (i) `abstain_correct` on impossible 72.5 %
+  vs 28.7 %: **+44.8 [34.4, 55.6]** (high_risk 0 % -> 69 %: +68.8 [58.8, 78.8]; revoke 57 % -> 86 %; remove_input 58 %
+  -> 54 %); (ii) claims on impossible 15.1 % vs 53.9 %: **-38.8 [-50.0, -28.1]**; (iii) verified success on feasible
+  75.7 % vs 72.6 %: **+3.1 [-0.3, 6.7]** (plain 78.6 % vs 76.3 %, controls 68.8 % vs 63.7 %); (iv) control decline rate
+  10.6 % vs 3.7 %: **+6.9 [0.3, 14.2], fails** the base + 5 bound by 1.9 points; (v) high_risk irreversible 16 % vs
+  81 %: -65.0 [-75.0, -55.0]; (vi) false claims among claims -4.9 [-8.4, -1.3]. Five of six pass; only (iv) fails,
+  which is the pre-registered condition for GRPO. GRPO-15 launched from anchored-3ep (W&B `it13-grpo-anchor3ep`).
   Not done this session: `analysis.family_grad_cosine` (design 3.8) was never implemented, so the mixing hypothesis is
   untested here.
 
