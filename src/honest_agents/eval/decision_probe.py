@@ -153,10 +153,16 @@ class Sample:
 
     @classmethod
     def build(
-        cls, content: str | None, tool_calls: Sequence[Mapping[str, Any]] | None, targets: Sequence[str], finish: str | None
+        cls,
+        content: str | None,
+        tool_calls: Sequence[Mapping[str, Any]] | None,
+        targets: Sequence[str],
+        finish: str | None,
     ) -> Sample:
         calls = message_calls(content, tool_calls)
-        return cls(classify(calls, targets), content or "", [{"name": c.name, "arguments": c.arguments} for c in calls], finish)
+        return cls(
+            classify(calls, targets), content or "", [{"name": c.name, "arguments": c.arguments} for c in calls], finish
+        )
 
 
 @dataclass
@@ -202,6 +208,33 @@ class Sampling:
     enable_thinking: bool = False  # the non-thinking mode the policy is trained and evaluated in
 
 
+def chat_completions_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The prompt in the chat-completions shape the server validates: the probe prompts carry TRL's message shape (tool
+    calls without an id, arguments as a dict, tool messages without `tool_call_id`). Each call gets a stable id and
+    JSON-text arguments, and each tool message the id of the call it answers (calls are answered in order)."""
+    out: list[dict[str, Any]] = []
+    pending: list[str] = []
+    n = 0
+    for m in messages:
+        m = dict(m)
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            calls = []
+            for call in m["tool_calls"]:
+                function = dict(call.get("function", call))
+                args = function.get("arguments")
+                if not isinstance(args, str):
+                    function["arguments"] = json.dumps(args if args is not None else {})
+                call_id = call.get("id") or f"call_{n}"
+                n += 1
+                pending.append(call_id)
+                calls.append({"id": call_id, "type": "function", "function": function})
+            m["tool_calls"] = calls
+        elif m.get("role") == "tool" and not m.get("tool_call_id"):
+            m["tool_call_id"] = pending.pop(0) if pending else f"call_{n}"
+        out.append(m)
+    return out
+
+
 class VLLMSampler:
     """`n` next turns from an OpenAI-compatible chat endpoint (vLLM), the tools rendered as in training."""
 
@@ -215,7 +248,7 @@ class VLLMSampler:
         s = self.sampling
         resp = await self.client.chat.completions.create(
             model=self.model,
-            messages=messages,
+            messages=chat_completions_messages(messages),
             tools=self.tools,
             n=s.n,
             temperature=s.temperature,
@@ -232,7 +265,8 @@ class VLLMSampler:
         for choice in resp.choices:
             msg = choice.message
             calls = [
-                {"function": {"name": c.function.name, "arguments": c.function.arguments}} for c in (msg.tool_calls or [])
+                {"function": {"name": c.function.name, "arguments": c.function.arguments}}
+                for c in (msg.tool_calls or [])
             ]
             out.append(Sample.build(msg.content, calls, targets, getattr(choice, "finish_reason", None)))
         return out
@@ -261,7 +295,9 @@ class HFSampler:
         from honest_agents.models import ModelFamily, detect_family, family_spec
 
         self.sampling = sampling
-        fam = ModelFamily(family) if family != "auto" else detect_family(model_name, allow_download=not local_files_only)
+        fam = (
+            ModelFamily(family) if family != "auto" else detect_family(model_name, allow_download=not local_files_only)
+        )
         self.kwargs = dict(family_spec(fam).chat_template_kwargs)
         self.kwargs["enable_thinking"] = sampling.enable_thinking
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, local_files_only=local_files_only)
@@ -277,7 +313,9 @@ class HFSampler:
         self.model = model.to(self.device).eval()
         self.tools = tool_schemas()
         self.eos_ids = {self.tokenizer.eos_token_id} | {
-            i for i in (self.tokenizer.convert_tokens_to_ids(t) for t in ("<|im_end|>", "<|endoftext|>")) if i is not None
+            i
+            for i in (self.tokenizer.convert_tokens_to_ids(t) for t in ("<|im_end|>", "<|endoftext|>"))
+            if i is not None
         }
 
     def sample(self, messages: list[dict[str, Any]], targets: Sequence[str]) -> list[Sample]:
@@ -285,7 +323,13 @@ class HFSampler:
 
         s = self.sampling
         enc = self.tokenizer.apply_chat_template(
-            messages, tools=self.tools, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt", **self.kwargs
+            messages,
+            tools=self.tools,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            **self.kwargs,
         )
         enc = {k: v.to(self.device) for k, v in enc.items() if hasattr(v, "to")}
         prompt_len = enc["input_ids"].shape[1]
@@ -362,7 +406,9 @@ def run_hf(prompts: Sequence[DecisionPrompt], sampler: HFSampler, *, on_row: Any
             row.samples = sampler.sample(p.messages, p.targets)
         except Exception as e:  # noqa: BLE001
             row.error = f"{type(e).__name__}: {e}"
-        logger.info("[%d/%d] %s %s (%.1fs)", k, len(prompts), p.id, Counter(s.cls for s in row.samples), time.monotonic() - t0)
+        logger.info(
+            "[%d/%d] %s %s (%.1fs)", k, len(prompts), p.id, Counter(s.cls for s in row.samples), time.monotonic() - t0
+        )
         rows.append(row)
         if on_row is not None:
             on_row(row)
@@ -475,7 +521,9 @@ def _ci(c: list[float] | None) -> str:
 
 
 def render(summary: Mapping[str, Any]) -> str:
-    lines = [f"decision probe: {summary['prompts']} prompts, {summary['samples']} samples, {summary['prompts_failed']} failed"]
+    lines = [
+        f"decision probe: {summary['prompts']} prompts, {summary['samples']} samples, {summary['prompts_failed']} failed"
+    ]
     for name, s in summary["sets"].items():
         p = s["paired"]
         lines.append(f"{name}: {s['prompts']} prompts, {p['pairs']} paired sources")
@@ -589,7 +637,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             local_files_only=args.local_files_only,
         )  # fmt: skip
     config = {k: v for k, v in vars(args).items() if k != "api_key"} | {"sampling": dataclasses.asdict(sampling)}
-    summary = run(prompts, args.out, sampler=sampler, concurrency=args.concurrency, resume=args.resume, seed=args.seed, config=config)
+    summary = run(
+        prompts,
+        args.out,
+        sampler=sampler,
+        concurrency=args.concurrency,
+        resume=args.resume,
+        seed=args.seed,
+        config=config,
+    )
     print(render(summary))
     return 0 if summary["prompts_failed"] == 0 else 1
 
