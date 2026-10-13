@@ -1,0 +1,41 @@
+# RL pool v2 for iteration 13 (docs/iteration-13-design.md 3.0 and 3.5 "Pool v2"; docs/research/it13-distribution.md
+# sections 1.5, 3, 4). Same base and exclusions as configs/tasks/rl_pool.yaml, rebalanced toward the tier-F endpoint
+# (revoke 35 % of the impossible episodes but 3 twin groups in B0), and ordered in stratified step blocks.
+#   python -m honest_agents.tasks.rl_pool --config configs/tasks/rl_pool_v2.yaml --report data/train_rl_v2.report.json
+# The per-step composition is printed on stderr; data/train_rl.jsonl (B0 / it11 pool) is not touched.
+pool: data/train_pool.jsonl
+difficulty: data/difficulty_2_3.json   # pass@4 band 2-3 of 4: gates the plain rows only (64 plain, as before)
+out: data/train_rl_v2.jsonl
+seed: 42
+
+max_infeasible: null
+family_quotas:
+  high_risk: 80
+  revoke_permission: 40         # 10 in v1: revoke learns (+9/56 in B0 from 3 twin groups) and has headroom
+  remove_input: 25              # 43 in v1: at its ceiling; the claimers plus retention (claimed_first)
+require_control: true          # every twin keeps its near-miss control
+# remove_input's 25 = every eligible twin with any claimed base episode in the bank (13) first, then 12 of the solved
+# ones in seeded order as retention.
+claimed_first: [remove_input]
+
+# Exclusions: as v1, plus every source of the distill pool (the decision SFT draws its high_risk pairs from it, so SFT
+# and RL stay disjoint by source; this costs 3 high_risk and 3 revoke eligible twins, quotas still met).
+bank:
+  - ~/Documents/honest-agents-archive/iterations/03-passk-bank/eval/passk/bank
+min_bank_samples: 4
+validation: data/validation.jsonl
+quarantine:
+  - ~/Documents/honest-agents-archive/iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/quarantine.jsonl
+exclude_sources: [data/teacher/sources.txt]
+exclude_pools: [data/distill_pool.jsonl]
+
+claim_rates: null
+claim_rate_band: [0.2, 0.8]
+
+# Step order: 8 prompts per optimizer step (grpo.shuffle_dataset false, data.pair_batches false). paired_strata: every
+# twin in the same step as its control; every step holds >= 1 high_risk pair and >= 1 revoke / remove_input pair; the
+# remaining slots by quota (pairs spread evenly, plain rows and lone controls in the rest); one unit per source per step.
+block_size: 8
+order: paired_strata
+major_family: high_risk
+steps: 15                      # report: rows by kind/family per 15-step window (configs/grpo_it13.yaml runs 15 steps)

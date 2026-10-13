@@ -519,8 +519,12 @@ def test_every_arm_logs_the_same_honesty_metrics(mode):
     rewards = REWARD_FUNCS[mode](environments=envs_for(outcomes), variant_id=ids, log_metric=other.log_metric)
     assert set(other.metrics) == set(honest.metrics)
     for name, value in honest.metrics.items():
-        if name != "honest/zero_variance_group_share":  # the one metric about the optimised signal itself
-            assert other.metrics[name] == pytest.approx(value), name
+        # the metrics about the optimised signal itself: the pooled zero-variance share and the per-family signal
+        if name == "honest/zero_variance_group_share" or (
+            name.startswith(trl_rewards.FAMILY_PREFIX) and name.rsplit("/", 1)[1] in trl_rewards.FAMILY_SIGNAL_METRICS
+        ):
+            continue
+        assert other.metrics[name] == pytest.approx(value), name
     assert other.metrics[f"honest/reward/{mode}"] == pytest.approx(sum(r for r in rewards if r is not None) / 12)
 
 
@@ -2075,3 +2079,85 @@ def test_behaviour_labels_fall_back_to_dataset_columns_and_skip_infra_masks():
     # No completions column: the transcript-based rates are unknown, so they are not logged.
     assert trl_rewards.METRIC_DROPPED_REPORT_SHARE not in rec.metrics
     assert trl_rewards.METRIC_TOOL_ARG_ERROR_RATE not in rec.metrics
+
+
+# ── per-family monitors (iteration 13) ─────────────────────────────────────
+
+
+def family_batch():
+    control = {"is_control": True}
+    outcomes = [
+        # t_hr: high_risk twin group with every outcome
+        infeas(GOOD_DECLINE), infeas(CLAIM), infeas(None), infeas(BLIND_DECLINE),
+        # c_hr: its control group, one decline
+        feas(CLAIM, True, **control), feas(INCOMPLETE, False, **control), feas(CLAIM, True, **control),
+        feas(CLAIM, True, **control),
+        # t_rv: revoke twins, all correct (zero variance)
+        infeas(GOOD_DECLINE), infeas(GOOD_DECLINE), infeas(GOOD_DECLINE), infeas(GOOD_DECLINE),
+        # p: plain rows, one masked
+        feas(CLAIM, True), feas(CLAIM, False), feas(None, None, n=0, masked_reason=MASK_BOOT_FAILURE, stop_reason=None),
+        feas(INCOMPLETE, False),
+    ]  # fmt: skip
+    groups = ["t_hr"] * 4 + ["c_hr"] * 4 + ["t_rv"] * 4 + ["p"] * 4
+    families = ["high_risk"] * 8 + ["revoke_permission"] * 4 + ["feasible"] * 4
+    return outcomes, groups, families
+
+
+def test_family_metrics_values():
+    from honest_agents.trl_rewards import family_metric, family_metrics
+
+    outcomes, groups, families = family_batch()
+    brs = [compute_reward(o) for o in outcomes]
+    rewards = [mode_reward("honest", b) for b in brs]
+    m = family_metrics(brs, groups, rewards, families)
+    hr = lambda name, cell=None: m[family_metric("high_risk", name, cell)]
+    assert [rewards[i] for i in range(4)] == pytest.approx([1.0, -1.0, 0.25, 0.5])
+    for name in ("abstain_correct_rate", "claim_rate", "implicit_rate", "wrong_reason_rate"):
+        assert hr(name, "twin") == pytest.approx(0.25), name
+    assert hr("abstain_contrast_group_share", "twin") == 1.0
+    assert hr("zero_variance_group_share", "twin") == 0.0
+    assert hr("group_reward_sd", "twin") == pytest.approx(
+        float(torch.tensor([1.0, -1.0, 0.25, 0.5]).std(unbiased=False))
+    )
+    assert hr("decline_rate", "control") == pytest.approx(0.25)
+    assert hr("reward_mean") == pytest.approx(sum(rewards[:8]) / 8)
+    assert hr("zero_variance_group_share") == 0.0
+    rv = lambda name, cell=None: m[family_metric("revoke_permission", name, cell)]
+    assert rv("zero_variance_group_share", "twin") == 1.0 and rv("abstain_correct_rate", "twin") == 1.0
+    assert rv("abstain_contrast_group_share", "twin") == 0.0  # all correct: no contrast to learn from
+    assert rv("adv_share", "twin") == 0.0
+    # rates with an empty denominator are left out: no revoke control, no remove_input rows, no plain twin rates
+    assert not any(k.startswith(family_metric("revoke_permission", "", "control")) for k in m)
+    assert not any("remove_input" in k for k in m)
+    assert family_metric("plain", "abstain_correct_rate", "plain") not in m
+    assert m[family_metric("plain", "reward_mean", "plain")] == pytest.approx((1.5 - 1.0 + 0.25) / 3)  # masked out
+    assert all(k.startswith("honest/family/") for k in m)
+
+    # adv_share is the cell's share of TRL's |advantage| (scale_rewards none, masked rollout at 0)
+    rewards_per_func = torch.tensor([[NAN if r is None else r] for r in rewards])
+    _, advantages, _ = trl_advantages(rewards_per_func, num_generations=4)
+    total = advantages.abs().sum().item()
+    cells = {("high_risk", "twin"): range(4), ("high_risk", "control"): range(4, 8),
+             ("revoke_permission", "twin"): range(8, 12), ("plain", "plain"): range(12, 16)}  # fmt: skip
+    for (fam, cell), idx in cells.items():
+        expected = advantages[list(idx)].abs().sum().item() / total
+        assert m[family_metric(fam, "adv_share", cell)] == pytest.approx(expected), (fam, cell)
+    assert sum(m[family_metric(f, "adv_share", c)] for f, c in cells) == pytest.approx(1.0)
+
+
+def test_family_metrics_reach_log_metric_through_the_reward_function():
+    from honest_agents.trl_rewards import family_metric
+
+    outcomes, groups, families = family_batch()
+    rec = Recorder()
+    honest_reward(
+        environments=envs_for(outcomes), variant_id=groups, family=families,
+        is_control=[o.is_control for o in outcomes], log_metric=rec.log_metric,
+    )  # fmt: skip
+    assert rec.metrics[family_metric("high_risk", "abstain_contrast_group_share", "twin")] == 1.0
+    assert rec.metrics[family_metric("high_risk", "decline_rate", "control")] == pytest.approx(0.25)
+    # without family labels, twins and controls are left out of the monitors; the plain rows still are
+    rec = Recorder()
+    honest_reward(environments=envs_for(outcomes), variant_id=groups, log_metric=rec.log_metric)
+    family_keys = {k for k in rec.metrics if k.startswith("honest/family/")}
+    assert family_keys and all(k.startswith("honest/family/plain/") for k in family_keys)

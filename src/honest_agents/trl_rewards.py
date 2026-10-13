@@ -285,6 +285,121 @@ def batch_metrics(
     return m
 
 
+# Per-family monitors (docs/iteration-13-design.md 3.8): `honest/family/<family>/...`, `<family>` the task family of
+# twins and controls (high_risk, revoke_permission, remove_input, ...) or `plain` for feasible rows that are not controls.
+FAMILY_PREFIX = "honest/family/"
+FAMILY_PLAIN = "plain"
+CELL_TWIN, CELL_CONTROL, CELL_PLAIN = "twin", "control", "plain"
+# The per-family monitors computed on the optimised reward (they differ between arms); the rest are outcome rates.
+FAMILY_SIGNAL_METRICS = (
+    "reward_mean",
+    "group_reward_sd",
+    "zero_variance_group_share",
+    "adv_share",
+    "abstain_contrast_group_share",
+)
+
+
+def family_metric(family: str, name: str, cell: str | None = None) -> str:
+    """`honest/family/<family>[/<cell>]/<name>`: the per-family monitor keys (G3 reads
+    `family_metric("high_risk", "abstain_contrast_group_share", "twin")`)."""
+    return f"{FAMILY_PREFIX}{family}/{cell + '/' if cell else ''}{name}"
+
+
+def _cell(b: RewardBreakdown) -> str:
+    if not b.feasible:
+        return CELL_TWIN
+    return CELL_CONTROL if b.is_control else CELL_PLAIN
+
+
+def family_metrics(
+    breakdowns: Sequence[RewardBreakdown],
+    groups: Sequence[str],
+    rewards: Sequence[float | None],
+    families: Sequence[str | None],
+) -> dict[str, float]:
+    """Per-family training monitors for one graded batch (`honest/family/<family>/...`). `rewards` is the optimised
+    reward of the run's mode, so the `FAMILY_SIGNAL_METRICS` describe what the gradient sees.
+
+    For each family (all its rows) and each of its cells (`twin`, `control`; `plain` rows form their own family):
+    `reward_mean` over scored rollouts, `group_reward_sd` (mean over groups with >= 2 scored rollouts of the population
+    sd of the group's rewards), `zero_variance_group_share` (as the pooled metric) and `adv_share`: the cell's share of
+    the batch's summed |reward - group mean|. TRL's advantage is exactly that deviation under `scale_rewards: none`
+    (which `train/` asserts) with a masked rollout at 0, but the advantages themselves are computed after the reward
+    function returns, so this is the deviation computed here, not a read of TRL's tensor.
+    Twins also get `abstain_correct_rate`, `implicit_rate`, `wrong_reason_rate`, `claim_rate` (over scored twins) and
+    `abstain_contrast_group_share` (twin groups with an `abstain_correct` rollout and a rollout paid differently, over
+    twin groups with a scored rollout: the G3 signal gate); controls get `decline_rate`. A rate with an empty denominator
+    is left out, as in `batch_metrics`; rows with no family label (twins and controls) are left out of the monitors."""
+    m: dict[str, float] = {}
+
+    def ratio(name: str, num: float, den: float) -> None:
+        if den > 0:
+            m[name] = num / den
+
+    by_group: dict[str, list[float]] = defaultdict(list)
+    for r, g in zip(rewards, groups, strict=True):
+        if r is not None:
+            by_group[g].append(r)
+    means = {g: sum(v) / len(v) for g, v in by_group.items()}
+    deviation = [abs(r - means[g]) if r is not None else 0.0 for r, g in zip(rewards, groups, strict=True)]
+    total_dev = sum(deviation)
+
+    # (family, cell) -> rollout indices
+    members: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for i, (b, fam) in enumerate(zip(breakdowns, families, strict=True)):
+        cell = _cell(b)
+        if cell == CELL_PLAIN:
+            members[(FAMILY_PLAIN, CELL_PLAIN)].append(i)
+        elif fam:
+            members[(str(fam), cell)].append(i)
+
+    def describe(idx: Sequence[int], key: Callable[[str], str]) -> None:
+        scored = [i for i in idx if rewards[i] is not None]
+        ratio(key("reward_mean"), sum(rewards[i] for i in scored), len(scored))  # type: ignore[misc]
+        cell_groups: dict[str, list[float]] = defaultdict(list)
+        for i in scored:
+            cell_groups[groups[i]].append(rewards[i])  # type: ignore[arg-type]
+        sds = [_pstdev(v) for v in cell_groups.values() if len(v) >= 2]
+        ratio(key("group_reward_sd"), sum(sds), len(sds))
+        share = zero_variance_group_share([rewards[i] for i in idx], [groups[i] for i in idx])
+        if share is not None:
+            m[key("zero_variance_group_share")] = share
+        ratio(key("adv_share"), sum(deviation[i] for i in idx), total_dev)
+
+    for fam in sorted({f for f, _ in members}):
+        cells = {c: idx for (f, c), idx in members.items() if f == fam}
+        if fam != FAMILY_PLAIN:
+            describe([i for idx in cells.values() for i in idx], lambda name, f=fam: family_metric(f, name))
+        for cell, idx in sorted(cells.items()):
+            describe(idx, lambda name, f=fam, c=cell: family_metric(f, name, c))
+            scored = [breakdowns[i] for i in idx if rewards[i] is not None]
+            if cell == CELL_TWIN:
+                cases = Counter(b.case for b in scored)
+                for name, case in (("abstain_correct_rate", "abstain_correct"), ("implicit_rate", "implicit_abstain"),
+                                   ("wrong_reason_rate", "abstain_wrong_reason")):  # fmt: skip
+                    ratio(family_metric(fam, name, cell), cases[case], len(scored))
+                ratio(family_metric(fam, "claim_rate", cell), sum(b.claimed_complete for b in scored), len(scored))
+                twin_groups: dict[str, list[int]] = defaultdict(list)
+                for i in idx:
+                    if rewards[i] is not None:
+                        twin_groups[groups[i]].append(i)
+                contrast = sum(
+                    any(breakdowns[i].case == "abstain_correct" for i in g_idx)
+                    and max(rewards[i] for i in g_idx) - min(rewards[i] for i in g_idx) > ZERO_VARIANCE_TOL  # type: ignore[operator]
+                    for g_idx in twin_groups.values()
+                )
+                ratio(family_metric(fam, "abstain_contrast_group_share", cell), contrast, len(twin_groups))
+            elif cell == CELL_CONTROL:
+                ratio(family_metric(fam, "decline_rate", cell), sum(b.declined for b in scored), len(scored))
+    return m
+
+
+def _pstdev(values: Sequence[float]) -> float:
+    mean = sum(values) / len(values)
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+
 def _label(env: Any, columns: dict[str, Any], key: str, i: int, n: int) -> Any:
     """A task label from the environment's spec, else from the dataset column TRL forwarded."""
     spec = getattr(env, "_spec", None)
@@ -617,6 +732,11 @@ def score_batch(
         for name, value in behaviour.behaviour_metrics(rows, prefix="honest/").items():
             log_metric(name, value)
 
+    def log_families() -> None:
+        families = [_label(env, columns, "family", i, n) for i, env in enumerate(environments)]
+        for name, value in family_metrics(breakdowns, groups, rewards, families).items():
+            log_metric(name, value)
+
     def log_columns() -> None:
         for column, values in episode_columns(outcomes, breakdowns, groups).items():
             log_extra(column, values)
@@ -631,6 +751,7 @@ def score_batch(
     if log_metric is not None:
         _guarded("metrics", log_metrics)
         _guarded("behaviour metrics", log_behaviour)  # separately: a transcript it cannot read must not cost the rest
+        _guarded("per-family metrics", log_families)
     if log_extra is not None:
         _guarded("completions-table columns", log_columns)
     _guarded("quarantine list / trajectory bank", persist)

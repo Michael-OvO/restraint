@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from honest_agents.bank import BankRow
+from honest_agents.report import parse_report
 from honest_agents.reward import EpisodeOutcome, outcome_to_dict
 from honest_agents.tasks.difficulty import VariantStat
 from honest_agents.tasks.rl_pool import (
@@ -21,11 +22,14 @@ from honest_agents.tasks.rl_pool import (
     EXCL_SOURCE_LISTED,
     EXCL_SOURCE_NEVER_PASSES,
     Exclusions,
+    PoolOptions,
     bank_exclusions,
     build_pool,
     check_blocks,
+    check_paired_blocks,
     main,
     order_blocks,
+    order_paired_blocks,
     plan_pool,
     read_bank_stats,
     summarize,
@@ -397,3 +401,191 @@ def test_cli_rejects_unknown_config_keys(tmp_path):
     (tmp_path / "c.yaml").write_text("pool: x\nblock_sise: 8\n")
     with pytest.raises(ValueError, match="block_sise"):
         main(["--config", str(tmp_path / "c.yaml")])
+
+
+# ── paired strata (iteration 13 pool v2) ─────────────────────────────────────
+
+
+def strata_pool(n: int = 40) -> list[dict]:
+    """n sources: a plain row and a high_risk control + twin each; revoke_permission on every third source,
+    remove_input on every fourth (offset 1)."""
+    rows = []
+    for i in range(n):
+        seed = f"s{i:02d}"
+        rows.append(row(seed, "feasible"))
+        fams = ["high_risk"] + (["revoke_permission"] if i % 3 == 0 else []) + (["remove_input"] if i % 4 == 1 else [])
+        for fam in fams:
+            rows += [row(seed, "control", fam), row(seed, "infeasible", fam)]
+    return rows
+
+
+def paired_plan(seed: int = 42, **kw) -> list[dict]:
+    rows = strata_pool()
+    kw.setdefault("family_quotas", {"high_risk": 30, "revoke_permission": None, "remove_input": None})
+    return plan_pool(
+        rows, {f"src/s{i:02d}" for i in range(40)}, max_infeasible=None, require_control=True, block_size=8,
+        seed=seed, order="paired_strata", **kw,
+    ).rows  # fmt: skip
+
+
+def blocks_of(rows: list[dict], size: int = 8) -> list[list[dict]]:
+    return [rows[b * size : (b + 1) * size] for b in range(len(rows) // size)]
+
+
+def test_paired_strata_every_block_holds_a_high_risk_pair_and_another_pair():
+    out = paired_plan()
+    unordered = paired_plan(family_quotas={"high_risk": 30, "revoke_permission": None, "remove_input": None})
+    assert sorted(r["variant_id"] for r in out) == sorted(r["variant_id"] for r in unordered)
+    assert len(out) == 60 + 48 + 40 + 10  # hr 30 + revoke 14 + remove 10 pairs, 40 plain, 10 lone hr controls
+    assert check_paired_blocks(out, 8) == []  # no split pair, no repeated source, no stratum shortfall
+    for block in blocks_of(out):
+        pairs = [
+            t for t in block if t["kind"] == "infeasible"
+            and any(c["kind"] == "control" and (c["pair_id"], c["family"]) == (t["pair_id"], t["family"]) for c in block)
+        ]  # fmt: skip
+        assert any(t["family"] == "high_risk" for t in pairs)
+        assert any(t["family"] in ("revoke_permission", "remove_input") for t in pairs)
+        twins = [t for t in block if t["kind"] == "infeasible"]
+        assert pairs == twins  # every twin of the block has its control in the same block
+        # one unit per source: the plain copy never shares a step with its own twin
+        plain_sources = {r["pair_id"] for r in block if r["kind"] == "feasible"}
+        assert not plain_sources & {t["pair_id"] for t in twins}
+    s = summarize(out, 8, steps=5, order="paired_strata")
+    assert s["step_block_problems"] == 0 and s["untrained_tail_rows"] == len(out) % 8
+    assert s["blocks_without_plain"] == [] and s["strata_shortfalls"] == []  # a plain capability anchor in every step
+    twins_in_blocks = sum(r["kind"] == "infeasible" for b in blocks_of(out) for r in b)
+    assert twins_in_blocks == 54  # no twin falls into the untrained tail
+    hr_per_block = [sum(r["kind"] == "infeasible" and r["family"] == "high_risk" for r in b) for b in blocks_of(out)]
+    assert max(hr_per_block) - min(hr_per_block) <= 2  # pairs spread over the blocks, not in runs
+
+
+def test_paired_strata_order_is_deterministic_given_the_seed():
+    assert paired_plan(seed=42) == paired_plan(seed=42)
+    rows = paired_plan(seed=42)[::-1]  # one fixed pool, ordered with two seeds
+    first, again, other = (order_paired_blocks(rows, 8, seed=s) for s in (42, 42, 7))
+    assert first == again
+    assert first != other and sorted(map(str, first)) == sorted(map(str, other))  # same rows, another order
+    assert check_paired_blocks(first, 8) == check_paired_blocks(other, 8) == []
+
+
+def test_paired_strata_reports_a_stratum_it_cannot_fill():
+    """Fewer non-high_risk pairs than blocks: every block still keeps its pairs together; the blocks without a
+    revoke / remove_input pair are reported as soft problems, not hidden."""
+    out = paired_plan(family_quotas={"high_risk": 30, "revoke_permission": 3, "remove_input": 0})
+    problems = check_paired_blocks(out, 8)
+    assert problems and all(p.startswith("no_minor") for p in problems)
+    assert sum(1 for b in blocks_of(out) if any(r["family"] == "revoke_permission" and r["kind"] == "infeasible"
+                                                for r in b)) == 3  # fmt: skip
+
+
+def test_check_paired_blocks_flags_a_split_pair_and_a_repeated_source():
+    a_twin, a_ctrl = row("a", "infeasible", "high_risk"), row("a", "control", "high_risk")
+    b_twin, b_ctrl = row("b", "infeasible", "revoke_permission"), row("b", "control", "revoke_permission")
+    ok = [a_twin, a_ctrl, b_twin, b_ctrl]
+    assert check_paired_blocks(ok, 4) == []
+    split = check_paired_blocks([a_twin, b_twin, b_ctrl, row("c", "feasible"), a_ctrl, row("d", "feasible")], 4)
+    assert any(p.startswith("split step 0") for p in split)
+    repeat = check_paired_blocks([a_twin, a_ctrl, row("a", "feasible"), b_twin, b_ctrl, row("x", "feasible")], 6)
+    assert any(p.startswith("repeat step 0") for p in repeat)
+
+
+def test_order_paired_blocks_keeps_pairs_together_in_the_tail():
+    rows = [
+        r for i in range(5) for r in (row(f"h{i}", "infeasible", "high_risk"), row(f"h{i}", "control", "high_risk"))
+    ]
+    out = order_paired_blocks(rows, 4, seed=0)  # 10 rows, two pairs per block, 2 tail rows = one whole pair
+    assert len(out) == 10
+    tail = out[8:]
+    assert {r["pair_id"] for r in tail} == {tail[0]["pair_id"]} and {r["kind"] for r in tail} == {
+        "infeasible",
+        "control",
+    }
+
+
+def test_prefer_twins_fill_the_quota_first_without_changing_the_rest_of_the_sample():
+    rows = big_pool()
+    remove_ids = [r["variant_id"] for r in rows if r["kind"] == "infeasible" and r["family"] == "remove_input"]
+    preferred = set(remove_ids[:3])
+    quotas = {"high_risk": 10, "remove_input": 5, "revoke_permission": 2}
+    built = plan_pool(rows, set(), max_infeasible=None, family_quotas=quotas, prefer_twins=preferred, seed=3)
+    chosen = {r["variant_id"] for r in built.rows if r["kind"] == "infeasible" and r["family"] == "remove_input"}
+    assert preferred <= chosen and len(chosen) == 5
+    assert built.preferred_chosen == {"remove_input": 3}
+    plain = plan_pool(rows, set(), max_infeasible=None, family_quotas=quotas, seed=3)
+    others = {r["variant_id"] for r in built.rows if r["family"] != "remove_input"}
+    assert others == {r["variant_id"] for r in plain.rows if r["family"] != "remove_input"}  # other families: same draw
+
+
+def claim_bank_row(r: dict, claimed: bool) -> str:
+    report = parse_report({"status": "complete" if claimed else "abstain", "blocker_category": "high_risk",
+                           "blocker_target": "/data"})  # fmt: skip
+    outcome = EpisodeOutcome(feasible=r["feasible"], report=report, tests_passed=False, n_actions=3, agent_acted=True)
+    return (
+        BankRow(task={**r, "split": "train"}, group=r["variant_id"], outcome=outcome_to_dict(outcome)).model_dump_json()
+        + "\n"
+    )
+
+
+def test_cli_paired_strata_with_claimed_first(tmp_path, capsys):
+    rows = strata_pool()
+    (tmp_path / "pool.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "diff.json").write_text(json.dumps({"keep_pairs": [f"src/s{i:02d}" for i in range(40)]}))
+    remove = [r for r in rows if r["kind"] == "infeasible" and r["family"] == "remove_input"]
+    claimers = {r["variant_id"] for r in remove[:2]}
+    bank_dir = tmp_path / "bank"
+    bank_dir.mkdir()
+    lines = [claim_bank_row(r, claimed=r["variant_id"] in claimers and i == 0) for r in remove for i in range(4)]
+    with gzip.open(bank_dir / "bank-1.jsonl.gz", "wt") as f:
+        f.writelines(lines)
+    (tmp_path / "sft_pool.jsonl").write_text(json.dumps(row("s39", "feasible")) + "\n")  # an SFT source
+    cfg = {
+        "pool": str(tmp_path / "pool.jsonl"), "difficulty": str(tmp_path / "diff.json"), "out": str(tmp_path / "rl.jsonl"),
+        "max_infeasible": None, "family_quotas": {"high_risk": 30, "revoke_permission": None, "remove_input": 4},
+        "require_control": True, "bank": [str(bank_dir)], "claimed_first": ["remove_input"],
+        "exclude_pools": [str(tmp_path / "sft_pool.jsonl")], "block_size": 8, "order": "paired_strata", "steps": 5,
+        "seed": 42,
+    }  # fmt: skip
+    (tmp_path / "rl_pool.yaml").write_text(yaml.safe_dump(cfg))
+    main(["--config", str(tmp_path / "rl_pool.yaml"), "--report", str(tmp_path / "report.json")])
+    out = [json.loads(line) for line in (tmp_path / "rl.jsonl").read_text().splitlines()]
+    assert not any(r["pair_id"] == "src/s39" for r in out)
+    chosen_remove = {r["variant_id"] for r in out if r["kind"] == "infeasible" and r["family"] == "remove_input"}
+    assert claimers <= chosen_remove and len(chosen_remove) == 4
+    assert [p for p in check_paired_blocks(out, 8) if p.startswith(("split", "repeat"))] == []
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["claimed_first"] == {"claimed_in_bank": 2, "chosen": {"remove_input": 2}}
+    assert len(report["blocks"]) == len(out) // 8 and report["summary"]["windows"]
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["summary"] == summarize(out, 8, 5, "paired_strata")
+    assert "step   0:" in captured.err  # per-step composition on stderr
+    assert read_bank_stats([bank_dir])[remove[0]["variant_id"]].claims == 1
+
+
+def test_pool_v2_config_matches_the_it13_training_config():
+    from honest_agents.train.config import load_run_config
+
+    cfg = load_run_config(REPO / "configs" / "grpo_it13.yaml")
+    pool_cfg = yaml.safe_load((REPO / "configs" / "tasks" / "rl_pool_v2.yaml").read_text())
+    g = cfg.grpo
+    prompts_per_step = g["per_device_train_batch_size"] * cfg.launch.num_processes * g["gradient_accumulation_steps"]
+    assert pool_cfg["block_size"] == prompts_per_step // g["num_generations"] == 8
+    assert cfg.data.train_file == pool_cfg["out"] == "data/train_rl_v2.jsonl"
+    assert cfg.data.pair_batches is False and g["shuffle_dataset"] is False
+    assert pool_cfg["order"] == "paired_strata" and pool_cfg["require_control"] is True
+    assert pool_cfg["family_quotas"] == {"high_risk": 80, "revoke_permission": 40, "remove_input": 25}
+    assert g["max_steps"] == 15 and pool_cfg["steps"] == 15
+    PoolOptions.from_dict(pool_cfg)  # every key is known
+
+
+def test_paired_strata_puts_all_pair_blocks_last_and_anchors_the_rest_with_a_plain_row():
+    """More pairs than blocks of 3 pairs can hold: the all-pair blocks (no plain row) go to the end of the pass, and
+    every other block holds a plain row even when lone controls are first in the singles queue."""
+    rows = [
+        r for i in range(14) for r in (row(f"h{i}", "infeasible", "high_risk"), row(f"h{i}", "control", "high_risk"))
+    ]
+    rows += [r for i in range(6) for r in (row(f"r{i}", "infeasible", "revoke_permission"),
+                                            row(f"r{i}", "control", "revoke_permission"))]  # fmt: skip
+    rows += [row(f"c{i}", "control", "high_risk") for i in range(4)] + [row(f"p{i}", "feasible") for i in range(4)]
+    out = order_paired_blocks(rows, 8, seed=1)  # 48 rows: 6 blocks, 20 pairs = 4 blocks of 3 + 2 blocks of 4
+    s = summarize(out, 8, order="paired_strata")
+    assert s["step_block_problems"] == 0 and s["blocks_without_plain"] == [4, 5]

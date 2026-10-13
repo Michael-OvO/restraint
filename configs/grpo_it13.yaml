@@ -1,0 +1,25 @@
+# Iteration 13 arm D-RL (docs/iteration-13-design.md 3.5): GRPO from the decision-SFT policy on pool v2, on ONE >= 80 GB
+# GPU (colocated vLLM at 0.3, 16k budget, from grpo_it12_96gb.yaml). Reward unchanged (alpha 0.1, false_blame -0.4,
+# gamma 0), env.report_turns 8 (grpo_it12.yaml). Probes at 0 (probe.on_start, inherited), 10 and 15.
+#   python -m honest_agents.train.run --config configs/grpo_it13.yaml model.name=<merged decision policy>
+base: grpo_it12_96gb.yaml
+output_root: outputs/it13
+model:
+  # PLACEHOLDER: the merged decision-SFT policy (sft.merge output of the chosen epoch, design 3.4). Override on the
+  # command line if it lands elsewhere; this path does not exist until the SFT stage has run.
+  name: outputs/it13/sft_decision_merged
+data:
+  # Pool v2 (configs/tasks/rl_pool_v2.yaml): high_risk 80 / revoke 40 / remove_input 25 twins, each with its control,
+  # 64 plain; stratified paired step blocks of 8 (every step: >= 1 high_risk twin + control, >= 1 revoke or remove_input
+  # twin + control). The file order is the step order: grpo.shuffle_dataset false, data.pair_batches false (inherited).
+  train_file: data/train_rl_v2.jsonl
+wandb:
+  name: it13-grpo-decision
+  group: it13
+grpo:
+  max_steps: 15
+  save_steps: 5
+probe:
+  steps: [10, 15]
+  on_start: true          # the step-0 probe of the decision policy
+  batch_size: 120         # = the probe size (120 variants x 1)
