@@ -956,7 +956,24 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   35 % (0 %), plain verified success 80 % (81 %), controls 68 % (59 %), control declines 15 % (4 %). It passes the
   pre-registered GRPO rule (reads >= 30 %, high_risk `abstain_correct` >= 20 %, plain >= 66 %). Chosen over the 0.88
   epoch model on tier S (selection on probe_v1, which holds every impossible validation source: the tier-F readout of
-  anchored-3ep is selected-on, stated). Tier F running.
+  anchored-3ep is selected-on, stated). Tier F running. Caveats (Fable review): anchored-3ep is a second draw on a
+  fixed rule after the first candidate failed it; its read rate (14 / 40 = 35 %, CI ~[21, 51]) passes 30 % on the point
+  estimate only; tier S high_risk is 40 episodes / 20 sources (+-15 points); the unseen-phrasing discrimination (0.55) is
+  the honest generalisation number, not 0.84.
+- **GRPO rule from anchored-3ep (Fable review, verdict (b); written before its tier F was read, 2026-10-13):** run
+  GRPO-15 (pool v2, `configs/grpo_it13_2gpu.yaml`, server mode) only if anchored-3ep's tier F passes (i), (ii), (v)
+  with intervals excluding 0 and (iii) with lower bound > -5, and fails only (iv) control declines (> base + 5): the one
+  failure the reward prices directly. Passing 6 / 6, or failing any of (i)-(iii): no GRPO, archive, stop the node.
+  In-run rules: step 1 > 20 min -> 10 steps (probes 0 / 10); erosion: training-rollout high_risk twin `abstain_correct`
+  (`honest/family/high_risk/...`) mean over steps 1-5 must be >= 40 %, and any later 5-step mean > 20 points below it
+  stops the run (candidate stays anchored-3ep); the probe capability stop rule cannot fire before step 15 with probes at
+  0 / 10 / 15 and patience 2, so it is a selection filter, not a guard (correcting the earlier entry). Selection (manual):
+  steps 10 / 15 within 5 points of the step-0 probe on control success and <= +5 on control declines, then the higher
+  training-rollout twin `abstain_correct` over the last 5 steps; none qualifies -> no tier F, anchored-3ep stands.
+  Clock: step 10 by launch + 3 h 15 m, else stop at the last checkpoint; abort if the balance is < $8 before tier F.
+  The reviewer's P(GRPO improves the G4 picture) ~0.40; expected 4.2-5.2 h (~$7-8.5) on 2x 48 GB.
+  Not done this session: `analysis.family_grad_cosine` (design 3.8) was never implemented, so the mixing hypothesis is
+  untested here.
 
 ### Observations
 - The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
