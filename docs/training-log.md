@@ -926,6 +926,13 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   assistant turns; W&B https://wandb.ai/michael_ovo/honest-agents/runs/gy8c31y8). Entropy guard again at step 35
   (0.88 epoch).
 
+- Decision rule for the anchored SFT (written before its tier S was read, 2026-10-12 19:58): GRPO from the anchored
+  policy if its tier S shows high_risk README reads >= 30 % and high_risk `abstain_correct` >= 20 % and plain verified
+  success >= base - 15 points (66 %); the stricter G2 capability screen (-6) is waived for this step because the GRPO
+  reward pays verified success (1.5) and charges false blame (-0.4) on every feasible row, so RL is expected to repair
+  over-abstention, and the probe capability stop rule (-15 points, patience 2) guards the run. Otherwise no GRPO: tier F
+  on the better of D / anchored for the record and stop the node.
+
 ### Observations
 - The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
   README in context, discrimination 0.04. One epoch of decision SFT on 88 own-state pairs moves it to 0.36.
