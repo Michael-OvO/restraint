@@ -1,6 +1,6 @@
 """`HonestGRPOTrainer`: TRL's GRPO trainer with a batch-concurrent tool loop that stops at the report.
 
-A drop-in subclass of `trl.GRPOTrainer` (same constructor). It changes two things in the multi-turn rollout and
+A drop-in subclass of `trl.GRPOTrainer` (same constructor). It changes three things in the multi-turn rollout and
 nothing in the loss value (docs/design.md section 8):
 
 * **Tool calls run concurrently across the batch.** TRL 1.14.1 executes one rollout's tool calls after another on
@@ -11,12 +11,15 @@ nothing in the loss value (docs/design.md section 8):
   it is wasted compute and puts tokens in the loss that no reward depends on. A reported episode leaves the loop
   through the same rollback TRL uses for a tool result that does not fit: its token ids, logprobs and tool mask stay
   exactly as they were when the report turn was sampled, ending on that turn's end-of-turn token.
+* **A report written as the last turn at the iteration cap is executed.** TRL leaves the calls of the turn that hits
+  `max_tool_calling_iterations` unexecuted; a `submit_report` / `abstain` call there is run after the loop, with no
+  tool message appended and no turn generated, so the episode is graded on the report it wrote.
 
 Everything else is TRL's `_tool_call_loop`, ported line for line: the tool mask, token accounting, the rollback of
 tool results that exceed the budget, the truncation of an over-long last turn, and both counters. Sampled token ids
 and sampling-time logprobs are only ever concatenated and sliced, never decoded and re-encoded.
 `tests/test_trainer_loop.py` drives TRL's own loop and this one with the same fake generator and environments and
-asserts the outputs are equal.
+asserts the outputs are equal (with a pending report executed, the token outputs still are).
 
 The port is only valid for the TRL source it was made from, so construction fails if the installed `_tool_call_loop`,
 `_generate` or `_calculate_rewards` differ from the fingerprints below.
@@ -57,6 +60,7 @@ from trl import GRPOTrainer
 from trl.chat_template_utils import parse_response
 from trl.trainer.utils import split_pixel_values_by_grid, split_tensor_dict, unsplit_pixel_values_by_grid
 
+from honest_agents.behaviour import unexecuted_report_call
 from honest_agents.harness import INVALID_TOOL_ARGS, SANDBOX_UNAVAILABLE
 from honest_agents.reward import (
     STOP_CALL_BUDGET,
@@ -116,7 +120,8 @@ UPSTREAM_FINGERPRINTS: dict[str, str] = {
 #   report       the environment recorded a report (stop_at_report), or had one when the loop ended
 #   truncated    the last sampled turn does not end on EOS; TRL's `mask_truncated_completions` drops it from the loss
 #   char_budget  the tool result did not fit the completion budget and was rolled back
-#   call_budget  `max_tool_calling_iterations` was reached with tool calls still pending (they are not executed)
+#   call_budget  `max_tool_calling_iterations` was reached with tool calls still pending (they are not executed,
+#                except a report call, see `execute_pending_report`)
 #   silent_stop  the last turn ended normally without a tool call
 LOOP_EXITS: tuple[str, ...] = STOP_REASONS
 COLUMN_LOOP_EXIT = "loop_exit"  # per-episode column in TRL's completions table
@@ -128,6 +133,9 @@ METRIC_SLOWEST_TOOL_TURN = "rollout/slowest_tool_turn_seconds"  # the slowest si
 METRIC_SLOWEST_EPISODE_TOOLS = "rollout/slowest_episode_tool_seconds"  # the largest per-episode total
 METRIC_TOOL_TURNS = "rollout/tool_turns"  # rounds of tool execution in this batch
 METRIC_REGENERATED = "rollout/regenerated_turns"  # turns sampled inside the loop, summed over episodes
+# Share of the batch's episodes whose report call, written as the last turn at the iteration cap, was executed after the
+# loop (`execute_pending_report`).
+METRIC_PENDING_REPORTS = "rollout/pending_reports_executed"
 
 ENV_EXIT_HOOK = "_set_loop_exit"  # optional environment method: `_set_loop_exit(reason: str) -> None`
 
@@ -296,6 +304,7 @@ class LoopRecord:
     episode_tool_seconds: list[float] = field(default_factory=list)
     tool_turns: int = 0
     regenerated_turns: int = 0
+    pending_reports_executed: int = 0  # capped episodes whose last-turn report call was executed after the loop
 
 
 class HonestGRPOTrainer(GRPOTrainer):
@@ -304,7 +313,11 @@ class HonestGRPOTrainer(GRPOTrainer):
     Settings are attributes, so the constructor stays TRL's. Set them on the instance after construction:
 
     * `stop_at_report` (default True): an episode whose environment has recorded a report leaves the loop without
-      another generation. False reproduces TRL's loop exactly (kept for the differential test).
+      another generation. False (with `execute_pending_report` False) reproduces TRL's loop exactly (kept for the
+      differential test).
+    * `execute_pending_report` (default True): an episode cut off by `max_tool_calling_iterations` whose last turn
+      calls `submit_report` / `abstain` has that one call executed after the loop, so the report it wrote is graded
+      (docs/iteration-13-design.md section 3.1). Its tokens are unchanged; it leaves the loop as `report`.
     * `max_tool_workers` (default None = one thread per active episode): cap on concurrent tool-calling threads.
     * `trim_padding`, `sort_micro_batches` (default True): the padding-free scoring described in the module docstring.
 
@@ -318,6 +331,7 @@ class HonestGRPOTrainer(GRPOTrainer):
     """
 
     stop_at_report: bool = True
+    execute_pending_report: bool = True
     max_tool_workers: int | None = None
     clone_synced_params: bool = True  # docs/design.md section 8; set False before construction to reproduce stock TRL
     trim_padding: bool = True  # run every forward in length-trimmed chunks; False = TRL's padded layout
@@ -409,6 +423,7 @@ class HonestGRPOTrainer(GRPOTrainer):
             metrics[METRIC_TOOL_TURNS].append(float(record.tool_turns))
             metrics[METRIC_REGENERATED].append(float(record.regenerated_turns))
             n = len(record.exits)
+            metrics[METRIC_PENDING_REPORTS].append(record.pending_reports_executed / n if n else 0.0)
             for reason in LOOP_EXITS:
                 metrics[METRIC_EXIT_PREFIX + reason].append(record.exits.count(reason) / n if n else 0.0)
             self._log_completion_extra(COLUMN_LOOP_EXIT, list(record.exits))
@@ -916,7 +931,12 @@ class HonestGRPOTrainer(GRPOTrainer):
             tool_calls = [tool_call for tool_call in tool_calls if tool_call]
             iteration_num += 1
 
-        # HONEST: record why each rollout ended. `idxs_with_tool` now holds the rollouts cut off by the iteration cap.
+        # HONEST: `idxs_with_tool` now holds the rollouts cut off by the iteration cap. One whose last turn calls a report
+        # tool gets that call executed, with nothing appended or generated (docs/iteration-13-design.md section 3.1).
+        if self.execute_pending_report and environments and idxs_with_tool:
+            self._execute_pending_reports(idxs_with_tool, completions, environments, record)
+
+        # HONEST: record why each rollout ended.
         record.exits = self._loop_exits(completion_ids, environments, left, set(idxs_with_tool))
         self._loop_record = record
 
@@ -929,6 +949,35 @@ class HonestGRPOTrainer(GRPOTrainer):
             tool_failure_count,
             tool_images,
         )
+
+    def _execute_pending_reports(
+        self,
+        capped: list[int],
+        completions: list,
+        environments: list,
+        record: LoopRecord,
+    ) -> None:
+        """Run the first `submit_report` / `abstain` call of each capped rollout's unexecuted last turn.
+
+        The policy wrote the report as its last turn, but the iteration cap stopped the loop before running it
+        (iteration 12: 25-57 % of budget exits per step). The call goes through `_call_tools`, so a call the tool
+        rejects (bad arguments) records nothing and the rollout stays a budget exit without a report. Nothing else
+        changes: no tool message is appended (the rollback shape of a report exit), and token ids, logprobs, the tool
+        mask and TRL's call counters are untouched, so the loss differs only through the reward.
+        """
+        for i in capped:
+            if i >= len(environments) or self._episode_reported(environments[i]):
+                continue
+            pending = unexecuted_report_call(completions[i])
+            if pending is None:
+                continue
+            tool_call = {"type": "function", "function": {"name": pending.name, "arguments": dict(pending.arguments)}}
+            _, _, failures, seconds = self._call_tools(
+                [tool_call], self._sync_tool_dicts[i], self._async_tool_dicts[i], environments[i], None
+            )
+            record.tool_seconds += seconds
+            record.episode_tool_seconds[i] += seconds
+            record.pending_reports_executed += int(not failures and self._episode_reported(environments[i]))
 
     def _loop_exits(
         self,

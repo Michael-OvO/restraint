@@ -152,6 +152,9 @@ def test_cli_refuses_a_test_split(tmp_path: Path):
         ({"rollout": {"model": "ckpt10", "max_tool_rounds": 60, "temperature": 1.0, "system_prompt": None}},
          "rollout.max_tool_rounds"),
         ({"reward": {"alpha": 0.5}}, "reward config differs"),
+        # a run under the iteration-13 harness against one from before it (no key: the old harness)
+        ({"rollout": {"model": "ckpt10", "max_tool_rounds": 30, "temperature": 1.0, "system_prompt": None,
+                      "execute_pending_report": True}}, "rollout.execute_pending_report"),
     ],
 )  # fmt: skip
 def test_cli_refuses_runs_that_differ_in_more_than_the_model(tmp_path: Path, change: dict, message: str):

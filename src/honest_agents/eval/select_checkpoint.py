@@ -265,7 +265,7 @@ def reward_config_of_run(run_dir: Path) -> RewardConfig:
 # pass the gate because it was given more tool rounds, a longer budget or another prompt than the base.
 ROLLOUT_KEYS = (
     "max_tool_rounds", "max_completion_tokens", "max_tokens_per_turn", "temperature", "top_p", "top_k", "min_p",
-    "repetition_penalty", "extra_body", "system_prompt", "neutral_tools",
+    "repetition_penalty", "extra_body", "system_prompt", "neutral_tools", "execute_pending_report",
 )  # fmt: skip
 
 

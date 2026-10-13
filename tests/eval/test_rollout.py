@@ -220,16 +220,54 @@ async def test_max_tool_rounds_matches_trl_semantics():
     assert res.dropped_report_tool is None  # the unexecuted last turn was bash
 
 
-async def test_a_report_past_the_turn_cap_is_recorded_as_dropped():
-    def bash_then_report(m, i):
+def _bash_then(last_calls):
+    """Bash on every turn before the third model call, then `last_calls` (a list of tool calls)."""
+
+    def script(m, i):
         if i < 2:
             return response("", [tool_call("bash", {"command": f"echo {i}"})])
-        return response("", [tool_call("abstain", ABSTAIN_ARGS)])
+        return response("", last_calls)
 
+    return script
+
+
+async def test_a_report_past_the_turn_cap_is_recorded_as_dropped_under_the_old_harness():
     env = FakeToolEnv()
-    res = await _loop(env, FakeClient(bash_then_report), RolloutConfig(model="m", max_tool_rounds=2))
+    cfg = RolloutConfig(model="m", max_tool_rounds=2, execute_pending_report=False)
+    res = await _loop(env, FakeClient(_bash_then([tool_call("abstain", ABSTAIN_ARGS)])), cfg)
     assert res.stop_reason == "max_turns" and res.report_turn is None and env._report is None
     assert res.dropped_report_tool == "abstain" and res.stats()["dropped_report_tool"] == "abstain"
+
+
+async def test_a_report_written_as_the_last_turn_at_the_cap_is_executed():
+    env = FakeToolEnv()
+    res = await _loop(
+        env, FakeClient(_bash_then([tool_call("abstain", ABSTAIN_ARGS)])), RolloutConfig(model="m", max_tool_rounds=2)
+    )
+    assert res.stop_reason == "report" and res.report_tool == "abstain" and res.report_turn == 3
+    assert res.dropped_report_tool is None and env._report is not None and env._report.status == "abstain"
+    assert res.n_model_calls == 3 and res.n_tool_calls == 3 and len(env.commands) == 2  # no further generation
+    assert res.messages[-1]["role"] == "tool" and res.messages[-1]["name"] == "abstain"
+
+
+async def test_at_the_cap_only_the_report_call_runs_never_bash():
+    env = FakeToolEnv()
+    last = [tool_call("bash", {"command": "rm -rf /"}, "b"), tool_call("submit_report", SUBMIT_ARGS, "r")]
+    res = await _loop(env, FakeClient(_bash_then(last)), RolloutConfig(model="m", max_tool_rounds=2))
+    assert res.stop_reason == "report" and res.report_tool == "submit_report" and env._report is not None
+    assert env.commands == ["echo 0", "echo 1"]  # the last turn's bash was not run
+    assert [m["name"] for m in res.messages if m["role"] == "tool"] == ["bash", "bash", "submit_report"]
+
+
+async def test_a_rejected_report_call_at_the_cap_is_no_report():
+    env = FakeToolEnv()
+    bad = [tool_call("abstain", {"reason": "r"})]  # missing blocker_category: the tool rejects the call
+    res = await _loop(env, FakeClient(_bash_then(bad)), RolloutConfig(model="m", max_tool_rounds=2))
+    assert res.stop_reason == "max_turns" and res.report_turn is None and env._report is None
+    assert res.n_tool_errors == 1 and res.n_tool_arg_errors == 1
+    # still a report call that never took effect: the monitors count it as dropped, as the trainer's do
+    assert res.dropped_report_tool == "abstain"
+    assert resolve_stop_reason(res.stop_reason, None, reported=False) == STOP_CALL_BUDGET
 
 
 async def test_token_budget_caps_max_tokens_and_stops():

@@ -177,6 +177,9 @@ class TrainerSection:
     max_tool_workers: int | None = None  # None = one thread per live episode
     trim_padding: bool = True  # length-trimmed forward chunks; False = TRL's batch-global padding
     sort_micro_batches: bool = True  # regroup a round's micro-batches by length (dapo/cispo/vespo only)
+    # Run the report call an episode wrote as its last turn at `max_tool_calling_iterations` (iteration 13; before, it
+    # was dropped). The evaluation harness reads it from here (`eval.run_eval`), so both grade the same episodes.
+    execute_pending_report: bool = True
 
 
 @dataclass

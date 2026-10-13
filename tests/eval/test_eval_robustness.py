@@ -280,6 +280,20 @@ def test_train_config_env_limits_reach_the_eval_budget_and_grader(tmp_path, monk
     assert seen["grading_config"].tests_timeout_sec == 99 and seen["grading_config"].replay_evidence is True
 
 
+def test_pending_report_execution_follows_the_train_config_and_the_cli(tmp_path):
+    def resolved(yaml: str | None, *flags: str) -> bool:
+        argv = ["--model", "m", *flags]
+        if yaml is not None:
+            cfg = tmp_path / "train.yaml"
+            cfg.write_text(yaml)
+            argv += ["--train-config", str(cfg)]
+        return run_eval.resolve_configs(run_eval.build_parser().parse_args(argv))[0].execute_pending_report
+
+    assert resolved(None) and resolved("grpo:\n  max_tool_calling_iterations: 12\n")
+    assert not resolved("trainer:\n  execute_pending_report: false\n")
+    assert not resolved(None, "--drop-pending-report")
+
+
 def test_many_infra_errors_put_a_warning_on_the_table():
     from honest_agents.eval.metrics import compute_metrics
 

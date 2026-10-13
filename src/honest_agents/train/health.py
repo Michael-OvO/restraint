@@ -29,6 +29,10 @@ act on 20-step windows to avoid noise; this check is the operator's view after e
 * harness (`honest/dropped_report_share`, `honest/tool_arg_error_rate`, from `behaviour`): budget exits whose report call
   was never executed above 5 %, or rollouts with a tool-argument error above 10 %, WARN on one step and FAIL on two
   consecutive steps (iteration 11: 43 % of budget-exit reports dropped, argument errors on up to 47 % of rows).
+  Under `trainer.execute_pending_report` (iteration 13) the harness runs a report written at the turn cap, so a
+  dropped report there means the call was rejected for its arguments (protocol drift, also seen in
+  `tool_arg_error_rate`): any dropped report WARNs on that step; the 5 % / two-step FAIL rule is the same as before.
+  The setting is read from the run's `run_config.json`; a run without it (older harness) keeps the old rule only.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from honest_agents.trl_rewards import (
 )
 
 OK, WARN, FAIL = 0, 1, 2
+RUN_CONFIG_FILE = "run_config.json"  # written by `train.run` next to the run log
 LEVEL_NAMES = {OK: "OK", WARN: "WARN", FAIL: "FAIL"}
 
 
@@ -97,6 +102,9 @@ class HealthConfig:
     # `harness_patience` consecutive steps. Iteration 11 dropped 73 of 168 budget-exit reports (43 %) and its argument
     # errors climbed to 26-30 of 64 rows per step: both corrupt the reward rather than express the policy.
     dropped_report_fail: float = 0.05  # share of call-budget exits whose report call was never executed
+    # The trainer executes a report call left at the turn cap (`TrainerSection.execute_pending_report`): a dropped
+    # report is then a rejected call, so any share above 0 WARNs; FAIL keeps the 5 % / two-step rule.
+    execute_pending_report: bool = True
     tool_arg_error_fail: float = 0.10  # share of rollouts with a tool call rejected for its arguments
     harness_patience: int = 2
 
@@ -280,10 +288,19 @@ def _harness(rows: Sequence[dict[str, Any]], cfg: HealthConfig) -> list[Finding]
     `harness_patience` steps, WARN when only the latest passes it. A step that did not log the rate (no budget exit in
     the batch) breaks the run of consecutive steps rather than extending it."""
     out: list[Finding] = []
-    k = max(1, cfg.harness_patience)
-    for key, limit, label in (
-        (METRIC_DROPPED_REPORT_SHARE, cfg.dropped_report_fail, "budget exits dropped their report"),
-        (METRIC_TOOL_ARG_ERROR_RATE, cfg.tool_arg_error_fail, "rollouts hit a tool-argument error"),
+    for key, limit, label, k in (
+        (
+            METRIC_DROPPED_REPORT_SHARE,
+            cfg.dropped_report_fail,
+            "budget exits dropped their report",
+            max(1, cfg.harness_patience),
+        ),
+        (
+            METRIC_TOOL_ARG_ERROR_RATE,
+            cfg.tool_arg_error_fail,
+            "rollouts hit a tool-argument error",
+            max(1, cfg.harness_patience),
+        ),
     ):
         latest = [_num(r, key) for r in rows[-k:]]
         if latest[-1] is None or latest[-1] <= limit:
@@ -291,6 +308,17 @@ def _harness(rows: Sequence[dict[str, Any]], cfg: HealthConfig) -> list[Finding]
         run = len(latest) == k and all(v is not None and v > limit for v in latest)
         level, when = (FAIL, f"on {k} consecutive steps") if run else (WARN, "this step")
         out.append(Finding(level, "harness", f"{latest[-1]:.0%} of {label} {when} (limit {limit:.0%})"))
+    if cfg.execute_pending_report:
+        dropped = _num(rows[-1], METRIC_DROPPED_REPORT_SHARE) if rows else None
+        if dropped is not None and 0 < dropped <= cfg.dropped_report_fail:
+            out.append(
+                Finding(
+                    WARN,
+                    "harness",
+                    f"{dropped:.0%} of budget exits dropped their report this step "
+                    "(the pending report call was rejected)",
+                )
+            )
     return out
 
 
@@ -378,6 +406,19 @@ def summary_line(rows: Sequence[dict[str, Any]]) -> str:
     )
 
 
+def config_for_run(run_dir: Path) -> HealthConfig:
+    """The checks for one run: `execute_pending_report` from its `run_config.json` (`trainer` section). A run whose
+    config does not name the setting predates it (its harness dropped such reports); without the file, the default."""
+    path = run_dir / RUN_CONFIG_FILE
+    if not path.is_file():
+        return HealthConfig()
+    try:
+        trainer = json.loads(path.read_text()).get("trainer") or {}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return HealthConfig()
+    return HealthConfig(execute_pending_report=bool(trainer.get("execute_pending_report", False)))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir", type=Path, help=f"a run's output directory (holds {TRAIN_LOG_FILE})")
@@ -386,7 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = ap.parse_args(argv)
     path = args.run_dir / TRAIN_LOG_FILE
     rows = read_jsonl(path) if path.exists() else []
-    findings = check(rows, now=args.now if args.now is not None else time.time())
+    findings = check(rows, now=args.now if args.now is not None else time.time(), cfg=config_for_run(args.run_dir))
     worst = max(f.level for f in findings)
     if args.json:
         print(

@@ -98,6 +98,7 @@ trainer:
   max_tool_workers: null   # null = one thread per live episode
   trim_padding: true       # forward passes on length-trimmed chunks instead of the batch-global padding (same loss)
   sort_micro_batches: true # regroup a round's micro-batches by length, longest first (dapo only; no effect at batch 1)
+  execute_pending_report: true # run a report call written as the last turn at the turn cap (iteration 13; eval follows)
 
 wandb:                     # train.dashboard; used only when grpo.report_to names wandb
   project: honest-agents

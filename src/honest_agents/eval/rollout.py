@@ -99,6 +99,10 @@ class RolloutConfig:
     # Capability measured apart from willingness: no `abstain` tool (pair it with the forced-attempt system prompt).
     # `submit_report` stays, so the episode still ends with a report and is graded exactly as in the normal mode.
     forced_attempt: bool = False
+    # At the turn cap, run the report call the last turn carries instead of dropping it (never a bash call): the cap
+    # bounds tool rounds, a report-only last message is accepted. As `HonestGRPOTrainer.execute_pending_report`
+    # (docs/iteration-13-design.md section 3.1); False reproduces the harness of iterations 11-12.
+    execute_pending_report: bool = True
 
     @property
     def removed_tools(self) -> frozenset[str]:
@@ -140,7 +144,7 @@ class LoopResult:
     n_tool_arg_errors: int = 0
     report_turn: int | None = None  # 1-based model call that submitted the final report (Agentic Abstention's turn)
     # The report tool the last turn called when the turn cap stopped the loop before running it (a "dropped report",
-    # iteration 11: 73 of 168 training budget exits); None otherwise.
+    # iteration 11: 73 of 168 training budget exits), or ran it and it was rejected (bad arguments); None otherwise.
     dropped_report_tool: str | None = None
     report_tool: str | None = None
     prompt_tokens_total: int = 0  # summed over calls (cost accounting)
@@ -263,9 +267,28 @@ async def run_agent_loop(
     """Chat-completions tool loop. Stops at the first successfully dispatched report tool call.
 
     `dispatch(name, args)` returns the tool's string output and raises on failure (unknown tool, bad arguments, tool
-    exception); failures are fed back to the model as `str({"error": ...})` like TRL does.
+    exception); failures are fed back to the model as `str({"error": ...})` like TRL does. At the turn cap only the
+    last turn's first report call is run (`cfg.execute_pending_report`), so the report the model wrote is graded.
     """
     res = LoopResult(messages=messages)
+
+    async def run_call(c: Any) -> None:
+        name = c.function.name
+        res.n_tool_calls += 1
+        try:
+            args = json.loads(c.function.arguments or "{}")
+            if not isinstance(args, dict):
+                raise TypeError(f"tool arguments must be a JSON object, got {type(args).__name__}")
+            content = await dispatch(name, args)
+            if name in REPORT_TOOLS and res.report_turn is None:
+                res.report_turn, res.report_tool = res.n_model_calls, name
+        except Exception as e:  # noqa: BLE001
+            res.n_tool_errors += 1
+            # A TypeError is a signature mismatch (`fn(**args)`), a JSONDecodeError unparsable arguments.
+            res.n_tool_arg_errors += isinstance(e, (TypeError, json.JSONDecodeError))
+            content = tool_error(e)
+        messages.append({"role": "tool", "tool_call_id": c.id, "name": name, "content": content})
+
     first_prompt: int | None = None
     extra_body = cfg.request_extra_body()
     for turn in range(cfg.max_tool_rounds + 1):
@@ -333,25 +356,17 @@ async def run_agent_loop(
             res.stop_reason = "length" if choice.finish_reason == "length" else "no_tool_calls"
             break
         if turn == cfg.max_tool_rounds:
-            res.stop_reason = "max_turns"
-            res.dropped_report_tool = next((c.function.name for c in calls if c.function.name in REPORT_TOOLS), None)
+            pending = next((c for c in calls if c.function.name in REPORT_TOOLS), None)
+            if cfg.execute_pending_report and pending is not None:
+                await run_call(pending)
+            if res.report_turn is not None:
+                res.stop_reason = "report"
+            else:  # no report call, or the environment rejected it (as the trainer, which counts it as dropped)
+                res.stop_reason = "max_turns"
+                res.dropped_report_tool = pending.function.name if pending is not None else None
             break
         for c in calls:
-            name = c.function.name
-            res.n_tool_calls += 1
-            try:
-                args = json.loads(c.function.arguments or "{}")
-                if not isinstance(args, dict):
-                    raise TypeError(f"tool arguments must be a JSON object, got {type(args).__name__}")
-                content = await dispatch(name, args)
-                if name in REPORT_TOOLS and res.report_turn is None:
-                    res.report_turn, res.report_tool = res.n_model_calls, name
-            except Exception as e:  # noqa: BLE001
-                res.n_tool_errors += 1
-                # A TypeError is a signature mismatch (`fn(**args)`), a JSONDecodeError unparsable arguments.
-                res.n_tool_arg_errors += isinstance(e, (TypeError, json.JSONDecodeError))
-                content = tool_error(e)
-            messages.append({"role": "tool", "tool_call_id": c.id, "name": name, "content": content})
+            await run_call(c)
         if res.report_turn is not None:
             res.stop_reason = "report"
             break

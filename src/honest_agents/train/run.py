@@ -17,6 +17,7 @@ from honest_agents.models import (
     flash_linear_attention_available,
 )
 from honest_agents.train.dashboard import WandbMirror, init_run, wandb_enabled
+from honest_agents.train.health import HealthConfig
 from honest_agents.train.plan import Plan, bank_dir, quarantine_file
 from honest_agents.train.rows import check_resume_order
 from honest_agents.train.startup import check_lm_head_cast, check_prompt_budget, startup_probe
@@ -71,7 +72,10 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
         probe = ValidationProbe(out, plan.cfg.probe.selection_metric)
         trainer.add_callback(probe)
     if wandb_enabled(plan.grpo_config.report_to):
-        trainer.add_callback(WandbMirror(run_log, probe, health_checks=plan.cfg.wandb.health))
+        health_config = HealthConfig(execute_pending_report=plan.cfg.trainer.execute_pending_report)
+        trainer.add_callback(
+            WandbMirror(run_log, probe, health_checks=plan.cfg.wandb.health, health_config=health_config)
+        )
     from honest_agents.memory import MemoryDebug, ReleaseFreedMemory, mem_debug_enabled
 
     trainer.add_callback(ReleaseFreedMemory())
@@ -196,6 +200,7 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     trainer.max_tool_workers = plan.cfg.trainer.max_tool_workers
     trainer.trim_padding = plan.cfg.trainer.trim_padding
     trainer.sort_micro_batches = plan.cfg.trainer.sort_micro_batches
+    trainer.execute_pending_report = plan.cfg.trainer.execute_pending_report
     check_training_template(trainer, plan.family, strict=plan.cfg.model.strict_template)
     check_tool_flow_template(trainer, strict=plan.cfg.model.strict_template)
     check_end_of_turn_token(trainer, strict=plan.cfg.model.strict_template)

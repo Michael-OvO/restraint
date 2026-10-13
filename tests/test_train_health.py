@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from honest_agents.callbacks import TRAIN_LOG_FILE
-from honest_agents.train.health import FAIL, OK, WARN, check, main
+from honest_agents.train.health import FAIL, OK, WARN, HealthConfig, check, config_for_run, main
 
 
 def step(i: int, **over) -> dict:
@@ -242,20 +242,47 @@ def _with(rows: list[dict], key: str, values: dict[int, float]) -> list[dict]:
 
 
 def test_dropped_reports_warn_on_one_step_and_fail_on_two_consecutive():
+    """The rule for a harness that drops a report written at the turn cap (before iteration 13)."""
     key = "honest/dropped_report_share"
+    old = HealthConfig(execute_pending_report=False)
     healthy = _with(run(6), key, dict.fromkeys(range(1, 7), 0.0))
-    assert "harness" not in checks(healthy)
-    assert checks(_with(healthy, key, {6: 0.20}))["harness"] == WARN
-    assert checks(_with(healthy, key, {5: 0.20, 6: 0.10}))["harness"] == FAIL
+    assert "harness" not in checks(healthy, cfg=old)
+    assert checks(_with(healthy, key, {6: 0.20}), cfg=old)["harness"] == WARN
+    assert checks(_with(healthy, key, {5: 0.20, 6: 0.10}), cfg=old)["harness"] == FAIL
     # 5 % is the limit itself: not above it
-    assert "harness" not in checks(_with(healthy, key, {5: 0.05, 6: 0.05}))
+    assert "harness" not in checks(_with(healthy, key, {5: 0.05, 6: 0.05}), cfg=old)
     # a bad step followed by a good one is over
-    assert "harness" not in checks(_with(healthy, key, {5: 0.30, 6: 0.0}))
+    assert "harness" not in checks(_with(healthy, key, {5: 0.30, 6: 0.0}), cfg=old)
     # a step without budget exits logs no share: it breaks the run of consecutive steps
     gap = [
         {k: v for k, v in r.items() if not (k == key and r["step"] == 5)} for r in _with(healthy, key, {4: 0.3, 6: 0.3})
     ]
-    assert checks(gap)["harness"] == WARN
+    assert checks(gap, cfg=old)["harness"] == WARN
+
+
+def test_any_dropped_report_warns_when_the_harness_executes_pending_reports():
+    """A dropped report is then a rejected call (protocol drift): it WARNs at once, and FAILs by the old rule."""
+    key = "honest/dropped_report_share"
+    healthy = _with(run(6), key, dict.fromkeys(range(1, 7), 0.0))
+    assert "harness" not in checks(healthy)
+    findings = [f for f in check(_with(healthy, key, {6: 0.02})) if f.check == "harness"]
+    assert [f.level for f in findings] == [WARN] and "rejected" in findings[0].message
+    assert checks(_with(healthy, key, {5: 0.20, 6: 0.10}))["harness"] == FAIL
+    # the check is on the latest step: a bad step followed by a clean one is over
+    assert "harness" not in checks(_with(healthy, key, {5: 0.5, 6: 0.0}))
+
+
+def test_the_dropped_report_rule_follows_the_runs_config(tmp_path):
+    assert config_for_run(tmp_path).execute_pending_report  # no run_config.json: the current harness
+    (tmp_path / "run_config.json").write_text(json.dumps({"trainer": {"max_tool_workers": None}}))
+    assert not config_for_run(tmp_path).execute_pending_report  # a run from before the setting
+    (tmp_path / "run_config.json").write_text(json.dumps({"trainer": {"execute_pending_report": True}}))
+    assert config_for_run(tmp_path).execute_pending_report
+    rows = _with(run(4), "honest/dropped_report_share", {4: 0.03})
+    (tmp_path / TRAIN_LOG_FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert main([str(tmp_path), "--now", str(rows[-1]["time"] + 60)]) == WARN
+    (tmp_path / "run_config.json").write_text(json.dumps({"trainer": {"execute_pending_report": False}}))
+    assert main([str(tmp_path), "--now", str(rows[-1]["time"] + 60)]) == OK
 
 
 def test_tool_argument_errors_warn_then_fail():

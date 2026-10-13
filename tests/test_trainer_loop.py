@@ -259,6 +259,7 @@ def run_loop(
     *,
     serial: bool,
     stop_at_report: bool = True,
+    execute_pending_report: bool = True,
     max_workers: int | None = None,
     barrier: threading.Barrier | None = None,
 ) -> Result:
@@ -267,6 +268,7 @@ def run_loop(
     envs = [FakeEnv(e, delay=scenario.delay, barrier=barrier) for e in episodes]
     trainer = make_trainer(generator, envs, scenario)
     trainer.stop_at_report = stop_at_report
+    trainer.execute_pending_report = execute_pending_report
     trainer.max_tool_workers = max_workers
     prompt_ids = [[100 + e, 5, 6] for e in episodes]
     prompts = [[{"role": "system", "content": "sys"}, {"role": "user", "content": f"task {e}"}] for e in episodes]
@@ -446,6 +448,61 @@ def test_iteration_cap_leaves_pending_tool_calls_unexecuted():
     assert_same(ours, ref)
     assert ours.envs[0].log == [("bash", "c0"), ("bash", "c1"), ("bash", "c2")]
     assert ours.trainer._loop_record.exits == [STOP_CALL_BUDGET]
+
+
+def capped_report_scenario() -> Scenario:
+    """Episodes cut off by a cap of 3 iterations; their 4th turn (never run by TRL) carries various calls."""
+    bash3 = [Turn(3, [BASH(f"c{i}")]) for i in range(3)]
+    return Scenario(
+        {
+            0: [*bash3, Turn(4, [call("submit_report", status="incomplete")])],  # a report-only last turn
+            1: [*bash3, Turn(4, [BASH("late"), call("submit_report", status="complete")])],  # bash is never run
+            2: [*bash3, Turn(4, [call("submit_report", wrong=1)])],  # rejected for its arguments: no report
+            3: [*bash3, Turn(4, [BASH("more")])],  # an ordinary budget exit
+            4: [Turn(4, [BASH("a")]), Turn(5)],  # stops silently before the cap
+        },
+        max_iterations=3,
+    )
+
+
+@pytest.mark.parametrize("workers", [None, 1])
+def test_a_report_written_at_the_iteration_cap_is_executed_with_trls_token_outputs(workers, monkeypatch):
+    monkeypatch.setattr(trainer_mod, "_argument_hint", lambda tool, arguments: "")
+    scenario = capped_report_scenario()
+    ref = run_loop(scenario, serial=True)
+    ours = run_loop(scenario, serial=False, max_workers=workers)
+    # every token output (ids, logprobs, tool mask, messages, counters) is TRL's: nothing is appended or generated
+    for name, a, b in zip(FIELDS, ours.output, ref.output, strict=True):
+        assert a == b, f"{name} differs"
+    assert ours.prompts == ref.prompts
+    assert ours.generator.seen_turns == ref.generator.seen_turns
+    # ... only the environments differ: the pending report call ran, and nothing else did
+    assert ours.envs[0].log == [*ref.envs[0].log, ("submit_report", "incomplete")]
+    assert ours.envs[0]._report == {"status": "incomplete"} and ref.envs[0]._report is None
+    assert ours.envs[1].log == [*ref.envs[1].log, ("submit_report", "complete")]  # no ("bash", "late")
+    for i in (2, 3, 4):
+        assert ours.envs[i].log == ref.envs[i].log and ours.envs[i]._report is None
+    last = ours.output[1][0][-1]
+    assert last["role"] == "assistant" and last["tool_calls"][0]["function"]["name"] == "submit_report"
+    record = ours.trainer._loop_record
+    assert record.exits == [STOP_REPORT, STOP_REPORT, STOP_CALL_BUDGET, STOP_CALL_BUDGET, STOP_SILENT]
+    assert record.pending_reports_executed == 2
+
+
+def test_a_pending_report_is_not_run_when_switched_off_or_already_recorded():
+    scenario = capped_report_scenario()
+    ref = run_loop(scenario, serial=True)
+    off = run_loop(scenario, serial=False, execute_pending_report=False)
+    assert_same(off, ref)
+    assert off.trainer._loop_record.exits[:2] == [STOP_CALL_BUDGET, STOP_CALL_BUDGET]
+    # with stop_at_report off, an episode that reported earlier and is still calling tools at the cap keeps its report
+    early = Scenario(
+        {0: [Turn(3, [call("submit_report", status="complete")]), Turn(3, [call("submit_report", status="x")])]},
+        max_iterations=1,
+    )
+    ours = run_loop(early, serial=False, stop_at_report=False)
+    assert ours.envs[0].log == [("submit_report", "complete")] and ours.envs[0]._report == {"status": "complete"}
+    assert ours.trainer._loop_record.pending_reports_executed == 0
 
 
 def test_no_tool_calls_at_all():

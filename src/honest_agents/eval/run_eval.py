@@ -158,6 +158,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"capability mode: feasible tasks only, no `abstain` tool, the shipped {FORCED_ATTEMPT_PROMPT_FILE.name}",
     )
+    p.add_argument(
+        "--drop-pending-report",
+        action="store_true",
+        help="the harness of iterations 11-12: a report call written as the last turn at the turn cap is not run "
+        "(default: it is run, as the trainer does unless trainer.execute_pending_report is false)",
+    )
     p.add_argument("--request-timeout", type=float, default=600.0)
     p.add_argument("--environment-type", default="docker")
     p.add_argument(
@@ -323,6 +329,10 @@ def resolve_configs(
         system_prompt=Path(prompt_file).read_text() if prompt_file else None,
         neutral_tools=bool(args.neutral_prompt or args.neutral_tools),
         forced_attempt=bool(args.forced_attempt),
+        # As the training run's trainer (train/config.py TrainerSection), unless the CLI asks for the old harness.
+        execute_pending_report=(
+            not args.drop_pending_report and bool((train.get("trainer") or {}).get("execute_pending_report", True))
+        ),
         **sampling,
     )
     # The environment's own limits, as `train.build_budget` applies them: the command timeout and any `env.budget`.
@@ -544,6 +554,9 @@ def _check_resumable(out: Path, args: argparse.Namespace, rollout_cfg: RolloutCo
     old_forced = bool(old.get("rollout", {}).get("forced_attempt", False))
     if old_forced != rollout_cfg.forced_attempt:
         diffs.append(f"forced_attempt: {old_forced!r} -> {rollout_cfg.forced_attempt!r}")
+    old_pending = bool(old.get("rollout", {}).get("execute_pending_report", False))  # absent: the older harness
+    if old_pending != rollout_cfg.execute_pending_report:
+        diffs.append(f"execute_pending_report: {old_pending!r} -> {rollout_cfg.execute_pending_report!r}")
     if old.get("split") != args.split:
         diffs.append(f"split: {old.get('split')!r} -> {args.split!r}")
     if diffs:
