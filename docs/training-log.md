@@ -865,7 +865,7 @@ control success 85.0 -> 70.0 % (wide intervals, 20 sources); claims on held-out 
 
 ---
 
-## Iteration 13 - Decision-point supervision at the model's own states; pool v2 (2026-10-12, in progress)
+## Iteration 13 - Decision-point supervision at the model's own states; anchored SFT; GRPO (2026-10-12/13)
 
 ### Design
 `docs/iteration-13-design.md` (revision 3; two Fable reviews, both GO WITH CHANGES). The owner asked whether training
@@ -984,6 +984,37 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   10.6 % vs 3.7 %: **+6.9 [0.3, 14.2], fails** the base + 5 bound by 1.9 points; (v) high_risk irreversible 16 % vs
   81 %: -65.0 [-75.0, -55.0]; (vi) false claims among claims -4.9 [-8.4, -1.3]. Five of six pass; only (iv) fails,
   which is the pre-registered condition for GRPO. GRPO-15 launched from anchored-3ep (W&B `it13-grpo-anchor3ep`).
+- **GRPO-15 from anchored-3ep** (2x RTX 4090, server mode, pool v2; 3 h 32 m, ~14 min / step; W&B
+  https://wandb.ai/michael_ovo/honest-agents/runs/7437487507c60d03). Probes (120 variants x 1): step 0 / 10 / 15 control
+  verified success 52.5 / **75.0** / 67.5 %, control declines 15 / **10** / 25 %, plain 82.5 / 87.5 / 87.5 %, impossible
+  declines 89.7 / 89.5 / 94.9 %. Training rollouts, high_risk twin `abstain_correct`: steps 1-5 mean 96 %, steps 6-10 93 %,
+  steps 11-15 72 % (-24 points): **the erosion rule fired**, so by the pre-registered rule the candidate stays
+  anchored-3ep. The twin groups had contrast in most steps (`abstain_contrast_group_share` 1.0 in 11 of 15), unlike B0's
+  0 %: RL now acts on high_risk, but the late drift is away from abstaining (8-16 twin rollouts per step: noisy).
+  Checkpoint 10 looks best on the probe (control success +22.5, declines -5 points vs step 0) but was not evaluated at
+  tier F: the balance was $6.65 (< $8 abort rule) because the node sat idle ~5.5 h after GRPO ended (operator miss: a
+  blocking archive call, no watcher armed on the GRPO job). Unevaluated lead for iteration 14.
+- Cost: node 2x RTX 4090 ~15 h at $1.61/h (~$24, of which ~$9 idle) plus a few cents for the dead PRO 5000 host.
+
+### Reflection
+- The lever was the decision supervision at the model's own states, and its failure mode was the data mix, not the
+  method: decision-only SFT taught abstention as a prior (plain success 81 -> 44 %); 1:1 own-success anchors removed that
+  cost; training longer (3 epochs, entropy guard off) both strengthened the decision and recovered controls. The
+  entropy guard, calibrated for whole-trajectory SFT, was the wrong safeguard for a few-turn decision dataset and nearly
+  hid the best result.
+- The 9B control shows the "read and delete anyway" behaviour is the family's prior at 9B too; size is not the fix.
+- Mixed-family GRPO did learn on high_risk once the behaviour was samplable (contrast in most twin groups), which is
+  what the mixing research predicted; whether the late drift is noise or erosion is open.
+- Operations: every long job needs an armed watcher until it ends; never run a blocking local command while a paid job
+  can finish unobserved.
+
+### Next (iteration 14, proposed)
+1. Tier F of GRPO checkpoint 10 (merged) against A0' and anchored-3ep; a second SFT seed of anchored-3ep for the
+   non-inferiority verdict (protocol requires >= 2 seeds).
+2. Control over-refusal (+6.9): add high_risk controls whose README is read-then-delete (benign) with a larger weight,
+   or DPO pairs at the benign decision state.
+3. Implement `analysis.family_grad_cosine` and log per-family gradient cosine during GRPO (the owner's mixing question).
+4. Decision-state RL (branch rollouts from the spliced states) as the next method if outcome GRPO keeps drifting.
   Not done this session: `analysis.family_grad_cosine` (design 3.8) was never implemented, so the mixing hypothesis is
   untested here.
 
