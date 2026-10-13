@@ -156,8 +156,10 @@ class BankSelection:
 
 
 def read_rows(bank_path: str | Path, flt: RowFilter | None = None) -> BankSelection:
-    """Rows of a bank (file or directory) split into usable and scorable, with a count of every drop reason."""
+    """Rows of a bank (file or directory) split into usable and scorable, with a count of every drop reason. A leading
+    `~` in the path is expanded (the archive banks live under the home directory on the Mac)."""
     flt = flt or RowFilter()
+    bank_path = Path(bank_path).expanduser()
     quarantined = _quarantined(bank_path, flt)
     leaky = leaky_variants(bank_mod.iter_bank(bank_path)) if flt.drop_leaky else set()  # a streaming first pass
     sel = BankSelection([], [], Counter())
@@ -178,17 +180,31 @@ def variant_fraction(variant: str, seed: int) -> float:
     return int.from_bytes(digest[:8], "big") / 2**64
 
 
-def is_heldout(row: BankRow, fraction: float, seed: int) -> bool:
-    return fraction > 0 and variant_fraction(variant_of(row), seed) < fraction
+def pair_of(row: BankRow) -> str:
+    """The row's source task (`pair_id`): twin, control and plain variants of one source share it. Falls back to the
+    variant, so a row without a pair is its own group."""
+    spec = row.task.get("spec") if isinstance(row.task.get("spec"), dict) else {}
+    return str(row.task.get("pair_id") or spec.get("pair_id") or variant_of(row))
 
 
-def partition(rows: Iterable[BankRow], fraction: float, seed: int) -> tuple[list[BankRow], list[BankRow]]:
+PARTITION_KEYS: dict[str, Callable[[BankRow], str]] = {"variant": variant_of, "pair": pair_of}
+
+
+def is_heldout(row: BankRow, fraction: float, seed: int, key: Callable[[BankRow], str] = variant_of) -> bool:
+    return fraction > 0 and variant_fraction(key(row), seed) < fraction
+
+
+def partition(
+    rows: Iterable[BankRow], fraction: float, seed: int, key: Callable[[BankRow], str] = variant_of
+) -> tuple[list[BankRow], list[BankRow]]:
     """(fit rows, held-out rows), split by VARIANT so no variant is on both sides (rollouts of one variant share a
-    prompt and would leak into the held-out entropy / calibration otherwise)."""
+    prompt and would leak into the held-out entropy / calibration otherwise). `key=pair_of` splits by source task
+    instead, so a twin and its control land on the same side (the decision stage derives both examples of a pair from
+    one control episode and holds out whole pairs)."""
     fit: list[BankRow] = []
     held: list[BankRow] = []
     for row in rows:
-        (held if is_heldout(row, fraction, seed) else fit).append(row)
+        (held if is_heldout(row, fraction, seed, key) else fit).append(row)
     return fit, held
 
 

@@ -2,8 +2,9 @@
 
 One entrypoint for every SFT stage (`kind:` in the config picks the example builder): `hindsight` (report-only
 hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`),
-imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`) and context distillation of hinted base-model
-rollouts (`selfdistill`, `sft.selfdistill`); the last four register their builders with `register_stage`.
+imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`), context distillation of hinted base-model
+rollouts (`selfdistill`, `sft.selfdistill`) and decision-point supervision at the model's own high_risk states
+(`decision`, `sft.decision`); the last five register their builders with `register_stage`.
 A stage turns the fit rows and the held-out rows of a trajectory bank into `SFTExample`s; this module tokenises them
 with the loss mask of `sft.data`, wires TRL's `SFTTrainer` with PEFT LoRA and writes the adapter.
 
@@ -61,7 +62,8 @@ class LoraSection:
 @dataclass
 class DataSection:
     bank: str = "outputs/phase0/bank"  # bank directory (`bank-*.jsonl`) or one bank file
-    holdout_fraction: float = 0.1  # of VARIANTS: held-out entropy batch and confidence calibration
+    holdout_fraction: float = 0.1  # of VARIANTS (or pairs, see `partition_by`): held-out entropy batch and calibration
+    partition_by: str = "variant"  # `variant` | `pair`: what the held-out split keeps together (`data.PARTITION_KEYS`)
     max_length: int = 16384  # longer examples are dropped (truncating would cut the report)
     max_rows: int | None = None  # cap on fit examples, taken in a stable pseudo-random order
     min_examples: int = 16  # refuse a run with fewer fit examples
@@ -109,6 +111,7 @@ class SftConfig:
     bestofn: dict[str, Any] = field(default_factory=dict)  # `bestofn.BestOfNOptions` fields (kinds bestofn, combo)
     teacher: dict[str, Any] = field(default_factory=dict)  # `teacher_stage.TeacherOptions` fields (kind teacher)
     selfdistill: dict[str, Any] = field(default_factory=dict)  # `selfdistill.SelfDistillOptions` (kind selfdistill)
+    decision: dict[str, Any] = field(default_factory=dict)  # `decision.DecisionOptions` fields (kind decision)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -131,6 +134,7 @@ STAGE_MODULES = {
     "combo": "honest_agents.sft.bestofn",
     "teacher": "honest_agents.sft.teacher_stage",
     "selfdistill": "honest_agents.sft.selfdistill",
+    "decision": "honest_agents.sft.decision",
 }
 
 
@@ -168,6 +172,8 @@ def parse_config(raw: dict[str, Any], *, check_kind: bool = True) -> SftConfig:
         validator(cfg)
     if not 0.0 <= cfg.data.holdout_fraction < 1.0:
         raise ValueError("data.holdout_fraction must be in [0, 1)")
+    if cfg.data.partition_by not in data.PARTITION_KEYS:
+        raise ValueError(f"data.partition_by must be one of {sorted(data.PARTITION_KEYS)}, got {cfg.data.partition_by!r}")
     return cfg
 
 
@@ -230,7 +236,7 @@ def build_stage_data(cfg: SftConfig) -> tuple[StageData, dict[str, Any]]:
     """Read the bank, partition it by variant and build the stage's examples. Returns the data and a summary."""
     flt = data.RowFilter(**cfg.data.row_filter)
     sel = data.read_rows(cfg.data.bank, flt)
-    fit, held = data.partition(sel.usable, cfg.data.holdout_fraction, cfg.seed)
+    fit, held = data.partition(sel.usable, cfg.data.holdout_fraction, cfg.seed, data.PARTITION_KEYS[cfg.data.partition_by])
     if cfg.data.max_rows is not None:
         fit = _stable_order(fit)[: cfg.data.max_rows]
     stage = STAGES[cfg.kind](cfg, fit, held, sel.scorable)

@@ -1,0 +1,66 @@
+# Iteration 13, decision-point supervision (docs/iteration-13-design.md sections 3.2 and 3.4): spliced examples at the
+# base model's OWN high_risk states (pass@4 bank, distill-pool sources), two injected read turns with real sandbox
+# outputs, then the decision and the report; loss on READ1, READ2, DECISION and REPORT only. Builder:
+# honest_agents/sft/decision.py; sandbox outputs: honest_agents/tasks/decision_probe.py.
+#   python -m honest_agents.tasks.decision_probe outputs --pools data/distill_pool.jsonl data/train_rl.jsonl data/val.jsonl
+#   python -m honest_agents.sft.decision summary --config configs/sft_decision_qwen35.yaml   # selection only, no GPU
+#   python -m honest_agents.sft.decision verify  --config configs/sft_decision_qwen35.yaml   # G1 (labels, tokens)
+#   python -m honest_agents.sft.train_sft --config configs/sft_decision_qwen35.yaml --dry-run
+#   scripts/run_sft.sh configs/sft_decision_qwen35.yaml
+# After training: the epoch ladder (eval.decision_probe --hf-model ... --adapter <checkpoint> on the own-prefix subset),
+# `sft.merge`, the 12-task vLLM sanity run, the full decision probe, tier S (G2).
+# Shared sections (model, data.row_filter, train defaults) come from sft_hindsight.yaml.
+base: sft_hindsight.yaml
+kind: decision
+run_name: it13-sft-decision          # also the W&B run name
+
+lora:
+  r: 32                              # the RL adapter's rank, as in iterations 11-12
+  alpha: 64
+
+data:
+  # The iteration-3 pass@4 bank of the base model (3,828 train rows, harness.SYSTEM_PROMPT). On the node: rsync the
+  # archive directory and override data.bank=<path>.
+  bank: ~/Documents/honest-agents-archive/iterations/03-passk-bank/eval/passk/bank
+  holdout_fraction: 0.1              # of PAIRS (both sides together): held-out eval loss / entropy
+  partition_by: pair
+  max_length: 24576                  # whole spliced transcripts (~9-11k tokens); longer ones are dropped, not cut
+  # Expected ~180 fit examples (section 3.2: 104 pairs before the phrasing holdout); far fewer means the sandbox
+  # outputs or the sources are missing, not that training should go ahead on a handful.
+  min_examples: 128
+
+decision:                            # honest_agents.sft.decision.DecisionOptions
+  distill_pool: data/distill_pool.jsonl       # SFT sources: the 91 high_risk pairs outside the iteration-11 RL pool
+  rl_pool: data/train_rl.jsonl                # asserted disjoint from the sources (the RL twins stay unseen by SFT)
+  include_rl_pool_sources: false              # G1 fallback if fewer than min_pairs pairs come out (then recorded)
+  sandbox_outputs: data/decision/sandbox_outputs.jsonl
+  tasks_root: data/tasks
+  per_variant: 2                              # control episodes per variant, deletion-last-state-change first
+  phrasing_holdout: 2                         # README phrasings held out per side (review R3, revised from 4)
+  phrasing_seed: it13
+  min_pairs: 80
+  reward:                                     # the training reward the labels are verified under
+    alpha: 0.1
+    false_blame: -0.4
+    implicit_abstain: 0.0
+
+train:
+  # 5e-5, not iteration 12's 2e-5: ~95 % of the tokens are masked and the trained turns sit in the model's own context,
+  # so the drift surface is the four turns (section 3.4). ~100 steps of 8 examples at ~10k tokens.
+  learning_rate: 5.0e-5
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8     # effective batch 8
+  lr_scheduler_type: cosine
+  warmup_steps: 0.1
+  eval_steps: 5
+  save_steps: 1000                   # unused: save_strategy epoch (below) saves at every epoch end
+  save_total_limit: 3                # keep all three epoch adapters for the epoch ladder
+  # W&B: the key comes from WANDB_API_KEY or ~/.netrc on the node; WANDB_MODE=disabled turns it off.
+  report_to: wandb
+  extra:
+    run_name: it13-sft-decision      # the W&B run name (TrainingArguments.run_name), not the output path
+    save_strategy: epoch             # adapters at epoch 1, 2, 3: the decision probe picks one (section 3.4)
+
+guard:
+  entropy_floor_ratio: 0.8           # stop if held-out entropy falls below 0.8x its start: GRPO needs the spread
