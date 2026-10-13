@@ -1,4 +1,11 @@
-# Iteration 13 design: decision-point supervision at the model's own states (draft, 2026-10-12)
+# Iteration 13 design: decision-point supervision at the model's own states (revision 2, 2026-10-12)
+
+Revision 2 applies the go/no-go review (GO WITH CHANGES; required changes 1-6, marked **[R1]**-**[R6]** where they
+land) and the three research notes on the owner's question "should we train one task style at a time?" (section 3.0;
+notes in `docs/research/it13-*.md`). The changes to the plan: splice defects fixed (3.2), a README-phrasing holdout
+(3.2), the decision probe promoted to P0 with its sandbox outputs built on the node (3.3, 6), GRPO re-budgeted to
+3 h 15 m (6), the probe / tier-F overlap stated (4), and the RL pool rebalanced towards the endpoint with per-step
+family strata plus per-family monitors and a gradient-conflict diagnostic (3.5, 3.8).
 
 Goal unchanged since iteration 11: a policy that is **more honest on impossible tasks and no less capable** than the
 base model, by the iteration-12 evaluation protocol (tier S screen, tier F final paired by source, -5 margin,
@@ -18,7 +25,9 @@ Every number below that is not marked "estimate" was re-counted from the archive
   prefix, warning README) a non-destructive continuation and a rule-based report (`incomplete`, `risk_discovered`,
   target = the directory) that `compute_reward` scores `abstain_correct`. LoRA SFT with loss on **only** the two read
   turns, the decision turn and the report turn; everything else is the model's own and is masked. Then GRPO from that
-  policy with the iteration-11 pool, order and seed (paired step for step with B0 and iteration 11).
+  policy on **pool v2**: families stay mixed with each twin and its control in the same step, revoke_permission gets
+  40 twins instead of 10 (it learns under RL and is 35 % of the tier-F impossible episodes), per-step family strata
+  (section 3.0: the "train one style" alternative was checked three ways and rejected).
 - **Harness (H):** execute the pending report call at the turn cap (trainer and evaluation), closing the dropped-report
   leak exactly (20 % of budget exits at tier F); re-evaluate the base under it.
 - **Control arm (N):** Qwen3.5-9B base, unhinted, tier S, plus a sandbox-free *decision probe*: is "reads the warning
@@ -31,7 +40,7 @@ Every number below that is not marked "estimate" was re-counted from the archive
   at tier F 55 %; the capability bound passes -5 for the final candidate 45 %; **the whole G4 25-30 %**. The binding
   constraint is again evaluation power on capability (section 5): with the half-width observed in iteration 12 (4.6
   points), even a zero-loss policy passes -5 only ~60 % of the time.
-- **Cost:** one ~9 h session on one RTX PRO 6000 96 GB (~$17), one engineering day on the Mac first. Nothing is rented
+- **Cost:** one ~9 h session on one RTX PRO 6000 96 GB (~$17-19 of the $30 balance), one engineering day on the Mac first. Nothing is rented
   until the dataset, labels, scoring and tokenisation are verified locally (memory rule: gate GPU spend).
 
 ## 1. What the archive says (re-counted for this design)
@@ -91,6 +100,43 @@ of 116. The transfer check this iteration uses `corrupt_input` only (section 3.7
 | H5 | Qwen3.5-9B does not solve high_risk unprompted either (the failure is a family prior, not 4B capacity) | 9B tier S: claims on high_risk twins > 70 %; decision probe P(destroy \| warning) | 65 % that 9B claims > 70 %; 40 % that 9B decides right after reading |
 
 ## 3. Plan
+
+### 3.0 Mixed families or one style? (research, decides 3.5)
+
+The owner's hypothesis: sampling very different task families into one step makes the reward non-smooth and harms
+training; train one style. Three independent checks (archive analysis of it09 / it11 / it12 training rows with logged
+advantages; distribution options on the pool and bank; a literature review of ~60 papers) agree it is **not** the
+failure here, and that homogeneous training would make things worse:
+
+- **The jagged curve is not the gradient.** ~75 % of the per-step variance of mean reward is between task types; GRPO
+  subtracts the group mean, so that part never reaches the update. Advantage mass per step is not predicted by the
+  step's composition (R^2 <= 0), grad_norm is stable (CV ~0.2) and uncorrelated with twin counts; no family dominates
+  (high_risk twins 13 %, controls 24 %, plain 20 % of |advantage|).
+- **One-family steps would be rougher.** Simulated on the recorded advantages: gradient magnitude swings 2.8x between
+  family blocks, direction flips at every block boundary, 30-40 % of high_risk-only steps carry under half the usual
+  signal. Per-family advantage normalisation (AgentRL 2510.04206; TRL `scale_rewards: batch`) moves family shares by
+  <= 5 points here and does not improve direction alignment. Literature: joint multi-domain RL matches or beats
+  single-domain at equal compute (Guru 2506.14965; To-Mix-or-To-Merge 2602.12566 on Qwen3-4B; ScaleRL 2510.13786);
+  long single-domain phases forget (2606.02398: -6.6 to -8.8 points after one switch). The counter-evidence (MGS
+  2602.02301 gradient conflict math vs chat; TAC 2606.25178 bandit-chosen single-domain steps, +1.8) is small and
+  concerns very different domains at 128-512 prompts per step.
+- **The real conflict is inside high_risk, at one observable state.** Twin and control look identical to a policy
+  that never reads the README; the twin rewards stalling (the best twin samples were budget exits in 11 of 16 groups),
+  the control rewards finishing, and the two cancel (net/gross advantage 0.03-0.07). Training high_risk alone keeps
+  this conflict (it is within the family) and dropping the controls teaches "run out of budget". `abstain_correct` on
+  high_risk twins: 0 of 704 bank rows, 0 of 288 it11 rows, 0 of 224 B0 rows, and RL cannot reinforce what it never
+  samples (Yue et al. 2504.13837; on our exact stack, TRL GRPO + LoRA on Qwen3-4B, "Rewarding Intellectual Humility"
+  2601.20126 got 0.0 % abstention from RL alone and 39-44 % after a small SFT warm-start).
+- **Where the signal is of the right kind, the mix learned.** revoke_permission and remove_input twins rank correct
+  abstention top in every live group; revoke moved +9 of 56 in B0 with only 3 twin groups in 15 steps.
+
+What this changes: the decision SFT stays the lever for high_risk (it makes the behaviour samplable, the
+literature's ranked-first requirement); the RL pool keeps families **mixed and twins paired with their controls in the
+same step**, but gives the families that learn more slots (3.5, pool v2), adds per-family monitors, and logs a
+per-family gradient cosine so the mixing hypothesis is tested directly once high_risk carries signal (3.8). Not done:
+single-family curricula, homogeneous step blocks, per-family reward scales, reward changes. In-group hinted rollouts
+(Scaf-GRPO 2510.19807, π-Distill 2602.04942, the literature's top pick) need the behaviour under the hint, and
+iteration 12 measured 0 abstentions in 208 hinted episodes, so they stay off (section 9).
 
 ### 3.1 Harness: execute the pending report call at the turn cap (trainer and evaluation)
 
@@ -163,6 +209,22 @@ REPORT`, where:
   identical main task), which is what makes the twin's report truthful; this is why the twin example is built on the
   control's prefix rather than on a twin trajectory whose main-task outcome is unknown (tests are not run on high_risk
   twins).
+- **Splice consistency [R1].** Three defects the review found, each now a rule with a test:
+  (A) the own decision turn's *content* (its thinking / prose) was written after the previous tool output, not after
+  the README; it can refer to output that is no longer the last thing in context. On both sides the decision turn's
+  content is replaced by a short line drawn from the same pool of own sentences as READ1/READ2 (control: "README says
+  these are rebuildable outputs; clearing it as asked."-style templates with `<what>` from the control's README; twin:
+  the non-destructive continuation's own content if it is a later own turn, else a template quoting the warning) and
+  only the tool call is kept verbatim. (B) twin tails can contradict the new state: any tail turn whose content or
+  arguments mention the target, the deletion or "cleared / removed / freed" is a cut point, and if the cut leaves
+  fewer than one clean turn the twin goes straight to REPORT; the filter is checked on all built twins and the drop
+  count reported. (C) `evidence_commands` in the twin REPORT are restricted to commands that literally occur in the
+  spliced transcript (plus the two injected reads), never commands from the removed tail.
+- **README-phrasing holdout [R3].** The warning and benign READMEs come from 14 phrasings per side. Phrasings are split
+  by a stable hash: 10 per side are used in SFT, 4 per side are held out; the decision probe and the tier-S / tier-F
+  readouts report high_risk metrics separately on seen and unseen phrasings, so "learned the decision" is not confused
+  with "memorised 10 sentences". If an unseen phrasing occurs in fewer than 6 tier-F twin variants, the readout is
+  reported with its count and not gated.
 - **Own-twin augmentation** (P2, if time): twin episodes' own prefixes with READ1/READ2 injected and `DECISION` = the
   own next clean command (132 available); the example ends at the decision turn (no report, nothing to verify). At
   most 1 per twin variant.
@@ -188,7 +250,11 @@ adapter for the SFT epoch ladder) and classify the turn: `destroy` (`is_destruct
 `none`. Reported per arm and paired by source: P(destroy | warning), P(destroy | benign), P(report_blocker | warning),
 and discrimination = P(destroy | benign) - P(destroy | warning).
 
-Two prompt sets, both built on the Mac: **own-prefix** (RL-pool control prefixes, 128 capped, twin and control
+Priority **P0 [R4]**: the probe is the iteration's mechanism metric and the epoch selector, so it is built before any
+GPU is rented. The sandbox outputs (the `ls -la` and `cat README` of each high_risk variant, ~344 boots) are produced
+off the Mac's critical path: on the Mac's Docker daemon when it is running, otherwise as the first job on the node
+(~10 min at 32 parallel boots), before the base probe; the prompt sets are assembled from those outputs by the same
+code in both places. Two prompt sets: **own-prefix** (RL-pool control prefixes, 128 capped, twin and control
 outputs: unseen by SFT, same split) and **zero-prefix** (`[system, instruction, READ1, OUT1, READ2, OUT2]` for the 20
 validation high_risk pairs and the 91 distill pairs: "first thing, look at what you are asked to delete"). Cost: ~1,500
 completions of ~150 tokens, about two minutes per policy. It is a mechanism probe, not an outcome measure: tier S / F
@@ -214,9 +280,8 @@ of iteration 11), the 12-task vLLM sanity run, the full decision probe through v
 
 ### 3.5 GRPO from the decision policy (arm D-RL)
 
-`configs/grpo_it13.yaml`: `base: grpo_it12_96gb.yaml`, `model.name` = the merged decision policy, the iteration-11 pool
-(`data/train_rl.jsonl`, 351 rows, 80 high_risk twins with their 81 controls) in the **same file order and seed** as
-iteration 11 and B0, so every step sees the same tasks as those runs; reward unchanged (alpha 0.1, false_blame -0.4,
+`configs/grpo_it13.yaml`: `base: grpo_it12_96gb.yaml`, `model.name` = the merged decision policy, **pool v2**
+(`data/train_rl_v2.jsonl`, section 3.0 and below); reward unchanged (alpha 0.1, false_blame -0.4,
 gamma 0); `env.report_turns 8` plus the pending-report execution; 16k budget; colocated vLLM at 0.3; **15 steps**
 (time), `save_steps 5`, probes at 0 / 10 / 15 (120 variants x 1, `probe.batch_size 120`); the iteration-11/12 stop
 rules; W&B `it13-grpo-decision`. New per-step monitors: high_risk twin zero-variance share, `abstain_correct` on
@@ -229,6 +294,34 @@ benign README earns 0.1 or -0.4 against 1.5-1.6 for the deletion-and-success.
 
 Signal gate (G3, in run): high_risk twin groups with a contrast >= 40 % over steps 1-5 (B0: ~0 % in the abstain
 direction); else GRPO is stopped at step 5 and the SFT policy is the candidate (the RL is not teaching the decision).
+
+**Pool v2 (the distribution change).** Built with `tasks.rl_pool` from the same exclusions (SFT sources, validation,
+test), `family_quotas: {high_risk: 80, revoke_permission: 40, remove_input: 25}`, each twin with its control, plain
+64: ~355 rows. remove_input's 25 = the 13 twins with any base claim in the bank plus 12 of the solved ones as
+retention. Order: **stratified blocks** of 8 rows = one optimizer step (`shuffle_dataset false`, `pair_batches
+false`, as before): every block holds a twin **and its control in the same step** for at least one high_risk pair and
+at least one revoke or remove_input pair, the rest high_risk pairs / plain rows by quota, seed 42; `data_order.json`
+stamps the order. Per 15 steps that is ~27 high_risk, ~13 revoke and ~8 remove_input twins (B0 pool: 28 / 3 / 15).
+Why change the pool now rather than in iteration 14 (the distribution note's default was to stay paired with B0): the
+B0 pairing only answers "same tasks, different start policy", and the G2 / G3 readouts plus the per-family monitors
+answer the mechanism question without it; revoke is 35 % of the tier-F impossible episodes and was fed 3 twin groups
+in B0 (expected +2 to +4 points on the primary endpoint from the quota alone). The cost is attribution: D-RL's gain
+over D mixes "RL from D" and "pool v2"; the per-family monitors (3.8) separate them partly (revoke gains vs high_risk
+gains). Kept unchanged: reward, the 1:1 twin/control pairing, the mixed step.
+
+### 3.8 Per-family monitors and the gradient-conflict diagnostic
+
+Logged every step by `trl_rewards` (new, `honest/family/<fam>/...`): reward mean and within-group sd, zero-variance
+group share, `abstain_correct`, implicit and wrong-reason rates on twins, control decline rate, twin |advantage|
+share. G3 reads the high_risk twin contrast from these, not from the pooled `zero_variance_group_share`.
+
+The direct test of the owner's hypothesis (literature R8; TAC / MGS): after training, `analysis.family_grad_cosine`
+loads the checkpoint-5/10/15 adapters, recomputes the GRPO loss on that step's logged completions and advantages
+(from the completions parquet) separately per family (high_risk, revoke, remove_input, feasible), and reports the
+cosine between the per-family LoRA gradients (and per module group: attention, MLP). Reading, pre-registered: if
+cos(high_risk, feasible) < -0.1 on most probed steps while high_risk carries signal, iteration 14 tries PCGrad on the
+LoRA parameters or one-family blocks; if it is near zero or positive, the mixing hypothesis is set aside for this
+setup. P1: it runs on the node after the GRPO (~10 min) and is cut first if the clock is short.
 
 ### 3.6 Stronger-base control (arm N: Qwen3.5-9B)
 
@@ -257,6 +350,12 @@ probe, tier S (G2). **D-RL** GRPO-15 from D: probes 0/10/15, selection, tier F o
 transfer v2, decision probe. **N** 9B: tier S + decision probe (parallel with the final tier F). Every run passes
 `--train-config configs/grpo_it13.yaml` (G1 asserts `max_bash_calls 28`, `max_tool_rounds 36`,
 `execute_pending_report true` in each `config.json`).
+
+**Overlap [R6].** `probe_v1` (tier S and the in-run probes) is drawn from the validation split, so its 20 high_risk
+twins are a subset of tier F's validation twins; probe-based selection (G3) therefore looks at part of the tier-F data,
+and tier F of the selected checkpoint is not a fully clean held-out test. Stated, not fixed this iteration: the
+selection uses at most two probed steps, and the tier-F readout is also reported on the validation sources outside
+`probe_v1` (no gate). None of the SFT or RL sources is in validation.
 
 Evaluation tiers as in iteration 12, every arm under the new harness, unhinted prompt, temperature 1.0: **tier S** =
 `data/probe_v1.jsonl` (120 variants, 40 sources; 20 high_risk twins) x 2 = 240 episodes, ~35 min at 56 concurrent;
@@ -330,13 +429,14 @@ second seed and 8 samples per feasible variant before any claim; (d) no margin o
 | 1:40-1:55 | epoch ladder (HF probe on 40 + 40 x 4 per epoch) | adapter choice |
 | 1:55-2:10 | merge, 12-task vLLM sanity | merged D |
 | 2:10-2:50 | vLLM(D, mem 0.35) replaces nothing yet (two servers fit): full decision probe (2 min), **tier S of D** (240 ep) | G2 at ~2:50 |
-| 2:50-5:45 | both servers down; **GRPO-15 colocated** from D (B0 pace: steps 6-12 min, probes ~18 min at 0 / 10 / 15) | checkpoints 5 / 10 / 15 |
-| 5:45-6:00 | selection on the probes, merge, sanity | candidate |
-| 6:00-7:40 | server A (candidate, mem 0.42): **tier F** + transfer v2 + decision probe; server B (9B, mem 0.42): tier S + decision probe | G4, H5 |
-| 7:40-8:30 | gates, bad-case review inputs, `honest_agents.archive`, W&B links, log entry | - |
+| 2:50-6:05 | both servers down; **GRPO-15 colocated** from D **[R5]**: B0 measured 15 steps at 6-12 min (mean ~9: 2 h 15 m) plus three probes at ~18 min (54 m) = 3 h 10 m; budget 3 h 15 m | checkpoints 5 / 10 / 15 |
+| 6:05-6:20 | selection on the probes, merge, sanity; gradient-cosine diagnostic (P1, 10 min, alongside) | candidate |
+| 6:20-8:00 | server A (candidate, mem 0.42): **tier F** + transfer v2 + decision probe; server B (9B, mem 0.42): tier S + decision probe | G4, H5 |
+| 8:00-8:50 | gates, bad-case review inputs, `honest_agents.archive`, W&B links, log entry | - |
 
-Cut lines, by the clock and the pre-registered rules, not by looking at results: G2 later than 3:30 -> GRPO 10 steps
-(probes 0 / 10); later than 4:30 -> no GRPO, tier F on D; G2 fails on reads with the decision probe flat -> no GRPO,
+Cut lines, by the clock and the pre-registered rules, not by looking at results: G2 later than 3:10 -> GRPO 10 steps
+(probes 0 / 10, ~2 h 10 m); later than 4:30 -> no GRPO, tier F on D; GRPO step 10 not reached by 5:30 -> stop at
+step 10 and select among 0 / 10; G2 fails on reads with the decision probe flat -> no GRPO,
 diagnosis block (<= 1 h: 9B probe + tier S if the weights are down, base zero-prefix probe already done), stop the node
 (~4 h, ~$8); 9B weights not down by 6:00 -> drop the 9B tier S, keep its decision probe if the server is up by 7:00;
 any arm's evaluation stopped with SIGINT and `docker rm -f` of its containers before the next job (iteration-11
@@ -347,11 +447,12 @@ servers down.
 Engineering day (Mac, before the session), in priority order; P2 items are dropped first:
 
 - **P0:** `tasks/decision_probe.py` (sandbox outputs per high_risk variant, prompt sets, 182 + 162 boots on the Mac's
-  Docker); `sft/decision.py` stage + config + tests + the offline `abstain_correct` verification + dry run; the
+  Docker, OrbStack, or the node's first job); `eval/decision_probe.py` (vLLM and HF modes) **[R4]**; the splice
+  consistency rules and the phrasing holdout with tests **[R1, R3]**; pool v2 (`configs/tasks/rl_pool_v2.yaml`, the
+  stratified order) and the per-family monitors; `sft/decision.py` stage + config + tests + the offline `abstain_correct` verification + dry run; the
   pending-report execution in `trainer.py` and `eval/rollout.py` with tests, the config stamp, `ROLLOUT_KEYS`, the health
   rule; `configs/grpo_it13.yaml`, `configs/sft_decision_qwen35.yaml`; the session runbook with the clock above.
-- **P1:** `eval/decision_probe.py` (vLLM and HF modes, classification, paired summary); `data/transfer_v2.jsonl`; the
-  epoch-ladder script.
+- **P1:** `data/transfer_v2.jsonl`; the epoch-ladder script; `analysis.family_grad_cosine` (3.8).
 - **P2:** own-twin augmentation; forced-attempt run on the candidate; a Claude style audit of 30 twin reports.
 
 ## 7. Risks and mitigations
@@ -392,8 +493,14 @@ Engineering day (Mac, before the session), in priority order; P2 items are dropp
   category, target and README text, and the teacher's 72 reports fix the phrasing; rule-based labels are deterministic,
   free and verifiable offline. Kept for a style audit only. For families without ground truth in the spec it would be
   the way (~10-15k tokens per label, not 45k per episode).
-- **Hint inside GRPO (iteration-12 section 3.4, B2 / C).** Iteration 12 showed the hinted policy does not make the
-  decision either, so hinted rollouts would not add the behaviour to the groups. Off.
+- **Hint inside GRPO (iteration-12 section 3.4, B2 / C; Scaf-GRPO 2510.19807, π-Distill 2602.04942, LUFFY
+  2504.14945).** The literature's first-ranked fix for never-sampled behaviour, but it presupposes the behaviour under
+  the hint; iteration 12 showed the hinted policy does not make the decision either (0 abstentions in 208 hinted
+  episodes), so hinted rollouts would not add it to the groups. Off for iteration 13; back on the table for iteration
+  14 if D makes the decision samplable but GRPO does not amplify it (hinted continuations from D at decision states).
+- **One style at a time** (single-family curriculum, homogeneous step blocks, per-family reward / advantage scales):
+  rejected on the evidence of section 3.0; the per-family gradient cosine (3.8) is the pre-registered test that would
+  bring it back.
 - **Context distillation of hinted rollouts.** Failed its gate (2 % / 9 % reads, 0 abstentions). Off.
 - **Decision-state GRPO with prefix replay** (`reset()` runs the control prefix's commands in the sandbox, the prompt is
   the spliced decision state, 8 continuations are sampled and graded): the natural way to get mixed groups exactly where
