@@ -1,0 +1,32 @@
+# Iteration 13, decision SFT with anchor examples (arm D-anchor). The first decision SFT (sft_decision_qwen35.yaml)
+# taught the decision but over-generalised giving up: half of its trained report turns were `incomplete`, and on tier S
+# verified success fell 79 % -> 44 % on feasible tasks and 58 % -> 16 % on controls (false_blame after one command).
+# Mitigation: as many of the base model's OWN verified successes on feasible tasks as there are decision examples (1:1),
+# whole trajectory trained (self-distillation). Same bank, model, system prompt and hyper-parameters as the decision
+# run; only `decision.anchors` and the run name / output differ. Builder: honest_agents.sft.decision (build_anchors).
+#   python -m honest_agents.sft.decision verify --config configs/sft_decision_anchor_qwen35.yaml data.bank=<bank>
+#   python -m honest_agents.sft.train_sft --config configs/sft_decision_anchor_qwen35.yaml --dry-run
+#   scripts/run_sft.sh configs/sft_decision_anchor_qwen35.yaml
+base: sft_decision_qwen35.yaml
+run_name: it13-sft-decision-anchor   # output: outputs/sft/it13-sft-decision-anchor (not the decision run's directory)
+
+data:
+  min_examples: 256                  # ~176 decision + ~176 anchor examples before the held-out split
+
+decision:
+  anchors:                           # honest_agents.sft.decision.AnchorOptions
+    count: 165                       # 1:1 would be 176; 165 = every anchor left once the unread high_risk ones go
+    # Sources = the distill pool's sources (decision.distill_pool); a source in any of these is never used.
+    exclude_pools: [data/train_rl.jsonl, data/train_rl_v2.jsonl, data/val.jsonl, data/test.jsonl]
+    feasible_fraction: 0.5           # half plain feasible, half controls
+    control_families: [revoke_permission, remove_input]
+    high_risk_fill: true             # high_risk controls (those that read before deleting first) fill the control half
+    high_risk_unread: false          # false drops high_risk anchors that delete the sentinel unread (11 of 35; then count: 165)
+    max_turns: null                  # cap on own bash commands per anchor, if the anchors' trained tokens dwarf the decision's
+    length_buckets: 4                # anchors matched to the command-count quartiles of the decision sources
+    max_trained_ratio: 4.0           # G1: anchor / decision trained tokens
+
+train:
+  extra:
+    run_name: it13-sft-decision-anchor   # the W&B run name
+    save_strategy: epoch

@@ -4,6 +4,7 @@ synthetic bank."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections import Counter
 from pathlib import Path
@@ -21,8 +22,11 @@ from tests.decision_fixtures import (
     OWN_REPORT,
     TARGET,
     Fixture,
+    anchor_pool_row,
+    anchor_row,
     control_row,
     twin_row,
+    write_pool,
 )
 from tests.sft.helpers import bank_dir, tiny_tokenizer
 from tests.sft.test_train_sft import ROOT
@@ -472,3 +476,154 @@ def test_dry_run_tokenises_the_spliced_examples(fx: Fixture, tmp_path: Path):
     lines = [json.loads(x) for x in (cfg.output_dir / "examples.jsonl").read_text().splitlines()]
     assert all(len(ex["loss_messages"]) in (3, 4) for ex in lines)
     assert summary["mean_trained_tokens"] > 0
+
+
+# ── anchors ──────────────────────────────────────────────────────────────────
+
+GOOD_FEASIBLE = [f"anc__f{i}" for i in range(4)]
+GOOD_CONTROL = [f"anc__c{i}" for i in range(2)]
+
+
+def _anchor_rows(fx: Fixture, tmp_path: Path) -> tuple[list, str]:
+    """Anchor candidates: 4 good feasible (one with a second sample), 2 good remove_input controls, one source in an
+    excluded (RL) pool, one outside the distill pool, one failed episode, one validation row; the excluded pool path."""
+    pool = [json.loads(x) for x in fx.pool.read_text().splitlines()]
+    extra = [anchor_pool_row(p) for p in [*GOOD_FEASIBLE, "anc__fail", "anc__val"]]
+    extra += [anchor_pool_row(p, "remove_input") for p in GOOD_CONTROL]
+    write_pool(fx.pool, pool + extra)
+    excluded = write_pool(tmp_path / "rl_pool.jsonl", [anchor_pool_row("anc__rl")])
+    rows = [anchor_row(p) for p in GOOD_FEASIBLE] + [anchor_row(GOOD_FEASIBLE[0], sample=1)]
+    rows += [anchor_row(p, family="remove_input") for p in GOOD_CONTROL]
+    rows += [anchor_row("anc__rl"), anchor_row("anc__other"), anchor_row("anc__fail", passed=False),
+             anchor_row("anc__val", split="validation")]  # fmt: skip
+    return rows, str(excluded)
+
+
+def _anchor_opts(fx: Fixture, excluded: str, **anchors) -> dec.DecisionOptions:
+    return dec.DecisionOptions(**fx.options(anchors={"exclude_pools": [excluded], **anchors}))
+
+
+def test_anchor_selection_excludes_rl_and_validation_sources_and_filters(fx: Fixture, tmp_path: Path):
+    rows, excluded = _anchor_rows(fx, tmp_path)
+    a = dec.build_anchors([*rows, *fx.bank_rows], [], _anchor_opts(fx, excluded, count=6), [])
+    sources = {ex.meta["pair_id"] for ex in a.examples}
+    assert len(a.examples) == 6 and not sources & {"anc__rl", "anc__other", "anc__fail", "anc__val"}
+    # half feasible; the control half from remove_input first, then one high_risk control
+    assert a.info["by_kind"] == {dec.ANCHOR_FEASIBLE: 3, dec.ANCHOR_CONTROL: 2, dec.ANCHOR_HIGH_RISK: 1}
+    assert a.dropped[dec.DROP_ANCHOR_EXCLUDED] == 1 and a.dropped[dec.DROP_NOT_SOURCE] == 1
+    assert a.dropped["not_train_split"] == 1 and a.dropped[dec.DROP_ANCHOR_VARIANT_CAP] == 1
+    assert sum(a.dropped.values()) == 5  # + the failed episode (not success_claimed)
+    assert len({ex.variant for ex in a.examples}) == 6
+    assert all(dec.programmatic_drop_reason(a.rows[ex.meta["source_episode"]]) is None for ex in a.examples)
+    # stable: the same selection twice
+    again = dec.build_anchors([*rows, *fx.bank_rows], [], _anchor_opts(fx, excluded, count=6), [])
+    assert [ex.id for ex in again.examples] == [ex.id for ex in a.examples]
+
+
+def test_anchor_count_defaults_to_one_per_decision_example(fx: Fixture, tmp_path: Path):
+    rows, excluded = _anchor_rows(fx, tmp_path)
+    opts = _anchor_opts(fx, excluded)
+    ds = dec.build_dataset(fx.bank_rows, opts)
+    a = dec.build_anchors([*rows, *fx.bank_rows], [], opts, ds.pairs)
+    assert len(ds.examples) == 12 and a.info["requested"] == 12 and len(a.examples) == 12
+    assert a.info["by_kind"] == {dec.ANCHOR_FEASIBLE: 4, dec.ANCHOR_CONTROL: 2, dec.ANCHOR_HIGH_RISK: 6}
+    assert a.info["high_risk_deleting_unread"] == 6
+    strict = dec.build_anchors([*rows, *fx.bank_rows], [], _anchor_opts(fx, excluded, high_risk_unread=False), ds.pairs)
+    assert len(strict.examples) == 6 and strict.dropped[dec.DROP_ANCHOR_UNREAD] == 6
+    none = dec.build_anchors([*rows, *fx.bank_rows], [], dec.DecisionOptions(**fx.options()), ds.pairs)
+    assert none.examples == [] and none.info == {"enabled": False}
+
+
+def test_anchor_max_turns_and_options(fx: Fixture, tmp_path: Path):
+    rows, excluded = _anchor_rows(fx, tmp_path)
+    a = dec.build_anchors(rows, [], _anchor_opts(fx, excluded, count=6, max_turns=2), [])
+    assert a.examples == [] and a.dropped[dec.DROP_ANCHOR_TOO_LONG] == 7  # 6 variants + a second sample
+    with pytest.raises(ValueError, match="unknown key"):
+        dec.DecisionOptions(anchors={"nope": 1})
+    with pytest.raises(ValueError, match="feasible_fraction"):
+        dec.DecisionOptions(anchors={"feasible_fraction": 2})
+
+
+def test_anchors_follow_the_pair_partition(fx: Fixture, tmp_path: Path):
+    rows, excluded = _anchor_rows(fx, tmp_path)
+    fit, held = data.partition([*rows, *fx.bank_rows], 0.5, 0, data.pair_of)
+    a = dec.build_anchors(fit, held, _anchor_opts(fx, excluded, count=10), [])
+    held_pairs = {data.pair_of(r) for r in held}
+    assert a.held and a.fit
+    assert all(ex.meta["pair_id"] in held_pairs for ex in a.held)
+    assert not {ex.meta["pair_id"] for ex in a.fit} & held_pairs
+
+
+def test_anchor_trains_every_assistant_turn(fx: Fixture, tmp_path: Path):
+    tok = tiny_tokenizer()
+    renderer = make_renderer(tok, "qwen3")
+    ex = dec.anchor_example(anchor_row("anc__f0"), dec.ANCHOR_FEASIBLE)
+    assistant = [i for i, m in enumerate(ex.messages) if m.get("role") == "assistant"]
+    assert ex.loss_messages == assistant == dec.intended_loss_messages(ex) and len(assistant) == 4
+    t = tokenize_example(ex, renderer)
+    runs = data.mask_runs([int(x != data.IGNORE_INDEX) for x in t.labels])
+    assert len(runs) == len(assistant)
+    text = tok.decode([i for i, label in zip(t.input_ids, t.labels, strict=True) if label != data.IGNORE_INDEX])
+    assert "ls /app" in text and "cp /app/in.txt /app/out.txt" in text and "submit_report" in text
+    assert "[exit code" not in text and "autonomous agent" not in text  # tool outputs and the prompt are masked
+
+
+def _anchor_cfg(fx: Fixture, tmp_path: Path, rows: list, excluded: str, **over) -> train_sft.SftConfig:
+    bank = bank_dir(tmp_path / "bank", [*fx.bank_rows, *(twin_row(p) for p in fx.pairs), *rows])
+    overrides = [
+        f"data.bank={bank}",
+        f"output_root={tmp_path / 'out'}",
+        "data.holdout_fraction=0.0",
+        "data.min_examples=2",
+        "model.name=tiny",
+        "model.family=qwen3",
+        "train.report_to=none",
+        "data.max_length=8192",
+        *(f"decision.{k}={v}" for k, v in fx.options().items() if v is not None),
+        "decision.rl_pool=null",
+        f"decision.anchors.exclude_pools=[{excluded}]",
+        "decision.anchors.count=null",  # 1:1 on the synthetic bank
+        "decision.anchors.high_risk_unread=true",
+        *(f"{k}={v}" for k, v in over.items()),
+    ]
+    return train_sft.load_config(ROOT / "configs" / "sft_decision_anchor_qwen35.yaml", overrides)
+
+
+def test_shipped_anchor_config_parses():
+    cfg = train_sft.load_config(ROOT / "configs" / "sft_decision_anchor_qwen35.yaml")
+    base = train_sft.load_config(ROOT / "configs" / "sft_decision_qwen35.yaml")
+    assert cfg.kind == "decision" and cfg.run_name == "it13-sft-decision-anchor"
+    assert cfg.output_dir != base.output_dir and cfg.train.extra["run_name"] == "it13-sft-decision-anchor"
+    assert cfg.train == dataclasses.replace(base.train, extra=cfg.train.extra) and cfg.lora == base.lora
+    assert cfg.train.extra["save_strategy"] == "epoch"
+    opts = dec.parse_options(cfg.decision)
+    # the unread high_risk anchors are left out, and the count is what remains (165 on the real bank; 1:1 is 176)
+    assert opts.anchors is not None and opts.anchors.count == 165 and not opts.anchors.high_risk_unread
+    assert {"data/train_rl.jsonl", "data/train_rl_v2.jsonl", "data/val.jsonl"} <= set(opts.anchors.exclude_pools)
+    assert dec.parse_options(base.decision).anchors is None
+
+
+def test_stage_and_verify_with_anchors(fx: Fixture, tmp_path: Path, monkeypatch):
+    rows, excluded = _anchor_rows(fx, tmp_path)
+    cfg = _anchor_cfg(fx, tmp_path, rows, excluded)
+    stage, summary = train_sft.build_stage_data(cfg)
+    a = summary["decision"]["anchors"]
+    assert a["requested"] == a["selected"] == 12 and len(stage.train) == 24
+    assert Counter(ex.meta["side"] for ex in stage.train) == {"twin": 6, "control": 6, "anchor": 12}
+    monkeypatch.setattr(train_sft, "load_tokenizer", lambda cfg: tiny_tokenizer())
+    report = dec.verify(cfg, tokenizer=tiny_tokenizer())
+    assert report["verdict"] == "PASS", report["checks"]
+    names = {c["name"] for c in report["checks"]}
+    assert {"anchors: 12 selected", "anchors: source rows success_claimed", "anchors: no RL-pool / validation / test source",
+            "anchors: every assistant turn trained"} <= names  # fmt: skip
+    totals = report["tokenization"]["trained_totals"]
+    assert totals["decision"] > 0 and totals["anchor"] > 0 and totals["anchor_per_decision"] == round(totals["anchor"] / totals["decision"], 2)
+    assert "anchor" in report["tokenization"]["trained_tokens"]["by_side"]
+    text = dec.render_verify(report)
+    assert "trained tokens total: decision" in text and "anchors: 12 of 12" in text
+    # too many requested -> the count check fails; a tight ratio cap -> the token check fails
+    short = dec.verify(_anchor_cfg(fx, tmp_path / "b", rows, excluded, **{"decision.anchors.count": 40}), tokenizer=tiny_tokenizer())
+    assert short["verdict"] == "FAIL" and not next(c for c in short["checks"] if c["name"] == "anchors: 40 selected")["passed"]
+    tight = dec.verify(_anchor_cfg(fx, tmp_path / "c", rows, excluded, **{"decision.anchors.max_trained_ratio": 0.01}),
+                       tokenizer=tiny_tokenizer())  # fmt: skip
+    assert tight["verdict"] == "FAIL"

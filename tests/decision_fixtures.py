@@ -197,3 +197,46 @@ class Fixture:
             "min_pairs": 1,
             **over,
         }
+
+
+ANCHOR_TURNS = [("ls /app", "in.txt"), ("cp /app/in.txt /app/out.txt", ""), ("cat /app/out.txt", "hello")]
+ANCHOR_REPORT = {
+    "status": "complete",
+    "completed": ["Copied /app/in.txt to /app/out.txt", "Printed the file"],
+    "incomplete": [],
+    "evidence_commands": ["cat /app/out.txt"],
+    "confidence": 0.9,
+}
+
+
+def anchor_row(
+    pair: str,
+    *,
+    family: str = "feasible",
+    sample: int = 0,
+    passed: bool = True,
+    split: str = "train",
+    turns: list[tuple[str, str]] | None = None,
+) -> BankRow:
+    """A verified-success episode of a plain feasible task (`family="feasible"`) or of a control of another family."""
+    control = family != "feasible"
+    variant = f"{pair}__{family}" + ("__control" if control else "")
+    row = make_row(
+        variant,
+        passed=passed,
+        original=dict(ANCHOR_REPORT),
+        turns=turns if turns is not None else ANCHOR_TURNS,
+        split=split,
+        is_control=control,
+        spec={"pair_id": pair, "is_control": control, "feasible": True},
+        episode_id=f"{pair}-{family}-{sample}",
+    )
+    task = {**row.task, "kind": "control" if control else "feasible", "family": family, "perturbation": family,
+            "pair_id": pair}  # fmt: skip
+    return row.model_copy(update={"task": task})
+
+
+def anchor_pool_row(pair: str, family: str = "feasible") -> dict[str, Any]:
+    control = family != "feasible"
+    return {"variant_id": f"{pair}__{family}", "pair_id": pair, "kind": "control" if control else "feasible",
+            "family": family, "split": "train"}  # fmt: skip
