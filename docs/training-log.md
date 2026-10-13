@@ -865,7 +865,43 @@ control success 85.0 -> 70.0 % (wide intervals, 20 sources); claims on held-out 
 
 ---
 
----
+## Iteration 13 - Decision-point supervision at the model's own states; pool v2 (2026-10-12, in progress)
+
+### Design
+`docs/iteration-13-design.md` (revision 3; two Fable reviews, both GO WITH CHANGES). The owner asked whether training
+one task style at a time would help; three research notes (`docs/research/it13-*.md`) say no: group-centred GRPO
+removes the between-family reward jaggedness (~75 % of per-step reward variance), one-family steps would swing gradient
+magnitude 2.8x, and the real conflict is inside high_risk (twin and control indistinguishable without reading the
+README; 0 correct high_risk abstentions in ~1,200 rollouts). Changes: (1) decision SFT on spliced own trajectories (88
+pairs, read + decide + report turns only); (2) harness executes the report written at the turn cap; (3) RL pool v2
+(families mixed, twin and control in the same step, revoke 10 -> 40 twins) with per-family monitors; (4) a
+sandbox-free decision probe. Node: 2x RTX 4090 48 GB (no >= 80 GB VM on offer; a 2x RTX PRO 5000 host never opened
+SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.yaml` (12288 cap).
+
+### Results (so far)
+- G1 (Mac and node): PASS. 88 pairs / 176 examples, all twin reports score `abstain_correct`, 0 mutating turns
+  dropped, 492 trained tokens per example. Node smoke (16 episodes, new harness): 15 report exits, 1 turn cap, 0 dropped.
+- Decision SFT (W&B `it13-sft-decision`, https://wandb.ai/michael_ovo/honest-agents/runs/6aru21bs): stopped by the
+  entropy guard at step 20 of 63 (~1 epoch; held-out entropy 0.288 -> 0.204 < 0.8x), held-out loss 0.544 -> 0.213.
+  The guard is calibrated for whole-trajectory SFT; here loss sits on 3-4 mostly templated turns. Step-20 adapter used.
+- Decision probe, own-prefix states of RL-pool pairs (unseen by SFT), 8 samples per state:
+
+  | | base | D (step 20) |
+  |---|---|---|
+  | P(destroy \| warning README) | 0.81 | **0.11** |
+  | P(report blocker \| warning) | 0.002 | **0.57** |
+  | P(destroy \| benign README) | 0.85 | 0.48 |
+  | P(report blocker \| benign) | 0.001 | 0.06 |
+  | discrimination | 0.04 [0.01, 0.07] | **0.36 [0.32, 0.41]** |
+
+  Unseen README phrasings (6 sources): discrimination 0.16 [0.05, 0.27]. Zero-prefix (decision right after the
+  instruction): D discriminates little (0.06; base 0.02), as expected: there the right next move is the main task.
+  The pre-registered probe threshold P(destroy | benign) >= 0.8 fails; the benign mass moved to further inspection
+  (`cat` of the data files, re-reading the README: 41 %), not to declines (6 %).
+
+### Observations
+- The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
+  README in context, discrimination 0.04. One epoch of decision SFT on 88 own-state pairs moves it to 0.36.
 
 ---
 
