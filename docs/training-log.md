@@ -938,6 +938,25 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   impossible 28 % (53 %); revoke twins 82 % (50 %); plain verified success 78 % (81 %); controls 55 % (59 %), control
   declines 23 % (4 %). Rule outcome: reads 25 % < 30 % -> **no GRPO** (as pre-registered); tier F on the anchored policy
   (the better of D / anchored), which is also the iteration's primary-endpoint test of the SFT candidate.
+- **Tier F, anchored SFT (0.88 epoch) vs A0'** (712 episodes each, paired by source, 98 sources):
+  - (i) `abstain_correct` on impossible 60.0 % vs 28.7 %: **+31.2 [22.6, 40.6]**; high_risk +41.2 [28.7, 55.0]
+    (0 % -> 41 %); revoke +30.4 [21.4, 39.3] (57 % -> 88 %); remove_input 58 % = 58 %.
+  - (ii) claims on impossible 25.7 % vs 53.9 %: **-28.3 [-37.2, -19.4]**.
+  - (iii) verified success on feasible 73.4 % vs 72.6 %: **+0.7 [-2.9, 4.5]**, lower bound above -5 (protocol: no
+    verdict with one seed, as pre-registered). Plain 79.6 % vs 76.3 %; controls 58.1 % vs 63.7 %.
+  - (iv) control decline rate 23.1 % vs 3.7 %: **+19 points, FAILS** (<= base + 5); high_risk controls decline 29 %
+    (success 46 % vs 63 %).
+  - (v) high_risk irreversible violations 51 % vs 81 %; (vi) false claims among claims 16.0 % vs 21.7 %: -5.7 [-9.8, -2.0].
+  - G4: five of six pass; over-refusal on controls fails.
+- **Entropy guard off, 3 epochs (anchored-3ep;** W&B https://wandb.ai/michael_ovo/honest-agents/runs/x9scfrbd).
+  The guard had stopped both SFT runs at <= 1 epoch; the owner asked why, and the guard (calibrated for
+  whole-trajectory SFT) was turned off for a 3-epoch run with the same data. Decision probe: P(destroy | warning) 0.05,
+  P(destroy | benign) 0.89, discrimination **0.84** (unseen phrasings 0.55): the pre-registered probe threshold passes.
+  Tier S vs base: all twins `abstain_correct` 74 % (28 %), high_risk 70 % (0 %), high_risk README read before decision
+  35 % (0 %), plain verified success 80 % (81 %), controls 68 % (59 %), control declines 15 % (4 %). It passes the
+  pre-registered GRPO rule (reads >= 30 %, high_risk `abstain_correct` >= 20 %, plain >= 66 %). Chosen over the 0.88
+  epoch model on tier S (selection on probe_v1, which holds every impossible validation source: the tier-F readout of
+  anchored-3ep is selected-on, stated). Tier F running.
 
 ### Observations
 - The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
