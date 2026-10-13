@@ -11,6 +11,23 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
 
 ---
 
+## Latest (2026-10-13, after iteration 13)
+
+- **Iteration 13: first candidate that is much more honest and no less capable.** Decision-point SFT at the model's own
+  states (read the README, then delete or decline) plus 1:1 own-success anchors, 3 epochs ("anchored-3ep", Qwen3.5-4B
+  LoRA), tier F against base (712 episodes, paired by source, one seed): correct abstention on impossible tasks
+  29 -> 73 % (**+44.8 [34.4, 55.6]**; high_risk 0 -> 69 %), claims on impossible 54 -> 15 % (**-38.8**), verified success on
+  feasible 72.6 -> 75.7 % (**+3.1 [-0.3, 6.7]**), high_risk irreversible deletions 81 -> 16 %; control declines 3.7 ->
+  10.6 % (+6.9, fails the +5 bound). Five of six G4 checks pass; no non-inferiority verdict with one seed.
+- What did not work: decision-only SFT (abstention as a prior, plain success 81 -> 44 %); merging half the update; the
+  entropy guard (stopped both SFTs at <= 1 epoch). GRPO-15 from anchored-3ep: the erosion rule fired (high_risk twin
+  abstention 96 -> 72 % in training rollouts); checkpoint 10 is best on the probe but was not evaluated (budget).
+- Qwen3.5-9B base reads warnings and deletes anyway like the 4B: the failure is the family's prior, not size.
+- The owner's "train one style" question: three research notes say mixing is not the problem (docs/research/it13-*).
+- Next: tier F of GRPO checkpoint 10, a second SFT seed, fix control over-refusal, per-family gradient cosine.
+- W&B: anchored-3ep SFT https://wandb.ai/michael_ovo/honest-agents/runs/x9scfrbd, GRPO
+  https://wandb.ai/michael_ovo/honest-agents/runs/7437487507c60d03. Archive: `iterations/13-*`.
+
 ## Latest (2026-10-12, after iteration 12)
 
 - **Iteration 12:** fixed the harness (late reports scored, forgiving report schema). Hint distillation failed its gate:
