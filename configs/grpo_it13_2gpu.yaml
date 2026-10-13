@@ -1,0 +1,22 @@
+# Iteration 13 arm D-RL on TWO 48 GB GPUs (2x RTX PRO 5000; no >= 80 GB VM was on offer): vLLM server on GPU 0, trainer
+# on GPU 1 (server mode and the 12288 completion cap of grpo_it12.yaml, the 48 GB limit since iteration 11). Otherwise
+# identical to grpo_it13.yaml: pool v2, 15 steps, probes 0 / 10 / 15. Every run of the iteration on this node,
+# evaluations included, passes THIS file as --train-config so all arms share one budget.
+#   python -m honest_agents.train.run --config configs/grpo_it13_2gpu.yaml model.name=<merged decision policy>
+base: grpo_it12.yaml
+output_root: outputs/it13
+model:
+  # PLACEHOLDER: the merged decision-SFT policy (sft.merge output of the chosen epoch, design 3.4).
+  name: outputs/it13/sft_decision_merged
+data:
+  train_file: data/train_rl_v2.jsonl
+wandb:
+  name: it13-grpo-decision
+  group: it13
+grpo:
+  max_steps: 15
+  save_steps: 5
+probe:
+  steps: [10, 15]
+  on_start: true
+  batch_size: 120
