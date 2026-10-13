@@ -6,8 +6,9 @@
 base: grpo_it12.yaml
 output_root: outputs/it13
 model:
-  # PLACEHOLDER: the merged decision-SFT policy (sft.merge output of the chosen epoch, design 3.4).
-  name: outputs/it13/sft_decision_merged
+  # The base model, so evaluations that pass this file as --train-config (A0', tier S / F) work as-is; the GRPO run
+  # overrides it with the merged decision-SFT policy: model.name=outputs/it13/sft_decision_merged (design 3.4).
+  name: Qwen/Qwen3.5-4B
 data:
   train_file: data/train_rl_v2.jsonl
 wandb:

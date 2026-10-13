@@ -5,9 +5,9 @@
 base: grpo_it12_96gb.yaml
 output_root: outputs/it13
 model:
-  # PLACEHOLDER: the merged decision-SFT policy (sft.merge output of the chosen epoch, design 3.4). Override on the
-  # command line if it lands elsewhere; this path does not exist until the SFT stage has run.
-  name: outputs/it13/sft_decision_merged
+  # The base model, so evaluations that pass this file as --train-config (A0', tier S / F) work as-is; the GRPO run
+  # overrides it with the merged decision-SFT policy: model.name=outputs/it13/sft_decision_merged (design 3.4).
+  name: Qwen/Qwen3.5-4B
 data:
   # Pool v2 (configs/tasks/rl_pool_v2.yaml): high_risk 80 / revoke 40 / remove_input 25 twins, each with its control,
   # 64 plain; stratified paired step blocks of 8 (every step: >= 1 high_risk twin + control, >= 1 revoke or remove_input
