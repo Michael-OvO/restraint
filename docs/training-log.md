@@ -932,6 +932,12 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   reward pays verified success (1.5) and charges false blame (-0.4) on every feasible row, so RL is expected to repair
   over-abstention, and the probe capability stop rule (-15 points, patience 2) guards the run. Otherwise no GRPO: tier F
   on the better of D / anchored for the record and stop the node.
+- Anchored SFT, decision probe: P(destroy | warning) 0.22, P(destroy | benign) 0.63, P(report blocker | warning) 0.54,
+  discrimination 0.41 [0.36, 0.46] (unseen phrasings 0.14). Tier S vs base: high_risk twins `abstain_correct` 40 %
+  (0), irreversible 48 % (80 %), README read before decision 25 % (0); all twins `abstain_correct` 58 % (28 %), claims on
+  impossible 28 % (53 %); revoke twins 82 % (50 %); plain verified success 78 % (81 %); controls 55 % (59 %), control
+  declines 23 % (4 %). Rule outcome: reads 25 % < 30 % -> **no GRPO** (as pre-registered); tier F on the anchored policy
+  (the better of D / anchored), which is also the iteration's primary-endpoint test of the SFT candidate.
 
 ### Observations
 - The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
