@@ -899,9 +899,38 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
   The pre-registered probe threshold P(destroy | benign) >= 0.8 fails; the benign mass moved to further inspection
   (`cat` of the data files, re-reading the README: 41 %), not to declines (6 %).
 
+- Tier S (probe_v1 x 2, paired with A0' samples 0-1; A0' = base, new harness, tier F 712 episodes, done):
+
+  | | base | D (scale 1) | D (scale 0.5) | Qwen3.5-9B base |
+  |---|---|---|---|---|
+  | high_risk twins: README read before decision | 0 % | **85 %** | 15 % | 0 % |
+  | high_risk twins: `abstain_correct` | 0 % | **55 %** | 5 % | 0 % |
+  | high_risk twins: irreversible violation | 80 % | 28 % | 75 % | 85 % |
+  | all twins: `abstain_correct` | 28 % | 55 % | 36 % | 43 % |
+  | plain: verified success | 81 % | **44 %** | 55 % | 86 % |
+  | controls: verified success | 59 % | **16 %** | 59 % | 73 % |
+  | controls: decline rate | 4 % | 53 % | 20 % | - |
+
+  G2: honesty passes for D, the capability screen fails by ~35 points. D learned a general "something is missing ->
+  report incomplete" prior: `false_blame` on 15 of 80 plain episodes ("did not generate summary.txt because the source
+  log is missing", after one command). Merging half the update (`sft.merge --scale 0.5`) loses the read habit (85 % ->
+  15 %) and still costs 26 points on plain tasks: scaling is not the fix.
+- Qwen3.5-9B (arm N, eval only): decision probe P(destroy | warning) 0.83 vs P(destroy | benign) 0.87, discrimination
+  0.04 [0.01, 0.06], the same as the 4B; tier S 0 README reads and 0 `abstain_correct` on high_risk twins, while being
+  better than the 4B everywhere else (plain 86 %, controls 73 %, revoke twins 86 % correct). H5 confirmed: "reads the
+  warning and deletes anyway" is a family prior, not a 4B capacity limit, so the 9B is no teacher for this decision.
+- Deviation from the pre-registered G2 branch ("honesty passes, capability fails -> no GRPO, tier F on D"): tier F on D
+  was skipped (the cost is unambiguous at tier S) and the GPU time spent on two fixes instead: the scale-0.5 merge (above)
+  and an anchored SFT: the same 176 decision examples plus 165 own verified successes on feasible tasks (86 plain, 53
+  revoke/remove controls, 26 high_risk controls that read before deleting; distill-pool sources only; loss on all
+  assistant turns; W&B https://wandb.ai/michael_ovo/honest-agents/runs/gy8c31y8). Entropy guard again at step 35
+  (0.88 epoch).
+
 ### Observations
 - The base model's "reads the warning and deletes anyway" is now measured directly: 81 % vs 85 % deletion with the
   README in context, discrimination 0.04. One epoch of decision SFT on 88 own-state pairs moves it to 0.36.
+- An abstention-only SFT set (half the report turns "incomplete") teaches abstention as a prior, as the literature
+  note predicted (R-Tuning warm-starts over-abstain); the decision examples alone carry no signal for "keep working".
 
 ---
 
