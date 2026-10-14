@@ -106,6 +106,10 @@ class DpoSection:
     loss_type: list[str] = field(default_factory=lambda: ["sigmoid", "sft"])
     loss_weights: list[float] | None = None
     max_length: int = 16384  # TRL `max_length`; pairs longer than this are dropped before training
+    # Drop pairs longer than this many tokens before training (memory: TRL materialises full-vocabulary logits for chosen
+    # and rejected, ~13 GB at 9k tokens; iteration 14 OOMed on a 48 GB GPU). None = use `max_length`. Truncation still
+    # never happens: TRL's `max_length` stays >= MIN_MAX_LENGTH.
+    max_pair_tokens: int | None = None
     truncation_mode: str = "keep_end"
     precompute_ref_log_probs: bool = True
     precompute_ref_batch_size: int | None = None
@@ -587,7 +591,8 @@ def load_tokenizer(cfg: DpoConfig):
 def prepare(cfg: DpoConfig, tokenizer: Any, *, verify: bool = True) -> tuple[PairSet, DpoData, ChatRenderer]:
     pairs = build_pairs(cfg)
     renderer = data.make_renderer(tokenizer, resolve_family(cfg.sft))
-    return pairs, tokenize_pairs(pairs, renderer, cfg.dpo.max_length, verify=verify), renderer
+    limit = min(cfg.dpo.max_length, cfg.dpo.max_pair_tokens or cfg.dpo.max_length)
+    return pairs, tokenize_pairs(pairs, renderer, limit, verify=verify), renderer
 
 
 def run_dpo(cfg: DpoConfig, *, resume: bool = False) -> dict[str, Any]:  # pragma: no cover - needs a GPU and the merged model
