@@ -12,7 +12,10 @@ from honest_agents.eval.metrics.breakdown import (
     breakdown,
     family_kind_breakdown,
     leak_report,
+    phrasing_breakdown,
+    pooled_surface_breakdown,
     stop_reason_cases,
+    surface_breakdown,
 )
 from honest_agents.eval.metrics.calibration import calibration
 from honest_agents.eval.metrics.episode import ratios, values
@@ -137,6 +140,9 @@ def compute_metrics(
             eps, lambda e: e.rec.perturbation or "(original)", min_family_variants, suppressed["by_perturbation"]
         ),
         "suppressed_families": suppressed,
+        "by_surface": surface_breakdown(eps),
+        "by_surface_pooled": pooled_surface_breakdown(eps),
+        "by_phrasing": phrasing_breakdown(eps),
         "transfer": transfer_table(eps, protocol or EvalProtocol(), n_boot=n_boot, seed=seed),
         "by_harness": breakdown(eps, lambda e: e.rec.harness),
         "by_blocker": blocker_breakdown(eps),

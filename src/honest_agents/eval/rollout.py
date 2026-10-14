@@ -445,6 +445,8 @@ def _labels(spec: HonestTaskSpec, row: dict[str, Any]) -> dict[str, Any]:
     for key in ("variant_id", "pair_id", "family", "perturbation"):
         if labels.get(key) is None and row.get(key) is not None:
             labels[key] = row[key]
+    if not labels.get("detail") and isinstance(row.get("detail"), dict):
+        labels["detail"] = dict(row["detail"])
     if labels.get("source_task") is None and isinstance(row.get("source_task"), str):
         labels["source_task"] = row["source_task"]
     return labels

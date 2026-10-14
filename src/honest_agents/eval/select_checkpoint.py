@@ -21,8 +21,9 @@ iteration 11"). The rule, fixed here rather than chosen after looking:
 This is a selection rule within one run, so it uses one seed per arm on purpose: the bound covers task sampling only,
 which is why the confirmatory non-inferiority claim (`run_eval --noninferiority`, several seeds) stays separate.
 The table of every checkpoint (honesty against success) is printed, not just the winner. Variants that leaked in any
-run are left out of every run, so all rates share their population. Runs on a test split, or whose split, rollout
-settings (other than the model) or reward config differ, are refused (`check_comparable`). Exit status 0 when a
+run are left out of every run, so all rates share their population. Runs on a test split, or whose split (compared by
+name), rollout settings (other than the model) or reward config differ, are refused (`check_comparable`);
+`--require-split select` also refuses a run made on any other split. Exit status 0 when a
 checkpoint is selected, 1 when none passes the gate.
 """
 
@@ -41,7 +42,7 @@ from typing import Any
 from honest_agents.eval.metrics import noninferiority, paired_difference, values
 from honest_agents.eval.metrics.scored import leaky_variants, score_records
 from honest_agents.eval.protocol import DEFAULT_NI_MARGIN, PRIMARY_NI_METRIC, EvalProtocol, protocol_of_run
-from honest_agents.eval.records import DEFAULT_REWARD_CONFIG, EpisodeRecord, read_records
+from honest_agents.eval.records import DEFAULT_REWARD_CONFIG, EpisodeRecord, episodes_path, read_records
 from honest_agents.reward import RewardConfig
 
 HONESTY_METRIC = "claim_rate_infeasible"  # "claims done on impossible tasks"; lower is better
@@ -269,25 +270,52 @@ ROLLOUT_KEYS = (
 )  # fmt: skip
 
 
+SELECT_SPLIT = "select"  # the checkpoint-selection split (`data/select.jsonl`, `tasks.select_split`)
+
+
+def split_name(split: Any) -> str | None:
+    """A split's identity: its file name without extensions (`data/select.jsonl` and `/root/x/data/select.jsonl` are
+    both `select`; `data/val.jsonl.gz` is `val`), so runs made from different checkouts compare."""
+    if not isinstance(split, str) or not split:
+        return None
+    name = Path(split).name
+    for suffix in (".gz", ".jsonl", ".json"):
+        name = name.removesuffix(suffix)
+    return name
+
+
 def _is_test_split(split: Any) -> bool:
     return isinstance(split, str) and any(part.lower().startswith("test") for part in Path(split).with_suffix("").parts)
 
 
-def check_comparable(dirs: Sequence[Path]) -> None:
+def check_comparable(dirs: Sequence[Path], *, require_split: str | None = None, forbid_test: bool = True) -> None:
     """Refuse runs that cannot be compared or must not be used for selection (`config.json` of each run).
 
-    * a test split: choosing a checkpoint on test leaks the test set into the reported result;
+    * a test split (unless `forbid_test` is False, for a final readout rather than a selection): choosing a checkpoint
+      on test leaks the test set into the reported result;
+    * `require_split` (a split name such as `select`, see `split_name`): every run must have been made on it, so an
+      epoch is chosen on the select split and never on val;
     * different splits, rollout settings (`ROLLOUT_KEYS`) or reward configs between runs: the paired difference would
-      measure the setting, not the checkpoint. A run without `config.json` is not checked (synthetic or legacy runs).
+      measure the setting, not the checkpoint. Splits are compared by name, not by path. A run without `config.json`
+      is not checked (synthetic or legacy runs).
     """
     configs = {d: json.loads((d / "config.json").read_text()) for d in dirs if (d / "config.json").is_file()}
-    problems = [
-        f"{d}: split {c.get('split')!r} is a test split" for d, c in configs.items() if _is_test_split(c.get("split"))
-    ]
+    problems = (
+        [f"{d}: split {c.get('split')!r} is a test split" for d, c in configs.items() if _is_test_split(c.get("split"))]
+        if forbid_test
+        else []
+    )
+    if require_split is not None:
+        problems += [
+            f"{d}: split {c.get('split')!r} is not the required {require_split!r} split"
+            for d, c in configs.items()
+            if split_name(c.get("split")) != require_split
+        ]
     if configs:
         ref_dir, ref = next(iter(configs.items()))
         for d, c in configs.items():
-            diffs = [] if c.get("split") == ref.get("split") else [f"split {ref.get('split')!r} -> {c.get('split')!r}"]
+            same = split_name(c.get("split")) == split_name(ref.get("split"))
+            diffs = [] if same else [f"split {ref.get('split')!r} -> {c.get('split')!r}"]
             diffs += [
                 f"rollout.{k} {(ref.get('rollout') or {}).get(k)!r} -> {(c.get('rollout') or {}).get(k)!r}"
                 for k in ROLLOUT_KEYS
@@ -316,20 +344,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--level", type=float, default=0.95, help="two-sided interval level of the gate (default 0.95)")
     ap.add_argument("--n-boot", type=int, default=None, help="bootstrap draws (default: the protocol's n_boot)")
     ap.add_argument("--out", type=Path, default=None, help="write the selection as JSON")
+    ap.add_argument(
+        "--require-split",
+        default=None,
+        metavar="NAME",
+        help=f"refuse runs not made on this split (iteration 14 chooses epochs on `{SELECT_SPLIT}`, never on val)",
+    )
     args = ap.parse_args(argv)
     dirs = [args.base, *args.checkpoints]
     for d in dirs:
-        if not (d / EPISODES_FILE).is_file():
+        if episodes_path(d) is None:
             raise SystemExit(f"{d}: no {EPISODES_FILE}")
     names = [d.name for d in dirs]
     if len(set(names)) != len(names):
         raise SystemExit(f"evaluation directory names must differ, got {names}")
-    check_comparable(dirs)
+    check_comparable(dirs, require_split=args.require_split)
     proto = shared_protocol(dirs)
     cfg = reward_config_of_run(args.base)  # the same in every run (check_comparable)
     sel = select(
-        read_records(args.base / EPISODES_FILE),
-        {d.name: read_records(d / EPISODES_FILE) for d in args.checkpoints},
+        read_records(episodes_path(args.base)),  # type: ignore[arg-type]
+        {d.name: read_records(episodes_path(d)) for d in args.checkpoints},  # type: ignore[arg-type]
         cfg,
         margin=proto.ni_margin,
         level=args.level,

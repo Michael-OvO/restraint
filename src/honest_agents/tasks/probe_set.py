@@ -16,7 +16,8 @@ probe of every run, so probe steps and runs are paired by task. Selection:
   so over-refusal is measured on the tasks built to catch it and every source task carries both sides;
 * plain feasible rows of other pairs, in hash order, until `--feasible` feasible rows (plain and controls) are reached.
 
-Rows are written unchanged. Only validation-split rows are accepted (never test); variants on the quarantine list are
+Rows are written unchanged. Only validation-split rows are accepted (never test); a select-split probe set
+(`--select data/select_sources.txt --rows data/select.jsonl`, `select_split_probe`) is the whole select split; variants on the quarantine list are
 dropped with their pair's control. The validation set after the build's mixture balance (`val.jsonl`) has too few
 impossible variants for the default 64; build from `val_pool.jsonl` (every validation row before the mixture). Cost:
 one probe is (rows x `probe.samples_per_variant`) episodes, so 64 impossible + 64 controls + 64 plain twins at 4
@@ -35,6 +36,7 @@ from typing import Any
 
 Row = dict[str, Any]
 VALIDATION_SPLITS = ("validation", "val")  # train.config.VALIDATION_SPLITS, without importing the trainer stack
+SELECT_SPLITS = ("select",)  # `tasks.select_split`: 60 train-split sources for epoch / checkpoint selection
 
 
 def _kind(r: Row) -> str:
@@ -62,12 +64,15 @@ def select_probe_set(
     exclude: set[str] | frozenset[str] = frozenset(),
     seed: int = 0,
     with_plain_twins: bool = True,
+    splits: Sequence[str] = VALIDATION_SPLITS,
 ) -> list[Row]:
     """The probe rows (see the module docstring). Raises if the rows hold fewer than `n_infeasible` impossible or
-    `n_feasible` feasible variants after the exclusions: a short probe must not pass as the requested one."""
+    `n_feasible` feasible variants after the exclusions: a short probe must not pass as the requested one. `splits`
+    names the accepted splits: validation by default, `SELECT_SPLITS` for a select-split probe (never test)."""
     for i, r in enumerate(rows):
-        if r.get("split") not in VALIDATION_SPLITS:
-            raise ValueError(f"row {i} has split={r.get('split')!r}; the probe takes validation rows only")
+        if r.get("split") not in splits:
+            what = "validation" if tuple(splits) == VALIDATION_SPLITS else "/".join(splits)
+            raise ValueError(f"row {i} has split={r.get('split')!r}; the probe takes {what} rows only")
     by_pair: dict[str, list[Row]] = defaultdict(list)
     for r in rows:
         by_pair[str(r.get("pair_id") or r["variant_id"])].append(r)
@@ -123,6 +128,31 @@ def select_probe_set(
     return sorted(chosen.values(), key=lambda r: position[id(r)])  # file order, so the list diffs cleanly
 
 
+def select_split_probe(
+    rows: Sequence[Row],
+    *,
+    sources: set[str] | frozenset[str] | None = None,
+    exclude: set[str] | frozenset[str] = frozenset(),
+) -> list[Row]:
+    """The select probe set: the whole select split, in file order. It is small by construction (60 sources, all their
+    variants), so nothing is sampled: every source contributes its high_risk twin and control (one pair per evidence
+    surface once those are built), its plain task and its other families.
+
+    Every row must carry `split == "select"`. With `sources` (the contents of `data/select_sources.txt`) every row's
+    source must be listed, so a row from another split cannot slip in under a relabelled split; rows in `exclude`
+    (a quarantine list) are dropped with nothing else changed. Raises when a listed source has no row left."""
+    for i, r in enumerate(rows):
+        if r.get("split") not in SELECT_SPLITS:
+            raise ValueError(f"row {i} has split={r.get('split')!r}; the select probe takes select rows only")
+        if sources is not None and str(r.get("pair_id")) not in sources:
+            raise ValueError(f"row {i} belongs to source {r.get('pair_id')!r}, which is not a select source")
+    kept = [r for r in rows if r["variant_id"] not in exclude]
+    missing = (sources or set()) - {str(r.get("pair_id")) for r in kept}
+    if missing:
+        raise ValueError(f"{len(missing)} select source(s) have no row: {sorted(missing)[:3]}...")
+    return kept
+
+
 def summarize(rows: Sequence[Row], samples_per_variant: int = 1) -> dict[str, Any]:
     kinds = Counter(_kind(r) for r in rows)
     return {
@@ -131,6 +161,13 @@ def summarize(rows: Sequence[Row], samples_per_variant: int = 1) -> dict[str, An
         "by_kind": dict(kinds),
         "infeasible_by_family": dict(Counter(_family(r) for r in rows if _kind(r) == "infeasible")),
         "control_by_family": dict(Counter(_family(r) for r in rows if _kind(r) == "control")),
+        "high_risk_twins_by_surface": dict(
+            Counter(
+                (r.get("detail") or {}).get("surface", "readme")
+                for r in rows
+                if _kind(r) == "infeasible" and _family(r) == "high_risk"
+            )
+        ),
         "episodes_per_probe": len(rows) * samples_per_variant,
         "samples_per_variant": samples_per_variant,
     }
@@ -139,6 +176,14 @@ def summarize(rows: Sequence[Row], samples_per_variant: int = 1) -> dict[str, An
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rows", type=Path, nargs="+", required=True, help="validation rows (val_pool.jsonl of a build)")
+    ap.add_argument(
+        "--select",
+        type=Path,
+        default=None,
+        metavar="SELECT_SOURCES",
+        help="build the select probe set instead: --rows is data/select.jsonl, this is data/select_sources.txt; the whole "
+        "split is written (--infeasible / --feasible / --families / --seed do not apply)",
+    )
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--infeasible", type=int, default=64, help="impossible variants (round-robin over families)")
     ap.add_argument("--feasible", type=int, default=64, help="minimum feasible variants, plain and controls")
@@ -156,6 +201,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         from honest_agents.bank import quarantined_variants
 
         exclude = quarantined_variants(args.quarantine, exclude_sources=())
+    if args.select is not None:
+        sources = {line.strip() for line in args.select.read_text().splitlines() if line.strip()}
+        chosen = select_split_probe(rows, sources=sources, exclude=exclude)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text("".join(json.dumps(r) + "\n" for r in chosen))
+        print(json.dumps(summarize(chosen, args.samples_per_variant), indent=2))
+        return 0
     chosen = select_probe_set(
         rows,
         n_infeasible=args.infeasible,

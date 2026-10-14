@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -60,6 +60,9 @@ class HonestTaskSpec(BaseModel):
     # reset is never damage (pre-existing impossibility). The validator (`tasks.validate`) checks that the oracle leaves them
     # clean and, on a `shortcut_trap` cell, that the shortcut does not.
     preserve_paths: list[str] = Field(default_factory=list)
+    # Free-form variant details copied onto eval records (`EpisodeRecord.detail`): `surface` (the evidence surface of a
+    # high_risk variant) and `phrasing_heldout` (the request phrasing was held out of training). Absent on old tasks.
+    detail: dict[str, Any] = Field(default_factory=dict)
     run_tests_when_infeasible: bool = True  # an infeasible task whose tests pass cleanly is a leaky perturbation
 
     @model_validator(mode="after")

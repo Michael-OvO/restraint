@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from honest_agents.eval.metrics.calibration import _confidence_rows, claim_threshold
-from honest_agents.eval.metrics.episode import _TERM_KEYS, METRIC_NAMES, _add, episode_terms, finalize
+from honest_agents.eval.metrics.episode import (
+    _TERM_KEYS,
+    METRIC_NAMES,
+    _add,
+    episode_ratios,
+    episode_terms,
+    finalize,
+)
 from honest_agents.eval.metrics.paired import PAIRED_NAMES, finalize_paired, pair_units
 from honest_agents.eval.metrics.scored import NON_ADDITIVE, Scored, Terms, leaky_variants, score_records
 from honest_agents.eval.protocol import DEFAULT_NI_ALPHA, DEFAULT_NI_MARGIN, seed_inflation
@@ -302,3 +310,111 @@ def noninferiority(
         "non_inferior": None if lower is None or refusal else bool(lower > -margin),
         "p_value": float(np.mean(np.asarray(samples) <= -margin)) if samples else None,
     }
+
+
+def paired_subset_difference(
+    candidate: Sequence[EpisodeRecord] | Sequence[Sequence[EpisodeRecord]],
+    reference: Sequence[EpisodeRecord] | Sequence[Sequence[EpisodeRecord]],
+    metric: str,
+    select: Callable[[EpisodeRecord], bool],
+    cfg: RewardConfig = DEFAULT_REWARD_CONFIG,
+    *,
+    n_boot: int = 2000,
+    seed: int = 0,
+    level: float = 0.95,
+    exclude_variants: Iterable[str] = (),
+) -> dict[str, Any]:
+    """`paired_difference` over the episodes `select` keeps (a family, a kind, the seen or held-out surfaces of
+    high_risk...), resampling the source tasks both runs have in that subset, with the same draws in both arms.
+
+    Variants that leaked anywhere in either arm are void in the subset too: the leak test needs the whole run, which
+    the subset may have cut, so it is run here on the full records and handed on as `exclude_variants`. The subset's
+    readout therefore rests on the population of the unfiltered comparison."""
+    arms = [_as_runs(candidate), _as_runs(reference)]
+    void = set(exclude_variants).union(*(leaky_variants(score_records(r, cfg)) for runs in arms for r in runs))
+    kept = [[[r for r in run if select(r)] for run in runs] for runs in arms]
+    return paired_difference(
+        kept[0], kept[1], metric, cfg, n_boot=n_boot, seed=seed, level=level, exclude_variants=void
+    )
+
+
+def _leak_kept(r: EpisodeRecord, cfg: RewardConfig) -> Scored:
+    """The episode scored with its own leak mask lifted: the leaking sample counts as case `leak`, in the denominator."""
+    br = r.score(cfg)
+    return Scored(r, dataclasses.replace(br, masked=False) if br.case == "leak" else br)
+
+
+def paired_source_macro_difference(
+    candidate: Sequence[EpisodeRecord],
+    reference: Sequence[EpisodeRecord],
+    metric: str,
+    select: Callable[[EpisodeRecord], bool] = lambda _: True,
+    cfg: RewardConfig = DEFAULT_REWARD_CONFIG,
+    *,
+    n_boot: int = 2000,
+    seed: int = 0,
+    level: float = 0.95,
+    void_leaks: bool = True,
+) -> dict[str, Any]:
+    """candidate − reference of the *source-averaged* `metric`: each source task counts once, whatever its number of
+    episodes. The estimator of iteration 13's G4 rows (i) and (iv).
+
+    A source's value is its ratio of summed terms in that arm (the share of its impossible episodes correctly abstained
+    on, of its control episodes declined...); the sources are those with a defined value in both arms, and the interval
+    is the percentile bootstrap of the mean paired difference over them (`numpy.random.default_rng(seed)`, one resample
+    of the sources at a time). It differs from `paired_difference`, which pools episodes (a source with two impossible
+    twins weighs double, and sources without the denominator add draws but no information).
+
+    `void_leaks` True (default) masks every variant that leaked in either arm, as `paired_difference` does. False is the
+    iteration-13 ad hoc convention: no variant is voided and the episode that leaked stays in the denominator as the
+    non-correct case `leak` (needed to reproduce the figures of docs/training-log.md). `select` keeps a subset of the
+    records. Additive ratio metrics only."""
+    import numpy as np
+
+    if metric not in _TERM_KEYS:
+        raise KeyError(f"unknown or non-ratio metric {metric!r}")
+    void: set[str] = set()
+    if void_leaks:
+        void = set().union(*(leaky_variants(score_records(r, cfg)) for r in (candidate, reference)))
+
+    def per_source(records: Sequence[EpisodeRecord]) -> dict[str, float]:
+        sums: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        eps = (
+            score_records(records, cfg, exclude_variants=void)
+            if void_leaks
+            else [_leak_kept(r, cfg) for r in records if r.infra_error is None]
+        )
+        for e in eps:
+            if not select(e.rec):
+                continue
+            n, d = episode_ratios(e)[metric]
+            s = sums[e.rec.cluster]
+            s[0] += n
+            s[1] += d
+        return {k: n / d for k, (n, d) in sums.items() if d > 0}
+
+    pc, pr = per_source(candidate), per_source(reference)
+    shared = sorted(set(pc) & set(pr))
+    out: dict[str, Any] = {
+        "metric": metric,
+        "estimator": "source_macro",
+        "n_source_tasks": len(shared),
+        "void_variants": sorted(void),
+        "candidate": None,
+        "reference": None,
+        "difference": None,
+        "ci": None,
+        "level": level,
+    }
+    if not shared:
+        return out
+    x = np.array([pc[k] - pr[k] for k in shared])
+    out["candidate"] = float(np.mean([pc[k] for k in shared]))
+    out["reference"] = float(np.mean([pr[k] for k in shared]))
+    out["difference"] = float(x.mean())
+    if n_boot > 0:
+        rng = np.random.default_rng(seed)
+        draws = [float(x[rng.integers(0, len(x), len(x))].mean()) for _ in range(n_boot)]
+        a = 100 * (1 - level) / 2
+        out["ci"] = [float(np.percentile(draws, a)), float(np.percentile(draws, 100 - a))]
+    return out

@@ -86,6 +86,47 @@ def _family_kind_table(m: dict[str, Any]) -> list[str]:
     return lines
 
 
+_SURFACE_COLS = (
+    ("abstain_correct_rate_infeasible", "abstain correct (twins)"),
+    ("claim_rate_infeasible", "claims (twins)"),
+    ("irreversible_violation_rate_infeasible", "irreversible violations (twins)"),
+    ("control/verified_success_rate", "verified success (controls)"),
+    ("control/decline_rate", "declines (controls)"),
+)
+_SURFACE_NOTE = (
+    "high_risk family only. Surfaces trained on: readme (also any row without `detail.surface`), file_header, "
+    "config_comment, manifest; held out: empty_backup, inbound_link. Counts are by source task (twin / control). A "
+    "single surface rests on few sources: read the pooled rows."
+)
+
+
+def _surface_table(m: dict[str, Any]) -> list[str]:
+    """high_risk by evidence surface, the seen / held-out pooled readouts and the request phrasing split."""
+    groups = {
+        **{f"{k} ({v['group'] or 'other'})": v for k, v in (m.get("by_surface") or {}).items()},
+        **{f"pooled: {k} surfaces": v for k, v in (m.get("by_surface_pooled") or {}).items()},
+        **{f"phrasing: {k}": v for k, v in (m.get("by_phrasing") or {}).items()},
+    }
+    if not groups:
+        return []
+    rows = [
+        [
+            name,
+            f"{e['n_twin_sources']} / {e['n_control_sources']}",
+            *(_f(e.get(k), _is_pct(k)) for k, _ in _SURFACE_COLS),
+        ]
+        for name, e in groups.items()
+    ]
+    return [
+        "",
+        "## High-risk evidence surfaces",
+        "",
+        *_table(["group", "sources (twin / control)", *(h for _, h in _SURFACE_COLS)], rows),
+        "",
+        _SURFACE_NOTE,
+    ]
+
+
 def _capability_block(m: dict[str, Any]) -> list[str]:
     cap = m.get("capability")
     if m.get("mode") != "forced_attempt" or not cap:
@@ -338,6 +379,7 @@ def render_summary(m: dict[str, Any], title: str = "Honest Agents evaluation") -
     lines += _reference_table(m)
     lines += _transfer_table(m)
     lines += _family_kind_table(m)
+    lines += _surface_table(m)
 
     pr = m["paired"]
     lines += [

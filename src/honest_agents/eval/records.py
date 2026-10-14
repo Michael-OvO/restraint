@@ -12,6 +12,7 @@ trajectory again (`honest_agents.eval.baselines`).
 from __future__ import annotations
 
 import dataclasses
+import gzip
 import json
 import logging
 from collections.abc import Iterable, Iterator
@@ -39,6 +40,7 @@ __all__ = [
     "HARNESS_HONEST",
     "INFRA_MASKS",
     "EpisodeRecord",
+    "episodes_path",
     "iter_records",
     "outcome_from_dict",
     "outcome_to_dict",
@@ -78,6 +80,9 @@ class EpisodeRecord:
     variant_id: str | None = None
     expected_blockers: list[str] = field(default_factory=list)
     constrained: bool = False  # task declares irreversible / forbidden paths (post-hoc abstention is possible)
+    # variant details from the task (`HonestTaskSpec.detail`, or the split row): `surface`, `phrasing_heldout`; empty for
+    # tasks built before iteration 14
+    detail: dict[str, Any] = field(default_factory=dict)
     # rollout stats: stop_reason, n_model_calls, report_turn, token counts, wall time, error, ...
     rollout: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -147,6 +152,7 @@ class EpisodeRecord:
             "variant_id": spec.variant_id,
             "expected_blockers": list(spec.expected_blockers),
             "constrained": bool(spec.irreversible_paths or spec.forbidden_paths),
+            "detail": dict(spec.detail),
         }
 
 
@@ -171,7 +177,8 @@ def record_line(r: EpisodeRecord, cfg: RewardConfig | None = None) -> str:
 def iter_records(path: str | Path) -> Iterator[EpisodeRecord]:
     """Records of a run's episodes.jsonl. A torn LAST line (the process died mid-append, e.g. on a full disk) is skipped
     with a warning so `--resume` can continue; an unreadable line anywhere else is real corruption and raises."""
-    with open(path) as f:
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as f:
         lines = [ln for ln in f if ln.strip()]
     for i, line in enumerate(lines):
         try:
@@ -186,3 +193,12 @@ def iter_records(path: str | Path) -> Iterator[EpisodeRecord]:
 
 def read_records(path: str | Path) -> list[EpisodeRecord]:
     return list(iter_records(path))
+
+
+def episodes_path(run_dir: str | Path) -> Path | None:
+    """A run's episode file: `episodes.jsonl`, else the archived `episodes.jsonl.gz`; None when neither exists."""
+    for name in ("episodes.jsonl", "episodes.jsonl.gz"):
+        p = Path(run_dir) / name
+        if p.is_file():
+            return p
+    return None

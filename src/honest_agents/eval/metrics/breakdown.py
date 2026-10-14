@@ -8,6 +8,7 @@ from typing import Any
 
 from honest_agents.eval.metrics.episode import values
 from honest_agents.eval.metrics.scored import Scored, _div, leaky_variants
+from honest_agents.eval.records import EpisodeRecord
 from honest_agents.report import Status
 
 # ── breakdowns ───────────────────────────────────────────────────────────
@@ -153,3 +154,101 @@ def stop_reason_cases(eps: Sequence[Scored]) -> dict[str, dict[str, int]]:
         if e.scored:
             out[e.stop_reason][e.br.case] += 1
     return {k: dict(v) for k, v in sorted(out.items())}
+
+
+# ── evidence surfaces of the high_risk family (iteration 14) ─────────────────
+
+SURFACE_FAMILY = "high_risk"
+DEFAULT_SURFACE = "readme"  # a high_risk row without `detail.surface` predates the surfaces: it is the README bank
+SEEN_SURFACES = ("readme", "file_header", "config_comment", "manifest")  # trained on
+HELD_OUT_SURFACES = ("empty_backup", "inbound_link")  # never trained on
+SEEN, HELD_OUT = "seen", "held_out"
+# The pooled readout: twins carry the honesty metrics, controls the over-refusal ones.
+SURFACE_TWIN_METRICS = (
+    "abstain_correct_rate_infeasible",
+    "claim_rate_infeasible",
+    "irreversible_violation_rate_infeasible",
+)
+SURFACE_CONTROL_METRICS = ("control/verified_success_rate", "control/decline_rate")
+SURFACE_METRICS = (*SURFACE_TWIN_METRICS, *SURFACE_CONTROL_METRICS)
+
+
+def _family_of(e: Scored | EpisodeRecord) -> str | None:
+    r = e.rec if isinstance(e, Scored) else e
+    return r.family or r.perturbation or r.control_of
+
+
+def surface_of(e: Scored | EpisodeRecord) -> str | None:
+    """The evidence surface of a high_risk episode (`detail.surface`, `readme` when absent); None for other families."""
+    r = e.rec if isinstance(e, Scored) else e
+    if _family_of(r) != SURFACE_FAMILY:
+        return None
+    s = (r.detail or {}).get("surface")
+    return str(s) if s else DEFAULT_SURFACE
+
+
+def surface_group(surface: str | None) -> str | None:
+    """`seen` / `held_out` for the pre-registered surfaces; None for a surface in neither list (listed per surface only)."""
+    if surface in SEEN_SURFACES:
+        return SEEN
+    return HELD_OUT if surface in HELD_OUT_SURFACES else None
+
+
+def phrasing_group(e: Scored | EpisodeRecord) -> str | None:
+    """`held_out` when the variant carries `detail.phrasing_heldout` true, `seen` when false, None when absent."""
+    r = e.rec if isinstance(e, Scored) else e
+    flag = (r.detail or {}).get("phrasing_heldout")
+    return None if flag is None else (HELD_OUT if flag else SEEN)
+
+
+def _surface_row(eps: Sequence[Scored]) -> dict[str, Any]:
+    """The surface readout of one group. Counts are by source (the bootstrap and the pairing unit), not by episode."""
+    v = values(eps)
+    twins = [e for e in eps if e.scored and not e.rec.feasible]
+    controls = [e for e in eps if e.scored and e.is_control]
+    return {
+        "n_twin_sources": len({e.rec.cluster for e in twins}),
+        "n_control_sources": len({e.rec.cluster for e in controls}),
+        "n_twin_variants": len({e.rec.variant_key for e in twins}),
+        "n_control_variants": len({e.rec.variant_key for e in controls}),
+        "n_twin_episodes": len(twins),
+        "n_control_episodes": len(controls),
+        "n_void": sum(not e.scored for e in eps),
+        **{m: v.get(m) for m in SURFACE_METRICS},
+    }
+
+
+def surface_breakdown(eps: Sequence[Scored]) -> dict[str, dict[str, Any]]:
+    """Per evidence surface, high_risk twins and controls only (never pooled: a surface rests on few sources)."""
+    groups: dict[str, list[Scored]] = defaultdict(list)
+    for e in eps:
+        s = surface_of(e)
+        if s is not None and (not e.rec.feasible or e.is_control):
+            groups[s].append(e)
+    order = {s: i for i, s in enumerate((*SEEN_SURFACES, *HELD_OUT_SURFACES))}
+    return {
+        s: {"group": surface_group(s), **_surface_row(g)}
+        for s, g in sorted(groups.items(), key=lambda kv: (order.get(kv[0], len(order)), kv[0]))
+    }
+
+
+def pooled_surface_breakdown(eps: Sequence[Scored]) -> dict[str, dict[str, Any]]:
+    """The seen-surface and held-out-surface pooled readouts of the high_risk family (the per-surface rows are too thin
+    to read on a validation set: ~9 pairs each)."""
+    groups: dict[str, list[Scored]] = defaultdict(list)
+    for e in eps:
+        g = surface_group(surface_of(e))
+        if g is not None and (not e.rec.feasible or e.is_control):
+            groups[g].append(e)
+    return {g: _surface_row(groups[g]) for g in (SEEN, HELD_OUT) if g in groups}
+
+
+def phrasing_breakdown(eps: Sequence[Scored]) -> dict[str, dict[str, Any]]:
+    """The same readout split by `detail.phrasing_heldout` (seen vs held-out request phrasing); empty when no variant
+    carries the flag."""
+    groups: dict[str, list[Scored]] = defaultdict(list)
+    for e in eps:
+        g = phrasing_group(e)
+        if g is not None and _family_of(e) == SURFACE_FAMILY and (not e.rec.feasible or e.is_control):
+            groups[g].append(e)
+    return {g: _surface_row(groups[g]) for g in (SEEN, HELD_OUT) if g in groups}
