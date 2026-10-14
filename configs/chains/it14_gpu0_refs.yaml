@@ -1,0 +1,66 @@
+name: it14gpu0
+state_dir: outputs/chain/it14gpu0
+sequential: true
+instance_id: null
+balance_floor: 8
+final:
+  command: 'true'
+  timeout_min: 5
+steps:
+- name: base_surface_val
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks
+    runs/eval/it14_base_surface --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined
+    data/select_quarantine.txt -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.decision_probe
+    --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it14_base --base-url http://127.0.0.1:8000/v1 --model
+    policy --n 8 --concurrency 32
+  gpus:
+  - 0
+  done: runs/probe/it14_base/summary.json
+  after: []
+  timeout_min: 120
+  on_failure: continue
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8000'
+    BASE_URL: http://localhost:8000/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/480\]
+    total: 480
+- name: anchored3ep_surface_val
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it13/sft_anchor3ep_merged -- scripts/eval_heldout.sh
+    data/decision/surfaces_val/tasks runs/eval/it14_anchored_surface --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml
+    --exclude-quarantined data/select_quarantine.txt -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python
+    -m honest_agents.eval.decision_probe --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it14_anchored3ep
+    --base-url http://127.0.0.1:8000/v1 --model policy --n 8 --concurrency 32
+  gpus:
+  - 0
+  done: runs/probe/it14_anchored3ep/summary.json
+  after: []
+  timeout_min: 120
+  on_failure: continue
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8000'
+    BASE_URL: http://localhost:8000/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/480\]
+    total: 480
+- name: base_select
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it14_base_select
+    --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+  gpus:
+  - 0
+  done: runs/eval/it14_base_select/metrics.json
+  after: []
+  timeout_min: 90
+  on_failure: stop
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8000'
+    BASE_URL: http://localhost:8000/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/424\]
+    total: 424
