@@ -1,14 +1,18 @@
 """Decision-state DPO (iteration 14, docs/iteration-14-design.md section 3): preference pairs at the spliced decision
 states of `sft.decision`, trained with TRL's `DPOTrainer` on the merged SFT policy.
 
-A decision state is the prefix of a base-model high_risk control episode plus the two injected read turns (`ls -la`,
-`cat README`) with the real sandbox outputs of ONE variant. Each built pair of `sft.decision` (a control and a twin of
+A decision state is the prefix of a base-model high_risk control episode plus the injected read turns with the real
+sandbox outputs of ONE variant: `ls -la` and `cat README` for an iteration-13 README pair, the 2-4
+`inspection_commands(site)` of an authored-surface pair (`decision.surfaces`, SFT-v2). The state ends where the example's
+own `loss_roles["decision"]` says the deletion turn starts, so the number of read turns is derived from the example, not
+assumed. Each built pair of `sft.decision` (a control and a twin of
 the same source episode) gives two preference pairs, one per side of the evidence:
 
 * **benign** (the control's README, junk contents): chosen = the model's own destructive turn (proceed with the
   deletion), rejected = a decline report built the way `decision.twin_report_args` builds the twin report but with the
-  control's facts (target, README text, what);
-* **danger** (the twin's README, the only copy): chosen = the twin decline report, rejected = the model's own destructive
+  control's facts (target, README text, what; for an authored surface the surface's report template quoting the
+  control's evidence lines and citing the command that printed them);
+* **danger** (the twin's README, the only copy): chosen = the twin decline report (the twin's surface report), rejected = the model's own destructive
   turn (its tool call verbatim; the content is a plain "removing it as requested" line, because the content written
   after the benign README would argue from facts the twin's README contradicts).
 
@@ -61,6 +65,7 @@ from honest_agents.sft import decision as dec
 from honest_agents.sft.data import ChatRenderer, SFTExample, tokenize_example
 from honest_agents.sft.train_sft import SftConfig, build_lora_config, parse_config, resolve_family
 from honest_agents.tasks import decision_probe as dp
+from honest_agents.tasks import decision_surfaces as dsurf
 from honest_agents.tasks.decision_probe import VariantMeta
 
 logger = logging.getLogger("honest_agents.sft.dpo")
@@ -77,6 +82,7 @@ LOSS_TYPES = (
     "apo_zero", "apo_down", "discopop", "sft", "sigmoid_norm",
 )  # fmt: skip
 DROP_NOT_LAST_STATE_CHANGE = "deletion_not_last_state_change"
+DROP_NO_EVIDENCE = "surface_no_evidence_lines"
 
 # The rejected destructive turn on danger evidence: the failure mode is deleting without heeding the README, so the
 # prose does not mention it (rule A of `sft.decision`: a line written after the benign README does not belong here).
@@ -183,12 +189,28 @@ def _prompt_commands(prompt: Sequence[Mapping[str, Any]]) -> list[str]:
     return [c for turn in dec.turns_of(prompt[dec.completion_start(prompt) :]) for c in turn.commands()]
 
 
+class NoEvidenceError(ValueError):
+    """The decision state's last tool output holds no evidence line to quote (an authored-surface decline report)."""
+
+
 def decline_turn(own_args: Mapping[str, Any], meta: VariantMeta, template: int, prompt: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """The `submit_report` decline turn at this decision state: the twin report of `sft.decision` with `meta`'s facts and
-    evidence commands taken from the prompt only."""
-    args = dec.twin_report_args(own_args, meta, _prompt_commands(prompt), template)
+    evidence commands taken from the prompt only. For an authored-surface variant it is the surface's report template,
+    quoting the evidence lines of the prompt's last tool output (the output of the last inspection command, as in
+    `decision.build_pair`) and citing that command."""
+    commands = _prompt_commands(prompt)
+    if not meta.from_pool:
+        args = dec.twin_report_args(own_args, meta, commands, template)
+        content = dec._fill(dec.REPORT_TEMPLATES[template].content, meta)
+    else:
+        lines = dec.evidence_lines(str(prompt[-1].get("content") or ""))
+        if not lines:
+            raise NoEvidenceError(f"{meta.variant_id}: the last tool output of the prompt has no evidence line")
+        quote = dec.quote_of(lines)
+        args = dec.twin_report_args(own_args, meta, commands, template, quote=quote, read_command=meta.commands[-1])
+        content = dec._fill_surface(dec.SURFACE_REPORT_TEMPLATES[template].content, meta, quote)
     report_from_tool_args("submit_report", args)  # must parse
-    return dec.report_turn(args, dec._fill(dec.REPORT_TEMPLATES[template].content, meta))
+    return dec.report_turn(args, content)
 
 
 def destructive_turn(turn: Mapping[str, Any], meta: VariantMeta, template: int) -> dict[str, Any]:
@@ -196,40 +218,59 @@ def destructive_turn(turn: Mapping[str, Any], meta: VariantMeta, template: int) 
     return {**turn, "content": DESTRUCT_LINES[template].format(dir=meta.target)}
 
 
+def decision_boundary(example: SFTExample) -> int:
+    """Index of the deletion turn in `example.messages` = the length of the shared decision-state prompt, from the roles
+    `sft.decision` recorded: the prefix, then one assistant turn and one tool output per injected read, then the decision."""
+    roles = example.meta["loss_roles"]
+    n = roles["decision"]
+    reads = roles["reads"]
+    n_prefix = int(example.meta["n_prefix_messages"])
+    if not isinstance(n, int) or not reads or n != n_prefix + 2 * len(reads) or reads != [n_prefix + 2 * k for k in range(len(reads))]:
+        raise ValueError(f"{example.id}: loss_roles {roles} do not describe {n_prefix} prefix messages and consecutive read turns")
+    return n
+
+
 def pairs_of(
     built: dec.BuiltPair, twin_meta: VariantMeta, control_meta: VariantMeta, sides: Sequence[str] = SIDES
 ) -> list[PreferencePair]:
     """The preference pairs of one built decision pair (see the module docstring). Prompt = the messages up to the last
     injected tool output; chosen / rejected = the final assistant message."""
-    n = int(built.control.meta["n_prefix_messages"]) + 4  # prefix + READ1 + OUT1 + READ2 + OUT2
+    n = decision_boundary(built.control)
+    n_prefix = int(built.control.meta["n_prefix_messages"])
+    if built.twin.meta["loss_roles"]["reads"] != built.control.meta["loss_roles"]["reads"]:
+        raise ValueError(f"{built.state.episode_id}: twin and control read a different number of times")
     template = int(built.control.meta["template"])
     row = built.state.row
     own_args = (row.report_call or {}).get("arguments") or {}
     control_prompt = [dict(m) for m in built.control.messages[:n]]
     twin_prompt = [dict(m) for m in built.twin.messages[:n]]
-    if control_prompt[:-4] != twin_prompt[:-4]:
+    if control_prompt[:n_prefix] != twin_prompt[:n_prefix]:
         raise ValueError(f"{built.state.episode_id}: twin and control prompts differ before the injected reads")
     own_deletion = built.control.messages[n]
     if own_deletion.get("role") != "assistant":
         raise ValueError(f"{built.state.episode_id}: message {n} of the control is not the deletion turn")
+    pair_key = built.control.id.removesuffix(dec.SIDE_CONTROL)  # `<episode>:` or `<episode>:<surface>:`
+    surface = dec.surface_key(built)
     base = {
         "pair_id": built.state.pair_id,
         "source_episode": built.state.episode_id,
+        "surface": surface,
         "template": template,
         "phrasing_index": built.control.meta.get("phrasing_index"),
         "n_prompt_messages": n,
+        "n_reads": len(built.control.meta["loss_roles"]["reads"]),
     }
     out: list[PreferencePair] = []
     if SIDE_BENIGN in sides:
         out.append(PreferencePair(
-            f"{built.state.episode_id}:{SIDE_BENIGN}", SIDE_BENIGN, control_prompt,
+            f"{pair_key}{SIDE_BENIGN}", SIDE_BENIGN, control_prompt,
             chosen=dict(own_deletion),
             rejected=decline_turn(own_args, control_meta, template, control_prompt),
             meta={**base, "side": SIDE_BENIGN, "variant": control_meta.variant_id, "readme": control_meta.readme},
         ))  # fmt: skip
     if SIDE_DANGER in sides:
         out.append(PreferencePair(
-            f"{built.state.episode_id}:{SIDE_DANGER}", SIDE_DANGER, twin_prompt,
+            f"{pair_key}{SIDE_DANGER}", SIDE_DANGER, twin_prompt,
             chosen=decline_turn(own_args, twin_meta, template, twin_prompt),
             rejected=destructive_turn(own_deletion, twin_meta, template),
             meta={**base, "side": SIDE_DANGER, "variant": twin_meta.variant_id, "readme": twin_meta.readme},
@@ -248,12 +289,19 @@ class PairSet:
         return [*self.fit, *self.held]
 
 
-def _control_refs(opts: dec.DecisionOptions) -> dict[str, dict[str, dp.VariantRef]]:
-    """The pool pairs the decision dataset draws its sources from (the same merge as `decision.build_dataset`)."""
+def _variant_refs(opts: dec.DecisionOptions) -> dict[str, dp.VariantRef]:
+    """variant id -> task directory reference of every variant a built pair can use: the pool pairs the decision dataset
+    draws its sources from (the same merge as `decision.build_dataset`) and, with `decision.surfaces`, the manifest's
+    SFT surface variants."""
     sources = dec._pool_pairs(opts.distill_pool, opts.tasks_root)
     if opts.include_rl_pool_sources:
         sources = {**dec._pool_pairs(opts.rl_pool, opts.tasks_root), **sources}
-    return sources
+    refs = {ref.variant_id: ref for pair in sources.values() for ref in pair.values()}
+    if opts.surfaces is not None:
+        for row in dsurf.read_manifest(opts.surfaces.manifest):
+            if row.role == dsurf.ROLE_SFT:
+                refs |= {ref.variant_id: ref for ref in row.refs()}
+    return refs
 
 
 def pairs_from_dataset(
@@ -261,14 +309,15 @@ def pairs_from_dataset(
 ) -> tuple[list[PreferencePair], Counter[str]]:
     """(preference pairs, dropped states by reason). A state whose deletion was not the episode's last state change is
     dropped: its decline report would list `completed` work the own tail did only after the deletion (the SFT twin keeps
-    that tail before its report; the DPO completion follows the decision state directly)."""
-    refs = _control_refs(opts)
+    that tail before its report; the DPO completion follows the decision state directly). A surface state whose last
+    inspection output has no evidence line to quote is dropped too."""
+    refs = _variant_refs(opts)
     metas: dict[str, VariantMeta] = {}
 
-    def meta_of(ref: dp.VariantRef) -> VariantMeta:
-        if ref.variant_id not in metas:
-            metas[ref.variant_id] = dp.read_variant_meta(ref.task_dir)
-        return metas[ref.variant_id]
+    def meta_of(variant_id: str) -> VariantMeta:
+        if variant_id not in metas:
+            metas[variant_id] = dp.read_variant_meta(refs[variant_id].task_dir)
+        return metas[variant_id]
 
     out: list[PreferencePair] = []
     dropped: Counter[str] = Counter()
@@ -276,8 +325,10 @@ def pairs_from_dataset(
         if not built.state.deletion_last_state_change:
             dropped[DROP_NOT_LAST_STATE_CHANGE] += 1
             continue
-        pair = refs[built.state.pair_id]
-        out += pairs_of(built, meta_of(pair["infeasible"]), meta_of(pair["control"]), sides)
+        try:
+            out += pairs_of(built, meta_of(built.twin.meta["variant_id"]), meta_of(built.control.meta["variant_id"]), sides)
+        except NoEvidenceError:
+            dropped[f"{DROP_NO_EVIDENCE}:{dec.surface_key(built)}"] += 1
     return out, dropped
 
 
@@ -402,6 +453,7 @@ def tokenize_pairs(pairs: PairSet, renderer: ChatRenderer, max_length: int, *, v
     dropped: Counter[str] = Counter()
     lengths: dict[str, list[int]] = {"prompt": [], "chosen": [], "rejected": [], "total": []}
     by_side: Counter[str] = Counter()
+    by_surface: Counter[str] = Counter()
     held_ids = {p.id for p in pairs.held}
     for pair in pairs.all:
         rendered = render_pair(pair, renderer)
@@ -419,10 +471,12 @@ def tokenize_pairs(pairs: PairSet, renderer: ChatRenderer, max_length: int, *, v
         kept.append(pair)
         rendered_all.append(rendered)
         by_side[pair.side] += 1
+        by_surface[str(pair.meta["surface"])] += 1
     stats = {
         "pairs_train": len(train),
         "pairs_eval": len(evals),
         "by_side": dict(by_side),
+        "by_surface": dict(sorted(by_surface.items())),
         "dropped": dict(dropped),
         "tokens": {k: {"min": min(v), "mean": round(statistics.fmean(v), 1), "max": max(v)} for k, v in lengths.items() if v},
     }
@@ -459,12 +513,12 @@ def write_review(pairs: Sequence[PreferencePair], path: str | Path, stats: Mappi
         chosen = sorted((p for p in pairs if p.side == side), key=lambda p: dec._hash(p.id))[:n_per_side]
         for p in chosen:
             head = (
-                f"### {p.id}  (template {p.meta['template']}, phrasing {p.meta['phrasing_index']}, "
-                f"{p.meta['n_prompt_messages']} prompt messages)"
+                f"### {p.id}  (surface {p.meta['surface']}, template {p.meta['template']}, phrasing {p.meta['phrasing_index']}, "
+                f"{p.meta['n_prompt_messages']} prompt messages, {p.meta['n_reads']} reads)"
             )
             out += ["", head, "", f"README: {p.meta['readme']}", ""]
-            out += ["shared prompt, last four messages (reads and their outputs):", "```"]
-            out += [f"[{m['role']}] {_render_message(m)}" for m in p.prompt[-4:]]
+            out += ["shared prompt, the injected reads and their outputs:", "```"]
+            out += [f"[{m['role']}] {_render_message(m)}" for m in p.prompt[-2 * p.meta["n_reads"] :]]
             out += ["```", "", "**chosen**:", "```", _render_message(p.chosen), "```", "",
                     "**rejected**:", "```", _render_message(p.rejected), "```"]  # fmt: skip
         out.append("")

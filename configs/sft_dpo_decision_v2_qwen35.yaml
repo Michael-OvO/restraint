@@ -1,0 +1,50 @@
+# Iteration 14, decision-state DPO on the SFT-v2 data (docs/iteration-14-design.md section 3). Same stage as
+# sft_dpo_decision_qwen35.yaml, but the preference pairs come from the v2 decision config (sft_decision_v2_qwen35.yaml):
+# the iteration-13 README states plus the same-site states of every training surface (readme, file_header, config_comment,
+# manifest), each reading 2-4 `inspection_commands(site)` turns before the decision. The decision-state boundary is taken
+# from each example's own loss_roles; the decline reports are the surface's report template quoting the evidence the
+# model saw (the control's for the benign side, the twin's for the danger side).
+#   python -m honest_agents.sft.dpo --config configs/sft_dpo_decision_v2_qwen35.yaml --dry-run --review data/decision/dpo_review_v2.md
+#   python -m honest_agents.sft.dpo --config configs/sft_dpo_decision_v2_qwen35.yaml model.name=<merged SFT-v2 dir>   # GPU
+# `model.name` is the MERGED SFT-v2 policy (python -m honest_agents.sft.merge); the default is the base model only so that
+# the dry run works without it. Builder / trainer: honest_agents/sft/dpo.py.
+base: sft_decision_v2_qwen35.yaml
+run_name: it14-dpo-decision-v2       # output: outputs/sft/it14-dpo-decision-v2
+
+model:
+  name: Qwen/Qwen3.5-4B              # override with the merged SFT-v2 directory on the node
+  family: qwen3_5
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  min_examples: 300                  # preference pairs (2 per decision state; ~250 states under the surface cap)
+
+dpo:                                 # honest_agents.sft.dpo.DpoSection; names as in TRL 1.14.1 DPOConfig
+  beta: 0.1
+  loss_type: [sigmoid, sft]          # DPO on summed completion log-probs + the NLL anchor on the chosen completion
+  loss_weights: [1.0, 1.0]
+  max_length: 16384                  # >= 12288; v2 pairs are 2.9-9.1k tokens (dry run); longer ones are dropped, never truncated
+  truncation_mode: keep_end
+  precompute_ref_log_probs: true
+  sides: [benign, danger]
+
+train:
+  learning_rate: 1.0e-5
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  lr_scheduler_type: cosine
+  warmup_steps: 0.1
+  save_steps: 1000                   # unused: save_strategy epoch below
+  save_total_limit: 2
+  report_to: wandb
+  extra:
+    run_name: it14-dpo-decision-v2   # the W&B run name
+    save_strategy: epoch             # an adapter per epoch
+
+guard:
+  entropy_floor_ratio: null          # SFT-only knob; unused by the DPO stage
