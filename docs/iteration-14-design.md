@@ -90,6 +90,10 @@ beta 0.1, 1-2 epochs. Gate: control declines <= base + 3 with twin abstention no
 - References **[R7]**: A0' and anchored-3ep tier F from iteration 13 are reused (same harness); base and anchored-3ep are
   additionally run on the new-surface val set.
 - **[R6]** First node job: tier F of the iteration-13 GRPO checkpoint 10 (merged on anchored-3ep).
+- Estimators (pre-registered, Fable WP-D review): every G4 row uses pooled episodes with leaky variants void in both
+  arms (the protocol's and `select_checkpoint`'s method; `python -m honest_agents.eval.compare_runs`); iteration 13's
+  per-source convention is printed as a sensitivity row. (iv) and (vi) are judged on the point estimate, as in
+  iteration 13. The select split's 212 variants were never validated: G1-data runs on them before any selection.
 - Final readout: all G4 checks of iteration 13 on the old val set, plus seen-surface and held-out-surface pooled
   readouts and the seen / held-out phrasing split; transfer v2 (corrupt_input) if built; Agentic Abstention (immediate
   terminal subset, base + final; underpowered at 19 abstain rows, reported); TBLite only if >= $10 remains after the
