@@ -1043,7 +1043,7 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
 
 ---
 
-## Iteration 14 - Evidence surfaces, decision data v2, node chain (2026-10-13/14, in progress)
+## Iteration 14 - Evidence surfaces, decision data v2, node chain (2026-10-13/14)
 
 ### Design
 `docs/iteration-14-design.md` (draft 2, Fable-reviewed), `docs/iteration-14-training-plan.md` (owner-approved;
@@ -1109,10 +1109,37 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   SFT-v2 +5 / -4; DPO +3 / -3. No method makes the model read unfamiliar evidence: SFT, RL and DPO mostly move a
   general caution level (the decision probe agrees: 0.20). RL's gains are on the familiar template (capability +7.2 at
   tier F), not on new formats. This motivates `docs/iteration-15-proposal.md`.
+- **Seed 2** (same recipe, W&B https://wandb.ai/michael_ovo/honest-agents/runs/1lj3jdcu), tier F vs A0': (i) +42.7
+  [31.6, 54.2]; (ii) -33.6; (iii) +4.2 [+0.2, +8.3]; (iv) control declines 10.8 vs 4.2 %: **+6.6, fails** (seed 1:
+  +3.1; two-seed mean ~+4.8); (v) -50.0; (vi) -3.9. Two-seed protocol test of verified success: **+4.6 [-0.5, +9.4]**
+  (seed SD 0.6 points), lower bound above the -5 margin; the protocol still returns NO VERDICT because the reference
+  (base) has a single run and `ni_allow_single_seed` is false: as pre-registered, no non-inferiority is declared, but no
+  capability loss is visible across two seeds. Over-refusal on controls is the borderline, seed-sensitive endpoint.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
   out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
   6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
   none of these tasks, so declines are mostly honest failures; timely recall 0 everywhere). Underpowered (19 units).
+
+### Observations
+- On the familiar evaluation set the recipe works and replicates across two seeds: abstention +42-43, claims -34,
+  capability +4-5 with lower bounds above 0 per seed. Over-refusal on controls straddles the +5 limit (+3.1 / +6.6).
+- On unfamiliar evidence formats no method (SFT, RL, DPO) produces discrimination: they move a caution level. This is
+  the main open problem, and the reason for iteration 15's proposal (judgment as explicit reasoning, a decoupled
+  judgment set, cue-proof pairs, held-out discrimination as the primary metric).
+- RL (iteration-13 GRPO ckpt-10) adds capability on the familiar set (+7.2) but not reading of new formats.
+- DPO is a calibration knob: it removes over-refusal (+0.3) at the cost of abstention, and on new formats it lowers
+  caution rather than improving judgment.
+
+### Reflection
+- The node chain, Mac watcher and done markers made a long unattended session workable; the failures were in glue
+  (a tool's exit code on pruned failures, a missing WANDB_PROJECT, disk sizing for Terminal-Bench images, DPO memory),
+  each fixed in place. Running record-only arms on the idle GPU (DPO tier F, RL on new surfaces, Agentic Abstention)
+  produced the most informative result of the iteration at little cost.
+- Cost: ~16 h of a 2x RTX 4090 node at $1.56/h (~$25), well under the $30 overrun budget.
+
+### Next
+`docs/iteration-15-proposal.md`: a cheap judgment-only test first (~5,000 Claude-authored text items, no sandboxes),
+gated on held-out discrimination, before any full iteration.
 
 ### Incidents
 - Node disk full (243 GB): Agentic Abstention pulled ~146 GB of Terminal-Bench images, plus 30 GB of build cache and
