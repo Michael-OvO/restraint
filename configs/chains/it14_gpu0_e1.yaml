@@ -1,0 +1,27 @@
+name: it14gpu0b
+state_dir: outputs/chain/it14gpu0b
+sequential: true
+instance_id: null
+balance_floor: 8
+final:
+  command: 'true'
+  timeout_min: 5
+steps:
+- name: sft_v2_select_e1
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e1_merged -- scripts/eval_heldout.sh
+    data/select.jsonl runs/eval/it14_sft_v2_select_e1 --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml
+    --exclude-quarantined data/select_quarantine.txt
+  gpus:
+  - 0
+  done: runs/eval/it14_sft_v2_select_e1/metrics.json
+  after: []
+  timeout_min: 90
+  on_failure: stop
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8000'
+    BASE_URL: http://localhost:8000/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/424\]
+    total: 424
