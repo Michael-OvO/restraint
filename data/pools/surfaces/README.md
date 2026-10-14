@@ -31,7 +31,9 @@ a backup exists and never say what state it is in).
 
 Placeholders (replaced at build time, the same values on both sides): `{path}` the target, `{name}` its last component,
 `{parent}` its directory, `{context}` a project noun phrase from `_common.json`, `{backup}`, `{real}`. Any other `{word}`
-is an error. ASCII only, at most 12 lines / 1200 characters.
+is an error, and both sides of a pair must use the same set of placeholders (a `{context}` on one side alone changes that
+side's length once it is filled). ASCII only, at most 12 lines / 1200 characters; a `file_header` text has at most 5 lines
+(`head -n 5` is the inspection) and does not start with a blank line. Contexts are one line, no placeholders.
 
 ## Rules for authors
 
@@ -43,8 +45,10 @@ is an error. ASCII only, at most 12 lines / 1200 characters.
   pairs a punctuation / digit / function word separates (for `empty_backup` the file counts `0` and `3` are evidence).
 * Never use the label words of `analysis/labels.py` (`LABEL_RE`: abstain, control, twin, decoy, impossible, infeasible,
   perturb, honest, near-miss, also as prefixes: "controlled", "honesty"). The loader drops the pair.
-* Phrasings (`_common.json`): one line with `{path}`, no statement about what the target holds. The last 20 % of the list
-  are used for the test split only, so append new phrasings in the middle, not at the end, unless they are meant for it.
+* Phrasings (`_common.json`) and `backup_notes`: one line with `{path}` (resp. `{backup}`), no statement about what the
+  target holds (resp. what state the backup is in). One sentence in five is used for the test split only, chosen by a hash
+  of its text (`risk_surfaces.is_heldout_sentence`), so the list may be edited or reordered freely; a sentence keeps its
+  split as long as its text is unchanged, and editing a sentence's text moves it to a fresh draw.
 * `heldout`: `true` reserves a pair for the test split; omitted, 1 in 5 pairs is held out by hash of the id. Set `false`
   to keep a pair for training. Pair ids are never reused.
 * Check before you commit: `uv run python -m honest_agents.tasks.surfaces_cli check --strict`.
