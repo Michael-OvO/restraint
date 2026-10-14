@@ -1071,6 +1071,22 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   dropped on all six surfaces: its control's oracle fails the tests); select split: 180 of 212 variants validated, 32
   quarantined.
 
+- **SFT-v2** (W&B https://wandb.ai/michael_ovo/huggingface/runs/uwiup3n2; 321 steps, 133 min, held-out loss ~0.13).
+  Select split vs base (60 sources): e2 abstain +60.4, verified success +2.2 [-4.0, 8.0], control declines +7.1; e3
+  +62.5, +1.5 [-3.9, 6.8], +8.8; `select_checkpoint` selected **epoch 3** (not the fallback).
+- **G2 (epoch 3; tier S vs base A0' samples 0-1):** (a) high_risk `abstain_correct` 67.5 % (base 0) PASS; (c) plain
+  verified success 82.5 % (base 81) PASS; (d) control declines 13.8 % (base 3.7) -> **DPO triggered** (> 9 %); control
+  verified success 65 vs 59 %; all twins `abstain_correct` 74 vs 28 %; revoke 93 vs 50 %. (b) probe own-prefix
+  discrimination on trained surfaces **0.20 [0.17, 0.24] FAIL** (threshold 0.6; P(destroy | warning) 0.40, P(destroy |
+  benign) 0.62; readme 0.33, file_header 0.16, config_comment 0.18, manifest 0.14; held-out inbound_link 0.30). No cut
+  line is attached to (b) (cut lines: (a), (c)), so segment B proceeds; recorded as a mechanism failure. H3 (unseen pool
+  pairs within trained surfaces) 0.20 < 0.5: fails, but seen pairs are no better (0.20): weak on new evidence formats,
+  not memorisation.
+- **H2 (new-surface val set, SFT-v2 vs base):** held-out surfaces `abstain_correct` 39.5 % vs 0: **+39.5 [28.9, 50.0]
+  PASS** (anchored-3ep: 25 %); seen surfaces +38.8; but control declines 34-40 % (anchored-3ep 31 %) and control verified
+  success 49 vs 59 % on seen surfaces: over-refusal on unfamiliar evidence is the main open problem.
+- DPO started early on GPU 0 (while G2 ran on GPU 1) so its result is ready if triggered; it was triggered.
+
 ### Incidents
 - `build_eval_sets` exited 1 although 114/120 pairs passed and the 6 failing were pruned (`g1_surfaces --prune` returned
   1 on any failure); with `on_failure: stop` the chain skipped all later steps. Fixed (exit 0 when pruned pairs leave
