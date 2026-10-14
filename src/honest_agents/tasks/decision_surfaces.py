@@ -61,7 +61,10 @@ SURFACE_OUTPUTS = dp.DECISION_DIR / "sandbox_outputs_surfaces.jsonl"
 SURFACE_PROMPTS = dp.DECISION_DIR / "probe_prompts_surfaces.jsonl"
 DEFAULT_SALT = "it14"
 DEFAULT_PARALLEL = 6  # the Mac runs at most six boots at once
-DEFAULT_PROBE_SOURCES = 24  # per surface
+DEFAULT_PROBE_SOURCES = 48  # per training surface: RL-pool sources with a usable bank decision state (~100 own-prefix states at 2 per source)
+DEFAULT_HELDOUT_SELECT_SOURCES = 24  # select sources added to the held-out surfaces (zero-prefix prompts: no bank rows)
+DEFAULT_RL_POOLS = ("data/train_rl.jsonl", "data/train_rl_v2.jsonl")
+OWN_PREFIX_SURFACES = tuple(s for s in SURFACES if s != "empty_backup")  # empty_backup changes the instruction: its own prefix would not match
 DEFAULT_SFT_CONFIG = "configs/sft_decision_v2_qwen35.yaml"  # its `max_pairs_per_surface` cap defines "seen" pool pairs
 
 
@@ -175,10 +178,12 @@ def assign_pool_pairs(sources: Sequence[str], pool: SurfacePool, salt: str = DEF
     return {s: pairs[i % len(pairs)].id for i, s in enumerate(ordered)}
 
 
-def rl_pool_sources(path: str | Path = "data/train_rl.jsonl") -> set[str]:
+def rl_pool_sources(paths: str | Path | Iterable[str | Path] = "data/train_rl.jsonl") -> set[str]:
+    """Sources of the RL pool file(s); a missing file contributes nothing."""
     from honest_agents.sft.decision import pool_pair_ids
 
-    return pool_pair_ids([path]) if Path(path).expanduser().is_file() else set()
+    files = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    return pool_pair_ids([p for p in files if Path(p).expanduser().is_file()])
 
 
 def assert_sft_sources(sources: Iterable[str], distill: Iterable[str], rl: Iterable[str], data_dir: str | Path = "data") -> None:
@@ -268,18 +273,49 @@ def build_sft_rows(
     return rows, counts
 
 
-def probe_sources(data_dir: str | Path, rl_pool: str | Path, n: int, salt: str = DEFAULT_SALT) -> tuple[list[str], list[str]]:
-    """(training-surface probe sources, held-out-surface probe sources): RL-pool and select sources in a stable hash
-    order, `n` per surface; the held-out surfaces use select sources only."""
-    select = sorted(load_select_sources(Path(data_dir)))
-    rl = sorted(rl_pool_sources(rl_pool))
-    mixed = sorted({*select, *rl}, key=lambda s: _rank(salt, "probe", s))
-    return mixed[:n], sorted(select, key=lambda s: _rank(salt, "probe-held", s))[:n]
+@dataclass(frozen=True)
+class ProbeSources:
+    """Which sources the probe builds each surface on."""
+
+    train: list[str]  # training surfaces and inbound_link: RL-pool sources with a usable bank decision state
+    heldout_only: list[str]  # select sources: zero-prefix prompts of the held-out surfaces (no bank rows)
+    rl_pool_usable: int  # RL-pool sources with a usable state before the cap to `n`
+    rl_pool_total: int
+
+    def for_surface(self, surface: str) -> list[str]:
+        if surface in SURFACES_TRAIN:
+            return sorted(self.train)
+        if surface == "empty_backup":  # the instruction changes, so there is no own prefix to continue: zero-prefix only
+            return sorted(self.heldout_only)
+        return sorted({*self.train, *self.heldout_only})  # inbound_link keeps the instruction: own prefix + zero-prefix
+
+
+def probe_sources(
+    data_dir: str | Path,
+    rl_pools: str | Path | Iterable[str | Path],
+    bank_rows: Iterable[Any],
+    n: int,
+    *,
+    salt: str = DEFAULT_SALT,
+    exclude: Iterable[str] = (),
+    n_select: int = DEFAULT_HELDOUT_SELECT_SOURCES,
+) -> ProbeSources:
+    """`n` RL-pool sources in a stable hash order that have a usable decision state in `bank_rows` (the own-prefix probe
+    needs one), never a source of `exclude` (SFT, anchor and distill-pool sources) nor a select / validation / test
+    source. RL-pool sources are trained on by GRPO in iteration 13 but not by the SFT model the probe reads. The
+    held-out surfaces also get `n_select` select sources for zero-prefix prompts."""
+    from honest_agents.sft.decision import select_states
+
+    rl = rl_pool_sources(rl_pools)
+    banned = {*exclude, *excluded_from_training(data_dir)}
+    states, _ = select_states(bank_rows, pair_ids=rl - banned, per_variant=1)
+    usable = sorted({st.pair_id for st in states}, key=lambda s: _rank(salt, "probe", s))
+    select = sorted(load_select_sources(Path(data_dir)), key=lambda s: _rank(salt, "probe-held", s))
+    return ProbeSources(usable[:n], select[:n_select], len(usable), len(rl))
 
 
 def build_probe_rows(
-    train_sources: Sequence[str],
-    heldout_sources: Sequence[str],
+    probe: ProbeSources,
     sft_pairs: Mapping[str, set[str]],
     *,
     bank_tasks: Path,
@@ -291,7 +327,7 @@ def build_probe_rows(
     for surface in SURFACES:
         pool = get_pool(surface)
         trained = surface in SURFACES_TRAIN
-        sources = sorted(train_sources if trained else heldout_sources)
+        sources = probe.for_surface(surface)
         if trained:
             used = sorted(pool.by_id(i).id for i in sft_pairs.get(surface, ()))
             test_pairs = [p.id for p in pool.pairs_for("test")]
@@ -346,10 +382,30 @@ def surface_prompts(
         if not refs:
             continue
         before = len(prompts)
-        prompts += dp.own_prefix_prompts(bank_rows, refs, outputs, split, counts, per_variant=per_variant, sft_pairs=sft)
+        if surface in OWN_PREFIX_SURFACES:
+            prompts += dp.own_prefix_prompts(bank_rows, refs, outputs, split, counts, per_variant=per_variant, sft_pairs=sft)
         prompts += dp.zero_prefix_prompts(refs, outputs, split, counts, sft_pairs=sft)
         counts[f"prompts_{surface}"] = len(prompts) - before
     return prompts, counts
+
+
+def surface_counts(prompts: Sequence[dp.DecisionPrompt]) -> dict[str, dict[str, int]]:
+    """Per surface: own-prefix sources / states (an arm-pair is one state), their seen / unseen split, zero-prefix pairs."""
+    out: dict[str, dict[str, int]] = {}
+    for surface in SURFACES:
+        mine = [p for p in prompts if p.surface == surface and p.arm == dp.ARM_WARNING]
+        own = [p for p in mine if p.set == dp.SET_OWN_PREFIX]
+        zero = [p for p in mine if p.set == dp.SET_ZERO_PREFIX]
+        out[surface] = {
+            "own_prefix_sources": len({p.pair_id for p in own}),
+            "own_prefix_states": len(own),
+            "own_prefix_seen": sum(p.phrasing_seen is True for p in own),
+            "own_prefix_unseen": sum(p.phrasing_seen is False for p in own),
+            "zero_prefix_pairs": len(zero),
+            "zero_prefix_seen": sum(p.phrasing_seen is True for p in zero),
+            "zero_prefix_unseen": sum(p.phrasing_seen is False for p in zero),
+        }
+    return out
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -384,12 +440,23 @@ def _cmd_build(args: argparse.Namespace) -> int:
         rows, counts = build_sft_rows(sources, bank_tasks=bank_tasks, out_root=out_root, surfaces=args.surface or SURFACES_TRAIN, salt=args.salt)
         assert all(not r.pool_pair_heldout for r in rows), "a held-out pool pair reached the SFT rows"
     else:
-        train_src, held_src = probe_sources(args.data_dir, args.rl_pool, args.limit_sources or DEFAULT_PROBE_SOURCES, args.salt)
-        sft = trained_pool_pairs(read_manifest(args.manifest), args.sft_config)  # "seen" = trained under the cap
-        rows, counts = build_probe_rows(train_src, held_src, sft, bank_tasks=bank_tasks, out_root=out_root, salt=args.salt)
+        from honest_agents.bank import iter_bank
+        from honest_agents.sft.decision import pool_pair_ids
+
         sft_sources = {r.source for r in read_manifest(args.manifest) if r.role == ROLE_SFT}
-        if overlap := sft_sources & {r.source for r in rows}:
-            raise ValueError(f"{len(overlap)} probe source(s) are SFT sources (e.g. {min(overlap)})")
+        distill = pool_pair_ids([args.distill_pool])
+        bank_rows = [r for r in iter_bank(Path(args.bank).expanduser()) if r.task.get("family") == dp.HIGH_RISK]
+        probe = probe_sources(
+            args.data_dir, args.rl_pool, bank_rows, args.limit_sources or DEFAULT_PROBE_SOURCES, salt=args.salt, exclude=sft_sources | distill
+        )
+        sft = trained_pool_pairs(read_manifest(args.manifest), args.sft_config)  # "seen" = trained under the cap
+        rows, counts = build_probe_rows(probe, sft, bank_tasks=bank_tasks, out_root=out_root, salt=args.salt)
+        counts["rl_pool_sources_with_usable_state"] = probe.rl_pool_usable
+        counts["rl_pool_sources"] = probe.rl_pool_total
+        if overlap := (sft_sources | distill) & {r.source for r in rows if r.source not in set(probe.heldout_only)}:
+            raise ValueError(f"{len(overlap)} probe source(s) are SFT / distill-pool sources (e.g. {min(overlap)})")
+        if bad := excluded_from_training(args.data_dir) & {r.source for r in rows if r.source not in set(probe.heldout_only)}:
+            raise ValueError(f"{len(bad)} RL probe source(s) are select / validation / test sources (e.g. {min(bad)})")
     merged = merge_manifest(rows, args.manifest, replace_roles=[args.role] if not args.surface else [])
     print(json.dumps({"role": args.role, "built": dict(counts), "manifest_rows": len(merged),
                       "instruction_unequal": sum(not r.instruction_equal for r in rows if r.surface != "empty_backup"),
@@ -417,6 +484,14 @@ def _cmd_prompts(args: argparse.Namespace) -> int:
     sft = trained_pool_pairs(rows, args.sft_config)
     prompts, counts = surface_prompts(bank_rows, rows, outputs, per_variant=args.per_variant, sft_pairs=sft)
     manifest = dp.prompt_manifest(prompts, counts, dp.PhrasingSplit.build())
+    manifest["surface_counts"] = surface_counts(prompts)
+    manifest["probe_sources"] = {
+        "own_prefix": "RL-pool sources (data/train_rl.jsonl, data/train_rl_v2.jsonl) with a usable bank decision state; never an "
+        "SFT / anchor / distill-pool, select, validation or test source. The RL pool is trained on by GRPO in iteration 13 "
+        "(not by SFT-v2), which is acceptable for a probe of the SFT model.",
+        "empty_backup": "zero-prefix only (the instruction changes, so no own prefix continues it); select sources",
+        "per_variant": args.per_variant,
+    }
     dp.write_prompts(prompts, args.out, manifest)
     print(json.dumps(manifest, indent=2))
     return 0
@@ -433,7 +508,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--tasks", default="data/tasks", help="the iteration-3 task directories (`__high_risk` / `__feasible`)")
     b.add_argument("--out", default=str(SURFACE_TASKS))
     b.add_argument("--data-dir", default="data")
-    b.add_argument("--rl-pool", default="data/train_rl.jsonl")
+    b.add_argument("--rl-pool", nargs="+", default=list(DEFAULT_RL_POOLS), help="RL pool files: SFT never uses their sources, the probe draws from them")
+    b.add_argument("--distill-pool", default="data/distill_pool.jsonl", help="probe: the SFT / anchor source pool, excluded from the probe")
     b.add_argument("--surface", nargs="+", choices=SURFACES, help="only these surfaces (rows of the others are kept)")
     b.add_argument("--limit-sources", type=int, default=0, help="a subset: the first N sources in hash order")
     b.add_argument("--salt", default=DEFAULT_SALT)

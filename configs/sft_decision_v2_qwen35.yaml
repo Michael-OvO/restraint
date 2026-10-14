@@ -25,12 +25,12 @@ decision:
     surfaces: [readme, file_header, config_comment, manifest]
     data_dir: data                   # select_sources.txt, split_seeds.json: select / val / test sources never train
     max_pairs_per_surface: 40        # cap: 40 sources per surface (stable hash), the manifest stays uncapped. 4 x 40 + 88
-                                     # legacy = ~248 pairs = ~496 decision examples, kept near 1:1 with the anchors
+                                     # legacy = ~245 pairs = ~490 decision examples (pairs whose own report is schema-malformed are dropped), kept near 1:1 with the anchors
     per_variant: 1                   # one state per source and surface: 40 sources = <= 40 pairs per surface
     min_pairs_per_surface: 30        # G1 (a source can drop out of the cap on rule B)
     review_per_surface: 2            # G1: data/decision/review_v2.md holds 2 twin + 2 control examples per surface
   anchors:
-    count: 455                       # every anchor available (per_variant 4, unread high_risk dropped): ~0.9:1 against ~496 decision examples
+    count: 443                       # every anchor available (per_variant 4; unread high_risk and malformed-report anchors dropped): ~0.9:1 against ~490 decision examples
     per_variant: 4                   # the pass@4 bank has up to four own successes per variant; one per variant is too few
     high_risk_unread: false          # unread high_risk anchors dropped, as in iteration 13
     max_trained_ratio: 4.0

@@ -156,6 +156,28 @@ def test_surface_examples_train_reads_decision_and_report_and_quote_the_evidence
     assert pair.control.meta["surface"] == surface and pair.twin.meta["from_pool"]
 
 
+def test_surface_twins_draw_their_report_template_by_episode_and_surface(sfx: SurfaceFixture):
+    pairs = build_surface(sfx).pairs
+    for p in pairs:
+        key = f"{p.state.episode_id}:{p.surface}" if p.from_pool else p.state.episode_id
+        assert p.twin.meta["template"] == dec.template_index(key) == p.control.meta["template"]
+    by_episode: dict[str, set[int]] = {}
+    for p in pairs:
+        by_episode.setdefault(p.state.episode_id, set()).add(p.twin.meta["template"])
+    assert any(len(t) > 1 for t in by_episode.values())  # one prefix no longer sees a single phrasing across its twins
+
+
+@pytest.mark.parametrize("bad", ["not a list", None, ["ok", 3]])
+def test_malformed_own_reports_drop_the_pair(sfx: SurfaceFixture, bad):
+    from tests.decision_fixtures import OWN_REPORT
+
+    rows = [control_row(p, report={**OWN_REPORT, "evidence_commands": bad}) for p in sfx.base.pairs]
+    ds = dec.build_dataset(rows, options(sfx))
+    assert not ds.pairs and ds.dropped[dec.DROP_REPORT_MALFORMED] >= len(sfx.base.pairs)
+    ok = dec.build_dataset([control_row(p) for p in sfx.base.pairs], options(sfx))
+    assert ok.pairs and not ok.dropped[dec.DROP_REPORT_MALFORMED]
+
+
 def test_where_phrase_and_quote_per_surface(sfx: SurfaceFixture):
     ds = build_surface(sfx)
     wheres = {p.surface: dec.where_of(dp.read_variant_meta(p.twin_task_dir)) for p in ds.pairs if p.from_pool}
@@ -293,7 +315,7 @@ def test_shipped_v2_config_parses():
 
     cfg = train_sft.load_config(ROOT / "configs" / "sft_decision_v2_qwen35.yaml")
     opts = dec.parse_options(cfg.decision)
-    assert opts.surfaces is not None and opts.surfaces.surfaces == TRAIN and opts.anchors is not None and opts.anchors.count == 455 and opts.surfaces.max_pairs_per_surface == 40 and opts.surfaces.per_variant == 1
+    assert opts.surfaces is not None and opts.surfaces.surfaces == TRAIN and opts.anchors is not None and opts.anchors.count == 443 and opts.surfaces.max_pairs_per_surface == 40 and opts.surfaces.per_variant == 1
     assert cfg.lora.r == 32 and cfg.lora.alpha == 64 and cfg.train.learning_rate == 5e-5 and cfg.train.num_train_epochs == 3
     assert cfg.train.gradient_accumulation_steps == 8 and cfg.guard.entropy_floor_ratio is None
     assert cfg.train.extra["run_name"] == "it14-sft-v2" and cfg.train.extra["save_strategy"] == "epoch"
@@ -382,3 +404,10 @@ def test_seen_pool_pairs_are_the_capped_ones(sfx: SurfaceFixture):
     assert all(len(uncapped[s]) == 4 and len(trained[s]) == 2 and trained[s] < uncapped[s] for s in TRAIN)
     assert dsurf.cap_rows(reversed(sfx.rows), 2) == dsurf.cap_rows(sfx.rows, 2)  # a function of the ids, not of the order
     assert dsurf.trained_pool_pairs(sfx.rows, None) == uncapped
+
+
+def test_probe_sources_per_surface_keep_empty_backup_zero_prefix_only():
+    probe_src = dsurf.ProbeSources(train=["a", "b"], heldout_only=["s"], rl_pool_usable=2, rl_pool_total=3)
+    assert all(probe_src.for_surface(s) == ["a", "b"] for s in TRAIN)
+    assert probe_src.for_surface("inbound_link") == ["a", "b", "s"] and probe_src.for_surface("empty_backup") == ["s"]
+    assert "empty_backup" not in dsurf.OWN_PREFIX_SURFACES and "inbound_link" in dsurf.OWN_PREFIX_SURFACES

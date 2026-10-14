@@ -127,6 +127,7 @@ DROP_VARIANT_CAP = "per_variant_cap"
 DROP_SURFACE_EVIDENCE_HINT = "surface_evidence_hint_echo"
 DROP_SURFACE_NO_EVIDENCE = "surface_no_evidence_lines"
 DROP_SURFACE_INVALID = "surface_pair_invalid"
+DROP_REPORT_MALFORMED = "own_report_malformed"  # a list field of the own `submit_report` is a string / None, not a list of strings
 
 # Rule B: words that assert the deletion happened or refer to it. Conservative on purpose (a false cut only shortens a
 # tail); the target path itself is matched by `mentions_target`.
@@ -604,6 +605,28 @@ def _spec(row: BankRow) -> dict[str, Any]:
     return spec if isinstance(spec, dict) else {}
 
 
+REPORT_LIST_FIELDS = ("completed", "incomplete", "evidence_commands")
+
+
+def report_malformed_fields(message: Mapping[str, Any]) -> list[str]:
+    """The list fields of the `submit_report` calls of an assistant message that are present but not a list of strings
+    (a string holding broken JSON, None). Such a report is dropped, not repaired: a string is not trivially a one-element
+    list (the observed ones are truncated JSON arrays)."""
+    bad: list[str] = []
+    for call in message.get("tool_calls") or []:
+        fn = call.get("function") or {}
+        if fn.get("name") != "submit_report":
+            continue
+        args = fn.get("arguments")
+        if not isinstance(args, dict):
+            bad.append("arguments")
+            continue
+        for name in REPORT_LIST_FIELDS:
+            if name in args and not (isinstance(args[name], list) and all(isinstance(x, str) for x in args[name])):
+                bad.append(name)
+    return bad
+
+
 def _hash(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
@@ -820,7 +843,6 @@ def build_pair(
     `inspection_commands(site)` (2-4 turns) and quotes the evidence it saw; an iteration-13 pair reads `ls -la` and
     `cat README`."""
     row, target = state.row, state.target
-    template = template_index(state.episode_id)
     prefix = state.prefix_messages()
     own_turns = state.decision_and_tail()
     deletion_turn, tail = own_turns[0], own_turns[1:]
@@ -830,6 +852,9 @@ def build_pair(
     read_texts = dp.tool_texts(prefix)
     pool = twin_meta.from_pool
     surface = twin_meta.surface if pool else "readme"
+    # An authored-surface twin draws its phrasing by (episode, surface), so one prefix does not see the same report
+    # wording across its README pair and its surface twins; the iteration-13 README pair keeps its index.
+    template = template_index(f"{state.episode_id}:{surface}" if pool else state.episode_id)
     reads_twin = dp.injected_turns(target, key, read_texts, twin_outputs, twin_meta.site)
     reads_control = dp.injected_turns(target, key, read_texts, control_outputs, control_meta.site)
     n_reads = len(reads_twin)  # messages: an assistant turn and its output per command
@@ -840,6 +865,8 @@ def build_pair(
     quote = quote_of(quote_lines) if pool else None
     own_report_message = normalize_message(row.report_message or {})
     own_report_message["tool_calls"] = own_report_message.get("tool_calls", [])[: row.report_turn_extra_calls + 1]
+    if report_malformed_fields(own_report_message):
+        return DROP_REPORT_MALFORMED  # the control trains the report verbatim and the twin's `completed` comes from it
     own_args = (row.report_call or {}).get("arguments") or {}
     base_meta = {
         "pair_id": state.pair_id,
@@ -1293,6 +1320,9 @@ def build_anchors(
         if kind == ANCHOR_HIGH_RISK and not a.high_risk_unread and ex.meta["reads_before_deleting"] is False:
             dropped[DROP_ANCHOR_UNREAD] += 1
             continue
+        if report_malformed_fields(ex.messages[-1]):
+            dropped[DROP_REPORT_MALFORMED] += 1
+            continue
         if hint_leaks(ex.messages) or echoes_hint(ex):
             dropped[DROP_ANCHOR_HINT] += 1
             continue
@@ -1375,7 +1405,8 @@ def _decision_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> St
             "sources (and record that the RL twins are then seen by SFT)",
             total, opts.min_pairs,
         )  # fmt: skip
-    train_ds.split.write(Path(opts.sandbox_outputs).expanduser().parent / dp.PHRASINGS_FILE.name)
+    first_outputs = opts.sandbox_outputs if isinstance(opts.sandbox_outputs, str) else opts.sandbox_outputs[0]
+    train_ds.split.write(Path(first_outputs).expanduser().parent / dp.PHRASINGS_FILE.name)
     return StageData(train_ds.examples + anchors.fit, held_ds.examples + anchors.held, summary)
 
 
