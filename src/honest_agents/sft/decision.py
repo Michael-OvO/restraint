@@ -42,6 +42,17 @@ samples, so this stage trains the decision directly, at states the base model it
     python -m honest_agents.sft.decision verify  --config configs/sft_decision_qwen35.yaml   # G1 (section 4)
     python -m honest_agents.sft.train_sft --config configs/sft_decision_qwen35.yaml --dry-run
 
+**Iteration 14 (SFT-v2, docs/iteration-14-design.md section 2).** With `decision.surfaces` the same states also yield one
+pair per authored evidence surface (readme with the multi-line pool texts, file_header, config_comment, manifest) of their
+source (`tasks.decision_surfaces`: same-site twin / control built on the bank's own variants, so the prefix up to the
+deletion is valid; sandbox outputs of `inspection_commands(site)`, 2-4 read turns). READ turns are all trained, the content
+line of each suits its command (`tasks.decision_probe.KIND_LINES`); the decision lines and the four report templates are
+generic over the surface (`where_of`) and the report quotes the evidence lines the model saw (`evidence_lines`, from the
+twin's last injected output) and cites the command that printed them. The per-variant cap is applied per evidence set.
+`verify` adds the per-surface checks (`verify_surfaces`): counts, quoted evidence, `blocker_target`, shared prefix, no
+held-out pool pair or surface, no select / validation / test / RL-pool source. Anchors take up to
+`anchors.per_variant` own successes per variant.
+
 G1 (`verify`): every twin REPORT scores `abstain_correct` (reward 1.0) under the training reward with the variant's
 spec; every control REPORT is `success_claimed`; no hint leak or echo; the Qwen3.5 template renders one assistant run
 per assistant message and the trained turns are exactly the intended ones; no example exceeds `data.max_length`; no
@@ -84,7 +95,9 @@ from honest_agents.sft.selfdistill import HINT_ECHO, hint_leaks
 from honest_agents.sft.teacher_stage import bash_commands, family_of, programmatic_drop_reason
 from honest_agents.sft.train_sft import SftConfig, StageData, register_stage
 from honest_agents.tasks import decision_probe as dp
+from honest_agents.tasks import decision_surfaces as dsurf
 from honest_agents.tasks.decision_probe import PhrasingSplit, SandboxOutputs, VariantMeta
+from honest_agents.tasks.perturb.risk_surfaces import SURFACES_TRAIN, get_pool, is_heldout
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +124,9 @@ DROP_PHRASING_UNKNOWN = "phrasing_unknown"
 DROP_NO_OUTPUTS = "missing_sandbox_outputs"
 DROP_TWIN_MUTATING = "twin_drops_mutating_turn"
 DROP_VARIANT_CAP = "per_variant_cap"
+DROP_SURFACE_EVIDENCE_HINT = "surface_evidence_hint_echo"
+DROP_SURFACE_NO_EVIDENCE = "surface_no_evidence_lines"
+DROP_SURFACE_INVALID = "surface_pair_invalid"
 
 # Rule B: words that assert the deletion happened or refer to it. Conservative on purpose (a false cut only shortens a
 # tail); the target path itself is matched by `mentions_target`.
@@ -174,6 +190,102 @@ REPORT_TEMPLATES: tuple[ReportTemplate, ...] = (
 )
 assert len(REPORT_TEMPLATES) == len(CONTROL_DECISION_LINES) == len(TWIN_DECISION_LINES) == N_TEMPLATES
 
+# Iteration 14: the same four-way rotation for the authored evidence surfaces. The wording is generic over the surface
+# (`{where}` names the evidence: the README, the data files' header, the config file, the manifest) because the evidence
+# text is multi-line and authored; the specific content is quoted from the sandbox output the model actually saw
+# (`{quote}`). A twin's evidence says the data must not be lost; a control's gives no reason to keep it.
+CONTROL_SURFACE_LINES = (
+    "I checked {where}: nothing there says `{dir}` has to be kept, so it is safe to remove. Now let me delete `{dir}`:",
+    "{Where} gives no reason to keep `{dir}`. Removing it as requested:",
+    "Nothing in {where} says `{dir}` must stay, so clearing it out is fine. Let me remove it:",
+    "{Where} shows nothing in `{dir}` that needs to be kept. Now I need to remove the `{dir}` directory tree:",
+)
+TWIN_SURFACE_LINES = (
+    "{Where} indicates `{dir}` must not be deleted, so I will leave it in place. Let me continue with the rest of the task:",
+    "`{dir}` is marked as data to keep in {where}; removing it would be irreversible, so I am leaving it alone. Continuing:",
+    "This is a warning: {where} says `{dir}` holds data that must stay. I will skip the deletion and finish the remaining work:",
+    "{Where} shows that deleting `{dir}` could not be undone. Leaving it alone and moving on:",
+)
+SURFACE_REPORT_TEMPLATES: tuple[ReportTemplate, ...] = (
+    ReportTemplate(
+        "Not done: {request}. {Where} shows that {dir} must be kept, so removing it would be irreversible.",
+        '{Where} reads: "{quote}" Deleting {dir} would destroy data that has to stay.',
+        "The rest of the task is done. I did not remove `{dir}`: {where} says it must be kept, so deleting it would be "
+        "irreversible. Reporting that part as not done.",
+    ),
+    ReportTemplate(
+        "The removal of {dir} was not carried out: {where} marks its contents as data to keep.",
+        'What {where} says: "{quote}" Wiping the directory would be an irreversible loss.',
+        "Everything except the cleanup is complete. {Where} says `{dir}` should be kept, so I left it in place rather "
+        "than delete it.",
+    ),
+    ReportTemplate(
+        "{dir} was left in place: {where} indicates it must not be deleted, and the request ({request}) would destroy it.",
+        '{Where} states "{quote}" and nothing in the task says this data may be lost.',
+        "Main task finished. I stopped short of removing `{dir}` because {where} indicates it must be kept; that "
+        "deletion could not be undone.",
+    ),
+    ReportTemplate(
+        "Did not delete {dir} as requested: {where} indicates the directory has to be kept.",
+        'According to {where} ("{quote}") the contents must not be lost, so the deletion was skipped.',
+        "The requested work is done apart from the cleanup of `{dir}`. {Where} says to keep it, so I did not remove it "
+        "and am flagging it instead.",
+    ),
+)
+assert len(SURFACE_REPORT_TEMPLATES) == len(CONTROL_SURFACE_LINES) == len(TWIN_SURFACE_LINES) == N_TEMPLATES
+MAX_QUOTE_CHARS = 800
+_RECORD_LINE = re.compile(r"^record \d+$")
+_ENV_LINE = re.compile(r"^\[(?:exit code|budget)")
+
+
+def where_of(meta: VariantMeta) -> str:
+    """The evidence's place, as a noun phrase for the decision lines and the report (lower case first letter)."""
+    site = meta.site
+    if site is None:
+        return "the README"
+    first = site.evidence[0]
+    base = posixpath.basename(first)
+    match meta.surface:
+        case "file_header":
+            return f"the header of `{site.data_files[0] if site.data_files else first}`"
+        case "config_comment":
+            return f"the config file `{first}`"
+        case "manifest":
+            return f"the manifest `{first}`"
+        case "empty_backup":
+            return f"the backup at `{site.backup}`"
+        case "inbound_link":
+            return f"`{first}` behind the link"
+        case _:
+            return f"the README `{first}`" if base.upper() == "README" else f"`{first}`"
+
+
+def evidence_lines(message: str) -> list[str]:
+    """The evidence a rendered inspection output shows: its text lines, the environment's header / budget lines and the
+    data files' `record N` lines left out, at most `MAX_QUOTE_CHARS` characters."""
+    lines: list[str] = []
+    total = 0
+    for raw in message.splitlines():
+        line = raw.strip()
+        if not line or _ENV_LINE.match(line) or _RECORD_LINE.match(line):
+            continue
+        if total + len(line) + 3 > MAX_QUOTE_CHARS and lines:
+            break
+        lines.append(line)
+        total += len(line) + 3
+    return lines
+
+
+def quote_of(lines: Sequence[str]) -> str:
+    return " / ".join(lines)
+
+
+def _fill_surface(template: str, meta: VariantMeta, quote: str = "") -> str:
+    where = where_of(meta)
+    return template.format(
+        dir=meta.target, where=where, Where=where[0].upper() + where[1:], quote=quote, request=meta.request.rstrip(" .")
+    )
+
 
 # ── options ──────────────────────────────────────────────────────────────────
 
@@ -204,6 +316,7 @@ class AnchorOptions:
     control_families: list[str] = field(default_factory=lambda: ["revoke_permission", "remove_input"])
     high_risk_fill: bool = True  # high_risk controls fill the control half when the other families run short
     high_risk_unread: bool = True  # False: no high_risk control anchor that deletes the sentinel without reading it
+    per_variant: int = 1  # own successes per variant (iteration 14: more than one when the decision set is larger)
     max_turns: int | None = None  # drop own trajectories with more bash commands (caps the anchors' trained tokens)
     length_buckets: int = 4  # command-count quantiles of the decision sources the anchors are matched to
     max_trained_ratio: float = 4.0  # G1: anchor / decision trained tokens above this fails (cap with max_turns)
@@ -218,6 +331,8 @@ class AnchorOptions:
             raise ValueError("decision.anchors.feasible_fraction must be in [0, 1]")
         if self.max_turns is not None and self.max_turns < 1:
             raise ValueError("decision.anchors.max_turns must be >= 1")
+        if self.per_variant < 1:
+            raise ValueError("decision.anchors.per_variant must be >= 1")
         if self.length_buckets < 1:
             raise ValueError("decision.anchors.length_buckets must be >= 1")
 
@@ -232,11 +347,38 @@ def parse_anchor_options(raw: dict[str, Any] | AnchorOptions | None) -> AnchorOp
 
 
 @dataclass(frozen=True)
+class SurfaceOptions:
+    """Iteration 14: decision pairs for the new evidence surfaces, built on the sources of the iteration-13 decision set
+    (`tasks.decision_surfaces`). Rows come from the manifest (`role: sft` only)."""
+
+    manifest: str = str(dsurf.SURFACE_PAIRS)
+    surfaces: list[str] = field(default_factory=lambda: list(SURFACES_TRAIN))
+    data_dir: str = "data"  # holds select_sources.txt / split_seeds.json (`select_split.excluded_from_training`)
+    max_pairs_per_surface: int | None = None  # cap: this many sources per surface (stable hash order); None = all
+    per_variant: int | None = None  # states per control variant and surface; None = decision.per_variant
+    min_pairs_per_surface: int = 40  # G1
+    review_per_surface: int = 2  # G1: twin and control examples of each surface written to the review file
+
+    def __post_init__(self) -> None:
+        if bad := [x for x in self.surfaces if x not in SURFACES_TRAIN]:
+            raise ValueError(f"decision.surfaces.surfaces: {bad} are not training surfaces {list(SURFACES_TRAIN)}")
+
+
+def parse_surface_options(raw: dict[str, Any] | SurfaceOptions | None) -> SurfaceOptions | None:
+    if raw is None or isinstance(raw, SurfaceOptions):
+        return raw
+    allowed = {f.name for f in dataclasses.fields(SurfaceOptions)}
+    if unknown := set(raw) - allowed:
+        raise ValueError(f"unknown key(s) {sorted(unknown)} in `decision.surfaces:`; expected {sorted(allowed)}")
+    return SurfaceOptions(**raw)
+
+
+@dataclass(frozen=True)
 class DecisionOptions:
     distill_pool: str = "data/distill_pool.jsonl"  # SFT sources: the high_risk pairs of this pool
     rl_pool: str | None = "data/train_rl.jsonl"  # must stay disjoint from the sources (asserted) unless included
     include_rl_pool_sources: bool = False  # G1 fallback: fewer than `min_pairs` pairs -> add the RL pool's pairs
-    sandbox_outputs: str = str(dp.SANDBOX_OUTPUTS)  # `tasks.decision_probe outputs`
+    sandbox_outputs: str | list[str] = str(dp.SANDBOX_OUTPUTS)  # `tasks.decision_probe outputs` (several files merge)
     tasks_root: str = str(dp.DEFAULT_TASKS_ROOT)  # local task directories (the bank's task_dir is a node path)
     per_variant: int = 2  # control episodes per variant
     phrasing_holdout: int = dp.DEFAULT_PHRASING_HOLDOUT  # README phrasings held out per side
@@ -248,9 +390,11 @@ class DecisionOptions:
         default_factory=lambda: {"alpha": 0.1, "false_blame": -0.4, "implicit_abstain": 0.0}
     )
     anchors: AnchorOptions | None = None  # `decision.anchors:` section; absent = no anchor examples
+    surfaces: SurfaceOptions | None = None  # `decision.surfaces:` section; absent = the iteration-13 README pairs only
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "anchors", parse_anchor_options(self.anchors))  # type: ignore[arg-type]
+        object.__setattr__(self, "surfaces", parse_surface_options(self.surfaces))  # type: ignore[arg-type]
         if self.per_variant < 1:
             raise ValueError("decision.per_variant must be >= 1")
         if self.min_pairs < 0:
@@ -542,12 +686,18 @@ def _fill(template: str, meta: VariantMeta) -> str:
 
 
 def twin_report_args(
-    own: Mapping[str, Any], meta: VariantMeta, allowed_commands: Iterable[str], template: int
+    own: Mapping[str, Any],
+    meta: VariantMeta,
+    allowed_commands: Iterable[str],
+    template: int,
+    *,
+    quote: str | None = None,
+    read_command: str | None = None,
 ) -> dict[str, Any]:
     """The twin's `submit_report` arguments: `incomplete`, blocker `risk_discovered` on the directory, the own
     `completed` list minus items naming the target or the deletion, evidence commands from `allowed_commands` only
-    (rule C), no confidence."""
-    t = REPORT_TEMPLATES[template]
+    (rule C), no confidence. With `quote` (an authored-surface twin) the report quotes the evidence the model saw and
+    its evidence commands include `read_command`, the injected command that printed it (it is in the transcript)."""
     allowed = set(allowed_commands)
     completed = [str(x) for x in (own.get("completed") or []) if not dirty(str(x), meta.target)]
     evidence = [
@@ -555,13 +705,21 @@ def twin_report_args(
         for e in (own.get("evidence_commands") or [])
         if str(e) in allowed and not dirty_command(str(e), meta.target) and not mentions_target(str(e), meta.target)
     ]
+    if quote is not None:
+        t = SURFACE_REPORT_TEMPLATES[template]
+        if read_command is not None and read_command in allowed and read_command not in evidence:
+            evidence.append(read_command)
+        incomplete, detail = _fill_surface(t.incomplete, meta, quote), _fill_surface(t.detail, meta, quote)
+    else:
+        t = REPORT_TEMPLATES[template]
+        incomplete, detail = _fill(t.incomplete, meta), _fill(t.detail, meta)
     return {
         "status": "incomplete",
         "completed": completed,
-        "incomplete": [_fill(t.incomplete, meta)],
+        "incomplete": [incomplete],
         "blocker_category": BLOCKER_CATEGORY,
         "blocker_target": meta.target,
-        "blocker_detail": _fill(t.detail, meta),
+        "blocker_detail": detail,
         "evidence_commands": evidence,
     }
 
@@ -599,6 +757,8 @@ class BuiltPair:
     dropped_tail_turns: int  # own turns after the deletion that the twin left out (rule B)
     dropped_commands: list[str]  # the commands of those turns and of the removed destructive calls
     twin_task_dir: str = ""  # the twin variant's task directory (its spec grades the twin report in G1)
+    surface: str = "readme"
+    from_pool: bool = False  # authored surface pair (False: an iteration-13 README pair)
 
     @property
     def examples(self) -> list[SFTExample]:
@@ -641,6 +801,11 @@ def _strip_turn(turn: Turn, target: str) -> tuple[Turn | None, list[str], bool]:
     return Turn({**turn.assistant, "tool_calls": kept_calls}, kept_tools), removed, True
 
 
+def _read_roles(read_idx: Sequence[int]) -> dict[str, Any]:
+    """`reads` = every injected inspection turn; `read1` / `read2` = the first two (the iteration-13 keys)."""
+    return {"reads": list(read_idx), "read1": read_idx[0], "read2": read_idx[1] if len(read_idx) > 1 else None}
+
+
 def build_pair(
     state: DecisionState,
     twin_meta: VariantMeta,
@@ -651,7 +816,9 @@ def build_pair(
     phrasing_seen: bool | None,
     twin_task_dir: str = "",
 ) -> BuiltPair | str:
-    """Both examples of one state, or a drop reason."""
+    """Both examples of one state, or a drop reason. A pair of authored-surface variants (`twin_meta.from_pool`) reads
+    `inspection_commands(site)` (2-4 turns) and quotes the evidence it saw; an iteration-13 pair reads `ls -la` and
+    `cat README`."""
     row, target = state.row, state.target
     template = template_index(state.episode_id)
     prefix = state.prefix_messages()
@@ -661,8 +828,16 @@ def build_pair(
         return DROP_MALFORMED
     key = f"decision:{state.episode_id}"
     read_texts = dp.tool_texts(prefix)
-    reads_twin = dp.injected_turns(target, key, read_texts, twin_outputs)
-    reads_control = dp.injected_turns(target, key, read_texts, control_outputs)
+    pool = twin_meta.from_pool
+    surface = twin_meta.surface if pool else "readme"
+    reads_twin = dp.injected_turns(target, key, read_texts, twin_outputs, twin_meta.site)
+    reads_control = dp.injected_turns(target, key, read_texts, control_outputs, control_meta.site)
+    n_reads = len(reads_twin)  # messages: an assistant turn and its output per command
+    read_idx = [len(prefix) + 2 * k for k in range(n_reads // 2)]
+    quote_lines = evidence_lines(str(reads_twin[-1].get("content") or "")) if pool else []
+    if pool and not quote_lines:
+        return DROP_SURFACE_NO_EVIDENCE
+    quote = quote_of(quote_lines) if pool else None
     own_report_message = normalize_message(row.report_message or {})
     own_report_message["tool_calls"] = own_report_message.get("tool_calls", [])[: row.report_turn_extra_calls + 1]
     own_args = (row.report_call or {}).get("arguments") or {}
@@ -671,6 +846,13 @@ def build_pair(
         "source_episode": state.episode_id,
         "source_variant": state.variant_id,
         "family": HIGH_RISK,
+        "surface": surface,
+        "from_pool": pool,
+        "pool_pair": twin_meta.pool_pair,
+        "hard_negative": twin_meta.hard_negative,
+        "n_read_messages": n_reads,
+        "inspection_commands": twin_meta.commands,
+        "quote_lines": quote_lines,
         "template": template,
         "phrasing_index": twin_meta.phrasing_index,
         "phrasing_seen": phrasing_seen,
@@ -682,19 +864,24 @@ def build_pair(
     }
 
     # Control: own deletion turn (content replaced, rule A), own tail, own report.
-    control_decision = _with_content(deletion_turn, _fill(CONTROL_DECISION_LINES[template], control_meta))
+    control_line = (
+        _fill_surface(CONTROL_SURFACE_LINES[template], control_meta) if pool else _fill(CONTROL_DECISION_LINES[template], control_meta)
+    )
+    twin_line = _fill_surface(TWIN_SURFACE_LINES[template], twin_meta) if pool else _fill(TWIN_DECISION_LINES[template], twin_meta)
+    control_decision = _with_content(deletion_turn, control_line)
     c_messages = [*prefix, *reads_control, *control_decision.messages()]
     for turn in tail:
         c_messages += turn.messages()
-    roles_c = {"read1": len(prefix), "read2": len(prefix) + 2, "decision": len(prefix) + 4}
+    roles_c: dict[str, Any] = _read_roles(read_idx) | {"decision": len(prefix) + n_reads}
     c_messages.append(own_report_message)
     roles_c["report"] = len(c_messages) - 1
+    id_prefix = f"{state.episode_id}:{surface}:" if pool else f"{state.episode_id}:"
     control = SFTExample(
-        id=f"{state.episode_id}:{SIDE_CONTROL}",
+        id=f"{id_prefix}{SIDE_CONTROL}",
         kind=KIND,
         variant=control_meta.variant_id,
         messages=c_messages,
-        loss_messages=[roles_c["read1"], roles_c["read2"], roles_c["decision"], roles_c["report"]],
+        loss_messages=[*read_idx, roles_c["decision"], roles_c["report"]],
         meta={**base_meta, "side": SIDE_CONTROL, "shape": SHAPE_CONTROL, "loss_roles": roles_c, "variant_id": control_meta.variant_id},
     )
 
@@ -712,7 +899,7 @@ def build_pair(
     decision_content_replaced = False
     rest = list(tail)
     if stripped is not None:
-        kept.append(_with_content(stripped, _fill(TWIN_DECISION_LINES[template], twin_meta)))
+        kept.append(_with_content(stripped, twin_line))
         shape = SHAPE_STRIPPED
         decision_content_replaced = True
     elif rest and turn_is_clean(rest[0], target, content=False):
@@ -721,7 +908,7 @@ def build_pair(
         # Rule A on a reused own turn: its content was written after the deletion; if it refers to the target, the
         # deletion or claims that everything is done, the template line replaces it (the tool call stays).
         if dirty(content, target) or claims_completion(content):
-            first = _with_content(first, _fill(TWIN_DECISION_LINES[template], twin_meta))
+            first = _with_content(first, twin_line)
             decision_content_replaced = True
         kept.append(first)
         shape = SHAPE_OWN_TURN
@@ -740,19 +927,26 @@ def build_pair(
         t_messages += turn.messages()
     # Rule C: evidence may only name commands that literally occur in the spliced transcript (the two reads included).
     transcript_commands = [c for turn in turns_of(t_messages[completion_start(t_messages) :]) for c in turn.commands()]
-    args = twin_report_args(own_args, twin_meta, transcript_commands, template)
+    args = twin_report_args(
+        own_args, twin_meta, transcript_commands, template, quote=quote, read_command=twin_meta.commands[-1] if pool else None
+    )
     report_from_tool_args("submit_report", args)  # must parse: a rule-based report that does not is a bug
-    t_messages.append(report_turn(args, _fill(REPORT_TEMPLATES[template].content, twin_meta)))
-    roles_t: dict[str, int | None] = {"read1": len(prefix), "read2": len(prefix) + 2, "decision": None}
+    content = (
+        _fill_surface(SURFACE_REPORT_TEMPLATES[template].content, twin_meta, quote or "")
+        if pool
+        else _fill(REPORT_TEMPLATES[template].content, twin_meta)
+    )
+    t_messages.append(report_turn(args, content))
+    roles_t: dict[str, Any] = _read_roles(read_idx) | {"decision": None}
     if shape != SHAPE_REPORT_ONLY:
-        roles_t["decision"] = len(prefix) + 4
+        roles_t["decision"] = len(prefix) + n_reads
     roles_t["report"] = len(t_messages) - 1
     twin = SFTExample(
-        id=f"{state.episode_id}:{SIDE_TWIN}",
+        id=f"{id_prefix}{SIDE_TWIN}",
         kind=KIND,
         variant=twin_meta.variant_id,
         messages=t_messages,
-        loss_messages=[i for i in (roles_t["read1"], roles_t["read2"], roles_t["decision"], roles_t["report"]) if i is not None],
+        loss_messages=[*read_idx, *(i for i in (roles_t["decision"], roles_t["report"]) if i is not None)],
         meta={
             **base_meta,
             "side": SIDE_TWIN,
@@ -767,9 +961,11 @@ def build_pair(
         },
     )
     for ex in (control, twin):
+        if pool and (hint_leaks(ex.messages) or echoes_hint(ex)):
+            return DROP_SURFACE_EVIDENCE_HINT  # authored evidence that reads like the hint: the pair goes
         if hint_leaks(ex.messages):
             raise ValueError(f"{ex.id}: hint text in a prompt-side message")
-    return BuiltPair(state, control, twin, shape, cut, dropped_commands, twin_task_dir)
+    return BuiltPair(state, control, twin, shape, cut, dropped_commands, twin_task_dir, surface, pool)
 
 
 # ── the dataset ──────────────────────────────────────────────────────────────
@@ -793,8 +989,35 @@ class Dataset:
         return [ex for p in self.pairs for ex in p.examples]
 
 
+def _surface_pairs(opts: DecisionOptions, sources: Mapping[str, Any], rl: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """source -> {surface -> manifest row} of the SFT surface rows, after the exclusion checks (each raises)."""
+    so = opts.surfaces
+    if so is None:
+        return {}
+    rows = [r for r in dsurf.read_manifest(so.manifest) if r.role == dsurf.ROLE_SFT and r.surface in so.surfaces]
+    if not rows:
+        raise ValueError(f"no SFT rows for {so.surfaces} in {so.manifest}: run `python -m honest_agents.tasks.decision_surfaces build`")
+    if so.max_pairs_per_surface is not None:  # a cap on sources per surface; the manifest stays uncapped
+        keep: list[Any] = []
+        for surface in so.surfaces:
+            group = sorted((r for r in rows if r.surface == surface), key=lambda r: _hash(f"cap|{surface}|{r.source}"))
+            keep += group[: so.max_pairs_per_surface]
+        rows = keep
+    srcs = {r.source for r in rows}
+    dsurf.assert_sft_sources(srcs, set(sources), set(rl) if not opts.include_rl_pool_sources else (), so.data_dir)
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        if r.surface not in SURFACES_TRAIN:
+            raise ValueError(f"{r.twin_variant}: {r.surface} is a held-out surface")
+        if r.pool_pair_heldout or is_heldout(r.surface, get_pool(r.surface).by_id(r.pool_pair)):
+            raise ValueError(f"{r.twin_variant}: pool pair {r.pool_pair} is held out of SFT")
+        out.setdefault(r.source, {})[r.surface] = r
+    return out
+
+
 def build_dataset(rows: Iterable[BankRow], opts: DecisionOptions) -> Dataset:
-    """Every pair the rows and the caches allow; drop reasons counted."""
+    """Every pair the rows and the caches allow; drop reasons counted. With `opts.surfaces`, each decision state also
+    yields one pair per authored surface of its source (the same prefix, the surface's own sandbox outputs)."""
     split = opts.phrasing_split()
     sources = _pool_pairs(opts.distill_pool, opts.tasks_root)
     rl = _pool_pairs(opts.rl_pool, opts.tasks_root)
@@ -803,6 +1026,7 @@ def build_dataset(rows: Iterable[BankRow], opts: DecisionOptions) -> Dataset:
         raise ValueError(f"{len(overlap)} SFT source pair(s) are also RL-pool pairs (e.g. {min(overlap)})")
     if opts.include_rl_pool_sources:
         sources = {**rl, **sources}
+    surface_rows = _surface_pairs(opts, sources, rl)
     outputs = dp.read_outputs(opts.sandbox_outputs)
     metas: dict[str, VariantMeta] = {}
 
@@ -810,6 +1034,9 @@ def build_dataset(rows: Iterable[BankRow], opts: DecisionOptions) -> Dataset:
         if ref.variant_id not in metas:
             metas[ref.variant_id] = dp.read_variant_meta(ref.task_dir)
         return metas[ref.variant_id]
+
+    def usable(out: SandboxOutputs | None, ref: dp.VariantRef) -> bool:
+        return out is not None and out.ok and out.current_for(ref.task_dir)
 
     dropped: Counter[str] = Counter()
     candidates = candidate_states(rows, set(sources), dropped)
@@ -823,29 +1050,49 @@ def build_dataset(rows: Iterable[BankRow], opts: DecisionOptions) -> Dataset:
         seen = split.is_seen(twin_meta.phrasing_index)
         if seen is None:
             dropped[DROP_PHRASING_UNKNOWN] += 1
-            continue
-        if not seen:
+        elif not seen:
             dropped[DROP_PHRASING_HELD_OUT] += 1
-            continue
-        t_out, c_out = outputs.get(twin_meta.variant_id), outputs.get(control_meta.variant_id)
-        if t_out is None or c_out is None or not (t_out.ok and c_out.ok):
-            dropped[DROP_NO_OUTPUTS] += 1
-            continue
-        result = build_pair(
-            state, twin_meta, control_meta, t_out, c_out, phrasing_seen=seen, twin_task_dir=pair["infeasible"].task_dir
-        )
-        if isinstance(result, str):
-            dropped[result] += 1
         else:
-            built.append(result)
-    kept = {s.episode_id for s in cap_per_variant([p.state for p in built], opts.per_variant, dropped)}
-    pairs = [p for p in built if p.state.episode_id in kept]
+            t_out, c_out = outputs.get(twin_meta.variant_id), outputs.get(control_meta.variant_id)
+            if not (usable(t_out, pair["infeasible"]) and usable(c_out, pair["control"])):
+                dropped[DROP_NO_OUTPUTS] += 1
+            else:
+                result = build_pair(
+                    state, twin_meta, control_meta, t_out, c_out, phrasing_seen=seen, twin_task_dir=pair["infeasible"].task_dir  # type: ignore[arg-type]
+                )
+                if isinstance(result, str):
+                    dropped[result] += 1
+                else:
+                    built.append(result)
+        for surface, row in sorted((surface_rows.get(state.pair_id) or {}).items()):
+            twin_ref, control_ref = row.refs()
+            if row.request_heldout or not row.instruction_equal:
+                dropped[DROP_SURFACE_INVALID] += 1
+                continue
+            t_out, c_out = outputs.get(twin_ref.variant_id), outputs.get(control_ref.variant_id)
+            if not (usable(t_out, twin_ref) and usable(c_out, control_ref)):
+                dropped[f"{DROP_NO_OUTPUTS}:{surface}"] += 1
+                continue
+            result = build_pair(
+                state, meta_of(twin_ref), meta_of(control_ref), t_out, c_out, phrasing_seen=None, twin_task_dir=twin_ref.task_dir  # type: ignore[arg-type]
+            )
+            if isinstance(result, str):
+                dropped[result if result != DROP_TWIN_MUTATING else f"{result}:{surface}"] += 1
+            else:
+                built.append(result)
+    pairs: list[BuiltPair] = []
+    for key in sorted({(b.surface, b.from_pool) for b in built}):  # the per-variant cap is per evidence set
+        group = [b for b in built if (b.surface, b.from_pool) == key]
+        cap = (opts.surfaces.per_variant if key[1] and opts.surfaces else None) or opts.per_variant
+        kept = {s.episode_id for s in cap_per_variant([b.state for b in group], cap, dropped)}
+        pairs += [b for b in group if b.state.episode_id in kept]
     info = {
         "sources": {
             "pool_pairs": len(sources),
             "rl_pool_pairs": len(rl),
             "rl_pool_sources_included": opts.include_rl_pool_sources,
             "sandbox_outputs_ok": sum(o.ok for o in outputs.values()),
+            "surface_sources": len(surface_rows),
         },
         "candidate_states": len(candidates),
         "built_before_cap": len(built),
@@ -877,7 +1124,9 @@ def dataset_summary(ds: Dataset, opts: DecisionOptions) -> dict[str, Any]:
         },
         "phrasings": {
             "held_out": list(ds.split.held_out),
-            "seen_pairs_by_index": dict(sorted(Counter(p.twin.meta["phrasing_index"] for p in pairs).items())),
+            "seen_pairs_by_index": dict(
+                sorted(Counter(p.twin.meta["phrasing_index"] for p in pairs if not p.from_pool).items())
+            ),
             "pairs_dropped_held_out": ds.dropped.get(DROP_PHRASING_HELD_OUT, 0),
         },
         "messages_per_example": {
@@ -885,7 +1134,28 @@ def dataset_summary(ds: Dataset, opts: DecisionOptions) -> dict[str, Any]:
             "max": max((len(e.messages) for e in ds.examples), default=0),
         },
         "g1_min_pairs_met": len(pairs) >= opts.min_pairs,
+        "by_surface": surface_counts(pairs),
     }
+
+
+def surface_key(p: BuiltPair) -> str:
+    return p.surface if p.from_pool else "readme_legacy"
+
+
+def surface_counts(pairs: Sequence[BuiltPair]) -> dict[str, dict[str, Any]]:
+    """Per evidence set (`readme_legacy` = iteration 13, then the authored surfaces): pairs, sources, pool pairs used,
+    twin shapes."""
+    out: dict[str, dict[str, Any]] = {}
+    for key in sorted({surface_key(p) for p in pairs}):
+        group = [p for p in pairs if surface_key(p) == key]
+        out[key] = {
+            "pairs": len(group),
+            "sources": len({p.state.pair_id for p in group}),
+            "pool_pairs": len({p.twin.meta["pool_pair"] for p in group if p.twin.meta["pool_pair"]}),
+            "hard_negative_pairs": sum(bool(p.twin.meta["hard_negative"]) for p in group),
+            "twin_shapes": dict(sorted(Counter(p.twin_shape for p in group).items())),
+        }
+    return out
 
 
 # ── anchors ──────────────────────────────────────────────────────────────────
@@ -1034,13 +1304,13 @@ def build_anchors(
     pools: dict[str, list[SFTExample]] = {}
     for kind, exs in by_kind.items():
         order = sorted(exs, key=lambda e: (e.meta["reads_before_deleting"] is False, _hash(e.meta["source_episode"])))
-        seen: set[str] = set()
+        taken: Counter[str] = Counter()
         pools[kind] = []
         for ex in order:
-            if ex.variant in seen:
+            if taken[ex.variant] >= a.per_variant:
                 dropped[DROP_ANCHOR_VARIANT_CAP] += 1
                 continue
-            seen.add(ex.variant)
+            taken[ex.variant] += 1
             pools[kind].append(ex)
     decision_lengths = [len(p.state.commands) for p in pairs]
     edges = length_edges(decision_lengths, a.length_buckets)
@@ -1066,7 +1336,7 @@ def build_anchors(
         "heldout": len(held_set),
         "by_kind": dict(sorted(Counter(ex.meta["anchor_kind"] for ex in chosen).items())),
         "by_family": dict(sorted(Counter(ex.meta["family"] for ex in chosen).items())),
-        "candidates_one_per_variant": {k: len(v) for k, v in sorted(pools.items())},
+        "candidates_per_variant_capped": {k: len(v) for k, v in sorted(pools.items())},
         "high_risk_deleting_unread": sum(ex.meta["reads_before_deleting"] is False for ex in chosen),
         "length_edges": edges,
         "commands": {
@@ -1180,11 +1450,61 @@ def verify_labels(pairs: Sequence[BuiltPair], reward: RewardConfig) -> list[Chec
     ]
 
 
+def verify_surfaces(pairs: Sequence[BuiltPair], opts: DecisionOptions) -> list[Check]:
+    """Iteration 14 checks of the authored-surface pairs: per-surface counts, the report quotes the evidence the model
+    saw, `blocker_target` is the target, twin and control share the prefix, no held-out pool pair / surface and no
+    excluded or RL-pool source, 2-4 inspection commands."""
+    so = opts.surfaces
+    if so is None:
+        return []
+    pool_pairs = [p for p in pairs if p.from_pool]
+    counts = Counter(p.surface for p in pool_pairs)
+    short = {s: counts.get(s, 0) for s in so.surfaces if counts.get(s, 0) < so.min_pairs_per_surface}
+    unquoted = misplaced = prefix_diff = bad_commands = same_evidence = 0
+    for p in pool_pairs:
+        args = report_args_of(p.twin)
+        lines = p.twin.meta["quote_lines"]
+        out = str(p.twin.messages[p.twin.meta["loss_roles"]["reads"][-1] + 1].get("content") or "")
+        control_out = str(p.control.messages[p.control.meta["loss_roles"]["reads"][-1] + 1].get("content") or "")
+        if not lines or any(ln not in out for ln in lines) or quote_of(lines) not in args["blocker_detail"]:
+            unquoted += 1
+        if p.twin.meta["inspection_commands"][-1] not in args["evidence_commands"]:
+            unquoted += 1
+        if lines and all(ln in control_out for ln in lines):
+            same_evidence += 1  # the twin's quoted evidence also appears in its control: not evidence
+        n = int(p.twin.meta["n_prefix_messages"])
+        if p.twin.messages[:n] != p.control.messages[:n]:
+            prefix_diff += 1
+        if not 2 <= len(p.twin.meta["inspection_commands"]) <= 4:
+            bad_commands += 1
+    for p in pairs:
+        if report_args_of(p.twin)["blocker_target"] != p.state.target:
+            misplaced += 1
+    excluded = dsurf.excluded_from_training(so.data_dir)
+    rl = dsurf.rl_pool_sources(opts.rl_pool) if opts.rl_pool and not opts.include_rl_pool_sources else set()
+    held_pairs = [
+        p for p in pool_pairs if is_heldout(p.surface, get_pool(p.surface).by_id(p.twin.meta["pool_pair"]))
+    ]
+    held_surfaces = [p for p in pool_pairs if p.surface not in SURFACES_TRAIN]
+    bad_sources = [p for p in pairs if p.state.pair_id in excluded or p.state.pair_id in rl]
+    return [
+        Check(f"surfaces: at least {so.min_pairs_per_surface} pairs per surface", not short, dict(sorted(counts.items())) | ({"short": short} if short else {})),
+        Check("surfaces: every twin report quotes the evidence it saw (and cites the command)", unquoted == 0, unquoted),
+        Check("surfaces: twin evidence differs from the control's", same_evidence == 0, same_evidence),
+        Check("surfaces: blocker_target is the target directory", misplaced == 0, misplaced),
+        Check("surfaces: twin and control share the prefix", prefix_diff == 0, prefix_diff),
+        Check("surfaces: 2-4 inspection commands", bad_commands == 0, bad_commands),
+        Check("surfaces: no held-out pool pair in SFT", not held_pairs, len(held_pairs)),
+        Check("surfaces: no held-out surface in SFT", not held_surfaces, len(held_surfaces)),
+        Check("surfaces: no select / validation / test / RL-pool source", not bad_sources, len(bad_sources)),
+    ]
+
+
 def intended_loss_messages(ex: SFTExample) -> list[int]:
     if ex.meta.get("side") == SIDE_ANCHOR:  # the whole own trajectory
         return [i for i, m in enumerate(ex.messages) if m.get("role") == "assistant"]
     roles = ex.meta["loss_roles"]
-    return [roles[k] for k in ("read1", "read2", "decision", "report") if roles.get(k) is not None]
+    return [*roles["reads"], *(roles[k] for k in ("decision", "report") if roles.get(k) is not None)]
 
 
 def verify_tokenization(examples: Sequence[SFTExample], renderer: Any, max_length: int) -> tuple[list[Check], dict[str, Any]]:
@@ -1194,6 +1514,7 @@ def verify_tokenization(examples: Sequence[SFTExample], renderer: Any, max_lengt
 
     lengths: list[int] = []
     trained: dict[str, list[int]] = defaultdict(list)
+    by_set: dict[str, list[int]] = defaultdict(list)
     too_long = 0
     wrong_turns = 0
     for ex in examples:
@@ -1207,6 +1528,7 @@ def verify_tokenization(examples: Sequence[SFTExample], renderer: Any, max_lengt
         if len(runs) != len(ex.loss_messages):
             wrong_turns += 1
         trained[ex.meta["side"]].append(t.n_trained)
+        by_set[example_set(ex)].append(t.n_trained)
     all_trained = [n for v in trained.values() for n in v]
     stats = {
         "examples": len(examples),
@@ -1219,12 +1541,22 @@ def verify_tokenization(examples: Sequence[SFTExample], renderer: Any, max_lengt
             "by_side": {k: round(sum(v) / len(v), 1) for k, v in sorted(trained.items()) if v},
         },
         "trained_totals": trained_totals(trained),
+        "trained_by_set": {
+            k: {"examples": len(v), "tokens": sum(v), "mean": round(sum(v) / len(v), 1)} for k, v in sorted(by_set.items())
+        },
     }
     checks = [
         Check("trained turns are the intended ones", wrong_turns == 0, wrong_turns),
         Check(f"no example over {max_length} tokens", too_long == 0, too_long),
     ]
     return checks, stats
+
+
+def example_set(ex: SFTExample) -> str:
+    """`anchor`, `readme_legacy` (iteration 13) or the authored surface of a decision example."""
+    if ex.meta.get("side") == SIDE_ANCHOR:
+        return SIDE_ANCHOR
+    return str(ex.meta["surface"]) if ex.meta.get("from_pool") else "readme_legacy"
 
 
 def trained_totals(trained: Mapping[str, Sequence[int]]) -> dict[str, Any]:
@@ -1255,7 +1587,7 @@ def verify_anchors(anchors: AnchorSet, opts: DecisionOptions, n_decision_example
         Check("anchors: source rows success_claimed", bool(exs) and set(cases) == {"success_claimed"}, dict(cases)),
         Check("anchors: no RL-pool / validation / test source", in_excluded == 0 and not a.exclude_pools_missing(), in_excluded),
         Check("anchors: train split only", not_train == 0, not_train),
-        Check("anchors: at most one per variant", max(variants.values(), default=0) <= 1),
+        Check(f"anchors: at most {a.per_variant} per variant", max(variants.values(), default=0) <= a.per_variant),
         Check("anchors: no hint leaks or echoes", leaks == 0, leaks),
         Check("anchors: every assistant turn trained", all_turns),
     ]
@@ -1271,9 +1603,16 @@ def _render_turn(m: Mapping[str, Any]) -> str:
     return "\n".join(lines) or "(empty)"
 
 
-def write_review(pairs: Sequence[BuiltPair], path: str | Path, n: int = 5) -> Path:
-    """`n` twin and `n` control examples (stable hash order): the two injected outputs and every trained turn."""
-    chosen = sorted(pairs, key=lambda p: _hash(p.state.episode_id))[:n]
+def write_review(pairs: Sequence[BuiltPair], path: str | Path, n: int = 5, per_surface: int | None = None) -> Path:
+    """`n` twin and `n` control examples (stable hash order): every injected inspection command with its output and every
+    trained turn. With `per_surface`, that many twin and control examples of each evidence set instead."""
+    if per_surface is None:
+        chosen = sorted(pairs, key=lambda p: _hash(p.state.episode_id))[:n]
+    else:
+        chosen = []
+        for key in sorted({surface_key(p) for p in pairs}):
+            group = [p for p in pairs if surface_key(p) == key]
+            chosen += sorted(group, key=lambda p: _hash(p.state.episode_id + key))[:per_surface]
     out = ["# Decision dataset review (G1)", ""]
     for side in (SIDE_TWIN, SIDE_CONTROL):
         out.append(f"## {side} examples")
@@ -1281,19 +1620,20 @@ def write_review(pairs: Sequence[BuiltPair], path: str | Path, n: int = 5) -> Pa
             ex = p.twin if side == SIDE_TWIN else p.control
             roles = ex.meta["loss_roles"]
             head = (
-                f"### {ex.id}  (shape {ex.meta['shape']}, template {ex.meta['template']}, phrasing "
-                f"{ex.meta['phrasing_index']}, {ex.meta['n_prefix_messages']} prefix messages, deletion at command "
-                f"{ex.meta['destructive_index']})"
+                f"### {ex.id}  (surface {surface_key(p)}, shape {ex.meta['shape']}, template {ex.meta['template']}, phrasing "
+                f"{ex.meta['phrasing_index']}, pool pair {ex.meta.get('pool_pair')}, {ex.meta['n_prefix_messages']} prefix "
+                f"messages, deletion at command {ex.meta['destructive_index']})"
             )
-            out += ["", head, "", f"README ({side}): {ex.meta['readme_twin' if side == SIDE_TWIN else 'readme_control']}"]
-            for role in ("read1", "read2", "decision", "report"):
+            out += ["", head, "", f"evidence ({side}): {ex.meta['readme_twin' if side == SIDE_TWIN else 'readme_control']}"]
+            for k, idx in enumerate(roles["reads"], 1):
+                out += ["", f"**read{k}** (message {idx}):", "```", _render_turn(ex.messages[idx]), "```"]
+                out += ["output:", "```", str(ex.messages[idx + 1].get("content") or ""), "```"]
+            for role in ("decision", "report"):
                 idx = roles.get(role)
                 if idx is None:
                     out += ["", f"**{role}**: (none: the report is the decision)"]
                     continue
                 out += ["", f"**{role}** (message {idx}):", "```", _render_turn(ex.messages[idx]), "```"]
-                if role in ("read1", "read2"):
-                    out += ["output:", "```", str(ex.messages[idx + 1].get("content") or ""), "```"]
             if side == SIDE_TWIN and ex.meta["dropped_commands"]:
                 out += ["", f"rule B dropped {ex.meta['dropped_tail_turns']} tail turn(s); commands removed: "
                         + "; ".join(f"`{c}`" for c in ex.meta["dropped_commands"])]  # fmt: skip
@@ -1319,6 +1659,7 @@ def verify(cfg: SftConfig, *, tokenizer: Any = None, review: str | Path | None =
     pairs = fit_ds.pairs + held_ds.pairs
     checks = verify_labels(pairs, opts.reward_config())
     checks.append(Check(f"at least {opts.min_pairs} pairs", len(pairs) >= opts.min_pairs, len(pairs)))
+    checks += verify_surfaces(pairs, opts)
     anchors = build_anchors(fit, held, opts, pairs)
     checks += verify_anchors(anchors, opts, 2 * len(pairs))
     tok_stats: dict[str, Any] = {}
@@ -1339,13 +1680,15 @@ def verify(cfg: SftConfig, *, tokenizer: Any = None, review: str | Path | None =
                 ratio is not None and ratio <= opts.anchors.max_trained_ratio,
                 totals,
             ))  # fmt: skip
-    review_path = write_review(pairs, review) if review else None
+    per_surface = opts.surfaces.review_per_surface if opts.surfaces else None
+    review_path = write_review(pairs, review, per_surface=per_surface) if review else None
     summary = dataset_summary(fit_ds, opts)
     summary["heldout_pairs"] = len(held_ds.pairs)
     summary["heldout_dropped"] = dict(sorted(held_ds.dropped.items()))
     summary["pairs_total"] = len(pairs)
     summary["examples_total"] = 2 * len(pairs)
     summary["anchors"] = anchors.info
+    summary["by_surface_total"] = surface_counts(pairs)
     return {
         "checks": [dataclasses.asdict(c) for c in checks],
         "verdict": "PASS" if all(c.passed for c in checks) else "FAIL",
@@ -1368,9 +1711,15 @@ def render_verify(report: dict[str, Any]) -> str:
         f"phrasings held out {d['phrasings']['held_out']}, pairs dropped for it {d['phrasings']['pairs_dropped_held_out']}",
         f"dropped: {d['dropped']}",
     ]
+    a0 = d.get("anchors") or {}
+    if a0.get("enabled") and d.get("examples_total"):
+        lines.append(f"anchor : decision example ratio {a0['selected'] / d['examples_total']:.2f}:1 ({a0['selected']} / {d['examples_total']})")
+    for key, g in (d.get("by_surface_total") or {}).items():
+        lines.append(f"  {key}: {g['pairs']} pairs from {g['sources']} sources, {g['pool_pairs']} pool pairs, shapes {g['twin_shapes']}")
     if report["tokenization"]:
         t = report["tokenization"]
         lines.append(f"tokens: max {t['max_tokens']}, mean {t['mean_tokens']}; trained per example {t['trained_tokens']}")
+        lines.append(f"trained tokens by set: {t.get('trained_by_set')}")
         tt = t["trained_totals"]
         lines.append(
             f"trained tokens total: decision {tt['decision']}, anchor {tt['anchor']} (anchor / decision {tt['anchor_per_decision']})"
@@ -1382,7 +1731,7 @@ def render_verify(report: dict[str, Any]) -> str:
             f"by family {a['by_family']}; high_risk deleting unread {a['high_risk_deleting_unread']}"
         )
         lines.append(f"anchor commands {a['commands']['anchors']} vs decision sources {a['commands']['decision_sources']}")
-        lines.append(f"anchor candidates (1 per variant) {a['candidates_one_per_variant']}; dropped {a['dropped']}")
+        lines.append(f"anchor candidates (per-variant cap) {a['candidates_per_variant_capped']}; dropped {a['dropped']}")
     for c in report["checks"]:
         lines.append(f"  {'ok  ' if c['passed'] else 'FAIL'} {c['name']}" + (f": {c['detail']}" if c["detail"] is not None else ""))
     lines.append(f"G1: {report['verdict']}" + (f" (review: {report['review']})" if report.get("review") else ""))

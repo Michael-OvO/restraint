@@ -1,0 +1,44 @@
+# Iteration 14, SFT-v2 (docs/iteration-14-design.md section 2): the anchored-3ep recipe of iteration 13 on superset data.
+# From the base model: LoRA r32/a64, lr 5e-5, 3 epochs, entropy guard OFF, effective batch 8, an adapter per epoch.
+# Data: the iteration-13 README decision pairs + same-site splice pairs for the training surfaces (readme with the new
+# multi-line pool texts, file_header, config_comment, manifest; never empty_backup / inbound_link) + own-success anchors
+# at 1:1 against the decision examples. Each surface pair reads 2-4 inspection commands (`inspection_commands(site)`)
+# with the sandbox outputs of its own variant. Builders: honest_agents.sft.decision, honest_agents.tasks.decision_surfaces.
+#   python -m honest_agents.tasks.decision_surfaces build --role sft && python -m honest_agents.tasks.decision_surfaces outputs
+#   python -m honest_agents.sft.decision verify --config configs/sft_decision_v2_qwen35.yaml data.bank=<bank> \
+#       --review data/decision/review_v2.md
+#   python -m honest_agents.sft.train_sft --config configs/sft_decision_v2_qwen35.yaml --dry-run
+base: sft_decision_anchor_qwen35.yaml
+run_name: it14-sft-v2                # output: outputs/sft/it14-sft-v2
+
+data:
+  min_examples: 512                  # ~440 decision pairs (880 examples) + anchors before the held-out split
+  max_length: 24576                  # whole spliced transcripts (4 reads add ~1k tokens); longer ones are dropped, not cut
+
+decision:
+  sandbox_outputs:                   # the iteration-13 README variants, then the surface variants (merged by variant id)
+    - data/decision/sandbox_outputs.jsonl
+    - data/decision/sandbox_outputs_surfaces.jsonl
+  min_pairs: 160
+  surfaces:                          # honest_agents.sft.decision.SurfaceOptions
+    manifest: data/decision/surface_pairs.jsonl     # rows with role: sft only
+    surfaces: [readme, file_header, config_comment, manifest]
+    data_dir: data                   # select_sources.txt, split_seeds.json: select / val / test sources never train
+    max_pairs_per_surface: 40        # cap: 40 sources per surface (stable hash), the manifest stays uncapped. 4 x 40 + 88
+                                     # legacy = ~248 pairs = ~496 decision examples, kept near 1:1 with the anchors
+    per_variant: 1                   # one state per source and surface: 40 sources = <= 40 pairs per surface
+    min_pairs_per_surface: 30        # G1 (a source can drop out of the cap on rule B)
+    review_per_surface: 2            # G1: data/decision/review_v2.md holds 2 twin + 2 control examples per surface
+  anchors:
+    count: 455                       # every anchor available (per_variant 4, unread high_risk dropped): ~0.9:1 against ~496 decision examples
+    per_variant: 4                   # the pass@4 bank has up to four own successes per variant; one per variant is too few
+    high_risk_unread: false          # unread high_risk anchors dropped, as in iteration 13
+    max_trained_ratio: 4.0
+
+guard:
+  entropy_floor_ratio: null          # OFF: the guard stopped both iteration-13 SFT runs at <= 1 epoch
+
+train:
+  extra:
+    run_name: it14-sft-v2            # the W&B run name
+    save_strategy: epoch             # adapters at epochs 1, 2, 3

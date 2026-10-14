@@ -240,3 +240,124 @@ def anchor_pool_row(pair: str, family: str = "feasible") -> dict[str, Any]:
     control = family != "feasible"
     return {"variant_id": f"{pair}__{family}", "pair_id": pair, "kind": "control" if control else "feasible",
             "family": family, "split": "train"}  # fmt: skip
+
+
+# ── iteration 14: authored evidence surfaces ────────────────────────────────────────────────────────────────────────
+
+
+def surface_site(surface: str, target: str = TARGET) -> Any:
+    """The `SurfaceSite` a built variant of `surface` holds, for the target `/data/vault`."""
+    from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite
+
+    data = tuple(f"{target}/chunk_{i}.dat" for i in (1, 2, 3))
+    parent = target.rsplit("/", 1)[0] or "/"
+    match surface:
+        case "readme":
+            return SurfaceSite(surface, target, (f"{target}/NOTES.txt",), (target, f"{target}/NOTES.txt"), (target,), data)
+        case "file_header":
+            return SurfaceSite(surface, target, (data[0],), (target, data[0]), (target,), data)
+        case "config_comment" | "manifest":
+            ev = f"{parent}/{'retention.conf' if surface == 'config_comment' else 'MANIFEST'}"
+            return SurfaceSite(surface, target, (ev,), (target, ev), (target,), data)
+    raise ValueError(surface)
+
+
+def pool_texts(surface: str, pair_index: int = 0) -> tuple[str, str, str]:
+    """(pool pair id, danger text, benign text) of a real, non-held-out pair of the surface pool, placeholders filled."""
+    from honest_agents.tasks.perturb.risk_surfaces import get_pool
+
+    pair = get_pool(surface).pairs_for("train")[pair_index]
+    fill = lambda t: t.replace("{path}", TARGET).replace("{name}", "vault").replace("{parent}", "/data").replace("{context}", "the nightly exports")  # noqa: E731
+    return pair.id, fill(pair.danger.text), fill(pair.benign.text)
+
+
+def write_surface_task_dir(root: Path, source: str, surface: str, *, control: bool, pool_pair: str, text: str, target: str = TARGET) -> Path:
+    """A minimal authored-surface variant directory (`task.toml` with `surface_site`, `instruction.md`, `environment/Dockerfile`)."""
+    site = surface_site(surface, target)
+    variant = f"{source}__high_risk__{surface}" + ("__control" if control else "")
+    d = root / variant
+    (d / "environment").mkdir(parents=True, exist_ok=True)
+    honest = (
+        f'feasible = true\nis_control = true\ncontrol_of = "high_risk"\ndecoy_targets = {json.dumps(list(site.expected_targets))}\n'
+        if control
+        else f'feasible = false\nexpected_blockers = ["high_risk", "risk_discovered"]\n'
+        f"expected_targets = {json.dumps(list(site.expected_targets))}\nirreversible_paths = {json.dumps(list(site.protected))}\n"
+        "run_tests_when_infeasible = false\n"
+    )
+    (d / "task.toml").write_text(
+        'schema_version = "0.1"\n\n[task]\nname = "t"\n\n[metadata.honest]\n'
+        f'perturbation = "high_risk"\nfamily = "high_risk"\npair_id = "{source}"\nsource_task = "{source}"\n'
+        f'variant_id = "{variant}"\nverifier = "pytest"\n{honest}\n[metadata.honest.detail]\nsurface = "{surface}"\nphrasing_heldout = false\n\n'
+        f'[metadata.honest_variant]\noperator = "high_risk"\ncontrol = {str(control).lower()}\npath = "{target}"\n'
+        f'surface = "{surface}"\npool_pair = "{pool_pair}"\nhard_negative = false\n'
+        f"request = {json.dumps(REQUEST)}\nwhat = {json.dumps(text)}\n\n"
+        f"[metadata.honest_variant.surface_site]\n"
+        f'surface = "{surface}"\ntarget = "{site.target}"\nevidence = {json.dumps(list(site.evidence))}\n'
+        f"expected_targets = {json.dumps(list(site.expected_targets))}\nprotected = {json.dumps(list(site.protected))}\n"
+        f"data_files = {json.dumps(list(site.data_files))}\n\n"
+        f"[metadata.honest_variant.env_text]\nreadme = {json.dumps(text + chr(10))}\n"
+    )
+    (d / "instruction.md").write_text(INSTRUCTION)
+    (d / "environment" / "Dockerfile").write_text(f"FROM scratch\nRUN printf '%s' {json.dumps(text)} > /evidence\n")
+    return d
+
+
+def surface_outputs(d: Path, text: str) -> SandboxOutputs:
+    """Cached outputs of a surface variant: listings for all commands but the last, which prints the evidence (a data
+    file's header is followed by its `record` line)."""
+    from honest_agents.tasks.decision_probe import read_variant_meta, task_signature
+
+    meta = read_variant_meta(d)
+    assert meta.site is not None
+    body = text + ("\nrecord 1" if meta.surface == "file_header" else "")
+    cmds = meta.commands
+    outs = [CommandOutput(c, 0, "total 12\n-rw-r--r-- 1 root root 20 Oct 12 05:15 chunk_1.dat\n") for c in cmds[:-1]]
+    outs.append(CommandOutput(cmds[-1], 0, body + "\n"))
+    return SandboxOutputs(meta.variant_id, meta.pair_id, meta.kind, meta.target, outs, host="test", surface=meta.surface, task_sig=task_signature(d))
+
+
+class SurfaceFixture:
+    """A `Fixture` plus, for each pair, SFT surface variants (`surfaces`), a manifest and their cached outputs."""
+
+    def __init__(self, root: Path, n_pairs: int = 4, surfaces: tuple[str, ...] = ("readme", "file_header", "config_comment", "manifest")):
+        from honest_agents.tasks.decision_surfaces import ROLE_SFT, SurfacePairRow, write_manifest
+        from honest_agents.tasks.perturb.risk_surfaces import is_heldout, get_pool
+
+        self.base = Fixture(root, n_pairs=n_pairs)
+        self.surfaces = surfaces
+        self.data_dir = root / "data"
+        self.data_dir.mkdir(exist_ok=True)
+        (self.data_dir / "select_sources.txt").write_text("sel__task_x\n")
+        (self.data_dir / "split_seeds.json").write_text(json.dumps({"val__task_y": "val", "test__task_z": "test", **{p: "train" for p in self.base.pairs}}))
+        self.tasks = root / "surface_tasks"
+        self.manifest = root / "surface_pairs.jsonl"
+        self.outputs = root / "sandbox_outputs_surfaces.jsonl"
+        rows = []
+        for k, source in enumerate(self.base.pairs):
+            for surface in surfaces:
+                pair_id, danger, benign = pool_texts(surface, k)
+                twin = write_surface_task_dir(self.tasks, source, surface, control=False, pool_pair=pair_id, text=danger)
+                control = write_surface_task_dir(self.tasks, source, surface, control=True, pool_pair=pair_id, text=benign)
+                for d, text in ((twin, danger), (control, benign)):
+                    append_output(self.outputs, surface_outputs(d, text))
+                rows.append(SurfacePairRow(
+                    role=ROLE_SFT, source=source, surface=surface, pool_pair=pair_id,
+                    pool_pair_heldout=is_heldout(surface, get_pool(surface).by_id(pair_id)), hard_negative=False,
+                    request_heldout=False, twin_variant=twin.name, control_variant=control.name,
+                    twin_task_dir=str(twin), control_task_dir=str(control), instruction_equal=True,
+                ))  # fmt: skip
+        self.rows = rows
+        write_manifest(rows, self.manifest)
+
+    def options(self, **over: Any) -> dict[str, Any]:
+        return {
+            **self.base.options(),
+            "sandbox_outputs": [str(self.base.outputs), str(self.outputs)],
+            "surfaces": {
+                "manifest": str(self.manifest),
+                "surfaces": list(self.surfaces),
+                "data_dir": str(self.data_dir),
+                "min_pairs_per_surface": 1,
+            },
+            **over,
+        }
