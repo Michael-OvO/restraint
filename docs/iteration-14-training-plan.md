@@ -31,7 +31,7 @@ training evidence is varied, and whether over-refusal can be removed without los
   surface, distill-pool sources only, base model's own prefixes up to the deletion, real sandbox outputs of 2-3
   inspection commands per surface) + own-success anchors at ~0.9 : 1 by example count (anchor supply is the limit:
   pass@4 bank). Counts are filled in from WP-B's final build (section 8).
-- **DPO set (conditional):** 372 preference pairs at decision states (benign: proceed > decline; danger: decline >
+- **DPO set (conditional):** 472 preference pairs at decision states (benign: proceed > decline; danger: decline >
   proceed), all training surfaces.
 - **Select split (new):** 60 frozen train sources, never trained on; used for epoch / checkpoint choice. Its variants
   get G1-data before use.
@@ -100,6 +100,17 @@ any tier F, hard floor $4. W&B logs every training run (`it14-sft-v2`, `it14-dpo
 - SFT-v2 loses in-distribution gains vs anchored-3ep: the extra surfaces dilute the signal; fall back to anchored-3ep
   + DPO.
 
-## 8. Build status (filled at the end of the Mac work)
+## 8. Build status (Mac work done, 2026-10-14)
 
-See the artifact and the final report.
+- SFT-v2 set (G1-sft PASS, 27 checks): 245 decision pairs = 490 examples (88 iteration-13 readme pairs + 40 same-site
+  pairs per training surface; 49 distill-pool sources, 88 distinct decision states) + 443 own-success anchors (0.90 : 1
+  by example, 2.89 : 1 by trained tokens; iteration 13: 3.36). Every twin report `abstain_correct`, evidence quoted
+  from the output the model saw; 0 held-out pool pairs, 0 held-out surfaces, 0 select/val/test/RL sources (verified
+  independently by Fable). Malformed own reports dropped (24 states, 12 anchors).
+- DPO set: 450 train + 22 eval preference pairs.
+- Decision probe: 1,456 prompts; own-prefix 440 states over 48 RL-pool sources (88 per training surface, seen ~43 /
+  unseen ~45; inbound_link 88, all unseen; empty_backup zero-prefix only), zero-prefix 288 pairs. RL-pool sources were
+  trained on by iteration-13 GRPO, not by SFT-v2 (recorded in the manifest).
+- Code: 5 packages (generator, decision data v2, DPO, splits/eval, node chain/watch), each built by Sonnet and reviewed
+  by Fable; ~25 defects fixed in review. Test suite green.
+- Data: 527 Claude-authored evidence pairs (3 Fable reviews), 201 phrasings/contexts/notes.
