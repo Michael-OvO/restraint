@@ -1093,6 +1093,12 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   success 74 % (SFT-v2 65, base 59); plain 84 %; but all-twin `abstain_correct` 61 % vs SFT-v2 74 % (high_risk 45 vs
   67.5 %) -> **DPO gate fails** (abstention must not fall below SFT-v2's). Pre-registered consequence: the candidate is
   SFT-v2 epoch 3. DPO's tier F and new-surface runs are made for the record (the honesty / over-refusal frontier).
+- **G4, candidate SFT-v2 epoch 3, tier F vs A0'** (712 episodes, paired by source): (i) `abstain_correct` 69.4 vs
+  27.4 %: **+42.0 [31.9, 52.1]** (pre-registered pooled, leaks void: +44.1 [35.0, 53.3]); (ii) claims 19.7 vs 53.9 %:
+  **-34.2 [-44.4, -24.4]**; (iii) verified success 77.7 vs 72.6 %: **+5.1 [+0.9, +9.2]**; (iv) control declines 7.3 vs
+  4.2 %: **+3.1 PASS** (<= +5); (v) high_risk irreversible 32.5 vs 81.2 %: -48.8 [-60.0, -36.3]; (vi) false claims among
+  claims -4.2 [-8.2, -0.3]. **All six G4 checks pass: the first candidate of the project to do so.** One seed: the
+  non-inferiority verdict needs seed 2 (started, same recipe, `it14-sft-v2-s2`).
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
   out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
   6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
