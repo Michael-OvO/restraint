@@ -1,0 +1,102 @@
+# Iteration 15 G0 (docs/iteration-15-g0-judgment-test.md): judgment-set SFT on top of SFT-v2 epoch 3, on ONE 96 GB GPU.
+# vLLM servers share the card with the trainer at VLLM_GPU_MEM 0.45 while training runs; 0.85 afterwards.
+# Preconditions: `node sync --with-data` (data/judgment, data/decision, data/bank/passk, data/weights/it14/sft-v2-e3-final,
+# data/pools/surfaces, data/tasks); setup_node.sh done.
+name: it15g0
+state_dir: outputs/chain/it15g0
+sequential: false
+instance_id: null
+balance_floor: 8
+steps:
+  # The new-surface val set, rebuilt exactly as in iteration 14 (same command, same pools; G1 prunes the same source).
+  - name: build_surface_val
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.surfaces_cli ids --split-file data/val.jsonl
+      --out data/decision/val_high_risk_sources.txt --family high_risk --twins-only
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.surfaces_cli build --bank data/tasks
+      --out data/decision/surfaces_val --mode varied --split test --ids-file data/decision/val_high_risk_sources.txt
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.g1_surfaces
+      --variants data/decision/surfaces_val/surface_variants.jsonl --out data/decision/surfaces_val/g1.jsonl
+      --concurrency 16 --prune
+      && mkdir -p outputs/chain/it15g0/markers && touch outputs/chain/it15g0/markers/build_surface_val.done
+    gpus: []
+    done: outputs/chain/it15g0/markers/build_surface_val.done
+    after: []
+    timeout_min: 90
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    after: []
+    timeout_min: 30
+    on_failure: stop
+
+  - name: verify_g0
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.judgment verify
+      --config configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
+      && touch outputs/chain/it15g0/markers/verify_g0.done
+    gpus: []
+    done: outputs/chain/it15g0/markers/verify_g0.done
+    after: [merge_sft_v2]
+    timeout_min: 30
+    on_failure: stop
+
+  - name: train_g0
+    command: >-
+      scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
+    gpus: [0]
+    done: outputs/sft/it15-g0-judgment/final/adapter_config.json
+    after: [verify_g0]
+    timeout_min: 300
+    on_failure: stop
+    env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it15, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  # Reference while G0 trains (shares the card at 0.45): SFT-v2 epoch 3 on the new-surface set with 4 samples.
+  - name: sft_v2_surface4
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e3_merged
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_sft_v2_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+    gpus: []
+    done: runs/eval/it15_sft_v2_surface4/metrics.json
+    after: [merge_sft_v2, build_surface_val]
+    timeout_min: 150
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.45", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+
+  - name: merge_g0
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter outputs/sft/it15-g0-judgment/final --out outputs/it15/g0_merged
+    gpus: []
+    done: outputs/it15/g0_merged/config.json
+    after: [train_g0]
+    timeout_min: 30
+    on_failure: stop
+
+  # G0 readouts: six-surface decision probe, new-surface val set (4 samples), tier S.
+  - name: g0_evals
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g0_merged
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.decision_probe
+      --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it15_g0 --base-url http://localhost:8000/v1
+      --model policy
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g0_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/probe_v1.jsonl runs/eval/it15_g0_tierS --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g0_tierS/metrics.json
+    after: [merge_g0, build_surface_val, sft_v2_surface4]
+    timeout_min: 240
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
