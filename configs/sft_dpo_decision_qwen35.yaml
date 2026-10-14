@@ -1,0 +1,54 @@
+# Iteration 14, decision-state DPO (docs/iteration-14-design.md section 3), conditional on SFT-v2's tier-S control declines
+# exceeding base + 5. Preference pairs at the spliced decision states of sft.decision (same bank, sources, phrasing
+# holdout, sandbox outputs): benign README -> chosen = proceed (own deletion turn), rejected = decline report; danger
+# README -> chosen = decline report, rejected = own deletion turn. Prompt = the shared conversation incl. tools; the two
+# completions are the final assistant message. Only states whose deletion was the episode's last state change are used
+# (the decline report lists the own completed work). Builder / trainer: honest_agents/sft/dpo.py. The `sft_` prefix
+# marks the SFT-family schema (tests/test_scripts dry-runs every other config through honest_agents.train).
+#   python -m honest_agents.sft.dpo --config configs/sft_dpo_decision_qwen35.yaml --dry-run --review data/decision/dpo_review.md
+#   python -m honest_agents.sft.dpo --config configs/sft_dpo_decision_qwen35.yaml model.name=<merged SFT-v2 dir>     # GPU
+# `model.name` is the MERGED SFT-v2 policy (python -m honest_agents.sft.merge); the reference is that model with the new
+# LoRA adapter disabled. The default below is the base model only so that the dry run works without the merged dir.
+base: sft_decision_qwen35.yaml
+run_name: it14-dpo-decision          # output: outputs/sft/it14-dpo-decision
+
+model:
+  name: Qwen/Qwen3.5-4B              # override with the merged SFT-v2 directory on the node
+  family: qwen3_5
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  min_examples: 100                  # preference pairs (2 per decision state); far fewer = missing sandbox outputs
+
+dpo:                                 # honest_agents.sft.dpo.DpoSection; names as in TRL 1.14.1 DPOConfig
+  beta: 0.1
+  # sigmoid = DPO on summed completion log-probs; sft = mean NLL of the chosen completion (the RPO anchor). Each pair is
+  # length-asymmetric (deletion ~60 tokens vs report ~200-250) but mirrored across the two sides, so there is no global
+  # length preference; the sft term keeps the chosen completion from losing probability along with the rejected one.
+  loss_type: [sigmoid, sft]
+  loss_weights: [1.0, 1.0]
+  max_length: 16384                  # >= 12288; pairs longer than this are dropped, never truncated
+  truncation_mode: keep_end
+  precompute_ref_log_probs: true
+  sides: [benign, danger]
+
+train:
+  learning_rate: 1.0e-5              # DPO on a LoRA: 5x below the SFT rate (Fable review: 5e-6 x ~40 steps barely moves a LoRA)
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  lr_scheduler_type: cosine
+  warmup_steps: 0.1
+  save_steps: 1000                   # unused: save_strategy epoch below
+  save_total_limit: 2
+  report_to: wandb
+  extra:
+    run_name: it14-dpo-decision      # the W&B run name
+    save_strategy: epoch             # an adapter per epoch
+
+guard:
+  entropy_floor_ratio: null          # SFT-only knob; unused by the DPO stage
