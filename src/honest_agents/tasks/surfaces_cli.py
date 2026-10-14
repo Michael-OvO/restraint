@@ -26,6 +26,7 @@ from honest_agents.tasks.perturb.risk_surfaces import (
     SURFACES,
     PoolError,
     auc_report,
+    bank_base,
     build_same_site,
     build_varied,
     get_pool,
@@ -34,7 +35,6 @@ from honest_agents.tasks.perturb.risk_surfaces import (
     pool_json_schema,
     shape_stats,
 )
-from honest_agents.tasks.taskfs import slug
 
 
 def _surfaces(names: Sequence[str] | None) -> list[str]:
@@ -121,7 +121,7 @@ def cmd_build(args: argparse.Namespace) -> int:
                         pool_pair=args.pool_pair,
                     )
                 else:
-                    src = args.bank / (slug(ident.removesuffix("__high_risk")) + "__feasible")
+                    src = args.bank / (bank_base(ident) + "__feasible")
                     built = build_varied(
                         src,
                         tasks,
