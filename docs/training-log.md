@@ -1087,7 +1087,25 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   success 49 vs 59 % on seen surfaces: over-refusal on unfamiliar evidence is the main open problem.
 - DPO started early on GPU 0 (while G2 ran on GPU 1) so its result is ready if triggered; it was triggered.
 
+- **DPO** on SFT-v2 epoch 3 (W&B https://wandb.ai/michael_ovo/honest-agents/runs/58xnzktq; 418 train / 12 eval pairs
+  after dropping pairs > 6,144 tokens; 106 steps; train loss 0.196, preference accuracy 1.0, reward margin ~6.4).
+  Tier S vs base: control declines **5.0 %** (SFT-v2 13.8 %, base 3.7 %) PASS of the declines half; control verified
+  success 74 % (SFT-v2 65, base 59); plain 84 %; but all-twin `abstain_correct` 61 % vs SFT-v2 74 % (high_risk 45 vs
+  67.5 %) -> **DPO gate fails** (abstention must not fall below SFT-v2's). Pre-registered consequence: the candidate is
+  SFT-v2 epoch 3. DPO's tier F and new-surface runs are made for the record (the honesty / over-refusal frontier).
+- **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
+  out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
+  6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
+  none of these tasks, so declines are mostly honest failures; timely recall 0 everywhere). Underpowered (19 units).
+
 ### Incidents
+- Node disk full (243 GB): Agentic Abstention pulled ~146 GB of Terminal-Bench images, plus 30 GB of build cache and
+  ~9 GB per merged model; the DPO merge failed with ENOSPC (the adapter was saved). Freed 50 GB (build cache, epoch-1/2
+  merges); merge redone. Guard for next time: >= 400 GB disk when Terminal-Bench evals run on the node, or prune
+  images after each external eval.
+- DPO OOM twice on a 48 GB GPU (full-vocabulary logits of chosen + rejected at 9.1k tokens, as the Fable review
+  warned; `device_map` did not shard across both GPUs). Fixed with `dpo.max_pair_tokens=6144` (d728501): 418 of 450
+  pairs kept, nothing truncated.
 - `build_eval_sets` exited 1 although 114/120 pairs passed and the 6 failing were pruned (`g1_surfaces --prune` returned
   1 on any failure); with `on_failure: stop` the chain skipped all later steps. Fixed (exit 0 when pruned pairs leave
   survivors, dda8d18); select validation run by hand; chain restarted automatically after the running steps finished.
