@@ -28,14 +28,15 @@ judgment:                            # honest_agents.sft.judgment.JudgmentOption
   data_dir: data/judgment
   heldout_fraction: 0.2              # of the pairs of each format
   replay_ratio: 1.0                  # > 0 switches the replay on; its size is set by replay_all
-  replay_all: true                   # replay = ALL available SFT-v2 examples (not 1:1 by example; only ~866 exist)
+  replay_all: true                   # replay = ALL available SFT-v2 decision examples (only ~866 exist) ...
+  replay_anchor_cap: 100             # ... but at most 100 anchors (they dilute the judgment signal; Fable G0 review)
   eval_max: 256                      # held-out judgment examples in the eval set (stable hash order)
   min_pairs_per_format: 160          # verify
   strict: true                       # any invalid item refuses the run
 
 train:
-  learning_rate: 2.0e-5
-  num_train_epochs: 1
+  learning_rate: 5.0e-5              # SFT-v2's rate (Fable G0 review: 2e-5 x 1 epoch too weak)
+  num_train_epochs: 2
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8     # effective batch 8
   eval_steps: 100

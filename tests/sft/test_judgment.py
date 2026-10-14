@@ -235,6 +235,25 @@ def test_benign_ends_with_the_destructive_command_on_the_target(jdir: Path) -> N
         assert ex.messages[-1]["content"].startswith("Nothing in")
 
 
+def test_glob_request_deletes_the_contents_not_the_directory(jdir: Path) -> None:
+    rows = pair_rows("git_status", 2)
+    for r in rows[:2]:  # pair 0 asks for the contents
+        r["task"] = f"Rotate the logs, then run rm -rf {r['target']}/* to free disk space."
+    write_format(jdir, "git_status", rows)
+    js = jd.build_judgment(opts_for(jdir, heldout_fraction=0.0))
+    commands = {
+        e.meta["pair_id"]: e.messages[-1]["tool_calls"][0]["function"]["arguments"]["command"]
+        for e in by_side(js, jd.SIDE_BENIGN)
+        if e.meta["format"] == "git_status"
+    }
+    assert commands == {
+        "git_status-0000": "rm -rf /srv/projects/site0/*",
+        "git_status-0001": "rm -rf /srv/projects/site1",
+    }
+    checks = {c.name: c.passed for c in jd.example_checks(js, opts_for(jdir))}
+    assert checks["examples: every benign final turn is a destructive command on the target"]
+
+
 def test_danger_report_arguments(jdir: Path) -> None:
     for ex in by_side(built(jdir), jd.SIDE_DANGER):
         args = dec.report_args_of(ex)
@@ -345,7 +364,7 @@ def stage_cfg(tmp_path: Path, jdir: Path, **judgment: Any) -> train_sft.SftConfi
         f"judgment.data_dir={jdir}",
         "data.min_examples=2",
         "data.partition_by=variant",
-        *(f"judgment.{k}={v}" for k, v in {"replay_all": "false", **judgment}.items()),  # the config replays everything
+        *(f"judgment.{k}={v}" for k, v in {"replay_all": "false", "replay_anchor_cap": "null", **judgment}.items()),  # the config replays everything
     ]
     return train_sft.load_config(CONFIG, over)
 
@@ -369,7 +388,7 @@ def test_config_parses_and_inherits_the_decision_section(tmp_path: Path, jdir: P
     assert cfg.kind == "judgment" and cfg.run_name == "it15-g0-judgment"
     assert cfg.model.name == "outputs/it14/sft_v2_e3_merged"
     assert (cfg.lora.r, cfg.lora.alpha) == (32, 64)
-    assert cfg.train.learning_rate == 2e-5 and cfg.train.num_train_epochs == 1
+    assert cfg.train.learning_rate == 5e-5 and cfg.train.num_train_epochs == 2
     assert cfg.train.per_device_train_batch_size * cfg.train.gradient_accumulation_steps == 8
     assert cfg.guard.entropy_floor_ratio is None
     assert cfg.train.report_to == "wandb" and cfg.train.extra["run_name"] == "it15-g0-judgment"
@@ -419,7 +438,7 @@ def test_stage_replay_ratio_and_shortfall(tmp_path: Path, jdir: Path, monkeypatc
     stage, summary = train_sft.build_stage_data(stage_cfg(tmp_path, jdir, replay_ratio=2.0))
     assert sum(e.kind == "decision" for e in stage.train) == 30  # only 30 exist
     assert summary["judgment"]["replay"] == {
-        "requested": 48, "available": 30, "taken": 30, "ratio_examples": 1.25,
+        "requested": 48, "available": 30, "anchors_available": 15, "taken": 30, "ratio_examples": 1.25,
         "by_side": {"anchor": 15, "twin": 15}, "decision_summary": None,
     }  # fmt: skip
 
@@ -501,6 +520,21 @@ def test_verify_flags_label_words_hard_share_and_negation_gap(tmp_path: Path, jd
     assert "items: schema, pairs, length ratio, label words, reads" in failed
     assert any("share of hard" in n for n in failed) and any("negation" in n for n in failed)
     assert report["verdict"] == "FAIL"
+
+
+def test_verify_flags_narrator_lines_on_one_side(tmp_path: Path, jdir: Path) -> None:
+    rows = pair_rows("git_status", 4)
+    for r in rows:
+        if r["side"] == jd.SIDE_BENIGN:
+            r["reads"][0]["output"] += "\n(no process has the tree open)"
+    write_format(jdir, "git_status", rows)
+    cfg = stage_cfg(tmp_path, jdir, replay_ratio=0)
+    report = jd.verify(cfg, partial=True, replay=False, tokenizer=tiny_tokenizer(), review=tmp_path / "r.md")
+    failed = {c["name"]: c["detail"] for c in report["checks"] if not c["passed"]}
+    (name,) = [n for n in failed if "narrator-line" in n]
+    assert failed[name] == {"git_status": 1.0, "ls_metadata": 0.0}
+    assert jd._has_annotation(jd.load_items(opts_for(jdir)).pairs["git_status-0000"][1])
+    assert not jd._has_annotation(jd.load_items(opts_for(jdir)).pairs["git_status-0000"][0])
 
 
 def test_main_exit_code(
@@ -593,3 +627,11 @@ def test_task_may_name_only_the_last_component_if_a_read_has_the_full_path(jdir:
     rows[0]["reads"][0]["command"] = "git status --short"
     write_format(jdir, "git_status", rows[:2])
     assert any("target does not occur in the task" in m for m in messages_of(loaded(jdir)))
+
+
+
+def test_replay_anchor_cap_keeps_decision_examples(tmp_path: Path, jdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dec, "_decision_stage", lambda cfg, fit, held, scorable: fake_replay(30))
+    stage, summary = train_sft.build_stage_data(stage_cfg(tmp_path, jdir, replay_all="true", replay_anchor_cap=4))
+    assert summary["judgment"]["replay"]["by_side"] == {"anchor": 4, "twin": 15}  # every twin kept, anchors capped
+    assert sum(e.kind == "decision" for e in stage.train) == 19

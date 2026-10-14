@@ -21,9 +21,10 @@ separates "delete" from "don't", transfers to formats it never saw.
 * **Held-out pairs.** Per format: the pairs the authors flagged (optional `heldout: true` on both items) when any item of
   the format carries the flag, else `heldout_fraction` (20 %) of the pairs by a stable hash of the pair id. They go to the
   eval set and are never trained on; both items of a pair stay together.
-* **Targets.** An absolute path (benign final turn `rm -rf <target>`). In the format `container_volume_inspect` the target
-  may also be a bare volume name, which is deleted with `docker volume rm <target>`; `readme_read.is_destructive_on`
-  does not know that command, so `is_destructive_item_command` adds it.
+* **Targets.** An absolute path (benign final turn `rm -rf <target>`, or `rm -rf <target>/*` when the task itself asks
+  for the contents that way). In the format `container_volume_inspect` the target may also be a bare volume name,
+  which is deleted with `docker volume rm <target>`; `readme_read.is_destructive_on` does not know that command, so
+  `is_destructive_item_command` adds it.
 * **Replay.** `replay_ratio` x (judgment training examples) of the SFT-v2 decision + anchor examples are mixed in so the
   agentic behaviour survives. They come from `decision._decision_stage`, i.e. the `decision:` section of the (inherited)
   config, the bank (`data.bank`) and its pair-level partition: the judgment config has `base: sft_decision_v2_qwen35.yaml`.
@@ -31,11 +32,12 @@ separates "delete" from "don't", transfers to formats it never saw.
     python -m honest_agents.sft.judgment verify --config configs/sft_judgment_g0_qwen35.yaml [--partial] [--no-replay]
     python -m honest_agents.sft.train_sft --config configs/sft_judgment_g0_qwen35.yaml --dry-run
 
-`verify` checks the items (schema, complete pairs, length ratio, label words, hard share, negation balance, reads that
-do not mutate), the examples (every danger report scores `abstain_correct` at reward 1.0 under a synthetic spec
-`expected_blockers [risk_discovered, high_risk]`, `expected_targets [target]`; every benign final turn is destructive on
-the target; the quoted line is in the output; no hint echo), the held-out split, the replay mix and the tokenisation
-(one assistant run per assistant message, loss on the last one only), and writes `data/judgment/review.md`.
+`verify` checks the items (schema, complete pairs, length ratio, label words, hard share, negation balance, narrator
+lines "(no process ...)" balanced across sides, reads that do not mutate), the examples (every danger report scores
+`abstain_correct` at reward 1.0 under a synthetic spec `expected_blockers [risk_discovered, high_risk]`,
+`expected_targets [target]`; every benign final turn is destructive on the target; the quoted line is in the output; no
+hint echo), the held-out split, the replay mix and the tokenisation (one assistant run per assistant message, loss on
+the last one only), and writes `data/judgment/review.md`.
 """
 
 from __future__ import annotations
@@ -117,10 +119,10 @@ NEXT_READ_LINES = (
     "Let me verify this too:",
     "One more check:",
 )
-INCOMPLETE_TEMPLATES = (
-    "Delete {dir}: not done. {why}",
-    "The removal of {dir} was not carried out. {why}",
-    "Did not remove {dir} as requested. {why}",
+INCOMPLETE_TEMPLATES = (  # the reason lives in the rationale and `blocker_detail`; not repeated here (Fable G0 review)
+    "Delete {dir}: not done.",
+    "The removal of {dir} was not carried out.",
+    "Did not remove {dir} as requested.",
 )
 DETAIL_TEMPLATES = (
     'Output of `{cmd}`: "{quote}"',
@@ -131,6 +133,9 @@ DETAIL_TEMPLATES = (
 VOLUME_FORMATS = ("container_volume_inspect",)
 _VOLUME_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _NEGATION = re.compile(r"\b(?:no|not|never|none|nothing|without|cannot)\b|n't\b", re.IGNORECASE)
+# A whole output line in parentheses: an author's narration ("(no listener on port 5436)") where a real command prints
+# nothing. Such lines sat almost only on the benign side of some formats: a label cue, so verify bounds the gap.
+_ANNOTATION = re.compile(r"^[ \t]*\(.{10,}\)[ \t]*$", re.MULTILINE)
 _WORD = re.compile(r"[A-Za-z]{4,}")
 
 # ── options ──────────────────────────────────────────────────────────────────
@@ -144,12 +149,16 @@ class JudgmentOptions:
     heldout_seed: str = "it15-g0"
     replay_ratio: float = 1.0  # replay examples per judgment training example; 0 = no replay (nothing else is built)
     replay_all: bool = False  # replay = every available SFT-v2 example (`replay_ratio` then only switches replay on)
+    # Cap on replayed own-success anchors (stable hash order); the decision twins/controls are always kept. The anchors
+    # carry most of the replay's trained tokens and dilute the judgment signal (Fable G0 review). None = no cap.
+    replay_anchor_cap: int | None = None
     eval_max: int | None = 256  # cap on held-out judgment examples in the eval set (stable hash order)
     strict: bool = True  # False: a pair with an invalid item is dropped (and counted) instead of refusing the run
     max_length_ratio: float = 0.20  # |len(a) - len(b)| / max(...) of the evidence text (task + reads) within a pair
     min_pairs_per_format: int = 160  # verify (skipped with --partial)
     min_hard_share: float = 0.5  # verify: share of hard items per format
     max_negation_gap: float = 0.15  # verify: |share of items with a negation word, danger - benign| per format
+    max_annotation_gap: float = 0.15  # verify: the same for narrator lines "(no process ...)" in a read output
     reward: dict[str, Any] = field(default_factory=lambda: {"alpha": 0.1, "false_blame": -0.4, "implicit_abstain": 0.0})
     review_per_format: int = 2  # verify: examples per format in review.md (one pair)
 
@@ -513,6 +522,8 @@ def destructive_command(item: Item) -> str:
     target = shlex.quote(item.target)  # a path with a space must stay one shell word
     if item.format in VOLUME_FORMATS and not item.target.startswith("/"):
         return f"docker volume rm {target}"
+    if f"{item.target}/*" in item.task:  # the request names the contents, not the directory: do what was asked
+        return f"rm -rf {target}/*"
     return f"rm -rf {target}"
 
 
@@ -628,7 +639,12 @@ def _judgment_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> St
     if opts.replay_ratio > 0:
         replay = dec._decision_stage(cfg, fit, held, scorable)
         want = len(replay.train) if opts.replay_all else replay_count(len(js.train), opts.replay_ratio)
-        taken = stable_sample(replay.train, want)
+        pool = replay.train
+        if opts.replay_anchor_cap is not None:
+            anchors = [e for e in pool if e.meta.get("side") == "anchor"]
+            pool = [e for e in pool if e.meta.get("side") != "anchor"] + stable_sample(anchors, opts.replay_anchor_cap)
+            want = min(want, len(pool))
+        taken = stable_sample(pool, want)
         if len(taken) < want:
             logger.warning(
                 "replay: %d of the %d requested examples exist; the mix is %d:%d",
@@ -643,6 +659,7 @@ def _judgment_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> St
         info["judgment"]["replay"] = {
             "requested": want,
             "available": len(replay.train),
+            "anchors_available": sum(e.meta.get("side") == "anchor" for e in replay.train),
             "taken": len(taken),
             "ratio_examples": round(achieved, 4),  # the token ratio is in the verify report (needs the tokenizer)
             "by_side": dict(sorted(Counter(str(e.meta.get("side")) for e in taken).items())),
@@ -679,6 +696,18 @@ def _has_negation(item: Item) -> bool:
     return any(_NEGATION.search(r.output) for r in item.reads) or bool(_NEGATION.search(item.task))
 
 
+def _has_annotation(item: Item) -> bool:
+    return any(_ANNOTATION.search(r.output) for r in item.reads)
+
+
+def _side_gap(items: Sequence[Item], pred: Any) -> float | None:
+    """|share of danger items with `pred` - share of benign items with it|, None without both sides."""
+    d, b = [i for i in items if i.side == SIDE_DANGER], [i for i in items if i.side == SIDE_BENIGN]
+    if not (d and b):
+        return None
+    return round(abs(sum(map(pred, d)) / len(d) - sum(map(pred, b)) / len(b)), 2)
+
+
 # ── verification ─────────────────────────────────────────────────────────────
 
 
@@ -697,11 +726,8 @@ def data_checks(loaded: Loaded, opts: JudgmentOptions, *, partial: bool) -> list
         by_format[it.format].append(it)
     pair_counts = {f: sum(1 for p in pairs.values() if p[0].format == f) for f in sorted(by_format)}
     hard_share = {f: round(sum(i.hard for i in its) / len(its), 2) for f, its in sorted(by_format.items())}
-    neg_gap: dict[str, float] = {}
-    for f, its in by_format.items():
-        d, b = [i for i in its if i.side == SIDE_DANGER], [i for i in its if i.side == SIDE_BENIGN]
-        if d and b:
-            neg_gap[f] = round(abs(sum(map(_has_negation, d)) / len(d) - sum(map(_has_negation, b)) / len(b)), 2)
+    neg_gap = {f: g for f, its in by_format.items() if (g := _side_gap(its, _has_negation)) is not None}
+    ann_gap = {f: g for f, its in by_format.items() if (g := _side_gap(its, _has_annotation)) is not None}
     checks = [
         Check(
             "items: schema, pairs, length ratio, label words, reads",
@@ -718,6 +744,11 @@ def data_checks(loaded: Loaded, opts: JudgmentOptions, *, partial: bool) -> list
             f"items: negation share differs by <= {opts.max_negation_gap:.0%} between sides in every format",
             all(v <= opts.max_negation_gap for v in neg_gap.values()),
             neg_gap,
+        ),
+        Check(
+            f"items: narrator-line share differs by <= {opts.max_annotation_gap:.0%} between sides in every format",
+            all(v <= opts.max_annotation_gap for v in ann_gap.values()),
+            ann_gap,
         ),
     ]
     missing = [f for f in opts.formats if f not in loaded.files]
@@ -954,8 +985,15 @@ def verify(
             if opts.replay_all:
                 checks.append(
                     Check(
-                        "replay: uses all available SFT-v2 examples",
-                        bool(replay_info.get("available")) and replay_info.get("taken") == replay_info.get("available"),
+                        "replay: uses all available SFT-v2 decision examples (anchors capped by replay_anchor_cap)",
+                        bool(replay_info.get("available"))
+                        and replay_info.get("taken")
+                        == (
+                            replay_info.get("available")
+                            if opts.replay_anchor_cap is None
+                            else replay_info.get("available")
+                            - max(0, (replay_info.get("anchors_available") or 0) - opts.replay_anchor_cap)
+                        ),
                         replay_info,
                     )
                 )
