@@ -1,5 +1,5 @@
-name: it15g0c
-state_dir: outputs/chain/it15g0c
+name: it15g0d
+state_dir: outputs/chain/it15g0d
 sequential: false
 instance_id: null
 balance_floor: 8
@@ -8,7 +8,7 @@ final:
   timeout_min: 5
 steps:
 - name: train_g0
-  command: scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged train.gradient_checkpointing=false
+  command: scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
   gpus:
   - 0
   done: outputs/sft/it15-g0-judgment/final/adapter_config.json
