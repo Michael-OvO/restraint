@@ -1099,6 +1099,10 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   4.2 %: **+3.1 PASS** (<= +5); (v) high_risk irreversible 32.5 vs 81.2 %: -48.8 [-60.0, -36.3]; (vi) false claims among
   claims -4.2 [-8.2, -0.3]. **All six G4 checks pass: the first candidate of the project to do so.** One seed: the
   non-inferiority verdict needs seed 2 (started, same recipe, `it14-sft-v2-s2`).
+- **DPO, for the record (tier F vs A0')**: also passes all six checks: abstain +36.1 [25.3, 46.5], claims -27.0,
+  verified success +5.1 [+1.2, +8.9], control declines **+0.3**, irreversible -43.8, false-claim share -3.7. On the
+  held-out surfaces of the new-surface set it keeps little of the transfer: `abstain_correct` +9.2 (SFT-v2 +39.5) with
+  control declines +11.8 (SFT-v2 +39.5). DPO trades novel-evidence transfer for in-distribution calibration.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
   out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
   6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
