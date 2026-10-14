@@ -112,15 +112,45 @@ def _evidence_of(task_dir: Path) -> str:
     return str(cfg["metadata"]["honest_variant"]["what"])
 
 
+def prune_failed(variants_file: Path, rows: list[dict[str, Any]], results: list[PairCheck]) -> int:
+    """Remove the task dirs of failing pairs (twin and control) and rewrite `variants_file` without their rows."""
+    import shutil
+
+    failed = {r.pair for r in results if not r.ok}  # twin dir name = twin variant id
+    keep: list[dict[str, Any]] = []
+    for r in rows:
+        twin_id = r["variant_id"].removesuffix("__control")
+        if twin_id in failed:
+            shutil.rmtree(r["task_dir"], ignore_errors=True)
+        else:
+            keep.append(r)
+    variants_file.write_text("".join(json.dumps(r) + "\n" for r in keep))
+    return len(failed)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--variants", type=Path, required=True, help="surface_variants.jsonl from surfaces_cli build")
     ap.add_argument("--out", type=Path, help="write one JSON row per pair here")
     ap.add_argument("--concurrency", type=int, default=6)
     ap.add_argument("--oracle-timeout", type=int, default=600)
+    ap.add_argument(
+        "--prune",
+        action="store_true",
+        help="delete both task dirs of every pair that fails G1 and drop its rows from surface_variants.jsonl (--out keeps the record)",
+    )
+    ap.add_argument(
+        "--prune-from",
+        type=Path,
+        help="do not run anything: prune the pairs that failed in this earlier --out file (implies --prune)",
+    )
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     rows = [json.loads(ln) for ln in args.variants.read_text().splitlines() if ln.strip()]
+    if args.prune_from:
+        earlier = [PairCheck(**json.loads(ln)) for ln in args.prune_from.read_text().splitlines() if ln.strip()]
+        print(f"pruned {prune_failed(args.variants, rows, earlier)} failing pairs")
+        return 0
     twins = {r["variant_id"]: r for r in rows if not r["control"]}
     pairs = [
         (Path(r["task_dir"]), Path(r["task_dir"]).with_name(v + "__control"), str(r.get("surface") or "?"))
@@ -146,6 +176,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(json.dumps({k: f"{a}/{b}" for k, (a, b) in summary.items()}))
     if args.out:
         args.out.write_text("\n".join(json.dumps(asdict(r)) for r in results) + "\n")
+    if args.prune:
+        n = prune_failed(args.variants, rows, results)
+        print(f"pruned {n} failing pairs")
     return 0 if all(r.ok for r in results) else 1
 
 

@@ -843,6 +843,27 @@ def select_dirs(dirs: list[Path], only_ids: set[str] | None) -> list[Path]:
     return [d for d in dirs if d.name in only_ids]
 
 
+def write_quarantine_list(results: dict[str, Any], path: Path) -> int:
+    """Write (replace) the quarantine list of the rejected variants: one `QuarantineEntry` line each, kind `leak` (the
+    only kind evaluation runs honour by default), the reason in `detail`. An empty list is written as an empty file."""
+    from honest_agents.bank import QUARANTINE_LEAK, QuarantineEntry
+
+    lines = []
+    for vid, r in sorted(results.items()):
+        if r.ok and not r.leak and not r.relabel_to_control:
+            continue
+        why = "leak" if r.leak else "relabel_to_control" if r.relabel_to_control else (r.reason or "not ok")
+        lines.append(
+            QuarantineEntry(
+                variant_id=vid, kind=QUARANTINE_LEAK, source="validation", detail=f"G1 select: {why}"[:300]
+            ).model_dump_json()
+            + "\n"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(lines))
+    return len(lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -882,6 +903,11 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="validate only the variant ids listed in this file (one per line); the build drops variants without a result",
     )
+    ap.add_argument(
+        "--quarantine-out",
+        type=Path,
+        help="append every rejected variant (ok false, leak, relabel_to_control) to this quarantine list (bank.QuarantineEntry lines)",
+    )
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     dirs = sorted(p.parent for p in args.tasks_dir.glob("*/task.toml"))
@@ -907,6 +933,8 @@ def main(argv: list[str] | None = None) -> None:
         if flagged:  # the task hash changed, so a resumed run revalidates exactly these
             results = asyncio.run(validate_many(dirs, args.out, resume=True, **kw))
         print(f"relabelled {len(flagged)} variants as near-miss controls")
+    if args.quarantine_out:
+        write_quarantine_list(results, args.quarantine_out)
     n_ok = sum(r.ok for r in results.values())
     n_leak = sum(r.leak for r in results.values())
     print(

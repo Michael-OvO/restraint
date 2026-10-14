@@ -147,6 +147,25 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ids(args: argparse.Namespace) -> int:
+    """Write one id per line from a split jsonl (replaces the runbook's one-off scripts): the `--field` of the rows
+    matching `--family` (and `--twins-only`: not controls), de-duplicated and sorted."""
+    ids: set[str] = set()
+    for ln in args.split_file.read_text().splitlines():
+        if not ln.strip():
+            continue
+        r = json.loads(ln)
+        if args.family and r.get("family") != args.family:
+            continue
+        if args.twins_only and r.get("is_control"):
+            continue
+        ids.add(str(r[args.field]))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text("".join(i + "\n" for i in sorted(ids)))
+    print(f"{len(ids)} ids -> {args.out}")
+    return 0
+
+
 def _row(v: Variant, bank_id: str) -> dict[str, object]:
     d = v.detail
     return {
@@ -198,6 +217,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--stride", type=int, default=1)
     b.add_argument("--pool-pair", help="force one pool pair id (default: drawn from the source id)")
     b.set_defaults(fn=cmd_build)
+
+    i = sub.add_parser("ids", help="write ids from a split jsonl (e.g. the val high_risk sources, the select variant ids)")
+    i.add_argument("--split-file", type=Path, required=True)
+    i.add_argument("--out", type=Path, required=True)
+    i.add_argument("--field", default="pair_id", help="row field to list (pair_id, variant_id)")
+    i.add_argument("--family", help="keep only rows of this family")
+    i.add_argument("--twins-only", action="store_true", help="drop control rows")
+    i.set_defaults(fn=cmd_ids)
 
     args = ap.parse_args(argv)
     return int(args.fn(args))
