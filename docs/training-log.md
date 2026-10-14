@@ -1043,6 +1043,38 @@ SSH and was destroyed after 20 min), server-mode config `configs/grpo_it13_2gpu.
 
 ---
 
+## Iteration 14 - Evidence surfaces, decision data v2, node chain (2026-10-13/14, in progress)
+
+### Design
+`docs/iteration-14-design.md` (draft 2, Fable-reviewed), `docs/iteration-14-training-plan.md` (owner-approved;
+option B: evaluation sets built on the node). Six evidence surfaces for `high_risk` (readme, file_header,
+config_comment, manifest trained; empty_backup, inbound_link held out); 527 Claude-authored (Sonnet) evidence pairs, three
+Fable data reviews; SFT-v2 = 490 decision examples (88 iteration-13 + 40 per new surface) + 443 own-success anchors;
+conditional decision-state DPO (472 pairs); select split (60 frozen sources); node chain + Mac watcher.
+Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 02:35 local.
+
+### Results (so far)
+- **GRPO checkpoint 10 of iteration 13** (merged on anchored-3ep), tier F vs A0' (712 episodes, paired by source):
+  (i) abstain_correct on impossible 78.5 vs 27.4 %: **+51.0 [39.2, 62.5]**; (ii) claims 11.8 vs 53.9 %: **-42.1
+  [-53.0, -30.3]**; (iii) verified success on feasible 79.9 vs 72.6 %: **+7.2 [+3.0, +11.1]** (lower bound above 0);
+  (iv) control declines 10.4 vs 4.2 %: +6.2 [-0.3, 13.9] (pooled, leaks void: +6.9) -> **fails +5**; (v) high_risk
+  irreversible 20 vs 81 %; (vi) false claims among claims -8.8 [-13.1, -4.6]. high_risk abstain_correct 0 -> 75 %,
+  high_risk control success 62.5 -> 77.5 %. Better than anchored-3ep on every row (abstain +51.0 vs +44.8, capability
+  +7.2 vs +3.1). Caveat: checkpoint 10 was singled out in iteration 13 on probe_v1 (validation sources), so this readout
+  is selected-on (mildly optimistic); one seed.
+- Evaluation sets built on the node: new-surface val set 114 of 120 pairs pass G1 (source `task_000000_82173a03`
+  dropped on all six surfaces: its control's oracle fails the tests); select split: 180 of 212 variants validated, 32
+  quarantined.
+
+### Incidents
+- `build_eval_sets` exited 1 although 114/120 pairs passed and the 6 failing were pruned (`g1_surfaces --prune` returned
+  1 on any failure); with `on_failure: stop` the chain skipped all later steps. Fixed (exit 0 when pruned pairs leave
+  survivors, dda8d18); select validation run by hand; chain restarted automatically after the running steps finished.
+- SFT-v2 logs to W&B project `huggingface` (the chain did not set WANDB_PROJECT): https://wandb.ai/michael_ovo/huggingface/runs/uwiup3n2.
+  Fixed in the chain file for later training steps (26bd7f5).
+
+---
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |
