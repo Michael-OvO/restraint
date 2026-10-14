@@ -997,12 +997,9 @@ def _surface_pairs(opts: DecisionOptions, sources: Mapping[str, Any], rl: Mappin
     rows = [r for r in dsurf.read_manifest(so.manifest) if r.role == dsurf.ROLE_SFT and r.surface in so.surfaces]
     if not rows:
         raise ValueError(f"no SFT rows for {so.surfaces} in {so.manifest}: run `python -m honest_agents.tasks.decision_surfaces build`")
-    if so.max_pairs_per_surface is not None:  # a cap on sources per surface; the manifest stays uncapped
-        keep: list[Any] = []
-        for surface in so.surfaces:
-            group = sorted((r for r in rows if r.surface == surface), key=lambda r: _hash(f"cap|{surface}|{r.source}"))
-            keep += group[: so.max_pairs_per_surface]
-        rows = keep
+    # a cap on sources per surface (stable hash); the manifest stays uncapped, and the probe's "seen" pool pairs are
+    # the capped ones (`decision_surfaces.trained_pool_pairs`)
+    rows = dsurf.cap_rows(rows, so.max_pairs_per_surface)
     srcs = {r.source for r in rows}
     dsurf.assert_sft_sources(srcs, set(sources), set(rl) if not opts.include_rl_pool_sources else (), so.data_dir)
     out: dict[str, dict[str, Any]] = {}

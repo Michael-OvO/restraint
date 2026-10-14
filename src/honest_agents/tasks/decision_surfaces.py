@@ -62,6 +62,7 @@ SURFACE_PROMPTS = dp.DECISION_DIR / "probe_prompts_surfaces.jsonl"
 DEFAULT_SALT = "it14"
 DEFAULT_PARALLEL = 6  # the Mac runs at most six boots at once
 DEFAULT_PROBE_SOURCES = 24  # per surface
+DEFAULT_SFT_CONFIG = "configs/sft_decision_v2_qwen35.yaml"  # its `max_pairs_per_surface` cap defines "seen" pool pairs
 
 
 def _rank(*parts: object) -> str:
@@ -124,13 +125,40 @@ def refs_of(rows: Iterable[SurfacePairRow]) -> list[VariantRef]:
     return [ref for r in rows for ref in r.refs()]
 
 
-def sft_pool_pairs(rows: Iterable[SurfacePairRow]) -> dict[str, set[str]]:
-    """surface -> the pool pair ids the SFT rows use (what a probe row calls "seen")."""
-    out: dict[str, set[str]] = {}
-    for r in rows:
-        if r.role == ROLE_SFT:
-            out.setdefault(r.surface, set()).add(r.pool_pair)
+def cap_rows(rows: Iterable[SurfacePairRow], max_per_surface: int | None) -> list[SurfacePairRow]:
+    """The first `max_per_surface` rows of each surface in a stable hash order of the source: the cap
+    `decision.surfaces.max_pairs_per_surface` of `sft.decision` applies to the manifest's SFT rows (the manifest itself
+    stays uncapped). None = every row."""
+    rows = list(rows)
+    if max_per_surface is None:
+        return rows
+    out: list[SurfacePairRow] = []
+    for surface in sorted({r.surface for r in rows}):
+        group = sorted((r for r in rows if r.surface == surface), key=lambda r: _rank("cap", surface, r.source))
+        out += group[:max_per_surface]
     return out
+
+
+def sft_pool_pairs(rows: Iterable[SurfacePairRow], max_per_surface: int | None = None) -> dict[str, set[str]]:
+    """surface -> the pool pair ids the SFT rows use (what a probe row calls "seen"). With `max_per_surface` (the
+    training config's `decision.surfaces.max_pairs_per_surface`) only the rows the cap keeps count: a pool pair
+    assigned to a source the cap drops was never trained on."""
+    out: dict[str, set[str]] = {}
+    for r in cap_rows((r for r in rows if r.role == ROLE_SFT), max_per_surface):
+        out.setdefault(r.surface, set()).add(r.pool_pair)
+    return out
+
+
+def trained_pool_pairs(rows: Iterable[SurfacePairRow], sft_config: str | Path | None) -> dict[str, set[str]]:
+    """`sft_pool_pairs` under the cap of the SFT-v2 config (`decision.surfaces.max_pairs_per_surface`); no config = no cap."""
+    cap = None
+    if sft_config:
+        from honest_agents.sft import decision as dec
+        from honest_agents.sft.train_sft import load_config
+
+        so = dec.parse_options(load_config(str(sft_config)).decision).surfaces
+        cap = so.max_pairs_per_surface if so is not None else None
+    return sft_pool_pairs(rows, cap)
 
 
 # ── choosing sources and pool pairs ──────────────────────────────────────────
@@ -298,12 +326,19 @@ def _record(rows: list[SurfacePairRow], counts: Counter[str], surface: str, row:
 
 
 def surface_prompts(
-    bank_rows: Sequence[Any], rows: Sequence[SurfacePairRow], outputs: Mapping[str, dp.SandboxOutputs], *, per_variant: int = 1
+    bank_rows: Sequence[Any],
+    rows: Sequence[SurfacePairRow],
+    outputs: Mapping[str, dp.SandboxOutputs],
+    *,
+    per_variant: int = 1,
+    sft_pairs: Mapping[str, set[str]] | None = None,
 ) -> tuple[list[dp.DecisionPrompt], Counter[str]]:
-    """Own-prefix and zero-prefix prompts of the probe rows, one call per surface (a source has one pair per surface)."""
+    """Own-prefix and zero-prefix prompts of the probe rows, one call per surface (a source has one pair per surface).
+    `sft_pairs` (surface -> pool pairs the SFT trained on, `trained_pool_pairs`) decides a prompt's `phrasing_seen`;
+    None = the manifest's SFT rows uncapped."""
     counts: Counter[str] = Counter()
     split = dp.PhrasingSplit.build()
-    sft = sft_pool_pairs(read_manifest())
+    sft = dict(sft_pairs) if sft_pairs is not None else sft_pool_pairs(rows)
     probe_rows = [r for r in rows if r.role == ROLE_PROBE]
     prompts: list[dp.DecisionPrompt] = []
     for surface in SURFACES:
@@ -350,7 +385,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         assert all(not r.pool_pair_heldout for r in rows), "a held-out pool pair reached the SFT rows"
     else:
         train_src, held_src = probe_sources(args.data_dir, args.rl_pool, args.limit_sources or DEFAULT_PROBE_SOURCES, args.salt)
-        sft = sft_pool_pairs(read_manifest(args.manifest))
+        sft = trained_pool_pairs(read_manifest(args.manifest), args.sft_config)  # "seen" = trained under the cap
         rows, counts = build_probe_rows(train_src, held_src, sft, bank_tasks=bank_tasks, out_root=out_root, salt=args.salt)
         sft_sources = {r.source for r in read_manifest(args.manifest) if r.role == ROLE_SFT}
         if overlap := sft_sources & {r.source for r in rows}:
@@ -379,7 +414,8 @@ def _cmd_prompts(args: argparse.Namespace) -> int:
         r for r in iter_bank(Path(args.bank).expanduser()) if r.task.get("family") == dp.HIGH_RISK and r.task.get("pair_id") in wanted
     ]
     outputs = dp.read_outputs([args.sft_outputs, args.out_cache])
-    prompts, counts = surface_prompts(bank_rows, rows, outputs, per_variant=args.per_variant)
+    sft = trained_pool_pairs(rows, args.sft_config)
+    prompts, counts = surface_prompts(bank_rows, rows, outputs, per_variant=args.per_variant, sft_pairs=sft)
     manifest = dp.prompt_manifest(prompts, counts, dp.PhrasingSplit.build())
     dp.write_prompts(prompts, args.out, manifest)
     print(json.dumps(manifest, indent=2))
@@ -401,6 +437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--surface", nargs="+", choices=SURFACES, help="only these surfaces (rows of the others are kept)")
     b.add_argument("--limit-sources", type=int, default=0, help="a subset: the first N sources in hash order")
     b.add_argument("--salt", default=DEFAULT_SALT)
+    b.add_argument("--sft-config", default=DEFAULT_SFT_CONFIG, help="probe: the training config whose cap decides which pool pairs count as seen ('' = uncapped)")
     b.set_defaults(fn=_cmd_build)
     o = sub.add_parser("outputs", help="boot every manifest variant not yet cached and store its inspection outputs")
     o.add_argument("--role", choices=(ROLE_SFT, ROLE_PROBE), default=None)
@@ -416,6 +453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--sft-outputs", default=str(dp.SANDBOX_OUTPUTS))
     p.add_argument("--out-cache", default=str(SURFACE_OUTPUTS))
     p.add_argument("--per-variant", type=int, default=1)
+    p.add_argument("--sft-config", default=DEFAULT_SFT_CONFIG, help="the training config whose cap decides which pool pairs count as seen ('' = uncapped)")
     p.set_defaults(fn=_cmd_prompts)
     c = sub.add_parser("cleanup", help="remove leaked sandbox containers and networks (name-filtered)")
     c.set_defaults(fn=lambda a: dp._cmd_cleanup(argparse.Namespace(dry_run=False)))

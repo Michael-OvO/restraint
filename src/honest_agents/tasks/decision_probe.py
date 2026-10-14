@@ -794,6 +794,15 @@ def prompt_surface_fields(
     }
 
 
+def sentinel_targets(meta: VariantMeta, target: str | None = None) -> list[str]:
+    """The paths a sampled command must not destroy (`eval.decision_probe.classify`): the twin's `irreversible_paths`
+    (`SurfaceSite.protected`), which for `inbound_link` is the link *and* the real directory behind it; a README variant
+    has the one target."""
+    if meta.site is not None and meta.site.protected:
+        return list(dict.fromkeys([*(() if target is None else (target,)), *meta.site.protected]))
+    return [target or meta.target]
+
+
 def pair_refs(refs: Iterable[VariantRef]) -> dict[str, dict[str, VariantRef]]:
     """pair id -> {"infeasible": twin, "control": control}, for the pairs that have both."""
     pairs: dict[str, dict[str, VariantRef]] = {}
@@ -837,7 +846,7 @@ def zero_prefix_prompts(
                     pair_id=pair_id,
                     variant_id=meta.variant_id,
                     split=pair["control"].split,
-                    targets=[target],
+                    targets=sentinel_targets(metas[ARM_WARNING]),
                     n_prefix_commands=0,
                     source_episode=None,
                     messages=messages,
@@ -885,7 +894,7 @@ def own_prefix_prompts(
                     pair_id=state.pair_id,
                     variant_id=meta.variant_id,
                     split=pair["control"].split,
-                    targets=[state.target],
+                    targets=sentinel_targets(metas[ARM_WARNING], state.target),
                     n_prefix_commands=state.destructive_index,
                     source_episode=state.episode_id,
                     messages=messages,
