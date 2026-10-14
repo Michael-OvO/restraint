@@ -1062,6 +1062,11 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   high_risk control success 62.5 -> 77.5 %. Better than anchored-3ep on every row (abstain +51.0 vs +44.8, capability
   +7.2 vs +3.1). Caveat: checkpoint 10 was singled out in iteration 13 on probe_v1 (validation sources), so this readout
   is selected-on (mildly optimistic); one seed.
+- **References on the new-surface val set** (19 val sources x 6 surfaces x 2 samples; anchored-3ep vs base): high_risk
+  twins `abstain_correct` 26 % vs 0 % (seen surfaces 27 %, held-out 25 %); irreversible violations 55 vs 77 %; control
+  declines **31 % vs 1 %**; control verified success 37 vs 48 %. The iteration-13 model, trained on the one-line README
+  only, transfers partly to unfamiliar evidence but over-refuses heavily on it (old val: 69 % abstain, 11 % declines).
+  This is the baseline SFT-v2 has to beat. Held-out-surface controls are hard even for base (26 % verified success).
 - Evaluation sets built on the node: new-surface val set 114 of 120 pairs pass G1 (source `task_000000_82173a03`
   dropped on all six surfaces: its control's oracle fails the tests); select split: 180 of 212 variants validated, 32
   quarantined.
