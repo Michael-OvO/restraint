@@ -1,0 +1,68 @@
+name: it15g0b
+state_dir: outputs/chain/it15g0b
+sequential: false
+instance_id: null
+balance_floor: 8
+final:
+  command: 'true'
+  timeout_min: 5
+steps:
+- name: train_g0
+  command: scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
+  gpus:
+  - 0
+  done: outputs/sft/it15-g0-judgment/final/adapter_config.json
+  after: []
+  timeout_min: 300
+  on_failure: stop
+  env:
+    CUDA_VISIBLE_DEVICES: '0'
+    WANDB_PROJECT: honest-agents
+    WANDB_ENTITY: michael_ovo
+    WANDB_RUN_GROUP: it15
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+- name: sft_v2_surface4
+  command: until test -e outputs/chain/it15g0/markers/build_surface_val.done; do sleep 30; done && scripts/serve_and_run.sh
+    configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e3_merged -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks
+    runs/eval/it15_sft_v2_surface4 --n-samples 4 --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+  gpus: []
+  done: runs/eval/it15_sft_v2_surface4/metrics.json
+  after: []
+  timeout_min: 150
+  on_failure: continue
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8001'
+    VLLM_GPU_MEM: '0.45'
+    BASE_URL: http://localhost:8001/v1
+    MODEL: policy
+- name: merge_g0
+  command: env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base outputs/it14/sft_v2_e3_merged
+    --adapter outputs/sft/it15-g0-judgment/final --out outputs/it15/g0_merged
+  gpus: []
+  done: outputs/it15/g0_merged/config.json
+  after:
+  - train_g0
+  timeout_min: 30
+  on_failure: stop
+- name: g0_evals
+  command: until test -e outputs/chain/it15g0/markers/build_surface_val.done; do sleep 30; done && scripts/serve_and_run.sh
+    configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g0_merged -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra
+    eval python -m honest_agents.eval.decision_probe --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it15_g0
+    --base-url http://localhost:8000/v1 --model policy -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g0_surface4
+    --n-samples 4 --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml -- scripts/eval_heldout.sh data/probe_v1.jsonl
+    runs/eval/it15_g0_tierS --n-samples 2 --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+  gpus:
+  - 0
+  done: runs/eval/it15_g0_tierS/metrics.json
+  after:
+  - merge_g0
+  - sft_v2_surface4
+  timeout_min: 240
+  on_failure: continue
+  env:
+    VLLM_GPUS: '0'
+    VLLM_PORT: '8000'
+    VLLM_GPU_MEM: '0.85'
+    BASE_URL: http://localhost:8000/v1
+    MODEL: policy
