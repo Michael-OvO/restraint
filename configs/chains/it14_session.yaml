@@ -1,0 +1,106 @@
+# Iteration 14 node session, segment A (design section 6, steps 2-3 up to gate G2). Copy, fill every <PLACEHOLDER>, then:
+#   python -m honest_agents.node_chain check configs/chains/it14_session.yaml
+#   python -m honest_agents.node chain --host HOST --port PORT configs/chains/it14_session.yaml
+#   python -m honest_agents.node watch --host HOST --port PORT --instance-id ID configs/chains/it14_session.yaml
+# Gates G2 and G4 are human decisions: this chain ends at G2 (its final step archives and the watcher stops the node).
+# Segment B (DPO if control declines > base + 5, candidate tier F + surface set, Agentic Abstention, SFT-v2 seed 2) is a
+# second job file written after the G2 decision; start the node again (`vastai start instance`) and chain it.
+# Budget: 2x RTX 4090 at $1.61/h, ~13 h for the whole session, abort floor $8 before any tier F.
+#
+# GPUs and ports. `gpus:` only schedules (overlapping sets never run together); the command must pin itself. The scripts
+# read SLOT (default 0: training GPU 0, vLLM GPU 1, port 8000), so an evaluation step that is meant to serve on GPU 0 must
+# say so: `env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1"}`; one on GPU 1 while another
+# server runs on GPU 0 needs its own port (`VLLM_PORT: "8001"`, matching BASE_URL). One vLLM server per step: the step
+# stops it (the scripts' `trap stop_vllm EXIT INT TERM`), and whatever a step leaves running is killed when the step ends.
+# A step's done marker must be written by its command (`&& touch MARKER`) unless the output itself is the marker.
+name: it14
+state_dir: outputs/chain/it14
+sequential: false          # dependencies below are explicit
+instance_id: null          # or pass --instance-id to `node watch`
+balance_floor: 8
+steps:
+  # 1. Smoke on both GPUs (one slot: GPU 0 trains, GPU 1 serves).
+  - name: smoke
+    command: "scripts/smoke_test.sh --train <SMOKE_TASK_DIR> --config configs/qwen35_4b.yaml && mkdir -p outputs/chain/it14/markers && touch outputs/chain/it14/markers/smoke.done"
+    gpus: [0, 1]
+    done: outputs/chain/it14/markers/smoke.done
+    after: []
+    timeout_min: 45
+    on_failure: stop
+
+  # 2a. GRPO checkpoint-10 tier F on GPU 0 (serve + evaluate), in parallel with 2b. Must be ONE repo script that starts the
+  # server (start_vllm), waits (wait_vllm), evaluates and stops it (trap stop_vllm EXIT INT TERM), not an ad-hoc `&` line.
+  - name: grpo10_tierF
+    command: "<CMD: serve GRPO checkpoint 10 on GPU 0 (EVAL=1 scripts/serve_vllm.sh ... --served-model-name policy) and run scripts/eval_heldout.sh tier F into runs/eval/it14_grpo10_tierF>"
+    gpus: [0]
+    done: runs/eval/it14_grpo10_tierF/metrics.json
+    after: [smoke]
+    timeout_min: 150
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/712\]', total: 712}
+
+  # 2b. SFT-v2 seed 1 on GPU 1.
+  - name: sft_v2_s1
+    command: "scripts/run_sft.sh <SFT_V2_CONFIG> seed=1"
+    gpus: [1]
+    done: "<SFT_V2_S1_OUTPUT_DIR>/final/adapter_config.json"
+    after: [smoke]
+    timeout_min: 180
+    on_failure: stop
+
+  # 3. Base and anchored-3ep on the new-surface validation set (GPU 0, after 2a frees it).
+  - name: base_surface_val
+    command: "<CMD: serve base on GPU 0 and evaluate the new-surface validation set into runs/eval/it14_base_surface>"
+    gpus: [0]
+    done: runs/eval/it14_base_surface/metrics.json
+    after: [grpo10_tierF]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: anchored3ep_surface_val
+    command: "<CMD: serve anchored-3ep on GPU 0 and evaluate the new-surface validation set into runs/eval/it14_anchored_surface>"
+    gpus: [0]
+    done: runs/eval/it14_anchored_surface/metrics.json
+    after: [base_surface_val]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # 3. SFT-v2 select-split epoch choice, then tier S + surface set for G2 (GPU 1, port 8001: GPU 0 serves on 8000 meanwhile).
+  - name: sft_v2_select
+    command: "<CMD: evaluate SFT-v2 epochs on the select split into runs/eval/it14_sft_v2_select>"
+    gpus: [1]
+    done: runs/eval/it14_sft_v2_select/metrics.json
+    after: [sft_v2_s1]
+    timeout_min: 120
+    on_failure: stop
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+  - name: sft_v2_tierS_surface
+    command: "<CMD: tier S + surface set for the selected SFT-v2 epoch into runs/eval/it14_sft_v2_tierS>"
+    gpus: [1]
+    done: runs/eval/it14_sft_v2_tierS/metrics.json
+    after: [sft_v2_select]
+    timeout_min: 150
+    on_failure: stop
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+
+final:
+  # Archive to the node's staging area; the Mac watcher pulls /root/staging and the entries below, then stops the instance.
+  command: >-
+    env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.archive --iteration 14 --name it14-session
+    --source /root/restraint --dest /root/staging --no-weights
+    --eval runs/eval/it14_grpo10_tierF --eval runs/eval/it14_base_surface --eval runs/eval/it14_anchored_surface
+    --eval runs/eval/it14_sft_v2_select --eval runs/eval/it14_sft_v2_tierS
+    --run <SFT_V2_S1_OUTPUT_DIR> --log /root/chain-it14.log
+  timeout_min: 30
+
+watch:
+  pull_paths: [/root/staging, /root/chain-it14.log]
+  archives:
+    - iteration: 14
+      name: it14-session
+      eval: [runs/eval/it14_grpo10_tierF, runs/eval/it14_base_surface, runs/eval/it14_anchored_surface, runs/eval/it14_sft_v2_select, runs/eval/it14_sft_v2_tierS]
+      run: ["<SFT_V2_S1_OUTPUT_DIR>"]
+      log: [/root/chain-it14.log]
+      note: "Iteration 14 session, segment A (through G2)."

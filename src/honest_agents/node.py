@@ -3,6 +3,8 @@
     python -m honest_agents.node sync --host HOST --port PORT [--with-data] [--dry-run]
     python -m honest_agents.node run  --host HOST --port PORT --name grpo3 -- scripts/run_grpo.sh configs/x.yaml
     python -m honest_agents.node pull --host HOST --port PORT runs/eval/val_step50 outputs/grpo_v3/run1/train_log.jsonl
+    python -m honest_agents.node chain --host HOST --port PORT configs/chains/it14_session.yaml     # start a job chain
+    python -m honest_agents.node watch --host HOST --port PORT --instance-id ID configs/chains/it14_session.yaml
 
 Why this exists. The node is a short-lived rental (docs/node-runbook.md): giving it a GitHub deploy key means one more
 credential to create, scope and revoke for every box, so the code goes over rsync from the Mac instead, `.git` included
@@ -22,6 +24,10 @@ an already running server would not pass them on, so a name in use is refused), 
 
 `pull` copies node paths into a staging folder of the archive, keeping their repo-relative layout; the curated,
 self-describing save of an iteration remains `python -m honest_agents.archive`.
+
+`chain` validates a job file (`honest_agents.node_chain`: steps with GPUs, done markers, dependencies, a final archive step)
+and starts its node-side runner through the same secret-over-stdin path as `run`. `watch` (`honest_agents.node_watch`) is the
+Mac-side monitor: terse event lines, then pull and `vastai stop instance` (never destroy) when the chain writes `ALL_DONE`.
 """
 
 from __future__ import annotations
@@ -261,7 +267,97 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-secrets", action="store_true", help="send no secrets (empty lines)")
     r.add_argument("--dry-run", action="store_true", help="print the ssh command and remote script, send nothing")
     r.add_argument("command", nargs=argparse.REMAINDER, help="after `--`: the command line to run in --dest")
+
+    c = sub.add_parser("chain", help="validate a chain job file and start its runner on the node (secrets over stdin)")
+    _node_args(c)
+    c.add_argument("jobfile", type=Path, help="job file inside this checkout (it must already be synced to the node)")
+    c.add_argument("--name", default=None, help="session name; default chain-<job name>; log /root/<name>.log")
+    c.add_argument("--netrc", type=Path, default=DEFAULT_NETRC)
+    c.add_argument("--hf-token-file", type=Path, default=DEFAULT_HF_TOKEN)
+    c.add_argument("--no-secrets", action="store_true")
+    c.add_argument(
+        "--dry-run", action="store_true", help="validate and print the plan and the ssh command, send nothing"
+    )
+
+    w = sub.add_parser("watch", help="Mac side: poll the chain, print events, pull and stop the instance on ALL_DONE")
+    _node_args(w)
+    w.add_argument("jobfile", type=Path)
+    w.add_argument("--instance-id", type=int, default=None, help="Vast instance id (default: job file instance_id)")
+    w.add_argument("--balance-floor", type=float, default=None, help="USD; default: job file balance_floor")
+    w.add_argument(
+        "--hard-floor", type=float, default=None, help="USD; below it pull and stop at once, without waiting"
+    )
+    w.add_argument("--poll", type=float, default=60.0, help="seconds between polls")
+    w.add_argument("--ssh-fail-limit", type=int, default=3, help="consecutive ssh failures before a NODE alert")
+    w.add_argument("--balance-every", type=int, default=5, help="polls between balance checks")
+    w.add_argument("--staging", type=Path, default=DEFAULT_STAGING)
+    w.add_argument("--vastai", default="vastai", help="vastai CLI binary")
+    w.add_argument("--no-stop", action="store_true", help="pull on ALL_DONE but leave the instance running")
+    w.add_argument("--dry-run", action="store_true", help="print the pull commands and the stop command, run nothing")
     return ap
+
+
+CHAIN_RUNNER = "env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.node_chain run"
+
+
+def _chain(a: argparse.Namespace, node: Node) -> int:
+    from honest_agents.node_chain import ALL_DONE_FILE, ChainError, load_chain, placeholders, plan_lines
+
+    jobfile = a.jobfile.expanduser().resolve()
+    try:
+        chain = load_chain(jobfile)
+        rel = jobfile.relative_to(REPO)
+    except ChainError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except ValueError:
+        print(f"error: {jobfile} is outside {REPO}; the job file must travel with `sync`", file=sys.stderr)
+        return 2
+    print("\n".join(plan_lines(chain)), flush=True)
+    if placeholders(chain) and not a.dry_run:
+        print("error: fill in the <PLACEHOLDER> tokens first (see the warning above)", file=sys.stderr)
+        return 2
+    # A stale ALL_DONE of an earlier run of this chain goes before the runner starts (it would unlink it itself, but
+    # only after `uv run` has resolved the environment); a watcher armed in between would otherwise pull and stop the node.
+    stale = shlex.quote(f"{chain.state_dir.rstrip('/')}/{ALL_DONE_FILE}")
+    command = f"rm -f {stale} && {CHAIN_RUNNER} {shlex.quote(str(rel))}"
+    script = remote_script(node.dest, command, "nohup", a.name or f"chain-{chain.name}", None)
+    cmd = run_argv(node, script)
+    secrets = Secrets() if a.no_secrets else read_secrets(a.netrc.expanduser(), a.hf_token_file.expanduser())
+    _print_argv(cmd)
+    print(f"secrets over stdin: {', '.join(secrets.names()) or 'none'}", flush=True)
+    if a.dry_run:
+        print("--- remote script ---\n" + script, end="")
+        return 0
+    return subprocess.run(cmd, input=secrets.stdin_payload(), text=True, check=False).returncode
+
+
+def _watch(a: argparse.Namespace, node: Node) -> int:
+    from honest_agents.node_chain import ChainError, load_chain
+    from honest_agents.node_watch import WatchConfig, pull_commands, real_effects, vast_stop_argv, watch
+
+    try:
+        chain = load_chain(a.jobfile)
+    except ChainError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    cfg = WatchConfig(
+        chain, node, a.instance_id if a.instance_id is not None else chain.instance_id,
+        a.balance_floor if a.balance_floor is not None else chain.balance_floor, a.hard_floor, a.poll,
+        a.ssh_fail_limit, a.balance_every, stop_instance=not a.no_stop,
+    )  # fmt: skip
+    if a.dry_run:
+        for argv in pull_commands(chain, node, a.staging.expanduser()):
+            _print_argv(argv)
+        if cfg.instance_id is not None:
+            _print_argv(vast_stop_argv(cfg.instance_id, a.vastai))
+        return 0
+    if cfg.instance_id is None and cfg.stop_instance:
+        print(
+            "warning: no instance id (--instance-id or job file); the watcher will pull but cannot stop",
+            file=sys.stderr,
+        )
+    return watch(cfg, real_effects(cfg, a.staging.expanduser(), a.vastai))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -284,6 +380,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 local_dir.mkdir(parents=True, exist_ok=True)
             rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, check=False).returncode or rc
         return rc
+    if a.cmd == "chain":
+        return _chain(a, node)
+    if a.cmd == "watch":
+        return _watch(a, node)
     words = a.command[1:] if a.command[:1] == ["--"] else a.command
     if not words:
         raise SystemExit("run: give the command after `--`")
