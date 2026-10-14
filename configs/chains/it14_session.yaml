@@ -1,98 +1,236 @@
-# Iteration 14 node session, segment A (design section 6, steps 2-3 up to gate G2). Copy, fill every <PLACEHOLDER>, then:
+# Iteration 14 node session, segment A (design section 6, steps 2-3 up to gate G2). Check, sync, start, watch:
 #   python -m honest_agents.node_chain check configs/chains/it14_session.yaml
+#   python -m honest_agents.node sync --host HOST --port PORT --with-data
 #   python -m honest_agents.node chain --host HOST --port PORT configs/chains/it14_session.yaml
 #   python -m honest_agents.node watch --host HOST --port PORT --instance-id ID configs/chains/it14_session.yaml
 # Gates G2 and G4 are human decisions: this chain ends at G2 (its final step archives and the watcher stops the node).
-# Segment B (DPO if control declines > base + 5, candidate tier F + surface set, Agentic Abstention, SFT-v2 seed 2) is a
-# second job file written after the G2 decision; start the node again (`vastai start instance`) and chain it.
-# Budget: 2x RTX 4090 at $1.61/h, ~13 h for the whole session, abort floor $8 before any tier F.
+# Segment B (DPO if tier-S control declines > base + 5, candidate tier F + surface set, Agentic Abstention, SFT-v2 seed 2)
+# is a second job file written after the G2 decision (command drafts: docs/iteration-14-runbook.md section 7).
+# Budget: 2x RTX 4090 at $1.61/h; this segment ~5 h (~$8); abort floor $8 (watcher).
+#
+# PRECONDITIONS (docs/iteration-14-runbook.md sections 2a-3b; the smoke step fails within minutes if any is missing):
+#   * scripts/serve_and_run.sh, scripts/merge_epochs.sh, scripts/select_epoch.sh exist and are tested (runbook 3a);
+#   * data/bank/passk (the iteration-3 pass@4 bank), data/weights/it13/anchor3ep-final and
+#     data/weights/it13/grpo-anchor3ep-ckpt10 are staged under data/ on the Mac (they travel with `sync --with-data`);
+#   * data/decision/surfaces_val/tasks (new-surface val set: 20 val high_risk sources x 6 surfaces) is built and G1-data
+#     passed on the Mac; the `progress.total` of the surface steps = 2 x the number of variant dirs it holds;
+#   * data/select.jsonl variants validated on the Mac (G1-data); failures listed in data/select_quarantine.txt (may be empty).
 #
 # GPUs and ports. `gpus:` only schedules (overlapping sets never run together); the command must pin itself. The scripts
 # read SLOT (default 0: training GPU 0, vLLM GPU 1, port 8000), so an evaluation step that is meant to serve on GPU 0 must
 # say so: `env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1"}`; one on GPU 1 while another
-# server runs on GPU 0 needs its own port (`VLLM_PORT: "8001"`, matching BASE_URL). One vLLM server per step: the step
-# stops it (the scripts' `trap stop_vllm EXIT INT TERM`), and whatever a step leaves running is killed when the step ends.
-# A step's done marker must be written by its command (`&& touch MARKER`) unless the output itself is the marker.
+# server runs on GPU 0 needs its own port (`VLLM_PORT: "8001"`, matching BASE_URL). Training steps pin CUDA_VISIBLE_DEVICES.
+# One vLLM server per step: scripts/serve_and_run.sh starts it (start_vllm), waits (wait_vllm), runs the commands after
+# each `--` in order with MODEL=policy and BASE_URL set, and stops it (`trap stop_vllm EXIT INT TERM`); whatever a step
+# leaves running is killed when the step ends. A step's done marker must be written by its command (`&& touch MARKER`)
+# unless the output itself is the marker. CPU-only steps (merges, selection) have `gpus: []` and run alongside anything.
+# Steps on the same GPU with no data dependency are ordered by file position (the runner picks ready steps in file order).
 name: it14
 state_dir: outputs/chain/it14
 sequential: false          # dependencies below are explicit
 instance_id: null          # or pass --instance-id to `node watch`
 balance_floor: 8
 steps:
-  # 1. Smoke on both GPUs (one slot: GPU 0 trains, GPU 1 serves).
+  # 0. Smoke on both GPUs: the SFT-v2 build on the CPU (bank, data, tokenisation on the node), then 16 episodes of the
+  #    base on the NEW surface val set (server on GPU 0): harness, Docker, the new task dirs and their labels.
   - name: smoke
-    command: "scripts/smoke_test.sh --train <SMOKE_TASK_DIR> --config configs/qwen35_4b.yaml && mkdir -p outputs/chain/it14/markers && touch outputs/chain/it14/markers/smoke.done"
+    command: >-
+      DRY_RUN=1 scripts/run_sft.sh configs/sft_decision_v2_qwen35.yaml data.bank=data/bank/passk
+      && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it14_smoke --limit 8 --n-samples 2
+      --concurrency 16 --train-config configs/grpo_it13_2gpu.yaml
+      && mkdir -p outputs/chain/it14/markers && touch outputs/chain/it14/markers/smoke.done
     gpus: [0, 1]
     done: outputs/chain/it14/markers/smoke.done
     after: []
     timeout_min: 45
     on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
-  # 2a. GRPO checkpoint-10 tier F on GPU 0 (serve + evaluate), in parallel with 2b. Must be ONE repo script that starts the
-  # server (start_vllm), waits (wait_vllm), evaluates and stops it (trap stop_vllm EXIT INT TERM), not an ad-hoc `&` line.
+  # 1. Iteration-13 merges (CPU, ~5 min each): anchored-3ep = base + its final adapter; GRPO checkpoint 10 was trained
+  #    on that merged model, so it is merged on top of it. `sft.merge` rewrites only the LoRA-changed tensors (incident
+  #    guard of iteration 13); the 12-task sanity run in step 2 is the second half of that guard.
+  - name: merge_it13
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it13/anchor3ep-final --out outputs/it13/sft_anchor3ep_merged
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it13/sft_anchor3ep_merged --adapter data/weights/it13/grpo-anchor3ep-ckpt10
+      --out outputs/it14/grpo10_merged
+    gpus: []
+    done: outputs/it14/grpo10_merged/config.json
+    after: [smoke]
+    timeout_min: 40
+    on_failure: continue
+
+  # 2a. GRPO checkpoint-10 tier F on GPU 0 (design R6: the first node job), in parallel with 2b. Same arguments as the
+  #     iteration-13 tier F runs (val.jsonl, 4 samples, concurrency 48, caps from grpo_it13_2gpu.yaml); A0' and
+  #     anchored-3ep tier F are reused from the archive as references.
   - name: grpo10_tierF
-    command: "<CMD: serve GRPO checkpoint 10 on GPU 0 (EVAL=1 scripts/serve_vllm.sh ... --served-model-name policy) and run scripts/eval_heldout.sh tier F into runs/eval/it14_grpo10_tierF>"
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/grpo10_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it14_grpo10_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it14_grpo10_tierF --n-samples 4 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml
     gpus: [0]
     done: runs/eval/it14_grpo10_tierF/metrics.json
-    after: [smoke]
+    after: [merge_it13]
     timeout_min: 150
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
     progress: {pattern: '^\[(\d+)/712\]', total: 712}
 
-  # 2b. SFT-v2 seed 1 on GPU 1.
+  # 2b. SFT-v2 seed 1 on GPU 1 (configs/sft_decision_v2_qwen35.yaml: 3 epochs, an adapter per epoch, W&B it14-sft-v2).
+  #     Output outputs/sft/it14-sft-v2 (run_name of the config). ~2 h: ~840 fit examples at ~30 min per epoch.
   - name: sft_v2_s1
-    command: "scripts/run_sft.sh <SFT_V2_CONFIG> seed=1"
+    command: "scripts/run_sft.sh configs/sft_decision_v2_qwen35.yaml data.bank=data/bank/passk seed=1"
     gpus: [1]
-    done: "<SFT_V2_S1_OUTPUT_DIR>/final/adapter_config.json"
+    done: outputs/sft/it14-sft-v2/final/adapter_config.json
     after: [smoke]
+    timeout_min: 240
+    on_failure: stop
+    env: {CUDA_VISIBLE_DEVICES: "1"}
+
+  # 3. References on GPU 0 after 2a: base and anchored-3ep on the new-surface val set (2 samples) and on the six-surface
+  #    decision probe (8 samples per prompt); then the base on the select split (the `--base` of the epoch selection).
+  - name: base_surface_val
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it14_base_surface --n-samples 2
+      --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.decision_probe
+      --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it14_base
+      --base-url http://127.0.0.1:8000/v1 --model policy --n 8 --concurrency 32
+    gpus: [0]
+    done: runs/probe/it14_base/summary.json
+    after: [smoke]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/480\]', total: 480}
+  - name: anchored3ep_surface_val
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it13/sft_anchor3ep_merged
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it14_anchored_surface --n-samples 2
+      --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.decision_probe
+      --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it14_anchored3ep
+      --base-url http://127.0.0.1:8000/v1 --model policy --n 8 --concurrency 32
+    gpus: [0]
+    done: runs/probe/it14_anchored3ep/summary.json
+    after: [merge_it13]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/480\]', total: 480}
+  - name: base_select
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it14_base_select --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+    gpus: [0]
+    done: runs/eval/it14_base_select/metrics.json
+    after: [smoke]
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/424\]', total: 424}
+
+  # 4. SFT-v2 epoch ladder: merge the three epoch adapters (CPU), evaluate each on the select split (2 samples; epoch 1 on
+  #    GPU 0, epochs 2-3 on GPU 1), then `select_checkpoint --require-split select` against the base; if no epoch passes
+  #    its capability gate the pre-registered fallback is epoch 3 (iteration 13's recipe). scripts/select_epoch.sh writes
+  #    outputs/it14/selected_epoch.txt and the symlink outputs/it14/sft_v2_selected_merged.
+  - name: sft_v2_merge
+    command: "scripts/merge_epochs.sh outputs/sft/it14-sft-v2 outputs/it14/sft_v2 Qwen/Qwen3.5-4B"
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    after: [sft_v2_s1]
+    timeout_min: 45
+    on_failure: stop
+  - name: sft_v2_select_e1
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e1_merged
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it14_sft_v2_select_e1 --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+    gpus: [0]
+    done: runs/eval/it14_sft_v2_select_e1/metrics.json
+    after: [sft_v2_merge]
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/424\]', total: 424}
+  - name: sft_v2_select_e2
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e2_merged
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it14_sft_v2_select_e2 --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+    gpus: [1]
+    done: runs/eval/it14_sft_v2_select_e2/metrics.json
+    after: [sft_v2_merge]
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/424\]', total: 424}
+  - name: sft_v2_select_e3
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e3_merged
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it14_sft_v2_select_e3 --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+    gpus: [1]
+    done: runs/eval/it14_sft_v2_select_e3/metrics.json
+    after: [sft_v2_merge]
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/424\]', total: 424}
+  - name: sft_v2_selection
+    command: >-
+      scripts/select_epoch.sh runs/eval/it14_base_select outputs/it14 3
+      runs/eval/it14_sft_v2_select_e1 runs/eval/it14_sft_v2_select_e2 runs/eval/it14_sft_v2_select_e3
+    gpus: []
+    done: outputs/it14/selected_epoch.txt
+    after: [base_select, sft_v2_select_e1, sft_v2_select_e2, sft_v2_select_e3]
+    timeout_min: 10
+    on_failure: stop
+
+  # 5. G2 readout of the selected epoch on GPU 1: tier S (probe_v1 x 2, as iteration 13), the new-surface val set
+  #    (recorded for G4 / H2, not used for G2) and the six-surface decision probe. G2 is read by the owner from
+  #    runs/eval/it14_sft_v2_tierS/metrics.json and runs/probe/it14_sft_v2/summary.json (plan section 4).
+  - name: sft_v2_tierS_surface
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_selected_merged
+      -- scripts/eval_heldout.sh data/probe_v1.jsonl runs/eval/it14_sft_v2_tierS --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it14_sft_v2_surface --n-samples 2
+      --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.decision_probe
+      --prompts data/decision/probe_prompts_surfaces.jsonl --out runs/probe/it14_sft_v2
+      --base-url http://127.0.0.1:8001/v1 --model policy --n 8 --concurrency 32
+    gpus: [1]
+    done: runs/probe/it14_sft_v2/summary.json
+    after: [sft_v2_selection]
     timeout_min: 180
     on_failure: stop
-
-  # 3. Base and anchored-3ep on the new-surface validation set (GPU 0, after 2a frees it).
-  - name: base_surface_val
-    command: "<CMD: serve base on GPU 0 and evaluate the new-surface validation set into runs/eval/it14_base_surface>"
-    gpus: [0]
-    done: runs/eval/it14_base_surface/metrics.json
-    after: [grpo10_tierF]
-    timeout_min: 120
-    on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
-  - name: anchored3ep_surface_val
-    command: "<CMD: serve anchored-3ep on GPU 0 and evaluate the new-surface validation set into runs/eval/it14_anchored_surface>"
-    gpus: [0]
-    done: runs/eval/it14_anchored_surface/metrics.json
-    after: [base_surface_val]
-    timeout_min: 120
-    on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
-
-  # 3. SFT-v2 select-split epoch choice, then tier S + surface set for G2 (GPU 1, port 8001: GPU 0 serves on 8000 meanwhile).
-  - name: sft_v2_select
-    command: "<CMD: evaluate SFT-v2 epochs on the select split into runs/eval/it14_sft_v2_select>"
-    gpus: [1]
-    done: runs/eval/it14_sft_v2_select/metrics.json
-    after: [sft_v2_s1]
-    timeout_min: 120
-    on_failure: stop
     env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
-  - name: sft_v2_tierS_surface
-    command: "<CMD: tier S + surface set for the selected SFT-v2 epoch into runs/eval/it14_sft_v2_tierS>"
-    gpus: [1]
-    done: runs/eval/it14_sft_v2_tierS/metrics.json
-    after: [sft_v2_select]
-    timeout_min: 150
-    on_failure: stop
-    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/480\]', total: 480}
 
 final:
-  # Archive to the node's staging area; the Mac watcher pulls /root/staging and the entries below, then stops the instance.
+  # Archive to the node's staging area (logs and results, no weights); the Mac watcher pulls /root/staging and the
+  # `archives` entries below (those include the SFT-v2 adapters: final + the selected epoch), then stops the instance.
+  # Probe directories hold samples.jsonl / summary.json, which `--eval` does not copy (iteration 13 lost them): `--file`.
   command: >-
     env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.archive --iteration 14 --name it14-session
     --source /root/restraint --dest /root/staging --no-weights
-    --eval runs/eval/it14_grpo10_tierF --eval runs/eval/it14_base_surface --eval runs/eval/it14_anchored_surface
-    --eval runs/eval/it14_sft_v2_select --eval runs/eval/it14_sft_v2_tierS
-    --run <SFT_V2_S1_OUTPUT_DIR> --log /root/chain-it14.log
+    --eval runs/eval/it14_smoke --eval runs/eval/it14_grpo10_sanity --eval runs/eval/it14_grpo10_tierF
+    --eval runs/eval/it14_base_surface --eval runs/eval/it14_anchored_surface --eval runs/eval/it14_base_select
+    --eval runs/eval/it14_sft_v2_select_e1 --eval runs/eval/it14_sft_v2_select_e2 --eval runs/eval/it14_sft_v2_select_e3
+    --eval runs/eval/it14_sft_v2_tierS --eval runs/eval/it14_sft_v2_surface
+    --file runs/probe/it14_base/summary.json --file runs/probe/it14_base/samples.jsonl --file runs/probe/it14_base/config.json
+    --file runs/probe/it14_anchored3ep/summary.json --file runs/probe/it14_anchored3ep/samples.jsonl --file runs/probe/it14_anchored3ep/config.json
+    --file runs/probe/it14_sft_v2/summary.json --file runs/probe/it14_sft_v2/samples.jsonl --file runs/probe/it14_sft_v2/config.json
+    --file outputs/it14/selection.json --file outputs/it14/selected_epoch.txt
+    --run outputs/sft/it14-sft-v2 --log /root/chain-it14.log
   timeout_min: 30
 
 watch:
@@ -100,7 +238,14 @@ watch:
   archives:
     - iteration: 14
       name: it14-session
-      eval: [runs/eval/it14_grpo10_tierF, runs/eval/it14_base_surface, runs/eval/it14_anchored_surface, runs/eval/it14_sft_v2_select, runs/eval/it14_sft_v2_tierS]
-      run: ["<SFT_V2_S1_OUTPUT_DIR>"]
+      eval: [runs/eval/it14_smoke, runs/eval/it14_grpo10_sanity, runs/eval/it14_grpo10_tierF,
+             runs/eval/it14_base_surface, runs/eval/it14_anchored_surface, runs/eval/it14_base_select,
+             runs/eval/it14_sft_v2_select_e1, runs/eval/it14_sft_v2_select_e2, runs/eval/it14_sft_v2_select_e3,
+             runs/eval/it14_sft_v2_tierS, runs/eval/it14_sft_v2_surface]
+      file: [runs/probe/it14_base/summary.json, runs/probe/it14_base/samples.jsonl, runs/probe/it14_base/config.json,
+             runs/probe/it14_anchored3ep/summary.json, runs/probe/it14_anchored3ep/samples.jsonl, runs/probe/it14_anchored3ep/config.json,
+             runs/probe/it14_sft_v2/summary.json, runs/probe/it14_sft_v2/samples.jsonl, runs/probe/it14_sft_v2/config.json,
+             outputs/it14/selection.json, outputs/it14/selected_epoch.txt]
+      run: [outputs/sft/it14-sft-v2]
       log: [/root/chain-it14.log]
       note: "Iteration 14 session, segment A (through G2)."
