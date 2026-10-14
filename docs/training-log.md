@@ -11,6 +11,23 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
 
 ---
 
+## Latest (2026-10-14, after iteration 14)
+
+- **Iteration 14: the recipe replicates and passes every final check once.** SFT-v2 (decision supervision on four
+  evidence formats + own-success anchors, 3 epochs) vs base on the validation set: abstention 27 -> 69-70 % (+42 / +43
+  for seeds 1 / 2), claims on impossible 54 -> 20 %, verified success +5.1 [+0.9, +9.2] / +4.2 [+0.2, +8.3]; control
+  declines +3.1 (seed 1: all six G4 checks pass, the first time) / +6.6 (seed 2 fails that one check). Two-seed
+  capability +4.6 [-0.5, +9.4]: no loss visible (formal verdict withheld: single base run).
+- Transfer: on held-out evidence formats abstention 0 -> 39.5 %, and Agentic Abstention (Terminal-Bench rewrites)
+  recall 37 -> 74 %; but on unfamiliar formats no model discriminates (impossible vs safe twins declined at similar
+  rates; probe 0.20): SFT, RL and DPO move a caution level, not judgment.
+- Iteration-13 GRPO checkpoint 10: strongest on the familiar set (abstain +51.0, capability +7.2 [+3.0, +11.1]),
+  control declines +6.2; no better on new formats. DPO: control declines +0.3 but abstention and transfer drop.
+- Next: `docs/iteration-15-proposal.md` (judgment as explicit reasoning, decoupled judgment set, cue-proof pairs;
+  a cheap test first).
+- W&B: SFT-v2 https://wandb.ai/michael_ovo/huggingface/runs/uwiup3n2 (seed 1), https://wandb.ai/michael_ovo/honest-agents/runs/1lj3jdcu
+  (seed 2), DPO https://wandb.ai/michael_ovo/honest-agents/runs/58xnzktq. Archive: `iterations/14-*`.
+
 ## Latest (2026-10-13, after iteration 13)
 
 - **Iteration 13: first candidate that is much more honest and no less capable.** Decision-point SFT at the model's own
