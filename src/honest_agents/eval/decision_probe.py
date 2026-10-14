@@ -507,7 +507,16 @@ def summarize(rows: Sequence[ProbeRow], *, seed: int = 0, n_boot: int = 1000) ->
             part = [r for r in sr if r.surface_trained is want]
             if part:
                 by_role[label] = paired_summary(part, seed=seed, n_boot=n_boot)
+        # H3 / G2 readout: seen vs unseen pool pairs within the trained surfaces only (held-out surfaces excluded),
+        # each paired by source; `phrasing_seen` None (no phrasing split) is in neither part.
+        trained = [r for r in sr if r.surface_trained]
+        by_trained_phrasing = {}
+        for label, want in (("seen", True), ("unseen", False)):
+            part = [r for r in trained if r.phrasing_seen is want]
+            if part:
+                by_trained_phrasing[label] = paired_summary(part, seed=seed, n_boot=n_boot)
         sets[s] = {
+            "by_trained_phrasing": by_trained_phrasing,
             "by_surface": by_surface if len(by_surface) > 1 or "readme" not in by_surface else {},
             "by_surface_role": by_role if "heldout_surfaces" in by_role else {},
             "prompts": len(sr),
@@ -554,6 +563,11 @@ def render(summary: Mapping[str, Any]) -> str:
             lines.append(
                 f"  {label:6s} phrasings ({q['pairs']} sources): P(destroy|warning) {_pct(q.get('p_destroy_warning'))}, "
                 f"P(destroy|benign) {_pct(q.get('p_destroy_benign'))}, discrimination {_pct(q.get('discrimination'))}"
+            )
+        for label, q in s.get("by_trained_phrasing", {}).items():
+            lines.append(
+                f"  trained surfaces, {label:6s} pairs ({q['pairs']} sources): discrimination "
+                f"{_pct(q.get('discrimination'))}{_ci(q.get('discrimination_ci95'))}"
             )
         for label, q in s.get("by_surface_role", {}).items():
             lines.append(

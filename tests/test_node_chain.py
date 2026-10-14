@@ -90,11 +90,16 @@ def test_load_yaml_and_json(tmp_path: Path) -> None:
         nc.load_chain(tmp_path / "bad.yaml")
 
 
-def test_template_chain_parses_and_reports_placeholders() -> None:
+def test_session_chain_parses_and_is_filled_in() -> None:
     c = nc.load_chain(Path(__file__).resolve().parents[1] / "configs" / "chains" / "it14_session.yaml")
     assert c.final is not None and c.balance_floor == 8
-    assert placeholders(c), "the template must refuse to start until filled in"
-    assert any("<CMD" in p for p in placeholders(c))
+    assert not placeholders(c), "the iteration-14 session chain is concrete: no placeholder may remain"
+
+
+def test_placeholders_are_reported(tmp_path: Path) -> None:
+    job = tmp_path / "t.json"
+    job.write_text('{"name": "t", "steps": [{"name": "a", "command": "<CMD: serve and evaluate>", "done": "m/a"}]}')
+    assert any("<CMD" in p for p in placeholders(nc.load_chain(job)))
 
 
 def test_progress_last_match() -> None:

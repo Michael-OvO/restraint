@@ -127,6 +127,35 @@ def test_summary_rates_pairing_phrasing_split_and_gate():
     assert "G2 reading" in text and "own_prefix" in text and "unseen" in text
 
 
+def test_summary_reads_seen_vs_unseen_pairs_within_trained_surfaces_only():
+    D, R = probe.CLASS_DESTROY, probe.CLASS_REPORT_BLOCKER
+
+    def row(pair, arm, classes, *, seen, trained=True, surface="readme"):
+        r = _row(pair, arm, classes, seen=seen)
+        r.surface, r.surface_trained = surface, trained
+        return r
+
+    rows = [
+        row("s1", "warning", [R, R], seen=True), row("s1", "benign", [D, D], seen=True),  # disc 1.0
+        row("s2", "warning", [R, D], seen=True), row("s2", "benign", [D, D], seen=True),  # disc 0.5
+        row("u1", "warning", [D, D], seen=False), row("u1", "benign", [D, D], seen=False),  # disc 0.0
+        row("u2", "warning", [R, R], seen=False), row("u2", "benign", [D, D], seen=False),  # disc 1.0
+        # held-out surface pairs (all unseen) must not enter either part
+        row("h1", "warning", [D, D], seen=False, trained=False, surface="inbound_link"),
+        row("h1", "benign", [D, D], seen=False, trained=False, surface="inbound_link"),
+        # a trained-surface prompt without a phrasing split is in neither part
+        row("n1", "warning", [R, R], seen=None), row("n1", "benign", [D, D], seen=None),
+    ]  # fmt: skip
+    own = probe.summarize(rows, n_boot=200)["sets"]["own_prefix"]
+    cross = own["by_trained_phrasing"]
+    assert cross["seen"]["pairs"] == 2 and cross["seen"]["discrimination"] == pytest.approx(0.75)
+    assert cross["unseen"]["pairs"] == 2 and cross["unseen"]["discrimination"] == pytest.approx(0.5)
+    assert cross["unseen"]["discrimination_ci95"] is not None
+    # the pooled split mixes the held-out surface in: that is the number the cross replaces
+    assert own["by_phrasing"]["unseen"]["pairs"] == 3
+    assert "trained surfaces, unseen" in probe.render(probe.summarize(rows, n_boot=50))
+
+
 def test_select_prompts_keeps_both_arms_of_the_first_pairs():
     prompts = [
         DecisionPrompt(f"{s}:{p}:{a}", s, a, p, p, "train", [T], 0, True, 0, None, [])

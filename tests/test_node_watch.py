@@ -313,9 +313,13 @@ def test_watch_dry_run_prints_pulls_and_stop(capsys: pytest.CaptureFixture[str],
     assert "rsync" in out and "vastai stop instance 5 --raw" in out and "destroy" not in out
 
 
-def test_chain_command_refuses_placeholders_and_passes_no_secret_in_argv(capsys: pytest.CaptureFixture[str]) -> None:
+def test_chain_command_refuses_placeholders_and_passes_no_secret_in_argv(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    unfilled = tmp_path / "unfilled.json"
+    unfilled.write_text(json.dumps({"name": "t", "steps": [{"name": "a", "command": "<CMD: x>", "done": "m/a"}]}))
+    assert nodemod.main(["chain", "--host", "h", "--no-secrets", str(unfilled)]) == 2
     template = nodemod.REPO / "configs" / "chains" / "it14_session.yaml"
-    assert nodemod.main(["chain", "--host", "h", "--no-secrets", str(template)]) == 2
     assert nodemod.main(["chain", "--host", "h", "--no-secrets", "--dry-run", str(template)]) == 0
     out = capsys.readouterr().out
     assert "honest_agents.node_chain run configs/chains/it14_session.yaml" in out and "secrets over stdin: none" in out
