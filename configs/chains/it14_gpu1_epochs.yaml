@@ -1,0 +1,54 @@
+name: it14gpu1
+state_dir: outputs/chain/it14gpu1
+sequential: false
+instance_id: null
+balance_floor: 8
+final:
+  command: 'true'
+  timeout_min: 5
+steps:
+- name: sft_v2_merge
+  command: scripts/merge_epochs.sh outputs/sft/it14-sft-v2 outputs/it14/sft_v2 Qwen/Qwen3.5-4B
+  gpus: []
+  done: outputs/it14/sft_v2_e3_merged/config.json
+  after: []
+  timeout_min: 45
+  on_failure: stop
+- name: sft_v2_select_e2
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e2_merged -- scripts/eval_heldout.sh
+    data/select.jsonl runs/eval/it14_sft_v2_select_e2 --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml
+    --exclude-quarantined data/select_quarantine.txt
+  gpus:
+  - 1
+  done: runs/eval/it14_sft_v2_select_e2/metrics.json
+  after:
+  - sft_v2_merge
+  timeout_min: 90
+  on_failure: stop
+  env:
+    VLLM_GPUS: '1'
+    VLLM_PORT: '8001'
+    BASE_URL: http://localhost:8001/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/424\]
+    total: 424
+- name: sft_v2_select_e3
+  command: scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e3_merged -- scripts/eval_heldout.sh
+    data/select.jsonl runs/eval/it14_sft_v2_select_e3 --n-samples 2 --concurrency 48 --train-config configs/grpo_it13_2gpu.yaml
+    --exclude-quarantined data/select_quarantine.txt
+  gpus:
+  - 1
+  done: runs/eval/it14_sft_v2_select_e3/metrics.json
+  after:
+  - sft_v2_merge
+  timeout_min: 90
+  on_failure: stop
+  env:
+    VLLM_GPUS: '1'
+    VLLM_PORT: '8001'
+    BASE_URL: http://localhost:8001/v1
+    MODEL: policy
+  progress:
+    pattern: ^\[(\d+)/424\]
+    total: 424
