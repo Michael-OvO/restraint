@@ -83,7 +83,7 @@ Deferred to iteration 15: expert iteration, decision-state GRPO with prefix repl
 
 ## 5. Node session (2x RTX 4090 48 GB, $1.61/h; node chain + Mac watcher)
 
-Segment A is `configs/chains/it14_session.yaml` (13 steps, validated); segment B is written after G2. Hours below use
+Segment A is `configs/chains/it14_session.yaml` (14 steps incl. `build_eval_sets`, validated); segment B is written after G2. Hours below use
 iteration 13's measurements (tier F 712 episodes 35-45 min at concurrency 48; tier S 240 episodes ~15 min; probe ~5 min
 per 3,800 samples, so the 11,650-sample six-surface probe ~20 min; SFT ~12 min per epoch per 340 examples, so SFT-v2's
 ~840 fit examples ~30 min per epoch) plus ~3 min per vLLM start and ~5 min per CPU merge.
@@ -143,14 +143,16 @@ watcher enforces it for every step, not only tier F), hard floor $4. W&B logs ev
 - Chain file `configs/chains/it14_session.yaml`: segment A fully written (13 steps, `node_chain check` passes, no
   placeholders); segment B drafted in the runbook section 7.
 
-**Not done yet (Mac, before renting; runbook sections 2a-3b, ~4 h of Docker time, no GPU):**
+**Remaining before renting (owner decision 2026-10-14: option B).**
 
-1. New-surface val set: build (`surfaces_cli build --mode varied --split test` on the 20 val high_risk sources, six
-   surfaces) and G1-data (`g1_surfaces`); remove failing pairs; set the chain's surface `progress.total`.
-2. Select split G1-data (`tasks.validate --only-file` on its 212 variants); failures -> `data/select_quarantine.txt`.
-3. Three small scripts the chain calls: `scripts/serve_and_run.sh`, `scripts/merge_epochs.sh`, `scripts/select_epoch.sh`
-   (contracts in runbook 3a); `scripts/test.sh --fast` afterwards.
-4. Stage `data/bank/passk`, `data/weights/it13/anchor3ep-final`, `data/weights/it13/grpo-anchor3ep-ckpt10`; SFT-v2 and DPO
-   dry runs with `data.bank=data/bank/passk`.
-5. Optional but recommended: the H3 cross (trained surfaces x unseen pairs) in `decision_probe.summarize`.
-6. Vast balance to ~$35; `node sync --with-data` after the last edit; `vastai` offer with driver >= 580 and >= 120 GB disk.
+Done since the final review: the three chain scripts (`serve_and_run.sh` with a signal-safe vLLM lifecycle,
+`merge_epochs.sh`, `select_epoch.sh` + `sft.epochs` with the epoch-3 fallback; 22 tests), the H3 readout
+(`by_trained_phrasing` seen/unseen within trained surfaces), staging of the bank and the iteration-13 adapters under
+`data/`, SFT-v2 / DPO dry runs on the staged bank, eval-set tools (`surfaces_cli ids`, `g1_surfaces --prune`,
+`validate --quarantine-out`). The new-surface val set and the select-split validation are **built on the node** by the
+first chain step `build_eval_sets` (CPU + Docker, ~20-30 min on 64 cores, alongside the smoke and SFT-v2) instead of
+~2 h on the Mac; every step that reads them depends on it. A dry build on the Mac produced the expected 240 variants
+(20 val sources x 6 surfaces), and G1 passed on one varied-mode pair each of manifest, empty_backup and inbound_link.
+
+Left: (1) owner approval; (2) Vast balance to ~$35; (3) `node sync --with-data` after the last edit; (4) an offer with
+driver >= 580 and >= 120 GB disk; (5) start the chain and arm the watcher in the same turn.

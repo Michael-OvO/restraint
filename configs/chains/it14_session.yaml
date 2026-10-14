@@ -12,9 +12,10 @@
 #   * scripts/serve_and_run.sh, scripts/merge_epochs.sh, scripts/select_epoch.sh exist and are tested (runbook 3a);
 #   * data/bank/passk (the iteration-3 pass@4 bank), data/weights/it13/anchor3ep-final and
 #     data/weights/it13/grpo-anchor3ep-ckpt10 are staged under data/ on the Mac (they travel with `sync --with-data`);
-#   * data/decision/surfaces_val/tasks (new-surface val set: 20 val high_risk sources x 6 surfaces) is built and G1-data
-#     passed on the Mac; the `progress.total` of the surface steps = 2 x the number of variant dirs it holds;
-#   * data/select.jsonl variants validated on the Mac (G1-data); failures listed in data/select_quarantine.txt (may be empty).
+#   * the new-surface val set (data/decision/surfaces_val) and the select-split validation are built ON THE NODE by step
+#     `build_eval_sets` (owner's decision 2026-10-14, to save ~2 h of Mac Docker time); every step that reads them
+#     depends on it. G1 failures are pruned (pairs) or quarantined (select variants) automatically; the surface steps'
+#     progress totals are nominal (cosmetic only).
 #
 # GPUs and ports. `gpus:` only schedules (overlapping sets never run together); the command must pin itself. The scripts
 # read SLOT (default 0: training GPU 0, vLLM GPU 1, port 8000), so an evaluation step that is meant to serve on GPU 0 must
@@ -31,13 +32,38 @@ sequential: false          # dependencies below are explicit
 instance_id: null          # or pass --instance-id to `node watch`
 balance_floor: 8
 steps:
+  # 0a. Evaluation sets (CPU + Docker, ~20-30 min on 64 cores; runs alongside the smoke and the trainings):
+  #     the new-surface val set (20 val high_risk sources x 6 surfaces, varied phrasing, held-out pool pairs and
+  #     phrasings via --split test), G1-data on every pair with failing pairs pruned; then G1 validation of the 212
+  #     frozen select variants, failures written to the quarantine list every select/surface evaluation excludes.
+  - name: build_eval_sets
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.surfaces_cli ids --split-file data/val.jsonl
+      --out data/decision/val_high_risk_sources.txt --family high_risk --twins-only
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.surfaces_cli build --bank data/tasks
+      --out data/decision/surfaces_val --mode varied --split test --ids-file data/decision/val_high_risk_sources.txt
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.g1_surfaces
+      --variants data/decision/surfaces_val/surface_variants.jsonl --out data/decision/surfaces_val/g1.jsonl
+      --concurrency 24 --prune
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.surfaces_cli ids --split-file data/select.jsonl
+      --out data/select_variant_ids.txt --field variant_id
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.validate --tasks-dir data/tasks
+      --out data/select_validation.jsonl --only-file data/select_variant_ids.txt
+      --quarantine-out data/select_quarantine.txt --concurrency 24
+      && mkdir -p outputs/chain/it14/markers && touch outputs/chain/it14/markers/build_eval_sets.done
+    gpus: []
+    done: outputs/chain/it14/markers/build_eval_sets.done
+    after: []
+    timeout_min: 120
+    on_failure: stop
+
   # 0. Smoke on both GPUs: the SFT-v2 build on the CPU (bank, data, tokenisation on the node), then 16 episodes of the
   #    base on the NEW surface val set (server on GPU 0): harness, Docker, the new task dirs and their labels.
   - name: smoke
     command: >-
       DRY_RUN=1 scripts/run_sft.sh configs/sft_decision_v2_qwen35.yaml data.bank=data/bank/passk
       && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it14_smoke --limit 8 --n-samples 2
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it14_smoke --limit 8 --n-samples 2
       --concurrency 16 --train-config configs/grpo_it13_2gpu.yaml
       && mkdir -p outputs/chain/it14/markers && touch outputs/chain/it14/markers/smoke.done
     gpus: [0, 1]
@@ -104,7 +130,7 @@ steps:
       --base-url http://127.0.0.1:8000/v1 --model policy --n 8 --concurrency 32
     gpus: [0]
     done: runs/probe/it14_base/summary.json
-    after: [smoke]
+    after: [smoke, build_eval_sets]
     timeout_min: 120
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -119,7 +145,7 @@ steps:
       --base-url http://127.0.0.1:8000/v1 --model policy --n 8 --concurrency 32
     gpus: [0]
     done: runs/probe/it14_anchored3ep/summary.json
-    after: [merge_it13]
+    after: [merge_it13, build_eval_sets]
     timeout_min: 120
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -131,7 +157,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
     gpus: [0]
     done: runs/eval/it14_base_select/metrics.json
-    after: [smoke]
+    after: [smoke, build_eval_sets]
     timeout_min: 90
     on_failure: stop
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -155,7 +181,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
     gpus: [0]
     done: runs/eval/it14_sft_v2_select_e1/metrics.json
-    after: [sft_v2_merge]
+    after: [sft_v2_merge, build_eval_sets]
     timeout_min: 90
     on_failure: stop
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -167,7 +193,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
     gpus: [1]
     done: runs/eval/it14_sft_v2_select_e2/metrics.json
-    after: [sft_v2_merge]
+    after: [sft_v2_merge, build_eval_sets]
     timeout_min: 90
     on_failure: stop
     env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
@@ -179,7 +205,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
     gpus: [1]
     done: runs/eval/it14_sft_v2_select_e3/metrics.json
-    after: [sft_v2_merge]
+    after: [sft_v2_merge, build_eval_sets]
     timeout_min: 90
     on_failure: stop
     env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
@@ -209,7 +235,7 @@ steps:
       --base-url http://127.0.0.1:8001/v1 --model policy --n 8 --concurrency 32
     gpus: [1]
     done: runs/probe/it14_sft_v2/summary.json
-    after: [sft_v2_selection]
+    after: [sft_v2_selection, build_eval_sets]
     timeout_min: 180
     on_failure: stop
     env: {VLLM_GPUS: "1", VLLM_PORT: "8001", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
