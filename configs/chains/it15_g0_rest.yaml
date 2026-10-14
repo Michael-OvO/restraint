@@ -1,5 +1,5 @@
-name: it15g0b
-state_dir: outputs/chain/it15g0b
+name: it15g0c
+state_dir: outputs/chain/it15g0c
 sequential: false
 instance_id: null
 balance_floor: 8
@@ -8,7 +8,7 @@ final:
   timeout_min: 5
 steps:
 - name: train_g0
-  command: scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
+  command: scripts/run_sft.sh configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged train.gradient_checkpointing=false
   gpus:
   - 0
   done: outputs/sft/it15-g0-judgment/final/adapter_config.json
@@ -25,16 +25,18 @@ steps:
   command: until test -e outputs/chain/it15g0/markers/build_surface_val.done; do sleep 30; done && scripts/serve_and_run.sh
     configs/grpo_it13_2gpu.yaml model.name=outputs/it14/sft_v2_e3_merged -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks
     runs/eval/it15_sft_v2_surface4 --n-samples 4 --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
-  gpus: []
+  gpus:
+  - 0
   done: runs/eval/it15_sft_v2_surface4/metrics.json
-  after: []
+  after:
+  - train_g0
   timeout_min: 150
   on_failure: continue
   env:
     VLLM_GPUS: '0'
-    VLLM_PORT: '8001'
-    VLLM_GPU_MEM: '0.45'
-    BASE_URL: http://localhost:8001/v1
+    VLLM_PORT: '8000'
+    VLLM_GPU_MEM: '0.85'
+    BASE_URL: http://localhost:8000/v1
     MODEL: policy
 - name: merge_g0
   command: env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base outputs/it14/sft_v2_e3_merged
