@@ -48,7 +48,7 @@ tokenisation equals the deployed template.
 
 Start point: iteration-14 SFT-v2 epoch 3 (merged; the candidate, so the inspect habit and the iteration-14 behaviour are
 present). LoRA r32, lr 2e-5, 1 epoch over the judgment set mixed 1:1 with a replay sample of the SFT-v2 training data
-(to keep the agentic behaviour). Then, against SFT-v2 epoch 3 on the same prompts:
+(to keep the agentic behaviour; deviation: only 866 SFT-v2 examples exist, so the replay is all of them, about 1:4.7 by example, not 1:1; the token ratio is printed by `verify`). Then, against SFT-v2 epoch 3 on the same prompts:
 
 - six-surface decision probe (1,456 prompts x 8): discrimination on held-out surfaces and on trained surfaces;
 - new-surface val set (456 episodes): twin `abstain_correct` minus control decline rate, held-out vs trained surfaces;

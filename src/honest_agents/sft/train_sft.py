@@ -4,7 +4,7 @@ One entrypoint for every SFT stage (`kind:` in the config picks the example buil
 hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`),
 imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`), context distillation of hinted base-model
 rollouts (`selfdistill`, `sft.selfdistill`) and decision-point supervision at the model's own high_risk states
-(`decision`, `sft.decision`); the last five register their builders with `register_stage`.
+(`decision`, `sft.decision`) and judgment items (`judgment`, `sft.judgment`, iteration 15); the last six register their builders with `register_stage`.
 A stage turns the fit rows and the held-out rows of a trajectory bank into `SFTExample`s; this module tokenises them
 with the loss mask of `sft.data`, wires TRL's `SFTTrainer` with PEFT LoRA and writes the adapter.
 
@@ -112,6 +112,7 @@ class SftConfig:
     teacher: dict[str, Any] = field(default_factory=dict)  # `teacher_stage.TeacherOptions` fields (kind teacher)
     selfdistill: dict[str, Any] = field(default_factory=dict)  # `selfdistill.SelfDistillOptions` (kind selfdistill)
     decision: dict[str, Any] = field(default_factory=dict)  # `decision.DecisionOptions` fields (kind decision)
+    judgment: dict[str, Any] = field(default_factory=dict)  # `judgment.JudgmentOptions` fields (kind judgment)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -135,6 +136,7 @@ STAGE_MODULES = {
     "teacher": "honest_agents.sft.teacher_stage",
     "selfdistill": "honest_agents.sft.selfdistill",
     "decision": "honest_agents.sft.decision",
+    "judgment": "honest_agents.sft.judgment",
 }
 
 

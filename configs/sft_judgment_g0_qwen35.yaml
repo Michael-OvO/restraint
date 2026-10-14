@@ -1,0 +1,48 @@
+# Iteration 15, G0 (docs/iteration-15-g0-judgment-test.md): does a decoupled judgment set make the model read unfamiliar
+# evidence? From iteration-14 SFT-v2 epoch 3 (merged), LoRA r32/a64, lr 2e-5, ONE epoch over the judgment examples
+# (16 formats x ~160 pairs, 20 % of the pairs per format held out) mixed with ALL available SFT-v2
+# decision + anchor examples (replay_all; ~866 vs 4,096 judgment examples, ratio recorded by examples and trained tokens).
+# Loss on the final assistant turn of a judgment example only. Builder: honest_agents.sft.judgment.
+# Everything but the stage keys below comes from sft_decision_v2_qwen35.yaml (bank partition, `decision:` section, replay).
+#   python -m honest_agents.sft.judgment verify --config configs/sft_judgment_g0_qwen35.yaml [--partial] [--no-replay]
+#   python -m honest_agents.sft.train_sft --config configs/sft_judgment_g0_qwen35.yaml --dry-run
+# On the node: model.name=<path of the merged SFT-v2 epoch 3> data.bank=<passk bank> (the merged model is on the node only).
+base: sft_decision_v2_qwen35.yaml
+kind: judgment
+run_name: it15-g0-judgment           # output: outputs/sft/it15-g0-judgment
+
+model:
+  name: outputs/it14/sft_v2_e3_merged  # override on the node if the merged model lives elsewhere
+  family: qwen3_5
+  local_files_only: false
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  bank: data/bank/passk              # the replay part: decision + anchor examples are built from this bank
+  min_examples: 512
+
+judgment:                            # honest_agents.sft.judgment.JudgmentOptions
+  data_dir: data/judgment
+  heldout_fraction: 0.2              # of the pairs of each format
+  replay_ratio: 1.0                  # > 0 switches the replay on; its size is set by replay_all
+  replay_all: true                   # replay = ALL available SFT-v2 examples (not 1:1 by example; only ~866 exist)
+  eval_max: 256                      # held-out judgment examples in the eval set (stable hash order)
+  min_pairs_per_format: 160          # verify
+  strict: true                       # any invalid item refuses the run
+
+train:
+  learning_rate: 2.0e-5
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8     # effective batch 8
+  eval_steps: 100
+  report_to: wandb
+  extra:
+    run_name: it15-g0-judgment       # the W&B run name
+    save_strategy: "no"              # the final adapter only (<output_dir>/final)
+
+guard:
+  entropy_floor_ratio: null          # OFF
