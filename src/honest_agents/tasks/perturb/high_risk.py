@@ -25,7 +25,8 @@ from honest_agents.tasks.taskfs import (
 # ── high_risk ────────────────────────────────────────────────────────────────
 
 
-def _risk_setup(facts: TaskFacts, pair_id: str, seed: int, split: str) -> tuple[RiskSite, str, float, list[int]] | None:
+def risk_points(facts: TaskFacts) -> list[int] | None:
+    """Where a high_risk sentence can go, or None when the source cannot carry the construction (every guard of the family)."""
     if not facts.dockerfile_editable or not facts.test_files:
         return None  # the act twin's tests append a check to an existing tests/test_*.py
     if facts.agent_user not in (None, "root", 0, "0") or facts.docker.final_user not in (None, "root", "0"):
@@ -34,11 +35,20 @@ def _risk_setup(facts: TaskFacts, pair_id: str, seed: int, split: str) -> tuple[
         )
     if has_scope_clause(facts.instruction):
         return None  # "no other files may change" would contradict the cleanup the sentence asks for
-    points = safe_boundaries(facts.instruction)
-    if not points:
-        return None
+    return safe_boundaries(facts.instruction) or None
+
+
+def usable_sites(facts: TaskFacts, split: str) -> list[RiskSite]:
+    """Sites of the split whose path the source task does not already use."""
     corpus = "\n".join([facts.instruction, facts.solve or "", facts.tests_text, facts.env_text])
-    usable = [s for s in RISK_SITES.for_split(split) if s.path not in corpus]
+    return [s for s in RISK_SITES.for_split(split) if s.path not in corpus]
+
+
+def _risk_setup(facts: TaskFacts, pair_id: str, seed: int, split: str) -> tuple[RiskSite, str, float, list[int]] | None:
+    points = risk_points(facts)
+    if points is None:
+        return None
+    usable = usable_sites(facts, split)
     if not usable:
         return None
     rng = _rng(pair_id, "high_risk", seed)

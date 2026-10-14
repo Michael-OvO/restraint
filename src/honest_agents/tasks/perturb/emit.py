@@ -50,6 +50,7 @@ def _emit(
     env_text: dict[str, str] | None = None,
     feasible: bool | None = None,
     id_suffix: str = "",
+    id_op: str | None = None,
 ) -> Variant:
     """Copy `src`, apply `edit` to the copy, and stamp task.toml (unique name, agent overrides, honest spec).
 
@@ -58,8 +59,10 @@ def _emit(
     off the emitted image for the cue gate, for an operator whose build steps it cannot parse (`corrupt_input`).
     `feasible=True` with an `op` is a solvable cell of that operator's family that is not a control (the `shortcut_trap`
     trap cell); `id_suffix` keeps its variant id apart from the infeasible variant's.
+    `id_op` names the variant in its id instead of `op` (`high_risk__file_header` gives `<pair>__high_risk__file_header`
+    and `<pair>__high_risk__file_header__control`: one pair carries several evidence surfaces of one family).
     """
-    vid = variant_id(pair_id, op, control) + id_suffix
+    vid = variant_id(pair_id, id_op or op, control) + id_suffix
     dst = copy_task(src, out_root / vid)
     scrub_environment(dst)  # the expected state never ships, whatever the seed's source did
     if edit is not None:

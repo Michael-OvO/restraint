@@ -21,6 +21,7 @@ from honest_agents.tasks.perturb.no_network import no_network, no_network_contro
 from honest_agents.tasks.perturb.remove_input import remove_input, remove_input_control
 from honest_agents.tasks.perturb.remove_tool import remove_tool, remove_tool_control
 from honest_agents.tasks.perturb.revoke_permission import revoke_permission, revoke_permission_control
+from honest_agents.tasks.perturb.risk_surfaces import SURFACES, surface_operator
 from honest_agents.tasks.perturb.shortcut_trap import shortcut_trap, shortcut_trap_control, shortcut_trap_feasible
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,16 @@ CONTROL_OPERATORS: dict[str, ControlOperator] = {
 # A family with a third cell next to its infeasible variant and its control (the solvable trap): built after them, and
 # if it cannot be built the whole family is dropped, so a pair never carries a cue without the cells that price it.
 SIBLING_OPERATORS: dict[str, ControlOperator] = {"shortcut_trap": shortcut_trap_feasible}
+
+# One `high_risk` operator per evidence surface (iteration 14, `risk_surfaces`): `generate_variants(operators=
+# ["high_risk_file_header"])`. Same family and blockers, `detail.surface` says where the evidence is. Kept apart from
+# OPERATORS so the default build, `--operators` choices and every iteration-13 task are unchanged.
+SURFACE_OPERATORS: dict[str, Operator] = {}
+SURFACE_CONTROL_OPERATORS: dict[str, ControlOperator] = {}
+for _surface in SURFACES:
+    SURFACE_OPERATORS[f"high_risk_{_surface}"], SURFACE_CONTROL_OPERATORS[f"high_risk_{_surface}"] = surface_operator(
+        _surface
+    )
 
 DEFAULT_OPERATORS = tuple(n for n in OPERATORS if n not in NOT_BUILT_BY_DEFAULT)
 
@@ -105,7 +116,7 @@ def _generate(
             return []
     for name in operators if operators is not None else list(OPERATORS):
         try:
-            v = OPERATORS[name](src, out_root, pair_id=pair_id, seed=seed, split=split)
+            v = {**OPERATORS, **SURFACE_OPERATORS}[name](src, out_root, pair_id=pair_id, seed=seed, split=split)
         except Exception as e:  # noqa: BLE001 — one malformed source task must not stop a 7k-task build
             log.warning("operator %s failed on %s: %s", name, pair_id, e)
             continue
@@ -114,7 +125,9 @@ def _generate(
         ctrl = None
         if controls:
             try:
-                ctrl = CONTROL_OPERATORS[name](src, out_root, pair_id=pair_id, twin=v, seed=seed, split=split)
+                ctrl = {**CONTROL_OPERATORS, **SURFACE_CONTROL_OPERATORS}[name](
+                    src, out_root, pair_id=pair_id, twin=v, seed=seed, split=split
+                )
             except Exception as e:  # noqa: BLE001
                 log.warning("control of %s failed on %s: %s", name, pair_id, e)
             if ctrl is None and require_controls:
