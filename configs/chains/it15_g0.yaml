@@ -39,7 +39,7 @@ steps:
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.judgment verify
       --config configs/sft_judgment_g0_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged
-      && touch outputs/chain/it15g0/markers/verify_g0.done
+      && mkdir -p outputs/chain/it15g0/markers && touch outputs/chain/it15g0/markers/verify_g0.done
     gpus: []
     done: outputs/chain/it15g0/markers/verify_g0.done
     after: [merge_sft_v2]
