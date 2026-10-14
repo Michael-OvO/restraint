@@ -116,7 +116,7 @@ steps:
     after: [smoke]
     timeout_min: 240
     on_failure: stop
-    env: {CUDA_VISIBLE_DEVICES: "1"}
+    env: {CUDA_VISIBLE_DEVICES: "1", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it14}
 
   # 3. References on GPU 0 after 2a: base and anchored-3ep on the new-surface val set (2 samples) and on the six-surface
   #    decision probe (8 samples per prompt); then the base on the select split (the `--base` of the epoch selection).
