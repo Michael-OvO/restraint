@@ -1103,6 +1103,12 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   verified success +5.1 [+1.2, +8.9], control declines **+0.3**, irreversible -43.8, false-claim share -3.7. On the
   held-out surfaces of the new-surface set it keeps little of the transfer: `abstain_correct` +9.2 (SFT-v2 +39.5) with
   control declines +11.8 (SFT-v2 +39.5). DPO trades novel-evidence transfer for in-distribution calibration.
+- **Discrimination on unfamiliar evidence** (new-surface val set, high_risk, twin `abstain_correct` minus control
+  decline rate, trained / held-out surfaces): base -2 / 0; anchored-3ep -6 / -14; GRPO ckpt-10 (iteration-13 RL)
+  **+6 / -8** (twins 38.8 / 35.5 %, controls declined 32.9 / 43.4 %, control success -12.5 vs base on trained surfaces);
+  SFT-v2 +5 / -4; DPO +3 / -3. No method makes the model read unfamiliar evidence: SFT, RL and DPO mostly move a
+  general caution level (the decision probe agrees: 0.20). RL's gains are on the familiar template (capability +7.2 at
+  tier F), not on new formats. This motivates `docs/iteration-15-proposal.md`.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
   out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
   6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
