@@ -179,6 +179,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.prune:
         n = prune_failed(args.variants, rows, results)
         print(f"pruned {n} failing pairs")
+        # With --prune the failures are handled (dropped and recorded in --out): success unless nothing survived.
+        # Iteration 14's node chain stopped on exit 1 although 114 of 120 pairs passed and the 6 were pruned.
+        return 0 if any(r.ok for r in results) else 1
     return 0 if all(r.ok for r in results) else 1
 
 
