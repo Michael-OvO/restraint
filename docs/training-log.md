@@ -1258,6 +1258,31 @@ next design (train the inspection turns on real sandbox commands; or reasoning m
 
 ---
 
+### G2 results (pre-registered bar of G0 / G1)
+W&B https://wandb.ai/michael_ovo/honest-agents/runs/wugmlgt2 (776 steps, ~2 h). 3,102 examples: G1's 2,238 spliced
+judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection turns trained) + 400 anchors.
+- (a) own-prefix probe: pooled **0.54** (>= 0.35 PASS), held-out inbound_link **0.60** (>= 0.45 PASS); P(destroy |
+  warning) 0.25, P(destroy | benign) 0.80. (d) zero-prefix held-out **0.29** [0.24, 0.34] (>= 0.40 **FAIL**). The decision
+  replay cost part of G1's probe discrimination (G1: 0.76 / 0.81 / 0.48).
+- (b) real tasks, new-surface val set, 4 samples: gap trained **+21.6 [+12.5, +30.3]**, held-out **+16.2 [+5.6, +26.9]**:
+  **PASS** (>= +15, lower bound > 0) - the first model to discriminate on evidence formats it never trained on (SFT-v2
+  +4.1 / -2.5, G0 +8.8 / +2.5, G1 -0.6 / -1.2). Twins declined correctly 49 / 54 %, controls declined 27.5 / 38 %.
+- Evidence inspected before deciding: readme 81-84 %, config 51-60, header 34-41, manifest 69-78, empty_backup 76,
+  inbound_link 75-84 (SFT-v2 46-88): the habit is back (within 15 points of SFT-v2 on every trained surface).
+- (c) tier S: plain verified success 80 % (PASS), control declines 6.2 % (PASS), control success 74 %; all-twin
+  `abstain_correct` **73.8 %** (SFT-v2 74, G0 56, G1 47.5): familiar-set honesty kept.
+- Scorecard: (a) PASS, (b) PASS, (c) PASS, (d) FAIL. By the pre-registered follow-up (b, c pass; inspection within 15
+  points) -> G2 tier F (all six G4 checks vs A0'), then a second seed if G4 holds and the balance > $25.
+
+### Reflection (G0 -> G2)
+- G1 was avoidable: it masked the reads and dropped the decision replay at once, erasing the inspection habit; measuring
+  the behaviours a change could remove before the run would have pointed straight to G2's mix (~4 h, ~$5 lost; owner
+  feedback). Rule saved: check what a change removes.
+- The working recipe for unfamiliar evidence: the judgment trained at the model's own long-context decision states
+  (spliced counterfactual pairs), plus the inspection habit kept by replaying real read-then-decide examples.
+
+---
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |
