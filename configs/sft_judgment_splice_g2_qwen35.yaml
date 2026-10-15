@@ -1,0 +1,64 @@
+# Iteration 15, G1 (docs/iteration-15-g1-spliced-judgment.md): the G0 judgment items spliced into the model's own
+# high_risk prefixes (the iteration-13/14 decision states), so the judgment is trained in the long agentic context.
+# From iteration-14 SFT-v2 epoch 3 (merged), as G0, so G0 and G1 differ only in the example shape. LoRA r32/a64, lr 5e-5,
+# 2 epochs, effective batch 8, gradient checkpointing on, entropy guard off, the final adapter only.
+# Data: up to 75 G0 judgment pairs per spliceable format (15 formats; held-out pairs never) x 2 examples on the SFT-v2
+# decision states (stable hash, even spread) + 400 own-success anchors. Builder: honest_agents.sft.judgment_splice; the
+# decision states, bank partition and anchors come from the inherited `decision:` section, the items from `judgment:`
+# (same held-out split).
+#   python -m honest_agents.sft.judgment_splice verify --config configs/sft_judgment_splice_g1_qwen35.yaml
+#   python -m honest_agents.sft.train_sft --config configs/sft_judgment_splice_g1_qwen35.yaml --dry-run
+# On the node: model.name=<path of the merged SFT-v2 epoch 3> data.bank=<passk bank> (the merged model is on the node only).
+base: sft_judgment_g0_qwen35.yaml
+kind: judgment_splice
+run_name: it15-g2-splice-replay             # output: outputs/sft/it15-g2-splice-replay
+
+model:
+  name: outputs/it14/sft_v2_e3_merged  # override on the node if the merged model lives elsewhere
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  bank: data/bank/passk
+  min_examples: 512
+  max_length: 24576                  # whole spliced transcripts; longer ones would be dropped, verify refuses any
+
+decision:
+  anchors:
+    count: 400                       # own-success anchors (the rest of the anchor options are SFT-v2's)
+
+judgment:                            # items and the held-out split exactly as G0 (heldout_fraction 0.2, seed it15-g0)
+  replay_ratio: 0                    # no G0 replay mix: the anchors above are the replay
+  # 15 of the 16 G0 formats. container_volume_inspect cannot be spliced: 95 of its 128 training pairs have a volume-name
+  # target (no path to map onto T) and the evidence of nearly all the rest names the volume, never the `_data` path that
+  # becomes T (`reads_never_name_target`), leaving ~7 pairs.
+  formats: [notes_file, file_header, config_comment, manifest_index, git_status, git_log_unpushed, crontab_or_timer,
+            db_lockfile, ls_metadata, ticket_or_email_note, retention_policy_doc, mount_df, process_open_files,
+            ci_cache_marker, checksum_inventory]
+
+splice:                              # honest_agents.sft.judgment_splice.SpliceOptions
+  pairs_per_format: 75
+  min_pairs_per_format: 50           # ticket_or_email_note / mount_df lose the most pairs to `reads_never_name_target`
+  seed: it15-g1
+  eval_pairs_per_format: 4
+  replay_decision: true              # G2: also train the SFT-v2 decision examples (real inspection turns)
+  train_reads: false                  # loss on the injected read turns (as SFT-v2). The G1 review recommends false: the  # owner-approved per Fable G1 review: injected reads name invented files; G0 did not train reads either
+                                     # read commands are the items' (`cat T/ROLLUP`, `cat /etc/ca/ca.cnf`), files the
+                                     # sandboxes do not have; false trains the decision + report only (as G0)
+
+train:
+  learning_rate: 5.0e-5
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8     # effective batch 8
+  gradient_checkpointing: true
+  eval_steps: 100
+  report_to: wandb
+  extra:
+    run_name: it15-g2-splice-replay         # the W&B run name
+    save_strategy: "no"              # the final adapter only (<output_dir>/final)
+
+guard:
+  entropy_floor_ratio: null          # OFF

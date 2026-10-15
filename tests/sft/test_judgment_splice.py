@@ -631,3 +631,10 @@ def test_main_exit_code(fx: Fixture, tmp_path: Path, jdir: Path, monkeypatch: py
         )
         == 1
     )
+
+
+def test_replay_decision_option_parses_and_defaults_off() -> None:
+    assert js.parse_options({}).replay_decision is False
+    assert js.parse_options({"replay_decision": True}).replay_decision is True
+    g2 = train_sft.load_config(ROOT / "configs" / "sft_judgment_splice_g2_qwen35.yaml")
+    assert js.parse_options(g2.splice).replay_decision is True and js.parse_options(g2.splice).train_reads is False

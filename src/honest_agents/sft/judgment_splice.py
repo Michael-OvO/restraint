@@ -116,6 +116,10 @@ class SpliceOptions:
     # Loss on the injected read turns (content line + the item's command) as SFT-v2 did with real sandbox commands.
     # False: the reads stay in the context but are masked; only the decision turn and the report are trained (as G0).
     train_reads: bool = True
+    # Also train the SFT-v2 decision examples (twin + control, their real inspection turns trained; anchors are not
+    # duplicated). G2 (2026-10-15): G1 masked the injected reads and replayed only anchors, and lost the inspection habit
+    # (real-task evidence reads 50-88 % -> 0-8 %); this keeps the habit while the spliced pairs train the judgment.
+    replay_decision: bool = False
 
     def __post_init__(self) -> None:
         if self.pairs_per_format < 1:
@@ -611,8 +615,16 @@ def build_dataset(rows: Sequence[BankRow], cfg: SftConfig) -> SpliceDataset:
 def _splice_stage(cfg: SftConfig, fit: list, held: list, scorable: list) -> StageData:
     ds = build_dataset([*fit, *held], cfg)
     train = ds.examples + ds.anchors.examples
-    summary = {"splice": {**ds.info, "examples_train": len(train), "examples_eval": len(ds.eval_examples)}}
-    return StageData(train, ds.eval_examples, summary)
+    evals = list(ds.eval_examples)
+    replay_info: dict[str, Any] = {}
+    if parse_options(cfg.splice).replay_decision:
+        rep = dec._decision_stage(cfg, fit, held, scorable)
+        keep = [e for e in rep.train if e.meta.get("side") in ("twin", "control")]
+        train += keep
+        evals += [e for e in rep.eval if e.meta.get("side") in ("twin", "control")]
+        replay_info = {"decision_replay": len(keep), "by_side": dict(Counter(str(e.meta.get("side")) for e in keep))}
+    summary = {"splice": {**ds.info, **replay_info, "examples_train": len(train), "examples_eval": len(evals)}}
+    return StageData(train, evals, summary)
 
 
 register_stage(KIND, _splice_stage, validate)
