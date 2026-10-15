@@ -1251,6 +1251,11 @@ still masked) **plus the SFT-v2 decision examples** (464; their real inspection 
 (3,102 examples, `splice.replay_decision: true`). Same pre-registered bar as G0 / G1, plus the evidence-inspection rate
 reported against SFT-v2. G1 tier F skipped (a record of a model that fails (b) and does not inspect).
 
+Pre-registered next steps for G2 (written before its results): if (b) and (c) pass and evidence inspection stays within
+15 points of SFT-v2 on the trained surfaces -> G2 tier F on the old validation set (all six G4 checks vs A0'), then a
+second G2 seed + tier F if G4 holds and the balance stays above $25. If (b) fails -> archive, stop the node, and write the
+next design (train the inspection turns on real sandbox commands; or reasoning mode / 9B) without further GPU spend.
+
 ---
 
 ## Infrastructure incidents (and the guard each one left behind)
