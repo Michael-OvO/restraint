@@ -113,6 +113,7 @@ class SftConfig:
     selfdistill: dict[str, Any] = field(default_factory=dict)  # `selfdistill.SelfDistillOptions` (kind selfdistill)
     decision: dict[str, Any] = field(default_factory=dict)  # `decision.DecisionOptions` fields (kind decision)
     judgment: dict[str, Any] = field(default_factory=dict)  # `judgment.JudgmentOptions` fields (kind judgment)
+    splice: dict[str, Any] = field(default_factory=dict)  # `judgment_splice.SpliceOptions` fields (kind judgment_splice)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -137,6 +138,7 @@ STAGE_MODULES = {
     "selfdistill": "honest_agents.sft.selfdistill",
     "decision": "honest_agents.sft.decision",
     "judgment": "honest_agents.sft.judgment",
+    "judgment_splice": "honest_agents.sft.judgment_splice",
 }
 
 

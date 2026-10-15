@@ -792,6 +792,10 @@ def _with_content(turn: Turn, content: str) -> Turn:
     return Turn({**turn.assistant, "content": content}, list(turn.tools))
 
 
+with_content = _with_content  # public accessors for `sft.judgment_splice` (iteration 15, G1)
+stable_hash = _hash
+
+
 def _strip_turn(turn: Turn, target: str) -> tuple[Turn | None, list[str], bool]:
     """The deletion turn without its destructive calls / segments: (the stripped turn or None when nothing is left,
     the commands removed, whether the call list and tool messages lined up)."""
