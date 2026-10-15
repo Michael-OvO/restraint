@@ -1,0 +1,40 @@
+# Iteration 15 G2, seed 2 (pre-registered: only if G2 seed 1 tier F holds G4): same recipe, seed 2; merge; tier F.
+name: it15g2s2
+state_dir: outputs/chain/it15g2s2
+sequential: true
+instance_id: null
+balance_floor: 25
+steps:
+  - name: train_g2_s2
+    command: >-
+      scripts/run_sft.sh configs/sft_judgment_splice_g2_qwen35.yaml model.name=outputs/it14/sft_v2_e3_merged seed=2
+      run_name=it15-g2-splice-replay-s2 train.extra.run_name=it15-g2-splice-replay-s2
+    gpus: [0]
+    done: outputs/sft/it15-g2-splice-replay-s2/final/adapter_config.json
+    after: []
+    timeout_min: 240
+    on_failure: stop
+    env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it15, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+  - name: merge_g2_s2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter outputs/sft/it15-g2-splice-replay-s2/final --out outputs/it15/g2_s2_merged
+    gpus: []
+    done: outputs/it15/g2_s2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+  - name: g2_s2_tierF
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_s2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it15_g2_s2_tierF --n-samples 4 --concurrency 28
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g2_s2_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g2_s2_surface4/metrics.json
+    timeout_min: 240
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+final:
+  command: "true"
+  timeout_min: 5
