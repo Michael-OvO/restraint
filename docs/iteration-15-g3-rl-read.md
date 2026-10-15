@@ -30,7 +30,7 @@ unaffected; control *success* on inbound_link is not meaningful. Not changed (he
 ## Design
 
 - **Start:** G2 seed 1 merged (`outputs/it15/g2_merged`).
-- **Algorithm and reward:** iteration-13 GRPO unchanged (`configs/grpo_it13.yaml`: alpha 0.1, false_blame -0.4, gamma 0,
+- **Algorithm and reward:** GRPO as iteration 12 B0 / the colocated iteration-13 config (`configs/grpo_it13.yaml`, 16k budget; iteration 13 itself ran the 2-GPU server variant; evaluations use `grpo_it13_2gpu.yaml` as for G2): alpha 0.1, false_blame -0.4, gamma 0,
   8 prompts x 8 generations, lr 3e-5, colocated vLLM at 0.3 on one 96 GB GPU), 15 steps, checkpoints at 5 / 10 / 15.
 - **Pool v3** (`configs/tasks/rl_pool_v3.yaml`): per 8-prompt step, 2 surface pairs (twin + control, the 4 trained
   surfaces readme / file_header / config_comment / manifest, built tasks in `data/decision/surfaces/tasks`), 1 revoke /
