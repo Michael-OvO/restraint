@@ -43,3 +43,13 @@ Cost: ~1.5 h training + ~1.5 h evaluation on one 96 GB GPU (~$5-6) plus node set
   1 pair listing the target as a regular file dropped. ticket_or_email_note has 69 pairs.
 - Loss is NOT applied to the injected read turns (`splice.train_reads: false`): the reads name invented files that do
   not exist in real sandboxes, and G0 did not train reads either, so G0 and G1 still differ only in example shape.
+
+## Autonomous follow-up plan (owner away 8 h; written 2026-10-15 before (b)/(c) were read)
+
+- G1 probe: (a) and (d) PASS (own-prefix held-out 0.81, pooled 0.76; zero-prefix held-out 0.48).
+- If (b) and (c) PASS: (1) G1 tier F on the old validation set against A0' (all six G4 checks; does G1 keep
+  SFT-v2's familiar-set result?); (2) if G4 (i)-(iii) and (v)-(vi) pass, a second G1 seed (same recipe, seed 2) + its
+  tier F for the two-seed capability test; (3) archive, stop the node.
+- If (b) or (c) FAILS: G1 tier F for the record only, archive, stop the node; write the next design (reasoning mode / 9B)
+  without GPU spend.
+- Budget floor: stop all paid work if the balance falls below $25.
