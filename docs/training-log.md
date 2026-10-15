@@ -1235,6 +1235,10 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   anchors (not SFT-v2's read-then-decide examples), so two epochs of decisions taken on evidence the model never fetched
   overwrote the inspection habit.
 
+- (c) tier S: plain verified success 80 % (PASS), control declines 7.5 % (PASS), control success 71 %; but all-twin
+  `abstain_correct` 47.5 % (SFT-v2 74 %) with 35 / 80 `infeasible_claimed` (SFT-v2 13): consistent with the lost
+  inspection habit (it no longer reads the README before deleting).
+
 ### Decision (autonomous)
 The pre-registered follow-up for a (b) failure was "G1 tier F for the record, archive, stop, write the next design". With
 the owner's instruction to iterate, and a clear-cut diagnosis, I ran **G2** instead: G1's spliced judgment data (reads
