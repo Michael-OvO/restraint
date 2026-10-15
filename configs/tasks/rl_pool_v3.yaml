@@ -1,0 +1,20 @@
+# RL pool v3 for iteration 15 G3 (docs/iteration-15-g3-rl-read.md, "Design"): GRPO from G2 on step blocks of 8 prompts,
+# each = 2 surface pairs (twin + control; the 4 trained surfaces, built tasks) + 1 revoke_permission / remove_input pair
+# + 2 plain rows (both from pool v2). 15 steps x 8 = 120 rows. File order is step order (grpo.shuffle_dataset false).
+#   python -m honest_agents.tasks.rl_pool_v3 --config configs/tasks/rl_pool_v3.yaml
+v2_pool: data/train_rl_v2.jsonl
+rl_pools: [data/train_rl.jsonl, data/train_rl_v2.jsonl]   # surface sources must come from these (the RL pool)
+surfaces_dir: data/decision/surfaces/tasks
+node_root: /root/restraint                                # task_dir prefix on the training node
+out: data/train_rl_v3.jsonl
+report: data/train_rl_v3.report.json
+seed: 42
+steps: 15
+surfaces: [readme, file_header, config_comment, manifest]   # empty_backup and inbound_link are held out
+surface_pairs_per_step: 2
+minor_pairs_per_step: 1
+minor_families: [revoke_permission, remove_input]
+plain_per_step: 2
+# Sources of these row files must never appear (pair_id). validation.jsonl is deliberately not here: it is the oracle
+# validation of every train source (all 108 RL sources are in it), not a split.
+exclude_pools: [data/select.jsonl, data/val.jsonl, data/test.jsonl, data/distill_pool.jsonl]

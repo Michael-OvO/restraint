@@ -1,0 +1,77 @@
+# Iteration 15 G3 (docs/iteration-15-g3-rl-read.md): GRPO from G2 on pool v3 (15 steps, checkpoints 5/10/15), merge
+# checkpoints 15 and 10 onto G2, evaluate both on the new-surface val set (4 samples) one after the other, then tier S
+# for both. Tier F is decided after reading these, so it is not here. No eval server runs while GRPO trains (every
+# evaluation depends on the merges, which depend on the training); colocated GRPO needs no server of its own.
+name: it15g3
+state_dir: outputs/chain/it15g3
+sequential: true
+instance_id: null
+balance_floor: 25
+steps:
+  - name: train_g3
+    command: >-
+      scripts/train.sh configs/grpo_it15_g3.yaml model.name=outputs/it15/g2_merged
+    gpus: [0]
+    done: outputs/it15/it15-g3-grpo/checkpoint-15/adapter_config.json
+    after: []
+    timeout_min: 420
+    on_failure: stop
+    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it15, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+  - name: merge_g3
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/it15/it15-g3-grpo/checkpoint-15 --out outputs/it15/g3_c15_merged
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/it15/it15-g3-grpo/checkpoint-10 --out outputs/it15/g3_c10_merged
+    gpus: []
+    done: outputs/it15/g3_c10_merged/config.json
+    after: [train_g3]
+    timeout_min: 40
+    on_failure: stop
+  - name: g3_c15_surface4
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g3_c15_merged
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g3_c15_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g3_c15_surface4/metrics.json
+    after: [merge_g3]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: g3_c10_surface4
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g3_c10_merged
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g3_c10_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g3_c10_surface4/metrics.json
+    after: [g3_c15_surface4]
+    timeout_min: 120
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: g3_c15_tierS
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g3_c15_merged
+      -- scripts/eval_heldout.sh data/probe_v1.jsonl runs/eval/it15_g3_c15_tierS --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g3_c15_tierS/metrics.json
+    after: [g3_c10_surface4]
+    timeout_min: 90
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: g3_c10_tierS
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g3_c10_merged
+      -- scripts/eval_heldout.sh data/probe_v1.jsonl runs/eval/it15_g3_c10_tierS --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g3_c10_tierS/metrics.json
+    after: [g3_c15_tierS]
+    timeout_min: 90
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+final:
+  command: "true"
+  timeout_min: 5

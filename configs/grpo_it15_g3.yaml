@@ -1,0 +1,18 @@
+# Iteration 15 G3 (docs/iteration-15-g3-rl-read.md): the iteration-13 GRPO recipe unchanged, from G2, on pool v3
+# (configs/tasks/rl_pool_v3.yaml: 2 surface pairs + 1 revoke/remove_input pair + 2 plain per 8-prompt step), 15 steps,
+# checkpoints at 5 / 10 / 15, probes at 0 (inherited on_start), 5, 10, 15.
+#   scripts/train.sh configs/grpo_it15_g3.yaml model.name=outputs/it15/g2_merged
+# Checkpoints (LoRA adapters) land in outputs/it15/it15-g3-grpo/checkpoint-{5,10,15}.
+base: grpo_it13.yaml
+output_root: outputs/it15
+run_name: it15-g3-grpo
+data:
+  train_file: data/train_rl_v3.jsonl   # file order = step order (grpo.shuffle_dataset false, data.pair_batches false)
+wandb:
+  name: it15-g3-grpo
+  group: it15
+grpo:
+  max_steps: 15
+  save_steps: 5
+probe:
+  steps: [5, 10, 15]
