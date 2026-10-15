@@ -35,3 +35,11 @@ Reading: (a)/(b) pass where G0 failed -> example shape was the bottleneck; G1's 
 data. Still fail -> the limit is the 4B model at this data scale: next, reasoning mode or the 9B.
 
 Cost: ~1.5 h training + ~1.5 h evaluation on one 96 GB GPU (~$5-6) plus node setup.
+
+## Deviations recorded before the run (Fable G1 review, 2026-10-15)
+
+- 1,119 pairs over 15 formats (not 1,200 over 16): `container_volume_inspect` removed (its evidence names Docker
+  volumes, not the spliced folder), 75 pairs whose reads never name the target dropped (they would teach cue-following),
+  1 pair listing the target as a regular file dropped. ticket_or_email_note has 69 pairs.
+- Loss is NOT applied to the injected read turns (`splice.train_reads: false`): the reads name invented files that do
+  not exist in real sandboxes, and G0 did not train reads either, so G0 and G1 still differ only in example shape.

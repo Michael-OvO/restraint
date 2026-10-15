@@ -2,9 +2,10 @@
 # high_risk prefixes (the iteration-13/14 decision states), so the judgment is trained in the long agentic context.
 # From iteration-14 SFT-v2 epoch 3 (merged), as G0, so G0 and G1 differ only in the example shape. LoRA r32/a64, lr 5e-5,
 # 2 epochs, effective batch 8, gradient checkpointing on, entropy guard off, the final adapter only.
-# Data: 1,200 G0 judgment pairs (75 per trained format; held-out pairs never) x 2 examples on the SFT-v2 decision states
-# (stable hash, even spread) + 400 own-success anchors. Builder: honest_agents.sft.judgment_splice; the decision states,
-# bank partition and anchors come from the inherited `decision:` section, the items from `judgment:` (same held-out split).
+# Data: up to 75 G0 judgment pairs per spliceable format (15 formats; held-out pairs never) x 2 examples on the SFT-v2
+# decision states (stable hash, even spread) + 400 own-success anchors. Builder: honest_agents.sft.judgment_splice; the
+# decision states, bank partition and anchors come from the inherited `decision:` section, the items from `judgment:`
+# (same held-out split).
 #   python -m honest_agents.sft.judgment_splice verify --config configs/sft_judgment_splice_g1_qwen35.yaml
 #   python -m honest_agents.sft.train_sft --config configs/sft_judgment_splice_g1_qwen35.yaml --dry-run
 # On the node: model.name=<path of the merged SFT-v2 epoch 3> data.bank=<passk bank> (the merged model is on the node only).
@@ -30,12 +31,21 @@ decision:
 
 judgment:                            # items and the held-out split exactly as G0 (heldout_fraction 0.2, seed it15-g0)
   replay_ratio: 0                    # no G0 replay mix: the anchors above are the replay
+  # 15 of the 16 G0 formats. container_volume_inspect cannot be spliced: 95 of its 128 training pairs have a volume-name
+  # target (no path to map onto T) and the evidence of nearly all the rest names the volume, never the `_data` path that
+  # becomes T (`reads_never_name_target`), leaving ~7 pairs.
+  formats: [notes_file, file_header, config_comment, manifest_index, git_status, git_log_unpushed, crontab_or_timer,
+            db_lockfile, ls_metadata, ticket_or_email_note, retention_policy_doc, mount_df, process_open_files,
+            ci_cache_marker, checksum_inventory]
 
 splice:                              # honest_agents.sft.judgment_splice.SpliceOptions
   pairs_per_format: 75
-  min_pairs_per_format: 30           # container_volume_inspect has only ~33 pairs with a path target (volume-name targets cannot map onto T)
+  min_pairs_per_format: 50           # ticket_or_email_note / mount_df lose the most pairs to `reads_never_name_target`
   seed: it15-g1
   eval_pairs_per_format: 4
+  train_reads: false                  # loss on the injected read turns (as SFT-v2). The G1 review recommends false: the  # owner-approved per Fable G1 review: injected reads name invented files; G0 did not train reads either
+                                     # read commands are the items' (`cat T/ROLLUP`, `cat /etc/ca/ca.cnf`), files the
+                                     # sandboxes do not have; false trains the decision + report only (as G0)
 
 train:
   learning_rate: 5.0e-5

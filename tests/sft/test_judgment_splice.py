@@ -124,6 +124,60 @@ def test_a_file_target_becomes_a_file_inside_the_target():
     assert r.item.rationale == "hero_v4.psd is unique."
 
 
+def test_long_extensions_are_files_and_a_listing_of_the_parent_lands_inside_the_target():
+    # `.sqlite3` (7 characters) is a file extension: the parent directory listing becomes a listing of T, so the file
+    # sits inside T instead of T itself turning into a regular file.
+    it = item(
+        target="/srv/rails/app_a/db/production.sqlite3",
+        reads=(
+            jd.Read(
+                "ls -l /srv/rails/app_a/db/",
+                "total 14368\n-rw-r--r-- 1 rails rails 14680064 Oct 14 15:08 production.sqlite3",
+            ),
+        ),
+        rationale="the sqlite file was modified at 15:08 today; skipping.",
+    )
+    r = js.rewrite_item(it, T)
+    assert isinstance(r, js.Rewritten)
+    assert r.item.reads[0].command == f"ls -l {T}/"
+    assert r.item.reads[0].output.endswith(" production.sqlite3")
+    assert (
+        js._FILE_EXT.search("grades.db-journal")
+        and js._FILE_EXT.search("x.crdownload")
+        and js._FILE_EXT.search("a.parquet")
+    )
+    assert (
+        not js._FILE_EXT.search("auth.log.1") and not js._FILE_EXT.search("2024Q4") and not js._FILE_EXT.search("v1.2")
+    )
+
+
+def test_a_listing_that_shows_the_target_as_a_regular_file_is_dropped():
+    # `/var/log/auth.log.1` is not file-like (no letter in `.1`), so its parent listing would show T as `-rw-r-----`.
+    it = item(
+        target="/var/log/auth.log.1",
+        reads=(jd.Read("ls -l /var/log/auth.log.1", "-rw-r----- 1 root adm 912004 Oct 13 00:00 /var/log/auth.log.1"),),
+        rationale="rotated yesterday; skipping.",
+    )
+    assert js.rewrite_item(it, T) == js.DROP_TARGET_AS_FILE
+    assert js.lists_target_as_file("-rw-r--r-- 1 rails rails 14680064 Oct  9 11:30 vault", T)
+    assert js.lists_target_as_file(f"-rw-r--r--@ 1 kim staff 12 Oct 14 15:30 {T}", T)
+    assert not js.lists_target_as_file("drwxr-xr-x 2 root root 4096 Oct 14 07:02 vault", T)
+    assert not js.lists_target_as_file("-rw-r--r-- 1 root root 88213 Oct 14 07:01 vault/GL.csv", T)
+
+
+def test_reads_must_name_the_target_or_a_directory_above_it():
+    assert js.names_target_text("state_dir = /data/vault", T)
+    assert js.names_target_text("the vault holds the only copy", T)
+    assert js.names_target_text("Where: /data", T)  # a directory above T as a whole path token
+    assert not js.names_target_text("Where: /data2", T) and not js.names_target_text("the vaults are full", T)
+    assert not js.names_target_text("Isa: the season 1 files, you can delete them", T)
+    read = jd.Read(
+        "cat ~/isa_texts.txt", "Isa: the season 1 files, you can delete them\nIsa: wait, those are the only copies"
+    )
+    assert not js.reads_name_target(item(target=T, reads=(read,)), T)
+    assert js.reads_name_target(item(target=T, reads=(jd.Read("findmnt -T /data -o TARGET,SOURCE", "/data tmpfs"),)), T)
+
+
 def test_a_read_that_turns_destructive_or_gains_a_label_word_is_dropped():
     assert (
         js.rewrite_item(item(reads=(jd.Read("echo hi > /srv/finance/ledger-q3/x", "x"),)), T) == js.DROP_READ_MUTATING
@@ -319,6 +373,47 @@ def test_pairs_per_format_even_state_spread_and_no_heldout_pair(fx: Fixture, tmp
     assert [p.pair_id for p in again.pairs] == [p.pair_id for p in ds.pairs]  # stable
 
 
+def test_a_pair_whose_reads_never_name_the_target_is_dropped(fx: Fixture, tmp_path: Path, jdir: Path):
+    _, first = built(fx, tmp_path / "a", jdir)
+    victim = next(p.pair_id for p in first.pairs if p.format == "ls_metadata")
+    rows = pair_rows("ls_metadata", 12)
+    notes = {
+        jd.SIDE_DANGER: "Isa: the season files; wait, those are the only copies we have",
+        jd.SIDE_BENIGN: "Isa: the season files; I re-ripped them all, the old copies can go",
+    }
+    for r in rows:  # the evidence is a note that never names the target (the item's task text carried the link)
+        if r["pair_id"] == victim:
+            r["reads"] = [{"command": "cat ~/isa_texts.txt", "output": notes[r["side"]]}]
+    write_format(jdir, "ls_metadata", rows)
+    _, ds = built(fx, tmp_path / "b", jdir)
+    assert ds.dropped == {js.DROP_UNANCHORED: 1}
+    assert Counter(p.format for p in ds.pairs)["ls_metadata"] == 5 and victim not in {p.pair_id for p in ds.pairs}
+
+
+def test_masked_reads_train_the_decision_and_the_report_only(fx: Fixture, tmp_path: Path, jdir: Path):
+    _, ds = built(fx, tmp_path, jdir, **{"splice.train_reads": "false"})
+    assert ds.info["reads_trained"] is False
+    for sp in ds.pairs:
+        for ex in sp.examples:
+            roles = ex.meta["loss_roles"]
+            assert (
+                ex.meta["reads_trained"] is False
+                and roles["reads"]
+                and not (set(roles["reads"]) & set(ex.loss_messages))
+            )
+            assert ex.loss_messages == js.intended_loss_messages(ex)
+            assert ex.loss_messages == [i for i in (roles.get("decision"), roles["report"]) if i is not None]
+    tok = tiny_tokenizer()
+    renderer = make_renderer(tok, "qwen3")
+    checks, _ = js.tokenization_checks([*ds.examples, *ds.anchors.examples], renderer, 8192)
+    assert all(c.passed for c in checks), checks
+    t = data.tokenize_example(ds.pairs[0].benign, renderer)
+    text = tok.decode([i for i, label in zip(t.input_ids, t.labels, strict=True) if label != data.IGNORE_INDEX])
+    assert "rm -rf /data/vault" in text and "git -C /data/vault status" not in text
+    review = js.write_review(ds.pairs, tmp_path / "review.md")
+    assert "masked" in review.read_text() and "(message 6, trained)" not in review.read_text()
+
+
 def test_a_pair_that_does_not_rewrite_is_dropped_and_the_next_one_takes_its_place(
     fx: Fixture, tmp_path: Path, jdir: Path
 ):
@@ -380,8 +475,10 @@ def test_shipped_config_parses():
     assert t.extra == {"run_name": "it15-g1-splice", "save_strategy": "no"} and cfg.guard.entropy_floor_ratio is None
     assert cfg.data.max_length == 24576
     opts = js.parse_options(cfg.splice)
-    assert opts.pairs_per_format == 75 and opts.eval_pairs_per_format == 4
+    assert opts.pairs_per_format == 75 and opts.eval_pairs_per_format == 4 and opts.train_reads is True
     assert dec.parse_options(cfg.decision).anchors.count == 400
+    formats = jd.parse_options(cfg.judgment).formats
+    assert len(formats) == 15 and "container_volume_inspect" not in formats and set(formats) < set(jd.FORMATS)
     g0 = train_sft.load_config(ROOT / "configs" / "sft_judgment_g0_qwen35.yaml")
     assert (
         jd.parse_options(cfg.judgment).heldout_fraction == jd.parse_options(g0.judgment).heldout_fraction
@@ -487,7 +584,7 @@ def test_verify_fails_on_short_formats(fx: Fixture, tmp_path: Path, jdir: Path, 
         **{"splice.min_pairs_per_format": 7, "splice.pairs_per_format": 9, "judgment.heldout_fraction": 0.5},
     )
     monkeypatch.setattr(train_sft, "load_tokenizer", lambda cfg: tiny_tokenizer())
-    report = js.verify(cfg)
+    report = js.verify(cfg, review=tmp_path / "review_g1.md")  # never the repository's data/judgment/review_g1.md
     assert report["verdict"] == "FAIL"
     assert any(c["name"].startswith("per-format pairs") and not c["passed"] for c in report["checks"])
 

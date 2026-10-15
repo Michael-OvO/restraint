@@ -15,8 +15,12 @@ prefixes (`sft.decision`):
   so the spread is even to within one) and rewritten to that state's T (`rewrite_item`): the item's target path becomes
   T in commands, outputs and rationale, its parent directory becomes T's parent, and the item's directory name where it
   stands alone becomes T's. An item that cannot be rewritten cleanly (volume-name target, the target inside a longer
-  name, an ambiguous generic directory name left over, a read that mutates, a label word, a decisive line the budget
-  meter cut) is dropped with a counted reason and the next pair of that format takes its place.
+  name, an ambiguous generic directory name left over, a listing that shows T itself as a regular file, a read that
+  mutates, a label word, a decisive line the budget meter cut) is dropped with a counted reason and the next pair of
+  that format takes its place. A pair whose reads (commands and outputs, both sides) never name T, a path inside it or
+  a directory above it is dropped too (`reads_never_name_target`): the item's own task text, which carried that link
+  ("remove the datadir of the `an` instance"), is not part of the spliced example, so such evidence would teach
+  "alarming text anywhere -> refuse" rather than a judgment about T.
 * **Examples** (per pair, two, on the SAME own prefix). *Benign*: the pair's benign reads (injected assistant turns and
   tool outputs rendered through the episode's budget meter), then the control's own deletion turn with its content
   replaced by the benign rationale (rule A), the control's own tail and its own verified-success report. *Danger*: the
@@ -24,8 +28,11 @@ prefixes (`sft.decision`):
   turn / straight to the report, tail cut by rule B), then the twin report: the control's verified `completed`,
   `incomplete` = the deletion not done, `risk_discovered`, `blocker_target` = T, `blocker_detail` quoting the decisive
   output line (`judgment.decisive_line`), `evidence_commands` = the injected read commands (rule C); the report turn's
-  content is the danger rationale. Loss on the injected read turns' content, the decision turn and the report (as
-  SFT-v2); everything else is the model's own context and is masked.
+  content is the danger rationale. Loss on the injected read turns, the decision turn and the report (as SFT-v2);
+  everything else is the model's own context and is masked. `splice.train_reads: false` masks the read turns as well
+  (loss on the decision and the report only, as G0): the read commands are the item authors' (`cat T/ROLLUP`,
+  `cat /etc/ca/ca.cnf`), files the bank's sandboxes do not have, so training them teaches inspection commands that
+  cannot succeed at deployment.
 * **Anchors.** `decision.anchors.count` (400) own-success anchors, `decision.build_anchors`.
 * **Eval.** `eval_pairs_per_format` held-out G0 pairs per format, spliced the same way (never trained on).
 
@@ -77,6 +84,8 @@ DROP_TARGET_IN_LONGER_NAME = (
     "target_inside_a_longer_name"  # `<target>.txt`, `<target>-new`, `/mnt<target>`: not a clean rewrite
 )
 DROP_GENERIC_BASENAME = "generic_directory_name_left_over"  # the bare name (`cache`, `2024`) cannot be mapped safely
+DROP_TARGET_AS_FILE = "target_listed_as_a_regular_file"  # an `ls -l` line shows T itself as `-rw-...`: T is a directory
+DROP_UNANCHORED = "reads_never_name_target"  # no read (command or output, either side) names T, a subpath or a parent
 DROP_READ_MUTATING = "read_mutates_after_rewrite"
 DROP_LABEL_WORD = "label_word_after_rewrite"
 DROP_NO_QUOTE = "decisive_line_not_in_rendered_output"
@@ -104,6 +113,9 @@ class SpliceOptions:
     eval_pairs_per_format: int = 4  # held-out G0 pairs per format spliced into the eval set
     max_state_spread: int = 1  # verify: pairs per state differ by at most this
     review_per_format: int = 1  # verify: pairs per format in the review file
+    # Loss on the injected read turns (content line + the item's command) as SFT-v2 did with real sandbox commands.
+    # False: the reads stay in the context but are masked; only the decision turn and the report are trained (as G0).
+    train_reads: bool = True
 
     def __post_init__(self) -> None:
         if self.pairs_per_format < 1:
@@ -143,7 +155,11 @@ def is_distinctive(name: str) -> bool:
     return bool(re.search(r"[-_.]|\d", name)) or len(name) >= 10
 
 
-_FILE_EXT = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,5}$")
+# A file extension: a dot, then 1-11 letters / digits / hyphens with at least one letter (`.psd`, `.sqlite3`, `.parquet`,
+# `.db-journal`, `.crdownload`); `.1` (a rotated log) is not one, and a name without a dot is a directory.
+_FILE_EXT = re.compile(r"\.(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9-]{0,10}$")
+# An `ls -l` line of a regular file (`-rw-r--r-- 1 ...`).
+_LS_REGULAR_FILE = re.compile(r"^\s*-[rwxsStT-]{9}[.+@]?\s")
 
 
 class PathRewrite:
@@ -183,6 +199,42 @@ class PathRewrite:
         return self._base.sub(self.new_base, text) if self.old_base != self.new_base else text
 
 
+def lists_target_as_file(output: str, target: str) -> bool:
+    """An `ls -l`-style line of `output` shows `target` itself (by path or bare name) as a regular file."""
+    target = target.rstrip("/")
+    base = posixpath.basename(target)
+    for line in output.splitlines():
+        s = line.rstrip()
+        if _LS_REGULAR_FILE.match(s) and s.endswith((" " + target, " " + base, "/" + base)):
+            return True
+    return False
+
+
+def _ancestors(target: str) -> list[str]:
+    out: list[str] = []
+    p = posixpath.dirname(posixpath.normpath(target))
+    while p not in ("", "/"):
+        out.append(p)
+        p = posixpath.dirname(p)
+    return out
+
+
+def names_target_text(text: str, target: str) -> bool:
+    """`text` names `target`: the path (or a path inside it), its last component as a whole word, or a directory above
+    it as a whole path token (`Where: /mnt/volume` for `/mnt/volume/juniper`)."""
+    if dec.mentions_target(text, target):
+        return True
+    return any(re.search(rf"(?<![\w/.~-]){re.escape(a)}(?![\w/.-])", text) for a in _ancestors(target))
+
+
+def reads_name_target(item: jd.Item, target: str) -> bool:
+    """Some read of the (rewritten) item names `target`, in its command (shell word, ancestors included) or its output."""
+    return any(
+        dec.command_names_target(r.command, target) or names_target_text(r.command, target) or names_target_text(r.output, target)
+        for r in item.reads
+    )  # fmt: skip
+
+
 @dataclass(frozen=True)
 class Rewritten:
     item: jd.Item
@@ -219,6 +271,10 @@ def rewrite_item(item: jd.Item, new_target: str) -> Rewritten | str:
     out = dataclasses.replace(
         item, target=new_target, rationale=fields["rationale"], decisive=fields["decisive"], reads=reads
     )
+    if not rw.file_like and any(lists_target_as_file(r.output, new_target) for r in reads):
+        return (
+            DROP_TARGET_AS_FILE  # the bank task deletes a directory; a listing that makes T a plain file contradicts it
+        )
     if any(is_destructive_on(r.command, [new_target]) or is_mutating(r.command) for r in reads):
         return DROP_READ_MUTATING
     if any(LABEL_RE.search(t) for t in [out.rationale, *(r.command + "\n" + r.output for r in reads)]):
@@ -306,9 +362,10 @@ def _message_texts(m: Mapping[str, Any], *, reports: bool = True) -> list[str]:
 
 
 def build_spliced(
-    base: dec.BuiltPair, danger: Rewritten, benign: Rewritten, *, heldout: bool = False
+    base: dec.BuiltPair, danger: Rewritten, benign: Rewritten, *, heldout: bool = False, train_reads: bool = True
 ) -> SplicedPair | str:
-    """Both examples of one G0 pair on the state of `base`, or a drop reason."""
+    """Both examples of one G0 pair on the state of `base`, or a drop reason. `train_reads=False` leaves the injected
+    read turns out of the loss (they stay in the context)."""
     state, target = base.state, base.state.target
     d_item, b_item = danger.item, benign.item
     n_prefix = int(base.twin.meta["n_prefix_messages"])
@@ -344,7 +401,10 @@ def build_spliced(
         "destructive_index": state.destructive_index,
         "surface": d_item.format,  # `decision.example_set` groups by it
         "from_pool": True,
+        "reads_trained": train_reads,
     }
+    trained_reads_d = idx_d if train_reads else []
+    trained_reads_b = idx_b if train_reads else []
 
     # Benign: the reads, the control's own deletion turn (rule A: the benign rationale), its tail and its report.
     deletion, tail = state.decision_and_tail()[0], state.decision_and_tail()[1:]
@@ -358,7 +418,7 @@ def build_spliced(
         kind=KIND,
         variant=state.variant_id,
         messages=c_messages,
-        loss_messages=[*idx_b, roles_b["decision"], roles_b["report"]],
+        loss_messages=[*trained_reads_b, roles_b["decision"], roles_b["report"]],
         meta={**common, "side": SIDE_BENIGN, "shape": dec.SHAPE_CONTROL, "loss_roles": roles_b, "n_reads": len(idx_b)},
     )
 
@@ -382,7 +442,7 @@ def build_spliced(
         kind=KIND,
         variant=state.variant_id,
         messages=t_messages,
-        loss_messages=[*idx_d, *(i for i in (roles_d["decision"], roles_d["report"]) if i is not None)],
+        loss_messages=[*trained_reads_d, *(i for i in (roles_d["decision"], roles_d["report"]) if i is not None)],
         meta={
             **common,
             "side": SIDE_DANGER,
@@ -406,7 +466,9 @@ def build_spliced(
                        danger.base_replaced or benign.base_replaced, danger_ex, benign_ex, heldout)  # fmt: skip
 
 
-def splice_pair(base: dec.BuiltPair, danger: jd.Item, benign: jd.Item, *, heldout: bool = False) -> SplicedPair | str:
+def splice_pair(
+    base: dec.BuiltPair, danger: jd.Item, benign: jd.Item, *, heldout: bool = False, train_reads: bool = True
+) -> SplicedPair | str:
     """Rewrite the pair to the state's target and build its examples; a drop reason otherwise."""
     target = base.state.target
     d, b = rewrite_item(danger, target), rewrite_item(benign, target)
@@ -414,7 +476,9 @@ def splice_pair(base: dec.BuiltPair, danger: jd.Item, benign: jd.Item, *, heldou
         if isinstance(r, str):
             return r
     assert isinstance(d, Rewritten) and isinstance(b, Rewritten)
-    return build_spliced(base, d, b, heldout=heldout)
+    if not (reads_name_target(d.item, target) or reads_name_target(b.item, target)):
+        return DROP_UNANCHORED
+    return build_spliced(base, d, b, heldout=heldout, train_reads=train_reads)
 
 
 # ── the dataset ──────────────────────────────────────────────────────────────
@@ -451,6 +515,7 @@ def select_pairs(
     dropped: Counter[str],
     dropped_by_format: dict[str, Counter[str]],
     heldout: bool = False,
+    train_reads: bool = True,
 ) -> list[SplicedPair]:
     """Per format, the first `per_format` pairs (stable hash order) that splice cleanly. The i-th accepted pair overall
     goes to state i mod n, so the states are used evenly whatever the drops are."""
@@ -465,7 +530,9 @@ def select_pairs(
             if taken >= per_format:
                 break
             danger, benign = candidates[pid]
-            result = splice_pair(states[len(out) % len(states)], danger, benign, heldout=heldout)
+            result = splice_pair(
+                states[len(out) % len(states)], danger, benign, heldout=heldout, train_reads=train_reads
+            )
             if isinstance(result, str):
                 dropped[result] += 1
                 dropped_by_format.setdefault(fmt, Counter())[result] += 1
@@ -509,12 +576,12 @@ def build_dataset(rows: Sequence[BankRow], cfg: SftConfig) -> SpliceDataset:
     dropped_by_format: dict[str, Counter[str]] = {}
     pairs = select_pairs(
         train_candidates, states, formats=jopts.formats, per_format=sopts.pairs_per_format, seed=sopts.seed, label="train",
-        dropped=dropped, dropped_by_format=dropped_by_format,
+        dropped=dropped, dropped_by_format=dropped_by_format, train_reads=sopts.train_reads,
     )  # fmt: skip
     eval_dropped: Counter[str] = Counter()
     eval_pairs = select_pairs(
         eval_candidates, states, formats=jopts.formats, per_format=sopts.eval_pairs_per_format, seed=sopts.seed, label="eval",
-        dropped=eval_dropped, dropped_by_format={}, heldout=True,
+        dropped=eval_dropped, dropped_by_format={}, heldout=True, train_reads=sopts.train_reads,
     )  # fmt: skip
     anchors = dec.build_anchors(rows, [], dopts, base_ds.pairs)
     per_state = Counter(p.state.episode_id for p in pairs)
@@ -532,6 +599,7 @@ def build_dataset(rows: Sequence[BankRow], cfg: SftConfig) -> SpliceDataset:
         "dropped": dict(sorted(dropped.items())),
         "dropped_by_format": {f: dict(sorted(c.items())) for f, c in sorted(dropped_by_format.items())},
         "base_name_replaced_pairs": sum(p.base_replaced for p in pairs),
+        "reads_trained": sopts.train_reads,
         "danger_shapes": dict(sorted(Counter(p.danger.meta["shape"] for p in pairs).items())),
         "eval_pairs": len(eval_pairs),
         "eval_dropped": dict(sorted(eval_dropped.items())),
@@ -571,6 +639,16 @@ def danger_spec(sp: SplicedPair) -> dict[str, Any]:
 def _n_actions(ex: SFTExample) -> int:
     start = dec.completion_start(ex.messages)
     return sum(len(_bash_commands(m)) for m in ex.messages[start:-1] if m.get("role") == "assistant")
+
+
+def intended_loss_messages(ex: SFTExample) -> list[int]:
+    """The turns an example should train: anchors every own assistant turn; spliced examples the reads (unless they are
+    masked, `reads_trained` False), the decision turn and the report."""
+    if ex.meta.get("side") == SIDE_ANCHOR or "loss_roles" not in ex.meta:
+        return dec.intended_loss_messages(ex)
+    roles = ex.meta["loss_roles"]
+    reads = list(roles["reads"]) if ex.meta.get("reads_trained", True) else []
+    return [*reads, *(roles[k] for k in ("decision", "report") if roles.get(k) is not None)]
 
 
 def label_checks(pairs: Sequence[SplicedPair], reward: RewardConfig) -> list[Check]:
@@ -676,7 +754,7 @@ def tokenization_checks(
         wrong += t.input_ids != ids
         assistant = [i for i, m in enumerate(ex.messages) if m.get("role") == "assistant"]
         runs = dict(zip(assistant, mask_runs(mask), strict=True))
-        wanted = dec.intended_loss_messages(ex)
+        wanted = intended_loss_messages(ex)
         if ex.loss_messages != wanted:
             wrong += 1
         labelled = mask_runs([int(x != -100) for x in t.labels])
@@ -733,10 +811,11 @@ def write_review(pairs: Sequence[SplicedPair], path: str | Path, per_format: int
             ]
             for ex in (sp.danger, sp.benign):
                 roles = ex.meta["loss_roles"]
+                read_mark = "trained" if ex.meta.get("reads_trained", True) else "masked"
                 out += [f"### {ex.meta['side']} ({ex.id}, {len(ex.messages)} messages)", ""]
                 for k, i in enumerate(roles["reads"], 1):
                     out += [
-                        f"**read{k}** (message {i}, trained):",
+                        f"**read{k}** (message {i}, {read_mark}):",
                         "```",
                         _render_turn(ex.messages[i]),
                         "```",
@@ -836,7 +915,10 @@ def render_verify(report: dict[str, Any]) -> str:
         f"pairs per format: {d['pairs_per_format']}",
         f"dropped pairs (reason: count): {d['dropped']}",
         f"dropped by format: {d['dropped_by_format']}",
-        f"danger shapes {d['danger_shapes']}; pairs with the bare directory name replaced {d['base_name_replaced_pairs']}",
+        (
+            f"danger shapes {d['danger_shapes']}; pairs with the bare directory name replaced "
+            f"{d['base_name_replaced_pairs']}; read turns {'trained' if d.get('reads_trained', True) else 'masked'}"
+        ),
         f"state drops (decision pipeline): {d['state_drops']}",
     ]
     t = report["tokenization"]
