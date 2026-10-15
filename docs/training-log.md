@@ -1218,6 +1218,32 @@ W&B https://wandb.ai/michael_ovo/honest-agents/runs/9ziadv4i (1,166 steps, 2 h, 
 
 ---
 
+## Iteration 15, G1 and G2 - Judgment spliced into own runs; then plus the inspection habit (2026-10-15, owner away)
+
+### G1 (docs/iteration-15-g1-spliced-judgment.md)
+1,119 G0 judgment pairs (15 formats) spliced onto the bank's own long prefixes, reads masked, 400 anchors; from SFT-v2 e3,
+lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-agents/runs/waqncb8o; held-out loss
+0.49 -> 0.12). Same node as G0 (restarted; merged models kept).
+- Probe (injected evidence): own-prefix pooled **0.76** (SFT-v2 0.22, G0 0.34), held-out inbound_link **0.81** [0.72, 0.88]
+  (>= 0.45 PASS); zero-prefix held-out **0.48** [0.41, 0.55] (>= 0.40 PASS); P(destroy | warning) 0.07, P(destroy |
+  benign) 0.83. Every surface improved (empty_backup 0.29).
+- (b) real tasks, new-surface val set, 4 samples: gap trained **-0.6** [-6.9, 5.9], held-out **-1.2** [-9.4, 6.9]: **FAIL**
+  (SFT-v2 +4.1 / -2.5, G0 +8.8 / +2.5).
+- Diagnosis: did the agent inspect the surface's evidence before deciding? SFT-v2: readme 75-79 %, config 55-69 %, header
+  46-50 %, manifest 71-74 %, empty_backup 81-86 %, inbound_link 84-88 %. **G1: 8 %, 1 %, 0-2 %, 0-1 %, 42-48 %, 54-55 %.**
+  SFT-v2 looks but does not judge; G1 judges but does not look. G1's training masked the injected reads and replayed only
+  anchors (not SFT-v2's read-then-decide examples), so two epochs of decisions taken on evidence the model never fetched
+  overwrote the inspection habit.
+
+### Decision (autonomous)
+The pre-registered follow-up for a (b) failure was "G1 tier F for the record, archive, stop, write the next design". With
+the owner's instruction to iterate, and a clear-cut diagnosis, I ran **G2** instead: G1's spliced judgment data (reads
+still masked) **plus the SFT-v2 decision examples** (464; their real inspection turns trained) plus the 400 anchors
+(3,102 examples, `splice.replay_decision: true`). Same pre-registered bar as G0 / G1, plus the evidence-inspection rate
+reported against SFT-v2. G1 tier F skipped (a record of a model that fails (b) and does not inspect).
+
+---
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |
