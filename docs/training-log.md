@@ -1174,6 +1174,50 @@ gated on held-out discrimination, before any full iteration.
 
 ---
 
+## Iteration 15, G0 - Decoupled judgment set (2026-10-14/15)
+
+### Design
+`docs/iteration-15-g0-judgment-test.md`: 5,120 Sonnet-authored counterfactual decision items (16 evidence formats x 160
+pairs; held-out transfer formats empty_backup / inbound_link excluded), Fable-reviewed twice (held-out leaks, side
+cues, contents-vs-directory deletes fixed); LoRA SFT on top of SFT-v2 epoch 3, lr 5e-5, 2 epochs, 4,096 judgment +
+564 replay examples (anchors capped at 100). Node: 1x RTX PRO 6000 Max-Q 96 GB (Japan, $1.46/h), instance 55983325.
+W&B https://wandb.ai/michael_ovo/honest-agents/runs/9ziadv4i (1,166 steps, 2 h, train loss 0.22).
+
+### Results (pre-registered checks; SFT-v2 epoch 3 as reference on the same prompts)
+- (d) learnability, zero-prefix probe, held-out surfaces: **0.34** [0.28, 0.40] vs 0.19; threshold 0.40: **FAIL**
+  (empty_backup -0.04 -> 0.21; inbound_link 0.23 -> 0.38).
+- (a) deployment, own-prefix probe: held-out (inbound_link) **0.42** [0.33, 0.49] vs 0.30, threshold 0.45: **FAIL**;
+  pooled **0.34** [0.30, 0.37] vs 0.22 [0.19, 0.25], threshold 0.35: **FAIL** (narrowly). P(destroy | warning) 0.40 -> 0.27
+  with P(destroy | benign) 0.62 -> 0.61: more selective, not more cautious.
+- (b) new-surface val set (rebuilt; 120 pairs passed G1 this time, the flaky source included), 4 samples, gap = twin
+  `abstain_correct` minus control decline rate, paired over sources: held-out **+2.5 [-6.9, +11.9]** vs SFT-v2 -2.5
+  [-12.5, +6.9]; threshold +15 with lower bound > 0: **FAIL**. Trained surfaces +8.8 [+0.3, +17.2] vs +4.1.
+- (c) tier S: plain verified success 77.5 % (>= 76 PASS), control declines 6.2 % (<= 15 PASS; SFT-v2 13.8 %), control
+  verified success 77.5 % (SFT-v2 65 %); but all-twin `abstain_correct` 56 % (SFT-v2 74 %), high_risk 65 % (67.5 %),
+  `abstain_wrong_reason` 15 (SFT-v2 4).
+- **G0 fails its pre-registered bar.** The judgment set moved discrimination in the right direction everywhere (about
+  +0.12 on the probe, +5 to +10 points on real tasks) and reduced over-refusal on familiar controls, but at about a third
+  of the size the test asked for, and with fewer correct abstentions on the familiar set.
+
+### Observations
+- The model became more selective (deletes less after warnings, as often after benign evidence) rather than more
+  cautious: the first time a method moved discrimination, not just the caution level.
+- Familiar-set abstention fell (74 -> 56 %) with more wrong-reason reports: the short judgment items teach a different
+  report shape than the agentic splices, and the replay was cut to 564 examples.
+- Pre-registered reading: (d) fails -> not learnable *this way* at 4B; candidates are the 9B, reasoning mode, or the
+  judgment items spliced into own agentic prefixes (closing the short-item vs long-context gap).
+
+### Incidents
+- The stopped iteration-14 node could not be restarted (GPUs re-rented): new node, rebuilt eval sets (identical
+  command; the flaky source passed G1 this time).
+- First training attempt shared the GPU with a vLLM evaluation: 18 s/step (compute-bound, VRAM idle). Alone: 5.2 s/step.
+  Disabling gradient checkpointing gave 3.75 s/step but OOMed at 11.8k-token replay examples. Rule: never share the
+  training GPU with an evaluation server.
+- verify_g0's marker directory did not exist yet (created by another step): fixed with mkdir -p.
+- Cost: ~6.5 h of $1.46/h (~$9.5).
+
+---
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |

@@ -73,3 +73,8 @@ replay = every SFT-v2 decision twin/control example (464) + at most 100 anchors 
 Fail -> the judgment is not learnable this way at 4B; next: 9B base, or reasoning-mode training.
 
 Cost: node restart ~0.3 h, training ~0.7 h, evaluations ~1.3 h: ~2.5 h, ~$4.
+
+## Result (2026-10-15)
+
+FAIL on (a), (b), (d); PASS on (c). Discrimination improved everywhere (probe pooled 0.22 -> 0.34, held-out
+real-task gap -2.5 -> +2.5, trained +4.1 -> +8.8) but well short of the thresholds. Details in docs/training-log.md.
