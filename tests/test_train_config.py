@@ -1312,6 +1312,10 @@ def stub_trainer(monkeypatch):
         for module in (run_module, startup_module):
             if hasattr(module, name):
                 monkeypatch.setattr(module, name, lambda *a, **k: None)
+    import honest_agents.env as env_module
+
+    # `train()` imports it at call time: no Docker probe container from a unit test (none on a laptop without Docker)
+    monkeypatch.setattr(env_module, "preflight_network_policy", lambda *a, **k: False)
     return _StubTrainer
 
 
@@ -1333,6 +1337,25 @@ def test_train_wires_the_callbacks_bank_and_task_order(stub_trainer, data: Simpl
     assert json.loads((out / train.DATA_ORDER_FILE).read_text()) == plan.order
     assert t.trained_from is None and t.saved == str(out / "final")
     bank.use_environment()
+
+
+def test_train_checks_the_network_policy_before_any_trainer_exists(stub_trainer, data: SimpleNamespace, monkeypatch):
+    """Iteration 15 G3: harbor caches its egress-control probe per process, so the check has to run in the training
+    process, with the run's env section, before the trainer (whose environments boot the sandboxes) is built."""
+    import honest_agents.env as env_module
+
+    calls = []
+
+    def preflight(environment_type, enforce):
+        calls.append((environment_type, enforce, len(_StubTrainer.instances)))
+        return True
+
+    monkeypatch.setattr(env_module, "preflight_network_policy", preflight)
+    train.train(_plan(BASE, data))
+    assert calls == [("docker", True, 0)] and len(_StubTrainer.instances) == 1
+    calls.clear()
+    train.train(_plan(BASE, data, "env.enforce_network_policy=false", "seed=3"))
+    assert calls == [("docker", False, 1)]  # the function decides to skip; `train` always asks
 
 
 def test_train_adds_the_validation_probe_and_baselines_only_on_a_fresh_start(stub_trainer, data: SimpleNamespace):
@@ -1371,6 +1394,28 @@ def test_a_run_stopped_by_a_rule_exits_with_its_own_status(stub_trainer, data: S
     assert train.train(_plan(BASE, data, "seed=8")) is True
     assert train.main(["--config", str(BASE), f"data.train_file={data.train}", f"data.eval_file={data.val}",
                        f"output_root={data.root / 'out2'}"]) == train.EXIT_STOPPED_BY_RULE  # fmt: skip
+
+
+def test_the_exit_status_reaches_the_launcher_through_the_status_file(tmp_path, monkeypatch):
+    """`accelerate launch` exits 1 for any non-zero status of the training process, so `python -m honest_agents.train`
+    also writes its status where HONEST_TRAIN_STATUS_FILE points and scripts/train.sh exits with that (3 = stop rule)."""
+    import os
+    import sys
+
+    from honest_agents.train.cli import STATUS_FILE_ENV, record_exit_status
+
+    monkeypatch.delenv(STATUS_FILE_ENV, raising=False)
+    record_exit_status(train.EXIT_STOPPED_BY_RULE)  # no launcher asked: nothing written anywhere
+    path = tmp_path / "status"
+    monkeypatch.setenv(STATUS_FILE_ENV, str(path))
+    record_exit_status(train.EXIT_STOPPED_BY_RULE)
+    assert path.read_text().strip() == "3"
+    done = subprocess.run(
+        [sys.executable, "-m", "honest_agents.train", "--config", str(BASE), "--check-alpha"],
+        env={**os.environ, STATUS_FILE_ENV: str(path)}, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    assert path.read_text().strip() == "0"  # the module entry point records what it exits with
 
 
 def test_train_opens_the_dashboard_run_and_mirrors_after_the_run_log_and_probe(stub_trainer, data, monkeypatch):

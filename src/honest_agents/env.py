@@ -119,9 +119,13 @@ def preflight_network_policy(
     try:
         from harbor.environments.docker.docker import DockerEnvironment
     except ImportError:
+        logger.warning("network policy preflight skipped: harbor's Docker environment is not importable")
         return False
+    # Harbor instantiates `DockerEnvironment` itself for type "docker" (environments/factory.py), and the probe is a
+    # cached classmethod keyed on `cls`: this call and every boot's `self._egress_control_kernel_support()` share the entry.
     probe = getattr(DockerEnvironment, "_egress_control_kernel_support", None)
     if probe is None:
+        logger.warning("network policy preflight skipped: this harbor has no egress-control kernel probe to check")
         return False
     import time
 

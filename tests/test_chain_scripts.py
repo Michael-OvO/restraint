@@ -287,6 +287,47 @@ def _sh(script: str, env, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", str(SCRIPTS / script), *args], env=env, cwd=REPO, capture_output=True, text=True)
 
 
+FAKE_UV_TRAIN = r"""#!/usr/bin/env bash
+# stand-in for `uv run ... {python|accelerate} ARGS` under scripts/train.sh: the --dry-run passes, the config generates
+# in-process (`python -` is uses_vllm_server: no server to wait for), and `accelerate launch` behaves like the real one,
+# which exits 1 for ANY non-zero status of the training process. FAKE_TRAIN_STATUS is what the process exits with and
+# records in HONEST_TRAIN_STATUS_FILE; `crash` is a process that died before recording anything.
+while [[ $# -gt 0 && "$1" != python && "$1" != accelerate ]]; do shift; done
+echo "$*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "accelerate launch")
+    [[ "$FAKE_TRAIN_STATUS" == crash ]] && exit 1
+    echo "$FAKE_TRAIN_STATUS" > "${HONEST_TRAIN_STATUS_FILE:?train.sh did not name a status file}"
+    [[ "$FAKE_TRAIN_STATUS" == 0 ]] && exit 0 || exit 1 ;;
+  "python -") exit 1 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+@pytest.fixture
+def fake_uv_train(tmp_path: Path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "uv").write_text(FAKE_UV_TRAIN)
+    (bin_dir / "uv").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_LOG": str(tmp_path / "calls.log")}
+    env.pop("HONEST_TRAIN_STATUS_FILE", None)
+    return tmp_path, env
+
+
+@pytest.mark.parametrize("status, expected", [("3", 3), ("0", 0), ("crash", 1), ("4", 4)])
+def test_train_sh_exits_with_the_training_process_status_not_the_launchers(fake_uv_train, status, expected):
+    """A stop-rule stop is exit 3 (honest_agents.train.EXIT_STOPPED_BY_RULE) for sweep_alpha.sh and the chain log even
+    though `accelerate launch` turned it into 1; a process that crashed before recording anything stays 1."""
+    tmp, env = fake_uv_train
+    done = _sh("train.sh", {**env, "FAKE_TRAIN_STATUS": status}, "configs/grpo_it15_g3.yaml", "grpo.max_steps=1")
+    assert done.returncode == expected, done.stdout + done.stderr
+    calls = (tmp / "calls.log").read_text().splitlines()
+    assert any("--dry-run" in c for c in calls) and calls[-1].startswith("accelerate launch ")
+    assert "-m honest_agents.train --config configs/grpo_it15_g3.yaml" in calls[-1] and calls[-1].endswith(" grpo.max_steps=1")
+
+
 def test_merge_epochs_merges_each_checkpoint_into_its_epoch_directory(fake_uv):
     tmp, env = fake_uv
     run = _run_dir(tmp, {200: 3.0, 20: 1.0, 110: 2.0})

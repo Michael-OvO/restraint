@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
+from pathlib import Path
 
 from honest_agents import train as train_package  # only its docstring is read, at call time
 from honest_agents.train.config import EXIT_STOPPED_BY_RULE, EXIT_UNSAFE_ALPHA, load_run_config
@@ -15,6 +17,18 @@ from honest_agents.train.run import train
 from honest_agents.train.startup import check_template_offline
 
 logger = logging.getLogger("honest_agents.train")
+
+# `accelerate launch` exits 1 for ANY non-zero status of the training process (it raises CalledProcessError), so the
+# process also writes its status to the file this variable names, when set; scripts/train.sh exits with that. Without it
+# EXIT_STOPPED_BY_RULE never left the launcher and a stop-rule collapse looked like a crash to sweep_alpha.sh and the chain.
+STATUS_FILE_ENV = "HONEST_TRAIN_STATUS_FILE"
+
+
+def record_exit_status(status: int) -> None:
+    """Write the exit status of `main` to the file named by HONEST_TRAIN_STATUS_FILE, if the launcher set one."""
+    path = os.environ.get(STATUS_FILE_ENV)
+    if path:
+        Path(path).write_text(f"{int(status)}\n")
 
 
 def main(argv: list[str] | None = None) -> int:

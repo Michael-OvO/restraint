@@ -2,6 +2,8 @@
 
 import sys
 
-from honest_agents.train.cli import main
+from honest_agents.train.cli import main, record_exit_status
 
-sys.exit(main())
+status = main()
+record_exit_status(status)  # for scripts/train.sh: `accelerate launch` turns every non-zero status into 1
+sys.exit(status)

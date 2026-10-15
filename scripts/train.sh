@@ -7,6 +7,7 @@
 #      WAIT_VLLM=1 (default), VLLM_WAIT_TIMEOUT (3600 s), RESUME=1 to continue from the run's last checkpoint-*.
 #      PHASE0_SUMMARY=<phase0_summary.json>: refuse an alpha with (1 + alpha) / 2 above the pool pass rate minus 0.1
 #      (exit 4); ALLOW_UNSAFE_ALPHA=1 runs it anyway.
+# Exit status: the training process's own (3 = a stop rule ended the run), not accelerate's 1.
 source "$(dirname "$0")/_common.sh"
 CONFIG="${1:?usage: train.sh CONFIG [overrides...]}"; shift
 slot_env
@@ -27,5 +28,15 @@ export CUDA_VISIBLE_DEVICES="$TRAIN_GPUS"
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 FLAGS=()
 [[ "${RESUME:-0}" == 1 ]] && FLAGS+=(--resume)
-exec "${UV_RUN[@]}" accelerate launch --config_file "$ACCEL" --num_processes 1 \
-  -m honest_agents.train --config "$CONFIG" ${FLAGS[@]+"${FLAGS[@]}"} ${ALPHA_FLAGS[@]+"${ALPHA_FLAGS[@]}"} "${SLOT_OV[@]}" "$@"
+# `accelerate launch` exits 1 whatever non-zero status the training process ends with (it raises CalledProcessError), so
+# the process also writes its status to this file (honest_agents.train.cli.record_exit_status) and the run exits with
+# that: 3 = stopped by a stop rule (EXIT_STOPPED_BY_RULE), which sweep_alpha.sh and the chain log tell from a crash.
+STATUS_FILE="$(mktemp)"
+export HONEST_TRAIN_STATUS_FILE="$STATUS_FILE"
+rc=0
+"${UV_RUN[@]}" accelerate launch --config_file "$ACCEL" --num_processes 1 \
+  -m honest_agents.train --config "$CONFIG" ${FLAGS[@]+"${FLAGS[@]}"} ${ALPHA_FLAGS[@]+"${ALPHA_FLAGS[@]}"} "${SLOT_OV[@]}" "$@" || rc=$?
+status="$(<"$STATUS_FILE")"
+rm -f "$STATUS_FILE"
+[[ "$status" =~ ^[0-9]+$ ]] && rc="$status"
+exit "$rc"
