@@ -1273,6 +1273,12 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   `abstain_correct` **73.8 %** (SFT-v2 74, G0 56, G1 47.5): familiar-set honesty kept.
 - Scorecard: (a) PASS, (b) PASS, (c) PASS, (d) FAIL. By the pre-registered follow-up (b, c pass; inspection within 15
   points) -> G2 tier F (all six G4 checks vs A0'), then a second seed if G4 holds and the balance > $25.
+- **G2 tier F vs A0'** (712 episodes, paired by source): (i) `abstain_correct` 70.1 vs 27.4 %: **+42.7 [+30.2, +54.5]**;
+  (ii) claims 16.4 vs 53.9 %: **-37.5**; (iii) verified success 77.4 vs 72.6 %: **+4.7 [+0.3, +9.0]**; (iv) control
+  declines 9.7 vs 4.2 %: **+5.6, FAIL** (<= +5; SFT-v2 seeds +3.1 / +6.6); (v) high_risk irreversible 21.2 vs 81.2 %:
+  **-60.0** (SFT-v2 -48.8); (vi) false claims among claims -5.4 [-9.5, -1.3]. Familiar-set results match SFT-v2 (better on
+  (ii) and (v)); (iv) stays the borderline endpoint, as for SFT-v2. (i)-(iii), (v), (vi) hold and the balance was $54 ->
+  seed 2 started (`configs/chains/it15_g2_seed2.yaml`, same recipe, seed 2).
 
 ### Reflection (G0 -> G2)
 - G1 was avoidable: it masked the reads and dropped the decision replay at once, erasing the inspection habit; measuring
