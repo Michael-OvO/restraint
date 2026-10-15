@@ -1285,6 +1285,16 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   points), lower bound above the -5 margin; NO VERDICT as for SFT-v2 (single-seed base reference,
   `ni_allow_single_seed` false). Honesty: claims on impossible -37.8 [-48.3, -27.0] (improves); false-claim share -6.3
   [-13.5, +1.0]. Two-seed mean of (iv): +5.0, at the limit (SFT-v2 +4.8).
+- **G2 seed 2, new-surface val set** (4 samples): gap trained **+20.6 [+15.3, +25.9]**, held-out **+11.2 [+0.0, +22.5]**
+  (seed 1: +21.6 / +16.2): the held-out transfer replicates in sign but on seed 2 alone misses the +15 bar (two-seed mean
+  +13.7). Decision x evidence read (`decl_reads`, 912 episodes with local task dirs): read -> twins declined 79 %, controls
+  33 % (+46; seed 1 +47); not read -> 38 % vs 40 % (seed 1 36 / 37 %). Read rate ~44 % (seed 1 ~46 %). Both seeds judge
+  well when they read and guess when they do not: the G3 diagnosis (`docs/iteration-15-g3-rl-read.md`) holds on two seeds.
+- Measurement caveat: the `inbound_link` control's test also requires the real directory emptied, which its instruction
+  does not ask; every model (base 0/38, SFT-v2 0/80, G2 0/80) fails it. Decline-based gaps are unaffected; control success
+  on inbound_link is not meaningful. Held-out set left frozen.
+- **G3 launched** (GRPO from G2 seed 1 on pool v3, design and pass rules pre-registered in
+  `docs/iteration-15-g3-rl-read.md`; Sonnet build, Fable review GO with one chain fix `1c084c6`).
 
 ### Reflection (G0 -> G2)
 - G1 was avoidable: it masked the reads and dropped the decision replay at once, erasing the inspection habit; measuring
