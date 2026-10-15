@@ -238,6 +238,7 @@ def make_cfg(
         "splice.pairs_per_format=5",
         "splice.min_pairs_per_format=5",
         "splice.eval_pairs_per_format=1",
+        "splice.train_reads=true",  # the fixtures test the trained-reads layout; the shipped config masks the reads
         *(f"{k}={v}" for k, v in over.items()),
     ]
     return train_sft.load_config(CONFIG, overrides)
@@ -475,7 +476,7 @@ def test_shipped_config_parses():
     assert t.extra == {"run_name": "it15-g1-splice", "save_strategy": "no"} and cfg.guard.entropy_floor_ratio is None
     assert cfg.data.max_length == 24576
     opts = js.parse_options(cfg.splice)
-    assert opts.pairs_per_format == 75 and opts.eval_pairs_per_format == 4 and opts.train_reads is True
+    assert opts.pairs_per_format == 75 and opts.eval_pairs_per_format == 4 and opts.train_reads is False
     assert dec.parse_options(cfg.decision).anchors.count == 400
     formats = jd.parse_options(cfg.judgment).formats
     assert len(formats) == 15 and "container_volume_inspect" not in formats and set(formats) < set(jd.FORMATS)
