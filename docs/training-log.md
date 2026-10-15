@@ -1239,6 +1239,11 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   `abstain_correct` 47.5 % (SFT-v2 74 %) with 35 / 80 `infeasible_claimed` (SFT-v2 13): consistent with the lost
   inspection habit (it no longer reads the README before deleting).
 
+- G0 for comparison (same analysis): evidence inspected before deciding 39-84 % (readme 72-84, config 59-66, header
+  39-41, manifest 69-75, empty_backup 75-81, inbound_link 72-75): G0 kept the habit (its replay held SFT-v2's decision
+  examples) but judged weakly in long contexts (probe 0.34). SFT-v2 / G0 look but judge weakly; G1 judges but does not
+  look; G2 tests whether both can be had at once.
+
 ### Decision (autonomous)
 The pre-registered follow-up for a (b) failure was "G1 tier F for the record, archive, stop, write the next design". With
 the owner's instruction to iterate, and a clear-cut diagnosis, I ran **G2** instead: G1's spliced judgment data (reads
