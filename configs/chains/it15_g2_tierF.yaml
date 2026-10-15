@@ -1,0 +1,23 @@
+# Iteration 15 G2 follow-up (pre-registered in docs/training-log.md): tier F of G2 on the old validation set (all six
+# G4 checks against A0'), one 96 GB GPU, 4 samples, concurrency 24 (30 CPUs).
+name: it15g2f
+state_dir: outputs/chain/it15g2f
+sequential: true
+instance_id: null
+balance_floor: 25
+steps:
+  - name: g2_tierF
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it15_g2_tierF --n-samples 4 --concurrency 28
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g2_tierF/metrics.json
+    after: []
+    timeout_min: 150
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    progress: {pattern: '^\[(\d+)/712\]', total: 712}
+final:
+  command: "true"
+  timeout_min: 5
