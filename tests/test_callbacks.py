@@ -624,9 +624,9 @@ def test_truncated_share_rule_uses_the_absolute_ceiling():
 def test_masked_collapse_fires_on_two_consecutive_steps_not_one():
     """Iteration 15 G3: all boots failed, masked share 1.0 every step, and the 20-step window rule waited."""
     bad = healthy(**{MASKED: 1.0, "honest/masked/boot_failure": 1.0, "honest/masked/toolchain": 0.0})
-    fired = feed(rules(), [healthy(), bad, healthy(), bad])
+    fired = feed(StopRules(StopRuleConfig(window=20)), [healthy(), bad, healthy(), bad])
     assert fired == {}  # never two in a row
-    stop = rules()
+    stop = StopRules(StopRuleConfig(window=20))
     fired = feed(stop, [healthy(), bad, bad])
     assert fired == {3: [callbacks.RULE_MASKED_COLLAPSE]}
     trig = StopRules(StopRuleConfig(window=20)).observe(1, bad)
@@ -636,5 +636,5 @@ def test_masked_collapse_fires_on_two_consecutive_steps_not_one():
     (t,) = s2.observe(2, bad)
     assert "boot_failure" in t.detail
     assert StopRuleConfig().masked_fail_share == 0.5 and StopRuleConfig().masked_fail_patience == 2
-    assert feed(rules(masked_fail_patience=3), [bad, bad]) == {}
-    assert feed(rules(), [healthy(**{MASKED: 0.49})] * 4) == {}
+    assert feed(StopRules(StopRuleConfig(window=20, masked_fail_patience=3)), [bad, bad]) == {}
+    assert feed(StopRules(StopRuleConfig(window=20)), [healthy(**{MASKED: 0.49})] * 4) == {}
