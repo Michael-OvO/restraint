@@ -619,3 +619,22 @@ def test_truncated_share_rule_uses_the_absolute_ceiling():
     cfg = callbacks.StopRuleConfig(window=4)
     assert _drift_rules(cfg, {callbacks.METRIC_TRUNCATED: 0.2}) == []
     assert _drift_rules(cfg, {callbacks.METRIC_TRUNCATED: 0.5}) == [callbacks.RULE_TRUNCATED]
+
+
+def test_masked_collapse_fires_on_two_consecutive_steps_not_one():
+    """Iteration 15 G3: all boots failed, masked share 1.0 every step, and the 20-step window rule waited."""
+    bad = healthy(**{MASKED: 1.0, "honest/masked/boot_failure": 1.0, "honest/masked/toolchain": 0.0})
+    fired = feed(rules(), [healthy(), bad, healthy(), bad])
+    assert fired == {}  # never two in a row
+    stop = rules()
+    fired = feed(stop, [healthy(), bad, bad])
+    assert fired == {3: [callbacks.RULE_MASKED_COLLAPSE]}
+    trig = StopRules(StopRuleConfig(window=20)).observe(1, bad)
+    assert trig == []
+    s2 = StopRules(StopRuleConfig(window=20))
+    s2.observe(1, bad)
+    (t,) = s2.observe(2, bad)
+    assert "boot_failure" in t.detail
+    assert StopRuleConfig().masked_fail_share == 0.5 and StopRuleConfig().masked_fail_patience == 2
+    assert feed(rules(masked_fail_patience=3), [bad, bad]) == {}
+    assert feed(rules(), [healthy(**{MASKED: 0.49})] * 4) == {}

@@ -564,6 +564,9 @@ def _check_resumable(out: Path, args: argparse.Namespace, rollout_cfg: RolloutCo
 
 
 def evaluate(args: argparse.Namespace) -> dict:
+    from honest_agents.env import preflight_network_policy
+
+    preflight_network_policy(args.environment_type, not args.no_network_enforcement)
     out = Path(args.out)
     (out / "transcripts").mkdir(parents=True, exist_ok=True)
     rollout_cfg, reward_cfg, budget = resolve_configs(args)

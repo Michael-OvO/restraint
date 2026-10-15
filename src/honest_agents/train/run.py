@@ -224,6 +224,9 @@ def train(plan: Plan, resume: bool = False) -> bool:
 
         bundle = ensure_bundle(Path(plan.cfg.env.verifier_bundle_dir) if plan.cfg.env.verifier_bundle_dir else None)
         logger.info("verifier bundle: %s", bundle)
+    from honest_agents.env import preflight_network_policy
+
+    preflight_network_policy(plan.cfg.env.environment_type, plan.cfg.env.enforce_network_policy)  # before vLLM and boots
     out = Path(plan.grpo_config.output_dir)
     ckpt = _last_checkpoint(out) if resume else None
     if resume and ckpt is None:

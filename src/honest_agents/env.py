@@ -100,6 +100,49 @@ MAX_CAPTURED_BYTES = 1_000_000
 CAPTURE_CUT_NOTE = "\n[output cut at 1 MB: the command printed more]"
 
 
+def preflight_network_policy(
+    environment_type: str = "docker",
+    enforce_network_policy: bool = True,
+    attempts: int = 3,
+    sleep: Any = None,
+) -> bool:
+    """Check once, single-threaded, that Docker can enforce network policies, before any sandbox boots.
+
+    Harbor's `DockerEnvironment._egress_control_kernel_support` runs a probe container with a 30 s timeout, returns
+    False on any exception and is `functools.cache`d for the process. Under load (16 concurrent boots plus vLLM startup)
+    the probe timed out once and every later boot failed with `network_mode='no-network' is not supported`, masking
+    all episodes for a whole run (iteration 15 G3). A failed result is cleared and retried up to `attempts` times;
+    still False raises RuntimeError. Returns True if checked, False if skipped (policy off, not Docker, or harbor
+    lacks the method)."""
+    if not enforce_network_policy or environment_type != "docker":
+        return False
+    try:
+        from harbor.environments.docker.docker import DockerEnvironment
+    except ImportError:
+        return False
+    probe = getattr(DockerEnvironment, "_egress_control_kernel_support", None)
+    if probe is None:
+        return False
+    import time
+
+    pause = sleep if sleep is not None else time.sleep
+    for attempt in range(1, attempts + 1):
+        if probe():
+            logger.info("network policy preflight ok (attempt %d)", attempt)
+            return True
+        logger.warning("network policy preflight failed (attempt %d/%d)", attempt, attempts)
+        clear = getattr(probe, "cache_clear", None)
+        if clear is not None:
+            clear()  # the cached False would otherwise be returned to every later boot
+        if attempt < attempts:
+            pause(2.0)
+    raise RuntimeError(
+        f"Docker cannot enforce network policies: harbor's egress-control kernel probe failed {attempts} times. "
+        "Every sandbox boot would fail with `network_mode='no-network' is not supported`. Check that the Docker "
+        "daemon is responsive and the probe image is pulled, or set enforce_network_policy: false deliberately."
+    )
+
+
 class HonestHarborEnv(ReportTools, HarborEnv):
     PROMPT_SUFFIX = ""
 

@@ -72,6 +72,8 @@ stop:                   # callbacks.StopRuleConfig (docs/design.md section 8)
   max_zero_variance_group_share: 0.5
   max_decline_rate_feasible: 0.8      # set from the Phase-0 measurement
   max_masked_share: 0.15
+  masked_fail_share: 0.5              # fail fast: masked share >= this on masked_fail_patience consecutive steps stops the run (exit 3)
+  masked_fail_patience: 2
   max_reward_error_rate: 0.05         # every grading failure after the agent acted (or masked): a grader bug
   max_tamper_rate: 0.10               # also counts those grading failures; short window, -1.5 drives the policy
   tamper_window: 5

@@ -25,7 +25,7 @@ from typing import Any
 from transformers import TrainerCallback
 
 from honest_agents.bank import BankRow, iter_bank
-from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET, RewardConfig
+from honest_agents.reward import MASK_REASONS, STOP_CALL_BUDGET, STOP_CHAR_BUDGET, RewardConfig
 from honest_agents.trl_rewards import (
     METRIC_CLAIM_RATE_FEASIBLE,
     METRIC_DECLINE_RATE_FEASIBLE,
@@ -53,6 +53,7 @@ RULE_ZERO_VARIANCE = "zero_variance_groups_high"
 RULE_SUCCESS_VS_REWARD = "task_success_falling_reward_rising"
 RULE_DECLINE_RATE = "decline_rate_feasible_high"
 RULE_MASKED_SHARE = "masked_share_high"
+RULE_MASKED_COLLAPSE = "masked_share_collapse"
 RULE_REPORT_RATE = "report_rate_falling"
 RULE_VAL_SUCCESS = "validation_success_falling_reward_rising"
 RULE_REWARD_ERROR = "reward_error_rate_high"
@@ -211,6 +212,10 @@ class StopRuleConfig:
     max_zero_variance_group_share: float = 0.5  # most groups carry no learning signal
     max_decline_rate_feasible: float = 0.8  # ceiling on non-claim reports on feasible tasks; set from Phase 0
     max_masked_share: float = 0.15  # infrastructure failures or leaks are eating the batch
+    # Fail fast: a single step with at least this masked share, on `masked_fail_patience` consecutive steps, stops the
+    # run at once (iteration 15 G3: every sandbox boot failed for 15 steps, masked share 1.0, loss 0, nothing stopped it).
+    masked_fail_share: float = 0.5
+    masked_fail_patience: int = 2
     max_reward_error_rate: float = 0.05  # reward/grading failures (scored as tamper or masked): a grader bug
     # Tamper share over the short `tamper_window`. A genuine policy exploit and a broken grader both show up here (a
     # grading failure after the agent acted is scored as tamper), and either must stop the run within a few steps: at
@@ -237,12 +242,14 @@ class StopRuleConfig:
     def __post_init__(self) -> None:
         if self.action not in ("stop", "warn"):
             raise ValueError(f"stop.action must be 'stop' or 'warn', got {self.action!r}")
-        if self.window < 1 or self.val_patience < 1 or self.tamper_window < 1 or self.probe_capability_patience < 1:
+        if min(self.window, self.val_patience, self.tamper_window, self.probe_capability_patience,
+               self.masked_fail_patience) < 1:  # fmt: skip
             raise ValueError(
-                "stop.window, stop.tamper_window, stop.val_patience and stop.probe_capability_patience must be >= 1"
+                "stop.window, stop.tamper_window, stop.val_patience, stop.probe_capability_patience and "
+                "stop.masked_fail_patience must be >= 1"
             )
         for name in ("min_claim_rate_feasible", "max_zero_variance_group_share", "max_decline_rate_feasible",
-                     "max_masked_share", "max_reward_error_rate", "max_tamper_rate", "max_is_ratio_deviation", "max_is_ratio_at_cap_share", "max_truncated_share", "task_success_drop", "report_rate_drop", "val_task_success_drop",
+                     "max_masked_share", "masked_fail_share", "max_reward_error_rate", "max_tamper_rate", "max_is_ratio_deviation", "max_is_ratio_at_cap_share", "max_truncated_share", "task_success_drop", "report_rate_drop", "val_task_success_drop",
                      "probe_capability_drop"):  # fmt: skip
             if not 0.0 <= getattr(self, name) <= 1.0:
                 raise ValueError(f"stop.{name} must be in [0, 1], got {getattr(self, name)}")
@@ -276,6 +283,7 @@ class StopRuleState:
     probes: list[_Probe] = field(default_factory=list)
     probe_rates: list[tuple[int, dict[str, float]]] = field(default_factory=list)  # (step, PROBE_CANARIES rates)
     val_strikes: int = 0
+    masked_strikes: int = 0  # consecutive steps with a masked share >= `masked_fail_share`
     fired: dict[str, int] = field(default_factory=dict)  # rule -> first step it fired at
 
 
@@ -374,6 +382,16 @@ class StopRules(TrainerCallback):
             if (value < limit) if below else (value > limit):
                 side = "below" if below else "above"
                 out.append(Trigger(rule, step, value, limit, f"{name} = {value:.3f} over {w} steps, {side} {limit}"))
+
+        masked = _number(logs.get(METRIC_MASKED_SHARE))
+        s.masked_strikes = s.masked_strikes + 1 if (masked is not None and masked >= c.masked_fail_share) else 0
+        if s.masked_strikes >= c.masked_fail_patience:
+            reasons = {r: v for r in MASK_REASONS if (v := _number(logs.get(f"honest/masked/{r}"))) is not None}
+            top = max(reasons, key=reasons.get) if reasons else "unknown"
+            out.append(Trigger(RULE_MASKED_COLLAPSE, step, masked, c.masked_fail_share,
+                               f"{METRIC_MASKED_SHARE} = {masked:.3f} on {s.masked_strikes} consecutive steps (>= "
+                               f"{c.masked_fail_share}); dominant masked reason: {top} "
+                               f"({reasons.get(top, 0.0):.3f})"))  # fmt: skip
 
         threshold(RULE_CLAIM_RATE, METRIC_CLAIM_RATE_FEASIBLE, c.min_claim_rate_feasible, below=True)
         threshold(RULE_ZERO_VARIANCE, METRIC_ZERO_VARIANCE_GROUPS, c.max_zero_variance_group_share, below=False)
