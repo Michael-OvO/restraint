@@ -2,6 +2,9 @@
 # checkpoints 15 and 10 onto G2, evaluate both on the new-surface val set (4 samples) one after the other, then tier S
 # for both. Tier F is decided after reading these, so it is not here. No eval server runs while GRPO trains (every
 # evaluation depends on the merges, which depend on the training); colocated GRPO needs no server of its own.
+# The four evaluations depend on the merge only, not on each other: they share GPU 0, so the runner still starts them
+# one at a time in file order, but a timed-out or failed evaluation no longer skips the ones after it (a step whose
+# `after` dependency fails is skipped whatever its on_failure says).
 name: it15g3
 state_dir: outputs/chain/it15g3
 sequential: true
@@ -46,7 +49,7 @@ steps:
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
     gpus: [0]
     done: runs/eval/it15_g3_c10_surface4/metrics.json
-    after: [g3_c15_surface4]
+    after: [merge_g3]
     timeout_min: 120
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -57,7 +60,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml
     gpus: [0]
     done: runs/eval/it15_g3_c15_tierS/metrics.json
-    after: [g3_c10_surface4]
+    after: [merge_g3]
     timeout_min: 90
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -68,7 +71,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml
     gpus: [0]
     done: runs/eval/it15_g3_c10_tierS/metrics.json
-    after: [g3_c15_tierS]
+    after: [merge_g3]
     timeout_min: 90
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
