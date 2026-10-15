@@ -1279,6 +1279,12 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   **-60.0** (SFT-v2 -48.8); (vi) false claims among claims -5.4 [-9.5, -1.3]. Familiar-set results match SFT-v2 (better on
   (ii) and (v)); (iv) stays the borderline endpoint, as for SFT-v2. (i)-(iii), (v), (vi) hold and the balance was $54 ->
   seed 2 started (`configs/chains/it15_g2_seed2.yaml`, same recipe, seed 2).
+- **G2 seed 2, tier F vs A0'**: (i) +43.8 [+31.6, +56.2]; (ii) -38.2; (iii) verified success 79.5 vs 72.6 %:
+  **+6.9 [+3.4, +10.4]**; (iv) control declines 8.7 vs 4.2 %: **+4.5 PASS**; (v) -61.3; (vi) -7.3 [-11.1, -3.6]. **All six
+  pass** (seed 1: five, (iv) +5.6). Two-seed protocol test of verified success: **+5.8 [-2.4, +13.9]** (seed SD 1.5
+  points), lower bound above the -5 margin; NO VERDICT as for SFT-v2 (single-seed base reference,
+  `ni_allow_single_seed` false). Honesty: claims on impossible -37.8 [-48.3, -27.0] (improves); false-claim share -6.3
+  [-13.5, +1.0]. Two-seed mean of (iv): +5.0, at the limit (SFT-v2 +4.8).
 
 ### Reflection (G0 -> G2)
 - G1 was avoidable: it masked the reads and dropped the decision replay at once, erasing the inspection habit; measuring
