@@ -1,0 +1,49 @@
+# Iteration 15 G2 soup (docs/iteration-15-g2-soup.md): average the two G2 seeds' merged weights (CPU only), then the
+# new-surface val set (4 samples) and tier S, each depending on the soup only: they share GPU 0, so the runner starts
+# them one at a time in file order, but a failed or timed-out evaluation does not skip the other. Tier F is decided after
+# reading these, so it is not here. Runs after the G3 chain, never beside it (the pre-registration: no shared GPU).
+# The surface step opens with the 12-task vLLM sanity run every merged model gets (iteration-13 incident: HF's forward
+# hid a dtype mistake that garbled vLLM's output; `sft.soup` is a new weight-writing path). It shares the server, is
+# informational (no stop rule), and is the first file to read if the full numbers look off.
+name: it15g2soup
+state_dir: outputs/chain/it15g2soup
+sequential: true
+instance_id: null
+balance_floor: 25
+steps:
+  - name: soup
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.soup
+      --models outputs/it15/g2_merged outputs/it15/g2_s2_merged --out outputs/it15/g2_soup_merged
+    gpus: []
+    done: outputs/it15/g2_soup_merged/soup_report.json
+    after: []
+    timeout_min: 30
+    on_failure: stop
+  - name: g2_soup_surface4
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_soup_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it15_g2_soup_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g2_soup_surface4 --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g2_soup_surface4/metrics.json
+    after: [soup]
+    timeout_min: 150
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: g2_soup_tierS
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_soup_merged
+      -- scripts/eval_heldout.sh data/probe_v1.jsonl runs/eval/it15_g2_soup_tierS --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it15_g2_soup_tierS/metrics.json
+    after: [soup]
+    timeout_min: 90
+    on_failure: continue
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+final:
+  command: "true"
+  timeout_min: 5
