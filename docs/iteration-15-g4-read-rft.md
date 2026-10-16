@@ -10,6 +10,10 @@ first) did not move the read rate either: those transcripts are not the model's 
 Athanor (arXiv 2610.21055) got its last gains from rejection-sampling fine-tuning on the model's own correct samples
 (keep the shortest correct of 4). Here the filter is the behaviour we want, not only the outcome.
 
+Per surface (G3 c15, `read_diagnosis`): read rate readme 78-82 %, file_header 42-47, manifest 42-49, config_comment
+37-47, held-out empty_backup / inbound_link 29-33 %. The read habit is a README habit (the iteration-3 surface the most
+data trained); the kept examples must therefore over-weight the non-README surfaces (cap readme at 1/4 of the kept set).
+
 ## Design
 1. Sample G2 (seed 1, or the soup if it passes) on the training-surface tasks (`data/decision/surfaces/tasks`, surfaces
    readme / file_header / config_comment / manifest, RL-pool + distill sources; never select / val / test, never the
