@@ -114,6 +114,7 @@ class SftConfig:
     decision: dict[str, Any] = field(default_factory=dict)  # `decision.DecisionOptions` fields (kind decision)
     judgment: dict[str, Any] = field(default_factory=dict)  # `judgment.JudgmentOptions` fields (kind judgment)
     splice: dict[str, Any] = field(default_factory=dict)  # `judgment_splice.SpliceOptions` fields (kind judgment_splice)
+    read_rft: dict[str, Any] = field(default_factory=dict)  # `read_rft.ReadRftOptions` fields (kind read_rft)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -139,6 +140,7 @@ STAGE_MODULES = {
     "decision": "honest_agents.sft.decision",
     "judgment": "honest_agents.sft.judgment",
     "judgment_splice": "honest_agents.sft.judgment_splice",
+    "read_rft": "honest_agents.sft.read_rft",
 }
 
 

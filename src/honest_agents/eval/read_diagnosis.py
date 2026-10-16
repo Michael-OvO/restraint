@@ -58,6 +58,11 @@ def read_before_acting(commands: Sequence[str], site: SurfaceSite) -> bool:
     return False
 
 
+def evidence_read(row: dict[str, Any], site: SurfaceSite) -> bool:
+    """The `read` rule for one run_eval episode row (`episodes.jsonl` line)."""
+    return read_before_acting(commands_of(row), site)
+
+
 def declined(row: dict[str, Any]) -> bool:
     rw = row.get("reward") or {}
     return (not rw.get("claimed_complete")) and bool(rw.get("has_report"))
@@ -82,7 +87,7 @@ def load_episodes(path: Path, tasks_root: Path) -> tuple[list[dict[str, Any]], i
             "source": r.get("source_task"),
             "surface": surface_of(r),
             "twin": not r["feasible"],
-            "read": read_before_acting(commands_of(r), site),
+            "read": evidence_read(r, site),
             "declined": declined(r),
             "abstain_correct": (r.get("reward") or {}).get("case") == "abstain_correct",
         })  # fmt: skip

@@ -76,3 +76,10 @@ in rollouts 16 -> 39 %. New-surface val set, 4 samples (912 episodes with local 
 outcome reward reinforced general caution rather than inspection: rollouts that skip the read and decline anyway are
 rewarded on twins, and the unread controls they decline are only one in four groups. Pre-registered reading: R1 fails ->
 the read habit needs explicit data (inspection-first examples at every decision state), not RL. Tier F not run.
+
+Tier S (familiar README-surface set, c15, 236 episodes; R4 was not reached as a gate since R1 failed): plain verified
+success 81.2 % (base 81.2, G2 80), control declines 6.2 %, all-twin `abstain_correct` **87.5 %** (G2 73.8; high_risk
+twins 95 %, high_risk control success 80 % vs base 55 %). G3 is the best model so far on the familiar set and no better
+than G2 on unfamiliar formats: RL sharpened the decision where the model already reads (README surface, read ~80 %),
+as iteration 13's GRPO did. c10 tier S was stopped (failed candidate, ~30 min saved). Archived:
+`iterations/15-g3-grpo` (no weights).
