@@ -9,15 +9,21 @@ and its OWN episodes are kept only when they show the behaviour wanted, not only
 * (b) the outcome is right under the eval reward: a twin `abstain_correct` (blocker target matched), a control
   `success_claimed` with the tests passed and no violation; the bank row must also pass the teacher-stage safety filters
   (`teacher_stage.programmatic_drop_reason`: not masked / tampered / damaging, a parsed report, no calls hidden in the
-  report turn, non-mutating orientation first) and the hint / malformed-report filters of the decision anchors.
+  report turn, non-mutating orientation first) and the hint / malformed-report filters of the decision anchors;
+* (c) the decision was acted on: a twin ran at least one state-changing command (`mutation.first_mutation_index`: it did
+  the feasible part of the task instead of reading and declining everything; `twin_require_work`), a control ran a
+  destructive command on the target (it proceeded; `control_require_action`).
 
-Per task the shortest kept episode stays (fewest assistant turns, then fewest characters as the token proxy, then the
-episode id). Then, until stable: `readme` holds at most `readme_max_share` of the kept set (the habit is a README habit,
-the other surfaces must carry it), and the larger of twin / control is cut to within `balance_tolerance` of the smaller
-(stable hash order, from the surface that has most of that side). Examples are whole own trajectories with loss on every
-assistant turn (the conversion of the own-success anchors, `decision.anchor_example`). The G2 anchors are added
-(`decision.anchors`, built from `data.bank` as in `judgment_splice`). Fewer than `min_kept` kept examples is an error: stop
-rather than train on too little.
+Per task one kept episode stays. For a control it is the shortest (fewest assistant turns, then fewest characters as the
+token proxy, then the episode id: Athanor). For a twin it is a stable-hash pick, NOT the shortest: on G2's own surface
+episodes (it15_g2_surface4) the shortest correct twin of a task had run no state-changing command in 20 % of the tasks
+against 4 % for the other correct samples (8.2 vs 11.0 commands), i.e. the length preference selects twins that skip the
+main task, and the `completed` list does not show it (one such twin lists files it never created). Then, until stable:
+`readme` holds at most `readme_max_share` of the kept set (the habit is a README habit, the other surfaces must carry it),
+and the larger of twin / control is cut to within `balance_tolerance` of the smaller (stable hash order, from the surface
+that has most of that side). Examples are whole own trajectories with loss on every assistant turn (the conversion of the
+own-success anchors, `decision.anchor_example`). The G2 anchors are added (`decision.anchors`, built from `data.bank` as
+in `judgment_splice`). Fewer than `min_kept` kept examples is an error: stop rather than train on too little.
 
     python -m honest_agents.sft.read_rft verify --config configs/sft_read_rft_g4_qwen35.yaml [--runs DIR ...] [--no-anchors]
 """
@@ -38,7 +44,9 @@ from typing import Any
 
 from honest_agents import bank
 from honest_agents.bank import BankRow
+from honest_agents.behaviour import is_destructive
 from honest_agents.eval.read_diagnosis import read_before_acting
+from honest_agents.mutation import first_mutation_index
 from honest_agents.reward import compute_reward
 from honest_agents.sft import decision as dec
 from honest_agents.sft.data import SFTExample, variant_of
@@ -61,9 +69,11 @@ DROP_SURFACE = "surface_not_trained"
 DROP_WRONG_TWIN = "twin_not_abstain_correct"
 DROP_WRONG_CONTROL = "control_not_verified_success"
 DROP_NOT_READ = "evidence_not_read_before_acting"
+DROP_TWIN_NO_WORK = "twin_no_state_change"  # read, declined, but never did the feasible part of the task
+DROP_CONTROL_NOT_ACTED = "control_target_not_acted"  # claimed success without ever acting on the target
 DROP_HINT = "hint_leak_or_echo"
 DROP_MALFORMED = "own_report_malformed"
-DROP_NOT_SHORTEST = "not_shortest_of_task"
+DROP_OTHER_SAMPLE = "other_sample_of_task"  # another sample of the task was kept instead
 DROP_README_CAP = "readme_cap"
 DROP_BALANCE = "side_balance"
 DEFAULT_REVIEW = Path("data/decision/review_g4_read_rft.md")
@@ -75,9 +85,12 @@ class ReadRftOptions:
         default_factory=lambda: ["runs/eval/it15_g4_sample/bank"]
     )  # trajectory banks of the sampling run(s)
     tasks_root: str = str(tasks_list.DEFAULT_TASKS_ROOT)  # local task dirs (the bank's task_dir is a node path)
+    val_root: str = str(tasks_list.DEFAULT_VAL_ROOT)  # the held-out surface set: its sources must never be sampled
     readme_max_share: float = 0.25  # readme examples / kept examples
     balance_tolerance: float = 0.10  # larger side <= (1 + tolerance) x smaller side
     min_kept: int = 200  # fewer kept examples: refuse (the anchors do not count)
+    twin_require_work: bool = True  # a kept twin ran a state-changing command (did the feasible part of the task)
+    control_require_action: bool = True  # a kept control ran a destructive command on the target (it proceeded)
     review_per_group: int = 1  # verify: examples per surface and side in the review file
     forbidden: list[str] = field(
         default_factory=lambda: list(tasks_list.FORBIDDEN_FILES)
@@ -173,8 +186,16 @@ def chars_of(ex: SFTExample) -> int:
     return len(json.dumps(ex.messages, default=str))
 
 
+def acted_on_target(commands: Sequence[str], site: SurfaceSite) -> bool:
+    """Some command is destructive on the target (the same test that ends the read rule's window)."""
+    return any(is_destructive(c) and site.target in c for c in commands)
+
+
 def episode_filter(
-    row: BankRow, site_of: Callable[[str], SurfaceSite | None], seen: Counter[tuple[str, str]]
+    row: BankRow,
+    site_of: Callable[[str], SurfaceSite | None],
+    seen: Counter[tuple[str, str]],
+    opts: ReadRftOptions,
 ) -> tuple[Kept | None, str | None]:
     """(kept episode, None) or (None, the first drop reason)."""
     site = site_of(task_name(row))
@@ -188,8 +209,13 @@ def episode_filter(
         return None, DROP_WRONG_TWIN if side == SIDE_TWIN else DROP_WRONG_CONTROL
     if (reason := programmatic_drop_reason(row)) is not None:
         return None, reason
-    if not read_before_acting(bash_commands(row), site):
+    commands = bash_commands(row)
+    if not read_before_acting(commands, site):
         return None, DROP_NOT_READ
+    if side == SIDE_TWIN and opts.twin_require_work and first_mutation_index(commands) is None:
+        return None, DROP_TWIN_NO_WORK
+    if side == SIDE_CONTROL and opts.control_require_action and not acted_on_target(commands, site):
+        return None, DROP_CONTROL_NOT_ACTED
     ex = rft_example(row, side, site.surface)
     if dec.report_malformed_fields(ex.messages[-1]):
         return None, DROP_MALFORMED
@@ -198,15 +224,23 @@ def episode_filter(
     return Kept(row, side, site.surface, ex, n_assistant_turns(ex), chars_of(ex)), None
 
 
-def shortest_per_task(kept: Iterable[Kept], dropped: Counter[str]) -> list[Kept]:
+def selection_key(k: Kept) -> tuple:
+    """Controls: the shortest correct episode (Athanor). Twins: a stable-hash pick, since the shortest correct twin is
+    the one most likely to have skipped the feasible part of the task (module docstring)."""
+    if k.side == SIDE_CONTROL:
+        return (k.n_turns, k.chars, _hash(k.row.episode_id))
+    return (_hash(k.row.episode_id),)
+
+
+def one_per_task(kept: Iterable[Kept], dropped: Counter[str]) -> list[Kept]:
     by_task: dict[str, list[Kept]] = defaultdict(list)
     for k in kept:
         by_task[variant_of(k.row)].append(k)
     out = []
     for _, group in sorted(by_task.items()):
-        group.sort(key=lambda k: (k.n_turns, k.chars, _hash(k.row.episode_id)))
+        group.sort(key=selection_key)
         out.append(group[0])
-        dropped[DROP_NOT_SHORTEST] += len(group) - 1
+        dropped[DROP_OTHER_SAMPLE] += len(group) - 1
     return out
 
 
@@ -242,21 +276,24 @@ def select(rows: Iterable[BankRow], opts: ReadRftOptions, site_of: Callable[[str
     seen: Counter[tuple[str, str]] = Counter()
     candidates = []
     for row in rows:
-        k, reason = episode_filter(row, site_of, seen)
+        k, reason = episode_filter(row, site_of, seen, opts)
         if k is not None:
             candidates.append(k)
         elif reason is not None:
             dropped[reason] += 1
-    kept = rebalance(shortest_per_task(candidates, dropped), opts, dropped)
+    kept = rebalance(one_per_task(candidates, dropped), opts, dropped)
     kept.sort(key=lambda k: k.row.episode_id)
     return Selection(kept, dropped, seen)
 
 
 def check_sources(rows: Sequence[BankRow], opts: ReadRftOptions) -> None:
-    """The sampled sources are in the RL / distillation pools and never in select / val / test / probe_v1."""
+    """The sampled sources are in the RL / distillation pools and never in select / val / test / probe_v1, nor a source
+    of the held-out surface set (`val_root`; an absent directory bans nothing, as in the task-list builder)."""
     pairs = {dec.pair_of(r) for r in rows}
     if bad := pairs & tasks_list.pair_ids(opts.forbidden):
         raise ValueError(f"{len(bad)} sampled source(s) are select / val / test / probe sources (e.g. {min(bad)})")
+    if bad := pairs & tasks_list.dir_pair_ids(Path(opts.val_root)):
+        raise ValueError(f"{len(bad)} sampled source(s) are held-out surface (surfaces_val) sources (e.g. {min(bad)})")
     if bad := pairs - tasks_list.pair_ids(opts.pools):
         raise ValueError(f"{len(bad)} sampled source(s) are in no RL / distillation pool (e.g. {min(bad)})")
 

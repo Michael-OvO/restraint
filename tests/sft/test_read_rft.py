@@ -38,7 +38,15 @@ def site(surface: str) -> SurfaceSite:
 
 
 def episode(
-    surface: str, pair: int, side: str, sample: int = 0, *, read: bool = True, extra: int = 0, ok: bool = True
+    surface: str,
+    pair: int,
+    side: str,
+    sample: int = 0,
+    *,
+    read: bool = True,
+    extra: int = 0,
+    ok: bool = True,
+    work: bool = True,  # twin: did the feasible part (a state-changing command); control: acted on the target
 ) -> BankRow:
     name = f"src{pair}__high_risk__{surface}" + ("__control" if side == "control" else "")
     ev = EVIDENCE[surface]
@@ -46,11 +54,12 @@ def episode(
     if read:
         turns.append((f"cat {ev}", "evidence text"))
     if side == "twin":
+        turns += [("echo 42 > /app/out.txt", "")] if work else []
         turns += [] if ok else [(f"rm -rf {T}", "")]
         row = make_row(name, passed=False, feasible=False, expected_targets=[T, ev], expected_blockers=["risk_discovered", "high_risk"],
                        original=TWIN_REPORT if ok else {**CONTROL_REPORT}, turns=turns, blocker_check="true")  # fmt: skip
     else:
-        turns.append((f"rm -rf {T}", ""))
+        turns += [(f"rm -rf {T}", "")] if work else [("echo 42 > /app/out.txt", "")]
         row = make_row(name, passed=ok, feasible=True, is_control=True, original=CONTROL_REPORT, turns=turns)
     task = {**row.task, "task_dir": f"/root/restraint/data/decision/surfaces/tasks/{name}", "pair_id": f"src{pair}"}
     return row.model_copy(update={"task": task, "episode_id": f"{name}-s{sample}", "extra": {"sample": sample}})
@@ -96,13 +105,43 @@ def test_wrong_blocker_target_is_not_kept():
     assert not rr.select([bad], OPTS, site_of).kept
 
 
-def test_shortest_episode_per_task_wins_with_chars_as_tiebreak():
+def test_shortest_control_per_task_wins_with_chars_as_tiebreak():
+    rows = [episode("manifest", 1, "control", s, extra=e) for s, e in ((0, 3), (1, 0), (2, 1), (3, 0))]
+    rows.append(episode("manifest", 1, "twin"))
+    sel = rr.select(rows, OPTS, site_of)
+    control = [k for k in sel.kept if k.side == "control"]
+    assert len(control) == 1 and control[0].row.episode_id.endswith(("-s1", "-s3")) and control[0].n_turns == 4
+    assert sel.dropped[rr.DROP_OTHER_SAMPLE] == 3
+
+
+def test_twin_per_task_is_a_stable_hash_pick_not_the_shortest():
+    """The shortest correct twin is the one most likely to have skipped the main task (G2 surface episodes: 20 % vs 4 %)."""
     rows = [episode("manifest", 1, "twin", s, extra=e) for s, e in ((0, 3), (1, 0), (2, 1), (3, 0))]
     rows.append(episode("manifest", 1, "control"))
     sel = rr.select(rows, OPTS, site_of)
     twin = [k for k in sel.kept if k.side == "twin"]
-    assert len(twin) == 1 and twin[0].row.episode_id.endswith(("-s1", "-s3")) and twin[0].n_turns == 3
-    assert sel.dropped[rr.DROP_NOT_SHORTEST] == 3
+    expected = min((r.episode_id for r in rows[:4]), key=rr._hash)
+    assert len(twin) == 1 and twin[0].row.episode_id == expected
+    assert sel.dropped[rr.DROP_OTHER_SAMPLE] == 3
+    assert rr.selection_key(twin[0]) == (rr._hash(expected),)
+
+
+def test_twin_that_never_changed_state_is_dropped_unless_relaxed():
+    lazy = episode("manifest", 1, "twin", work=False)  # read the evidence, declined, did nothing else
+    assert rr.episode_filter(lazy, site_of, Counter(), OPTS) == (None, rr.DROP_TWIN_NO_WORK)
+    kept, reason = rr.episode_filter(lazy, site_of, Counter(), rr.ReadRftOptions(twin_require_work=False))
+    assert kept is not None and reason is None
+    sel = rr.select([lazy, episode("manifest", 1, "control")], OPTS, site_of)
+    assert sel.dropped[rr.DROP_TWIN_NO_WORK] == 1 and not any(k.side == "twin" for k in sel.kept)
+
+
+def test_control_that_never_acted_on_the_target_is_dropped_unless_relaxed():
+    idle = episode("manifest", 1, "control", work=False)  # tests passed, claimed complete, never touched the target
+    assert rr.episode_filter(idle, site_of, Counter(), OPTS) == (None, rr.DROP_CONTROL_NOT_ACTED)
+    kept, reason = rr.episode_filter(idle, site_of, Counter(), rr.ReadRftOptions(control_require_action=False))
+    assert kept is not None and reason is None
+    sel = rr.select([episode("manifest", 1, "twin"), idle], OPTS, site_of)
+    assert sel.dropped[rr.DROP_CONTROL_NOT_ACTED] == 1 and not any(k.side == "control" for k in sel.kept)
 
 
 def test_readme_cap_and_side_balance():
@@ -154,12 +193,22 @@ def test_sources_must_be_in_pools_and_not_in_forbidden_files(tmp_path: Path):
         return str(p)
 
     rows = [episode("manifest", 1, "twin"), episode("manifest", 2, "control")]
-    ok = rr.ReadRftOptions(pools=[pool("a.jsonl", "src1", "src2")], forbidden=[pool("f.jsonl", "other")])
+    no_val = str(tmp_path / "no_such_val_root")
+    ok = rr.ReadRftOptions(
+        pools=[pool("a.jsonl", "src1", "src2")], forbidden=[pool("f.jsonl", "other")], val_root=no_val
+    )
     rr.check_sources(rows, ok)
     with pytest.raises(ValueError, match="select / val / test"):
-        rr.check_sources(rows, rr.ReadRftOptions(pools=ok.pools, forbidden=[pool("g.jsonl", "src2")]))
+        rr.check_sources(rows, rr.ReadRftOptions(pools=ok.pools, forbidden=[pool("g.jsonl", "src2")], val_root=no_val))
     with pytest.raises(ValueError, match="no RL / distillation pool"):
-        rr.check_sources(rows, rr.ReadRftOptions(pools=[pool("b.jsonl", "src1")], forbidden=ok.forbidden))
+        rr.check_sources(
+            rows, rr.ReadRftOptions(pools=[pool("b.jsonl", "src1")], forbidden=ok.forbidden, val_root=no_val)
+        )
+    val = tmp_path / "val" / "src1__high_risk__inbound_link"
+    val.mkdir(parents=True)
+    (val / "task.toml").write_text('[metadata.honest]\npair_id = "src1"\n')
+    with pytest.raises(ValueError, match="held-out surface"):
+        rr.check_sources(rows, rr.ReadRftOptions(pools=ok.pools, forbidden=ok.forbidden, val_root=str(val.parent)))
 
 
 def test_review_file_shows_trained_turns(tmp_path: Path):
@@ -184,4 +233,7 @@ def test_g4_config_parses_with_g2_anchors_and_training_recipe():
     )
     assert cfg.train.gradient_accumulation_steps == 8 and cfg.train.gradient_checkpointing
     assert cfg.decision["anchors"]["count"] == 400 and cfg.train.extra["run_name"] == "it15-g4-read-rft"
-    assert cfg.train.extra["save_strategy"] == "no" and rr.parse_options(cfg.read_rft).min_kept == 200
+    opts = rr.parse_options(cfg.read_rft)
+    assert cfg.train.extra["save_strategy"] == "no" and opts.min_kept == 200
+    assert opts.twin_require_work and opts.control_require_action
+    assert opts.val_root == "data/decision/surfaces_val/tasks" and opts.tasks_root == "data/decision/surfaces/tasks"

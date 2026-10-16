@@ -1,10 +1,15 @@
 # Iteration 15 G4 (docs/iteration-15-g4-read-rft.md): rejection-sampling fine-tuning on G2's own read-first decisions.
 # (a) sample G2 seed 1 (outputs/it15/g2_merged) 4x on the 400 training-surface tasks (data/decision/read_rft_tasks.jsonl,
 #     built by honest_agents.tasks.read_rft_tasks), transcripts kept (runs/eval/it15_g4_sample/transcripts) and a trajectory
-#     bank written for the SFT stage (runs/eval/it15_g4_sample/bank); (b) SFT on the kept episodes + the G2 anchors
-#     (kind read_rft; fails clearly with < 200 kept); (c) merge onto g2_merged; (d) surface4 and tier S evaluations.
+#     bank written for the SFT stage (runs/eval/it15_g4_sample/bank); (b) gate: `sft.read_rft verify` on the bank (>= 200
+#     kept, sides balanced, readme capped, 400 anchors), no GPU, the chain stops here when the kept set is too small or
+#     broken (the sampling bank stays for a relaxed re-run); (c) SFT on the kept episodes + the G2 anchors (kind read_rft;
+#     its dry run repeats the gate before the model is loaded); (d) merge onto g2_merged; (e) the 12-task vLLM sanity run
+#     every merged model gets, then surface4, then tier S.
 # No eval server runs while the SFT trains: every step depends on the one before it, and the sampling server is torn down by
-# serve_and_run.sh when (a) ends. owner-approved: balance_floor 15 (below the usual 25) for this chain.
+# serve_and_run.sh when (a) ends. Timeouts: 1,600 episodes at concurrency 24 (G3's 960-episode surface4 runs took 80-94 min
+# with the server start) -> 270 min; training ~250-500 kept + 400 anchors for one epoch (G2: 2,650 examples x 2 epochs in
+# 124 min) -> 180 min. owner-approved: balance_floor 15 (below the usual 25) for this chain.
 name: it15g4
 state_dir: outputs/chain/it15g4
 sequential: true
@@ -19,15 +24,26 @@ steps:
     gpus: [0]
     done: runs/eval/it15_g4_sample/metrics.json
     after: []
-    timeout_min: 240
+    timeout_min: 270
     on_failure: stop
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+  - name: verify_g4
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.read_rft verify
+      --config configs/sft_read_rft_g4_qwen35.yaml --json outputs/chain/it15g4/verify_g4.json
+      --review outputs/chain/it15g4/review_g4_read_rft.md
+      && mkdir -p outputs/chain/it15g4/markers && touch outputs/chain/it15g4/markers/verify_g4.done
+    gpus: []
+    done: outputs/chain/it15g4/markers/verify_g4.done
+    after: [sample_g4]
+    timeout_min: 30
+    on_failure: stop
   - name: train_g4
     command: >-
       scripts/run_sft.sh configs/sft_read_rft_g4_qwen35.yaml model.name=outputs/it15/g2_merged
     gpus: [0]
     done: outputs/sft/it15-g4-read-rft/final/adapter_config.json
-    after: [sample_g4]
+    after: [verify_g4]
     timeout_min: 180
     on_failure: stop
     env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it15, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -43,12 +59,14 @@ steps:
   - name: g4_surface4
     command: >-
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g4_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it15_g4_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/it15_g4_surface4 --n-samples 4
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
     gpus: [0]
     done: runs/eval/it15_g4_surface4/metrics.json
     after: [merge_g4]
-    timeout_min: 120
+    timeout_min: 150
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
   - name: g4_tierS

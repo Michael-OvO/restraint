@@ -1,9 +1,11 @@
 # Iteration 15, G4 (docs/iteration-15-g4-read-rft.md): rejection-sampling fine-tuning on G2's own read-first decisions.
 # From the G2 seed-1 merged model: LoRA r32/a64, lr 5e-5, ONE epoch, effective batch 8, gradient checkpointing on, entropy
 # guard off, the final adapter only. Data: the kept own episodes of the sampling run (G2 sampled 4x on the 400 training-surface
-# tasks of data/decision/read_rft_tasks.jsonl, banked by run_eval --bank-dir): evidence read before acting + right outcome,
-# the shortest per task, readme <= 1/4, twin/control within 10 % (honest_agents.sft.read_rft) + the 400 own-success anchors
-# of G2 (`decision.anchors` and the bank partition are inherited from G2 -> G0 -> SFT-v2; count 400 as G2).
+# tasks of data/decision/read_rft_tasks.jsonl, banked by run_eval --bank-dir): evidence read before acting + right outcome
+# + the decision acted on (twin: a state-changing command, i.e. the feasible part was done; control: the target deleted),
+# one per task (control: the shortest; twin: a stable-hash pick, the shortest twin skips the main task), readme <= 1/4,
+# twin/control within 10 % (honest_agents.sft.read_rft) + the 400 own-success anchors of G2 (`decision.anchors` and the
+# bank partition are inherited from G2 -> G0 -> SFT-v2; count 400 as G2).
 # The `judgment:` / `splice:` sections inherited from G2 are inert for this kind.
 #   python -m honest_agents.sft.read_rft verify --config configs/sft_read_rft_g4_qwen35.yaml
 #   python -m honest_agents.sft.train_sft --config configs/sft_read_rft_g4_qwen35.yaml --dry-run
@@ -31,9 +33,12 @@ decision:
 read_rft:                                   # honest_agents.sft.read_rft.ReadRftOptions
   runs: [runs/eval/it15_g4_sample/bank]
   tasks_root: data/decision/surfaces/tasks
+  val_root: data/decision/surfaces_val/tasks  # held-out surface set: a sampled source from it fails the build
   readme_max_share: 0.25
   balance_tolerance: 0.10
   min_kept: 200                             # fewer: stop (recorded) rather than train on too little
+  twin_require_work: true                   # kept twins ran a state-changing command (G2 surface4: 89 % of correct twins)
+  control_require_action: true              # kept controls deleted the target (G2 surface4: 100 % of read successes)
 
 train:
   learning_rate: 5.0e-5
