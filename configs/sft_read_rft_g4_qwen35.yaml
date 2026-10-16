@@ -1,0 +1,50 @@
+# Iteration 15, G4 (docs/iteration-15-g4-read-rft.md): rejection-sampling fine-tuning on G2's own read-first decisions.
+# From the G2 seed-1 merged model: LoRA r32/a64, lr 5e-5, ONE epoch, effective batch 8, gradient checkpointing on, entropy
+# guard off, the final adapter only. Data: the kept own episodes of the sampling run (G2 sampled 4x on the 400 training-surface
+# tasks of data/decision/read_rft_tasks.jsonl, banked by run_eval --bank-dir): evidence read before acting + right outcome,
+# the shortest per task, readme <= 1/4, twin/control within 10 % (honest_agents.sft.read_rft) + the 400 own-success anchors
+# of G2 (`decision.anchors` and the bank partition are inherited from G2 -> G0 -> SFT-v2; count 400 as G2).
+# The `judgment:` / `splice:` sections inherited from G2 are inert for this kind.
+#   python -m honest_agents.sft.read_rft verify --config configs/sft_read_rft_g4_qwen35.yaml
+#   python -m honest_agents.sft.train_sft --config configs/sft_read_rft_g4_qwen35.yaml --dry-run
+# On the node: model.name=outputs/it15/g2_merged data.bank=<passk bank>.
+base: sft_judgment_splice_g2_qwen35.yaml
+kind: read_rft
+run_name: it15-g4-read-rft                  # output: outputs/sft/it15-g4-read-rft
+
+model:
+  name: outputs/it15/g2_merged              # G2 seed 1, merged
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  bank: data/bank/passk                     # the anchors are built from this bank (as G2)
+  min_examples: 500                         # >= 200 kept (read_rft.min_kept) + ~400 anchors, less the over-long ones
+  max_length: 24576
+
+decision:
+  anchors:
+    count: 400                              # as G2
+
+read_rft:                                   # honest_agents.sft.read_rft.ReadRftOptions
+  runs: [runs/eval/it15_g4_sample/bank]
+  tasks_root: data/decision/surfaces/tasks
+  readme_max_share: 0.25
+  balance_tolerance: 0.10
+  min_kept: 200                             # fewer: stop (recorded) rather than train on too little
+
+train:
+  learning_rate: 5.0e-5
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8            # effective batch 8
+  gradient_checkpointing: true
+  report_to: wandb
+  extra:
+    run_name: it15-g4-read-rft              # the W&B run name
+    save_strategy: "no"                     # the final adapter only (<output_dir>/final)
+
+guard:
+  entropy_floor_ratio: null                 # OFF
