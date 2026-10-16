@@ -1364,3 +1364,20 @@ What we learned about the method; what we would do differently.
 ### Next
 The decision this led to.
 ```
+
+### Iteration 15, after G2 (2026-10-16): G3 RL, G2 soup, G4 self-distillation
+All three pre-registered; details in `docs/iteration-15-g3-rl-read.md`, `docs/iteration-15-g2-soup.md`,
+`docs/iteration-15-g4-read-rft.md`.
+- Diagnosis (`honest_agents.eval.read_diagnosis`): G2 separates twins from controls by ~46 points when it reads the
+  evidence and not at all when it does not; it reads ~45 %.
+- **G3** (GRPO from G2 on four trained surfaces): read rate unchanged; caution up in both branches (surface control
+  declines 41 %); best familiar-set model (tier S twins 87.5 %). Fails.
+- **G2 soup** (seed average): lands between the seeds (held-out +13.1). Fails S1; averaging same-lineage seeds averages
+  noise.
+- **G4** (self-distillation of 297 own read-first correct episodes): read rate unchanged; held-out +8.1. Fails.
+- Reading: per-surface read rates are the same in G2, G3 and G4 (readme ~75 %, other trained 43-49 %, held-out 28-34 %):
+  the model reads evidence when its ordinary exploration shows it. The next lever is an explicit inspection procedure
+  (proposal in the G4 doc), with a third held-out surface added first so transfer stays testable.
+- Incident: GRPO boot failure (cached harbor egress probe) -> preflight + masked-share stop rule (`e190486`, `6a1cd78`).
+- Candidate unchanged: SFT-v2 e3 (iteration 14) / G2 (iteration 15) remain the reference models. Node 55983325 stopped;
+  balance $18.86.
