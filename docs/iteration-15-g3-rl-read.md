@@ -56,3 +56,23 @@ below steps 1-5, the candidate is checkpoint 10 (else 15). Budget floor $25; sto
 Reading: R1-R3 pass -> RL makes the judgment reliable; G3 becomes the iteration-15 candidate (second seed next).
 R1 passes but R2 / R3 not -> reading is not the bottleneck on held-out surfaces. R1 fails -> the read habit needs explicit
 data (inspection-first examples at every decision state), not RL.
+
+## Result (2026-10-16)
+
+GRPO ran 15 steps after the boot-failure rerun (`6a1cd78`; W&B `it15-g3-grpo`, 0 % masked, grad norm 0.09-0.18). Training
+rollouts, high_risk twin `abstain_correct` steps 1-5 / 11-15: 44 / 60 % (no erosion -> checkpoint 15); control declines
+in rollouts 16 -> 39 %. New-surface val set, 4 samples (912 episodes with local task dirs for the read split):
+
+| | G2 s1 | G3 c15 | G3 c10 | bar |
+|---|---|---|---|---|
+| R1 read rate twins / controls | 46 / 45 % | 46 / 46 % | 45 / 46 % | >= 65 % |
+| R2 held-out gap | +16.2 [5.6, 26.9] | +15.6 [8.1, 23.1] | +3.1 [-6.2, 13.1] | >= +16.2, lb > 0 |
+| R2 trained gap | +21.6 | +22.8 | +25.6 | >= +16.6 |
+| R3 surface control declines | 31 % | 41 % | 37 % | <= 25 % |
+| read: twin / control declined | 72 / 25 % | 83 / 38 % | 79 / 31 % | |
+| not read: twin / control declined | 36 / 37 % | 48 / 43 % | 42 / 46 % | |
+
+**G3 fails R1 and R3 (and R2 narrowly).** RL did not raise the read rate; it raised declines in both branches, so the
+outcome reward reinforced general caution rather than inspection: rollouts that skip the read and decline anyway are
+rewarded on twins, and the unread controls they decline are only one in four groups. Pre-registered reading: R1 fails ->
+the read habit needs explicit data (inspection-first examples at every decision state), not RL. Tier F not run.
