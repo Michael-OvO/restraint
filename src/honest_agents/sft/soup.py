@@ -7,9 +7,11 @@ Every input is a directory of safetensors weights (single file or sharded) with 
 `sft.merge` keeps from the Qwen3.5 base (`A_log`, norms) and tensors the model class does not load (the MTP head) all
 stay, with their dtypes; identical inputs reproduce the tensor exactly. With `--base`, the result is
 `base + factor * (avg - base)` (task-vector extrapolation; factor 1 is the plain average). Weights are normalised to sum
-to 1. The first model's non-weight files (config, tokenizer, chat template, ...) are copied. Inputs are streamed
-tensor by tensor from open shard handles, and the output keeps the first model's shard layout, so peak memory is
-one output shard plus a tensor. A `soup_report.json` lists the inputs, weights and per-tensor statistics.
+to 1. The first model's non-weight files (config, tokenizer, chat template, processor, generation config, ...) are
+copied, except its own provenance (`merge_info.json`, `soup_report.json`). Inputs are streamed tensor by tensor from
+open shard handles, and the output keeps the first model's shard layout, so peak memory is one output shard plus a
+tensor. Stale `*.safetensors` in the output directory are removed first (vLLM loads every safetensors file it finds).
+A `soup_report.json` lists the inputs, weights and per-tensor statistics; it is written last, so it marks completion.
 """
 
 from __future__ import annotations
@@ -22,13 +24,15 @@ from pathlib import Path
 from typing import Any
 
 REPORT_TENSORS = 5  # max-abs-diff is reported for this many tensors (the most different ones)
+INDEX = "model.safetensors.index.json"
+PROVENANCE_FILES = ("merge_info.json", "soup_report.json")  # describe the input, not the soup; not copied
 
 
 def weight_map(model_dir: Path) -> dict[str, str]:
     """tensor name -> shard file name."""
     from safetensors import safe_open
 
-    index = model_dir / "model.safetensors.index.json"
+    index = model_dir / INDEX
     if index.exists():
         return dict(json.loads(index.read_text())["weight_map"])
     files = sorted(model_dir.glob("*.safetensors"))
@@ -73,10 +77,13 @@ def check_compatible(cks: Sequence[Checkpoint], labels: Sequence[str]) -> None:
                 f"tensor names differ: {label} lacks {sorted(keys - other)[:5]}, has extra {sorted(other - keys)[:5]}"
             )
     for k in sorted(keys):
-        m0 = cks[0].meta(k)
+        shape0, dtype0 = cks[0].meta(k)
         for ck, label in zip(cks[1:], labels[1:], strict=True):
-            if ck.meta(k)[0] != m0[0]:
-                raise SystemExit(f"shape of {k} differs: {m0[0]} vs {ck.meta(k)[0]} in {label}")
+            shape, dtype = ck.meta(k)
+            if shape != shape0:
+                raise SystemExit(f"shape of {k} differs: {shape0} vs {shape} in {label}")
+            if dtype != dtype0:
+                raise SystemExit(f"dtype of {k} differs: {dtype0} vs {dtype} in {label}")
 
 
 def soup(
@@ -106,52 +113,57 @@ def soup(
         check_compatible([cks[0], base_ck], [models[0], base])
 
     out_dir = Path(out)
+    if out_dir.resolve() in {Path(m).resolve() for m in (*models, *([base] if base else []))}:
+        raise SystemExit(f"--out {out} is one of the inputs; the output overwrites shards while they are read")
     out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in out_dir.glob("*.safetensors"):
+        stale.unlink()  # a shard of an earlier layout would be loaded next to the new ones
+    (out_dir / INDEX).unlink(missing_ok=True)
     first = cks[0]
     shards: dict[str, list[str]] = {}
     for name, shard in first.map.items():
         shards.setdefault(shard, []).append(name)
 
     identical: list[str] = []
-    averaged = 0
     diffs: dict[str, float] = {}
     new_map: dict[str, str] = {}
+    total_bytes = 0
     for shard, names in sorted(shards.items()):
         tensors = {}
         for name in sorted(names):
             ts = [ck.get(name) for ck in cks]
             dtype = ts[0].dtype
-            if any(t.dtype != dtype for t in ts):
-                raise SystemExit(f"dtype of {name} differs across inputs: {sorted({str(t.dtype) for t in ts})}")
             same = all(torch.equal(ts[0], t) for t in ts[1:])
-            if same:
-                identical.append(name)
-                avg = ts[0].float()
-            else:
-                avg = sum(wi * t.float() for wi, t in zip(w, ts, strict=True))
-                diffs[name] = max(float((t.float() - ts[0].float()).abs().max()) for t in ts[1:])
-            averaged += 1
             if same and factor == 1.0:
+                identical.append(name)
                 tensors[name] = ts[0]  # exact: no float32 round trip
-            elif base_ck is not None:
-                b = base_ck.get(name).float()
-                tensors[name] = (b + factor * (avg - b)).to(dtype)
             else:
+                if not ts[0].is_floating_point():
+                    raise SystemExit(f"{name} is {dtype} and differs across inputs: only float tensors average")
+                if same:
+                    identical.append(name)
+                    avg = ts[0].float()
+                else:
+                    avg = sum(wi * t.float() for wi, t in zip(w, ts, strict=True))
+                    diffs[name] = max(float((t.float() - ts[0].float()).abs().max()) for t in ts[1:])
+                if base_ck is not None:
+                    b = base_ck.get(name).float()
+                    avg = b + factor * (avg - b)
                 tensors[name] = avg.to(dtype)
             new_map[name] = shard
+            total_bytes += tensors[name].numel() * tensors[name].element_size()
         save_file({k: v.contiguous() for k, v in tensors.items()}, str(out_dir / shard), metadata={"format": "pt"})
         del tensors
-    if (first.dir / "model.safetensors.index.json").exists():
-        total = sum(f.stat().st_size for f in out_dir.glob("*.safetensors"))
-        index = {"metadata": {"total_size": total}, "weight_map": dict(sorted(new_map.items()))}
-        (out_dir / "model.safetensors.index.json").write_text(json.dumps(index, indent=2))
+    if (first.dir / INDEX).exists():
+        index = {"metadata": {"total_size": total_bytes}, "weight_map": dict(sorted(new_map.items()))}
+        (out_dir / INDEX).write_text(json.dumps(index, indent=2))
     for f in first.dir.iterdir():
-        if f.is_file() and f.suffix != ".safetensors" and f.name != "model.safetensors.index.json":
+        if f.is_file() and f.suffix != ".safetensors" and f.name not in (INDEX, *PROVENANCE_FILES):
             shutil.copy(f, out_dir / f.name)
     top = sorted(diffs, key=lambda k: -diffs[k])[:REPORT_TENSORS]
     report = {
         "models": list(models), "weights": w, "base": base, "factor": factor,
-        "tensors_total": len(new_map), "tensors_averaged": averaged,
+        "tensors_total": len(new_map),
         "tensors_identical_across_inputs": len(identical), "tensors_differing": len(diffs),
         "identical_examples": sorted(identical)[:REPORT_TENSORS],
         "max_abs_diff_between_inputs": {k: diffs[k] for k in top},
