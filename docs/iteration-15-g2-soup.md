@@ -19,3 +19,12 @@ Read rate and read-conditioned gap (`honest_agents.eval.read_diagnosis`) are rep
 
 Reading: S1 and S2 pass -> weight averaging is a free variance reducer for this recipe; the soup becomes the
 iteration-15 SFT candidate (G3 compared against it). Fail -> recorded; the seeds stay the reference.
+
+## Result (2026-10-16)
+Soup report: 248 tensors differ (= the LoRA-touched count), 490 byte-identical; 12-task sanity run coherent.
+- (S1) new-surface gap trained **+19.7 [+12.5, +26.9]**, held-out **+13.1 [+3.1, +23.1]**: **FAIL** (bar +20.6 / +16.2);
+  read rate 43 % (seeds 46 / 44), read-conditioned gap +41.7 (seeds +47 / +46).
+- (S2) tier S plain 81.2 %, control declines 7.5 %, all-twin `abstain_correct` 75.0 %: PASS.
+The soup lands between the seeds (their mean +13.7 held-out): no free gain. Athanor's +2.7 came from averaging models
+of *different lineages*; our seeds share data, recipe and parent, so averaging only averages sampling noise.
+Tier F not run (S1 failed). Seeds stay the reference.
