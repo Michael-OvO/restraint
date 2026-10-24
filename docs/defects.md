@@ -146,7 +146,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `{command, rc}` history in `honest_result.json`, so re-loading them with the fixed `load_trial` recovers commands and
   exit codes (still no outputs: they predate DEF-06). No archived number changes: the Agentic Abstention scorer does not
   read the history.
-- **Commits:** `0e2809f` (record outputs), `3328eeb` (replay CLI), repair commit (Harbor `load_trial` history, record
+- **Commits:** `0e2809f` (record outputs), `3328eeb` (replay CLI), `5fbc75f` (repair: Harbor `load_trial` history, record
   cap at least `max_output_chars`, replay never caches a lost sandbox, locks, tests).
 
 ### DEF-07: growing a pool reassigns existing variants
