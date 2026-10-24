@@ -1305,6 +1305,14 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
 
 ---
 
+## Process rule: integrity gate (2026-10-23)
+
+The iteration-15 diagnosis found that part of every iteration-15 verdict rested on defects in the grader, the task data
+and the metric code (the inbound_link control could not be passed; three conflicting "inspected" metrics; a missing task
+dir; bars at a point estimate). From now on no experiment starts while any defect in [defects.md](defects.md) is open,
+and each iteration begins with the integrity sweep and a written sign-off ([integrity-gate.md](integrity-gate.md)).
+Numbers above that a defect affected keep their original value here; their re-scored values go in the defect entry.
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |

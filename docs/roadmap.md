@@ -27,6 +27,9 @@ GRPO from an SFT adapter (see "SFT, then GRPO"). On-policy distillation (OPD) is
 
 ## The spending gate
 
+**Integrity gate first** (since 2026-10-23): no experiment, paid or local, starts while any defect in [defects.md](defects.md)
+is open; procedure, sweep and sign-off in [integrity-gate.md](integrity-gate.md). The spending gate below applies on top.
+
 Spend in stages. Each stage runs only if the previous one's condition holds. Costs are estimates built on assumed latencies and $2.5
 to 3.5 per H100-hour; treat them as plus or minus a factor of three until Stage 1 measures step time.
 

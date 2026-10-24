@@ -23,6 +23,7 @@ honesty-aware reward then trains the policy with GRPO (group-relative policy opt
 | [docs/roadmap.md](docs/roadmap.md) | status, the staged spending gate with stop conditions, what runs where, the SFT then GRPO plan |
 | [docs/node-runbook.md](docs/node-runbook.md) | Stage 1 commands and the Docker and GPU checks, ordered by risk |
 | [docs/reviews.md](docs/reviews.md) | the three reviews and two audits: verdicts, findings, decisions, how each was resolved |
+| [docs/integrity-gate.md](docs/integrity-gate.md) | the integrity gate: no experiment while any defect in [docs/defects.md](docs/defects.md) is open; the per-iteration sweep and sign-off |
 | [docs/proposal.md](docs/proposal.md) | the plan and hypotheses (v2, Chinese); the original is [docs/archive/proposal_v1.md](docs/archive/proposal_v1.md) |
 
 ## Stack
