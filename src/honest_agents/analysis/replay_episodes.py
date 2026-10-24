@@ -20,7 +20,8 @@ re-runs made after the episode, often after the `rm`. Neither shows what the age
 
 Results are cached content-addressed (docs/integrity-gate.md, "the result cache"): the key is the sha256 of the task dir
 contents, of the source files that shape a replay (`env.py`, `harness.py`, `grading.py`), of the command list, of the
-command timeout and of the base image digest. A cache hit boots nothing. Rows are append-only and carry a schema
+command timeout and of the base image digest. A cache hit boots nothing. A branch whose exec failed mid-way
+(`[sandbox unavailable]`) is `boot_failed` and never cached. Rows are append-only and carry a schema
 version; a corrupt or old row is ignored. The summary gives, per surface and branch, the share not replayable (bar:
 <= 10 % per branch, docs/iteration-16-direction.md S0.2).
 """
@@ -37,6 +38,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
@@ -46,6 +48,7 @@ from typing import Any, Protocol
 
 from honest_agents.behaviour import is_destructive
 from honest_agents.eval.records import history_steps
+from honest_agents.harness import SANDBOX_UNAVAILABLE
 from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite, site_of_task
 
 log = logging.getLogger(__name__)
@@ -279,6 +282,7 @@ class ReplayCache:
     def __init__(self, cache_dir: Path | None):
         self.path = None if cache_dir is None else cache_dir / f"{CHECK}.v{SCHEMA_VERSION}.jsonl"
         self._rows: dict[str, list[dict[str, Any]]] = {}
+        self._lock = threading.Lock()  # one appended row at a time: pool threads write rows larger than a buffer
         if self.path is not None and self.path.is_file():
             for line in self.path.read_text().splitlines():
                 try:
@@ -298,12 +302,14 @@ class ReplayCache:
         return self._rows.get(key)
 
     def put(self, key: str, entries: list[dict[str, Any]]) -> None:
-        self._rows[key] = entries
-        if self.path is None:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a") as f:
-            f.write(json.dumps({"check": CHECK, "schema": SCHEMA_VERSION, "key": key, "entries": entries}) + "\n")
+        line = json.dumps({"check": CHECK, "schema": SCHEMA_VERSION, "key": key, "entries": entries}) + "\n"
+        with self._lock:
+            self._rows[key] = entries
+            if self.path is None:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a") as f:
+                f.write(line)
 
 
 # ── replay ────────────────────────────────────────────────────────────────────
@@ -335,6 +341,11 @@ class EpisodeReplay:
     pair: BranchReplay | None = None
 
 
+def _sandbox_lost(entry: dict[str, Any]) -> bool:
+    """A step whose exec raised (`HonestHarborEnv.bash` records rc None and `SANDBOX_UNAVAILABLE`)."""
+    return entry.get("rc") is None and entry.get("output") == SANDBOX_UNAVAILABLE
+
+
 @dataclass
 class Replayer:
     runner: Runner
@@ -345,6 +356,11 @@ class Replayer:
     source_hash: str = field(default_factory=lambda: sha256_files(SOURCE_FILES))
     boots: int = 0
     cache_hits: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+
+    def _count(self, name: str) -> None:
+        with self._lock:  # `replay_all` calls `run_branch` from pool threads
+            setattr(self, name, getattr(self, name) + 1)
 
     def run_branch(self, task_id: str, commands: Sequence[str]) -> BranchReplay:
         task_dir = self.tasks_root / task_id
@@ -358,14 +374,19 @@ class Replayer:
         entries = self.cache.get(key)
         cached = entries is not None
         if entries is None:
-            self.boots += 1
+            self._count("boots")
             try:
                 entries = self.runner.run(task_dir, commands)
             except BootError as e:
                 return BranchReplay(task_id, BOOT_FAILED, error=str(e)[:500])
+            lost = next((i for i, e in enumerate(entries) if _sandbox_lost(e)), None)
+            if lost is not None:
+                # The exec itself failed (docker gone, daemon restart): an infra failure, not a result. Never cached,
+                # so a rerun tries again instead of reporting the episode not replayable until a source file changes.
+                return BranchReplay(task_id, BOOT_FAILED, error=f"sandbox unavailable at step {lost}")
             self.cache.put(key, entries)
         else:
-            self.cache_hits += 1
+            self._count("cache_hits")
         return BranchReplay(task_id, REPLAYABLE, [e.get("rc") for e in entries], entries, cached)
 
     def replay(self, ep: ArchivedEpisode, *, pair: bool = False, full: bool = False) -> EpisodeReplay:

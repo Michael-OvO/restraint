@@ -204,6 +204,42 @@ def test_cache_hit_boots_nothing_and_a_task_change_invalidates_only_that_task(tm
     assert other_cmds.boots == 1
 
 
+def test_a_lost_sandbox_mid_replay_is_boot_failed_and_never_cached(tmp_path):
+    """An exec that raised (rc None, `SANDBOX_UNAVAILABLE`) is infra, not a result: a rerun must try again."""
+
+    class FlakyRunner(FakeRunner):
+        def run(self, task_dir, commands):
+            entries = super().run(task_dir, commands)
+            if len(self.calls) == 1:
+                entries[-1] = harness.history_entry(commands[-1], None, harness.SANDBOX_UNAVAILABLE)
+            return entries
+
+    _surface_task(tmp_path / "tasks", TWIN)
+    runner = FlakyRunner()
+    ep = _ep(["ls", "cat /opt/store/saves.cfg"])
+    first = _replayer(tmp_path, runner).replay(ep)
+    assert first.status == BOOT_FAILED and "step 1" in first.own.error
+    assert not (tmp_path / "cache" / f"{rp.CHECK}.v{rp.SCHEMA_VERSION}.jsonl").exists()
+    again = _replayer(tmp_path, runner).replay(ep)  # a fresh process: nothing cached, so it boots and succeeds
+    assert again.status == REPLAYABLE and not again.own.cached and len(runner.calls) == 2
+
+
+def test_counters_and_cache_appends_are_thread_safe(tmp_path):
+    import threading
+
+    replayer = _replayer(tmp_path, FakeRunner())
+    for i in range(40):
+        _surface_task(tmp_path / "tasks", f"t{i}")
+    big = "x" * 70_000  # larger than a write buffer
+    threads = [threading.Thread(target=replayer.run_branch, args=(f"t{i}", [f"echo {big}"])) for i in range(40)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert replayer.boots == 40
+    assert len(ReplayCache(tmp_path / "cache")._rows) == 40  # no torn row
+
+
 def test_cache_key_covers_sources_image_and_timeout(tmp_path):
     base = rp.cache_key("t", "s", ["ls"], "img", 60)
     assert len({base, rp.cache_key("t", "s2", ["ls"], "img", 60), rp.cache_key("t", "s", ["ls"], "img2", 60),

@@ -91,6 +91,7 @@ async def test_agent_runs_tools_in_harbor_env_and_writes_report(tmp_path, monkey
     assert tool_msg["role"] == "tool" and tool_msg["content"] == "[exit code: 0] (no output)"
     payload = json.loads((tmp_path / "trial" / "agent" / RESULT_FILE).read_text())
     assert payload["report"]["status"] == "complete" and payload["n_actions"] == 1
+    assert payload["history"] == [harness.history_entry("echo hi > hello.txt", 0, "")]  # DEF-06: outputs recorded
     assert payload["rollout"]["report_turn"] == 2
     assert (ctx.n_input_tokens, ctx.n_output_tokens) == (130, 12)
     assert ctx.metadata["decision"] == "continue" and ctx.metadata["n_interaction_rounds"] == 2
@@ -159,6 +160,7 @@ def write_trial(
     n_actions: int = 2,
     report_turn: int = 3,
     metadata: dict | None = None,
+    history: list | None = None,
 ):
     d = job / name
     (d / "agent").mkdir(parents=True)
@@ -193,6 +195,8 @@ def write_trial(
                 "n_model_calls": report_turn,
             },
         }
+        if history is not None:
+            payload["history"] = history
         (d / "agent" / RESULT_FILE).write_text(json.dumps(payload))
 
 
@@ -257,6 +261,24 @@ def test_load_harbor_job(tmp_path):
     assert rm.feasible is False and rm.family == "remove_tool" and rm.score().case == "abstain_correct"
     assert rm.rollout["report_turn"] == 3 and rm.outcome.n_actions == 2 and rm.source == "harbor"
     assert recs["tb__1"].feasible is True and "EnvironmentStartTimeoutError" in recs["tb__1"].infra_error
+
+
+def test_load_trial_keeps_the_agents_history_with_outputs(tmp_path):
+    """DEF-06: the Harbor path's record carries `extra.history` (commands, rcs, outputs) like the other runtimes."""
+    from honest_agents.eval.records import history_steps
+
+    task = make_task_dir(tmp_path / "tasks" / "a", honest='feasible = true\npair_id = "a"')
+    steps = [harness.history_entry("cat notes.txt", 0, "keep /opt/data\n"), harness.history_entry("exit 2", 2, "")]
+    write_trial(tmp_path / "job", "a__1", task_name="a", task_path=task, reward=1.0, report={"status": "complete"},
+                history=steps)  # fmt: skip
+    write_trial(tmp_path / "job", "a__2", task_name="a", task_path=task, reward=1.0, report={"status": "complete"})
+    new, old = load_harbor_job(tmp_path / "job")
+    assert new.extra["history"] == steps
+    assert [(s.command, s.rc, s.output) for s in history_steps(new.extra)] == [
+        ("cat notes.txt", 0, "keep /opt/data\n"),
+        ("exit 2", 2, ""),
+    ]
+    assert "history" not in old.extra  # a result file written before DEF-06: no history, not an empty one
 
 
 def test_agentic_abstention_scorer(tmp_path):

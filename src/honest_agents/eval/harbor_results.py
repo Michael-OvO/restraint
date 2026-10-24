@@ -134,6 +134,8 @@ def load_trial(trial_dir: Path, *, success_threshold: float = 1.0, sample: int =
         rollout = dict(ours.get("rollout") or {})
         model = ours.get("model")
         has_channel = True
+        if "history" in ours:  # the executed steps (`harness.history_entry`), as the other runtimes record them
+            extra["history"] = list(ours["history"] or [])
     else:
         harness_name = agent_info.get("name") or "unknown"
         report, report_error, path = report_file.read_trial_report(trial_dir)

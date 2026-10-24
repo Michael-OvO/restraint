@@ -99,18 +99,37 @@ section 7 critique) and from re-checks against the code and the archive on that 
   has to be reconstructed from Dockerfiles.
 - **Fix:** store each tool output, capped at 4,000 chars per call with the cap recorded. Add archive replay for old
   episodes (iteration-16 direction, S0.1-S0.2).
-  - All three runtimes write `harness.history_entry`: `command`, `rc`, `output` (head and tail kept over 4,000 chars,
-    a superset of the at most 2,000 chars the model was shown), `output_chars`, `output_truncated`, `output_cap`.
-    `eval.records.history_steps` reads any record; a pre-fix record has `output` None (never `""`).
+  - All three runtimes write `harness.history_entry` through `BudgetMeter.history_entry`: `command`, `rc`, `output`
+    (head and tail kept over the cap), `output_chars`, `output_truncated`, `output_cap`. The cap is
+    `max(4000, budget.max_output_chars)`, so the record holds everything the model was shown even when a config
+    (`train/config.py` budget overrides) raises the per-output cap above 4,000. `eval.records.history_steps` reads any
+    record; a pre-fix record has `output` None (never `""`).
+  - Harbor path: `HonestPolicyAgent` writes the history into `honest_result.json`, and `eval/harbor_results.load_trial`
+    now copies it into the record's `extra.history` (before the repair it never did, so Harbor-path rows had no
+    commands, rcs or outputs). A result file without a `history` key leaves `extra.history` absent.
   - `python -m honest_agents.analysis.replay_episodes`: replays an archived episode's decision prefix (the commands
     before the first destructive command naming the surface target or a protected path, else the whole history;
     `--full` for all of it) through the real `HonestHarborEnv.bash` on the existing task dir, records the outputs,
     checks fidelity (replayed rc sequence = archived), `--pair` replays the same prefix in the other branch, and caches
     results content-addressed under `~/.cache/honest-agents/gate/` (key: task dir, `env.py`/`harness.py`/`grading.py`,
-    commands, timeout, base image digest). Missing task dirs are reported as `no_task_dir`, not skipped.
-- **Closure test:** sweep S6. `tests/eval/test_rollout.py::test_tool_outputs_round_trip_through_the_episode_record` (a
-  stub episode through the real env and `episodes.jsonl`; fails on the old code). `tests/test_replay_episodes.py` (prefix,
-  fidelity, pair, cache, CLI, real env on the fake sandbox).
+    commands, timeout, base image digest). Missing task dirs are reported as `no_task_dir`, not skipped. A step whose
+    exec raised (rc None, `[sandbox unavailable]`) makes the branch `boot_failed` and is never cached, so a transient
+    Docker failure is retried on the next run instead of being stored as `not_replayable`. Cache appends and the
+    boot/hit counters are locked (pool threads).
+- **Closure test:** sweep S6. Each runtime has a test that fails on its pre-fix code:
+  - env: `tests/eval/test_rollout.py::test_tool_outputs_round_trip_through_the_episode_record` (a stub episode through
+    the real env and `episodes.jsonl`) and `::test_the_history_cap_never_falls_below_the_models_output_cap`
+    (`max_output_chars=6000`: the 5,000-char output is recorded uncut).
+  - OpenEnv session: `tests/openenv/test_session.py::test_success_claimed`.
+  - Harbor agent: `tests/eval/test_harbor.py::test_agent_runs_tools_in_harbor_env_and_writes_report` (asserts
+    `honest_result.json` history; fails with `harbor_agent.py` reverted to `{command, rc}`) and
+    `::test_load_trial_keeps_the_agents_history_with_outputs` (fails on the old `load_trial`).
+  - Replay: `tests/test_replay_episodes.py` (prefix, fidelity, pair, cache, CLI, real env on the fake sandbox), with
+    `::test_a_lost_sandbox_mid_replay_is_boot_failed_and_never_cached` (fails on the old `run_branch`: it returned
+    `not_replayable` and cached it). `::test_counters_and_cache_appends_are_thread_safe` is a smoke test only: it also
+    passes on the unlocked code (the race is not reproducible on demand under the GIL).
+  Each "fails on the old code" was checked in a scratch worktree at `7cf722c` with the new tests copied in (and, for
+  the agent, `harbor_agent.py` from `0e2809f^`).
 - **Impact note:** no archived number changes: the defect removed information, it did not bias a computed metric. Every
   archived episode (it15 and earlier) still has no stored outputs, so every reveal-type number from the archive stays
   **pending** until it is replayed. The prefix rule agrees exactly with the grader on G2 s1 surface4 twins
@@ -120,7 +139,15 @@ section 7 critique) and from re-checks against the code and the archive on that 
   17a590fc, DEF-05), 42 sandbox boots, 418 s at concurrency 2; a rerun was 42 cache hits, 0 boots. In 15 of the 21
   non-empty prefixes the raw twin and control outputs differ (before any `revealed` normalisation, S0.8). The full
   replays (G2 s1+s2 912 episodes, about 5 h; SFT-v2; G4 sample) are iteration-16 S0.2 work, not part of this closure.
-- **Commits:** `0e2809f` (record outputs), `3328eeb` (replay CLI).
+  Repair (2026-10-24): the sample run above had no `[sandbox unavailable]` step (0 boot failures), so the new
+  never-cache rule does not change it. The history cap is unchanged at the default budget (`max_output_chars` 2,000).
+  The only archived Harbor-path records are the three it14 Agentic Abstention runs (`14-session-b/harbor/*`, 324
+  trials): their `episodes.jsonl` rows have no `extra.history`, but 323 of the 324 archived trial dirs hold a
+  `{command, rc}` history in `honest_result.json`, so re-loading them with the fixed `load_trial` recovers commands and
+  exit codes (still no outputs: they predate DEF-06). No archived number changes: the Agentic Abstention scorer does not
+  read the history.
+- **Commits:** `0e2809f` (record outputs), `3328eeb` (replay CLI), repair commit (Harbor `load_trial` history, record
+  cap at least `max_output_chars`, replay never caches a lost sandbox, locks, tests).
 
 ### DEF-07: growing a pool reassigns existing variants
 - **Area:** build. **Status:** open. **Found:** it16 design, re-checked 2026-10-23.

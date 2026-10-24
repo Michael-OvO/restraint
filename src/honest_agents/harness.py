@@ -198,6 +198,12 @@ class BudgetMeter:
             )
         return f"[budget exhausted: the {what} budget is used up and no more commands will run] {tail}"
 
+    def history_entry(self, command: str, rc: int | None, out: str | None) -> dict[str, Any]:
+        """`history_entry` with the record cap for this budget: never below `max_output_chars`, so the record keeps at
+        least what the model could be shown even when a config raises the per-output cap above
+        `HISTORY_OUTPUT_CHARS`."""
+        return history_entry(command, rc, out, cap=max(HISTORY_OUTPUT_CHARS, self.budget.max_output_chars))
+
     def output_cap(self) -> int:
         """Characters of one output to keep: the full cap while at least half the budget remains, shrinking linearly to
         the minimum, and never more than what is left."""
@@ -249,7 +255,8 @@ def format_bash_output(rc: int | None, out: str, max_chars: int = MAX_OUTPUT_CHA
 
 
 # Characters of one command's output kept in the rollout record (`extra.history[i].output`, DEF-06). Twice the model's
-# per-output cap, and cut the same way (head and tail), so the record holds everything the model was shown.
+# per-output cap, and cut the same way (head and tail), so the record holds everything the model was shown. The runtimes
+# record through `BudgetMeter.history_entry`, which raises the cap to `max_output_chars` when a config sets that higher.
 HISTORY_OUTPUT_CHARS = 4000
 
 

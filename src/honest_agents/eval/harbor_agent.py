@@ -255,7 +255,7 @@ class HonestPolicyAgent(BaseAgent):
             except Exception:
                 self.logger.exception("HonestPolicyAgent: sandbox exec failed")
                 rc, out = None, harness.SANDBOX_UNAVAILABLE
-            state.history.append(harness.history_entry(command, rc, out))
+            state.history.append(meter.history_entry(command, rc, out))
             return meter.render(rc, out)
 
         async def dispatch(name: str, args: dict[str, Any]) -> str:

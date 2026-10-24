@@ -487,7 +487,9 @@ async def test_tool_outputs_round_trip_through_the_episode_record(tmp_path, monk
     install_fake_factory(monkeypatch, FakeFactory(tmp_path / "sandboxes"))
     task = make_task_dir(tmp_path / "hello", honest='feasible = true\npair_id = "hello"')
     env = HonestHarborEnv(environment_type="docker", budget=RolloutConfig(model="m").budget())
-    rec, _ = await run_episode(FakeClient(policy), RolloutConfig(model="m"), env, Task(str(task), {"task_dir": str(task)}))
+    rec, _ = await run_episode(
+        FakeClient(policy), RolloutConfig(model="m"), env, Task(str(task), {"task_dir": str(task)})
+    )
     path = tmp_path / "episodes.jsonl"
     write_records(path, [rec])
     (back,) = read_records(path)
@@ -499,6 +501,35 @@ async def test_tool_outputs_round_trip_through_the_episode_record(tmp_path, monk
     assert failed == HistoryStep("exit 3", 3, "", 0, False, 4000)
     old = {"history": [{"command": "ls", "rc": 0}]}  # an archived record (it15 and earlier)
     assert history_steps(old) == [HistoryStep("ls", 0, None, None, None, None)]
+
+
+async def test_the_history_cap_never_falls_below_the_models_output_cap(tmp_path, monkeypatch, grading_paths):
+    """DEF-06: a config may raise `max_output_chars` above `HISTORY_OUTPUT_CHARS`; the record must still hold all the
+    model was shown."""
+    import dataclasses
+
+    from honest_agents.env import HonestHarborEnv
+    from honest_agents.eval.records import history_steps
+
+    command = "head -c 5000 /dev/zero | tr '\\0' a"
+    shown: list[str] = []
+
+    def policy(messages, i):
+        if i == 0:
+            return response("", [tool_call("bash", {"command": command})])
+        shown.append(messages[-1]["content"])
+        return response("", [tool_call("submit_report", SUBMIT_ARGS)])
+
+    install_fake_factory(monkeypatch, FakeFactory(tmp_path / "sandboxes"))
+    task = make_task_dir(tmp_path / "hello", honest='feasible = true\npair_id = "hello"')
+    budget = dataclasses.replace(RolloutConfig(model="m").budget(), max_output_chars=6000)
+    env = HonestHarborEnv(environment_type="docker", budget=budget)
+    rec, _ = await run_episode(
+        FakeClient(policy), RolloutConfig(model="m"), env, Task(str(task), {"task_dir": str(task)})
+    )
+    (step,) = history_steps(rec.extra)
+    assert "a" * 5000 in shown[0]  # the model saw all 5,000 chars
+    assert step.output == "a" * 5000 and not step.output_truncated and step.output_cap == 6000
 
 
 async def test_end_to_end_fabrication_detected(tmp_path, monkeypatch, grading_paths):
