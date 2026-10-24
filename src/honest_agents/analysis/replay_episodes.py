@@ -2,6 +2,7 @@
 
     uv run python -m honest_agents.analysis.replay_episodes EPISODES.jsonl[.gz] [...] --out replay.jsonl \
         [--tasks-root data/decision/surfaces_val/tasks] [--pair] [--sample 24 --seed 0] [--concurrency 4]
+        [--regrade --surface inbound_link --branch control]
 
 Records written before DEF-06 hold only `{command, rc}` per step (`extra.history`), and `outcome.evidence` holds grader
 re-runs made after the episode, often after the `rm`. Neither shows what the agent saw. For each episode this tool:
@@ -16,7 +17,10 @@ re-runs made after the episode, often after the `rm`. Neither shows what the age
 * checks fidelity: the replayed exit codes must equal the archived ones, else the episode is `not_replayable` with the
   first mismatching step;
 * with `--pair`, replays the same prefix in the other branch of the twin/control pair (`<id>` <-> `<id>__control`).
-  Its exit codes may differ by design; they are recorded, not checked.
+  Its exit codes may differ by design; they are recorded, not checked;
+* with `--regrade`, replays the **whole** history, hands the env the archived report and grades the episode against the
+  task dir as it is now (a fixed test or sentinel), with the eval's reward config (`config.json`): the row carries the
+  archived and the new case, so a grading fix re-scores the archive ("re-scored, post-fix"). Regrades are not cached.
 
 Results are cached content-addressed (docs/integrity-gate.md, "the result cache"): the key is the sha256 of the task dir
 contents, of the source files that shape a replay (`env.py`, `harness.py`, `grading.py`), of the command list, of the
@@ -49,6 +53,8 @@ from typing import Any, Protocol
 from honest_agents.behaviour import is_destructive
 from honest_agents.eval.records import history_steps
 from honest_agents.harness import SANDBOX_UNAVAILABLE
+from honest_agents.report import SelfReport
+from honest_agents.reward import EpisodeOutcome, RewardBreakdown, RewardConfig, outcome_from_dict
 from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite, site_of_task
 
 log = logging.getLogger(__name__)
@@ -66,7 +72,7 @@ _SRC = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (_SRC / "env.py", _SRC / "harness.py", _SRC / "grading.py")
 
 # Statuses of one replayed episode.
-REPLAYABLE = "replayable"
+REPLAYABLE = "replayable"  # (a regraded episode: replayed and graded, exit codes matched)
 NOT_REPLAYABLE = "not_replayable"
 NO_TASK_DIR = "no_task_dir"
 BOOT_FAILED = "boot_failed"
@@ -84,6 +90,9 @@ class ArchivedEpisode:
     commands: tuple[str, ...]
     rcs: tuple[int | None, ...]
     family: str | None = None
+    # the archived `outcome` and `reward.case` (`--regrade` hands the report back and compares the case)
+    outcome: dict[str, Any] | None = field(default=None, compare=False, hash=False, repr=False)
+    case: str = ""
 
     @property
     def branch(self) -> str:
@@ -101,6 +110,8 @@ def episode_of(row: dict[str, Any]) -> ArchivedEpisode:
         commands=tuple(s.command for s in steps),
         rcs=tuple(s.rc for s in steps),
         family=row.get("family"),
+        outcome=row.get("outcome") if isinstance(row.get("outcome"), dict) else None,
+        case=str((row.get("reward") or {}).get("case") or ""),
     )
 
 
@@ -205,6 +216,45 @@ class HarborRunner:
         if len(history) != len(commands):
             raise BootError(f"{len(history)} of {len(commands)} commands ran")
         return history
+
+    def regrade(
+        self, task_dir: Path, commands: Sequence[str], report: SelfReport | None, reward_config: RewardConfig
+    ) -> tuple[list[dict[str, Any]], EpisodeOutcome, RewardBreakdown]:
+        """Boot `task_dir`, run `commands`, submit `report` (None: the episode ended without one) and grade, as the eval
+        would have; the env tears the sandbox down after grading."""
+        from honest_agents.env import HonestHarborEnv
+        from honest_agents.harness import EpisodeBudget
+
+        budget = EpisodeBudget(
+            max_bash_calls=len(commands) + 1,
+            max_total_chars=10**9,
+            command_timeout_sec=self.command_timeout_sec,
+        )
+        env = HonestHarborEnv(
+            budget=budget, reward_config=reward_config, enforce_network_policy=self.enforce_network_policy
+        )
+        try:
+            env.reset(task_dir=str(task_dir))
+            try:
+                env._wait_boot()
+            except Exception as e:
+                raise BootError(f"{type(e).__name__}: {e}") from e
+            for command in commands:
+                env.bash(command)
+            env._set_external_report(report, None)
+            outcome, breakdown, _ = env._graded()
+            history = list(env._history)
+        finally:
+            try:
+                if env._boot is not None:
+                    concurrent.futures.wait([env._boot])
+                if env._env is not None and env._result is None:
+                    env._run(env._teardown())
+            finally:
+                env._loop.call_soon_threadsafe(env._loop.stop)
+        if len(history) != len(commands):
+            raise BootError(f"{len(history)} of {len(commands)} commands ran")
+        return history, outcome, breakdown
 
 
 # ── result cache ──────────────────────────────────────────────────────────────
@@ -341,6 +391,23 @@ class EpisodeReplay:
     pair: BranchReplay | None = None
 
 
+@dataclass
+class EpisodeRegrade:
+    episode_id: str
+    task_id: str
+    surface: str
+    branch: str
+    n_commands: int
+    status: str  # REPLAYABLE (replayed, exit codes matched, graded) | NOT_REPLAYABLE | NO_TASK_DIR | BOOT_FAILED
+    archived_case: str
+    case: str = ""  # the new case (also set when NOT_REPLAYABLE: the grade of a diverged replay, not to be used)
+    mismatch_at: int | None = None
+    archived_tests_passed: bool | None = None
+    tests_passed: bool | None = None
+    violation_details: list[str] = field(default_factory=list)
+    error: str = ""
+
+
 def _sandbox_lost(entry: dict[str, Any]) -> bool:
     """A step whose exec raised (`HonestHarborEnv.bash` records rc None and `SANDBOX_UNAVAILABLE`)."""
     return entry.get("rc") is None and entry.get("output") == SANDBOX_UNAVAILABLE
@@ -417,6 +484,84 @@ class Replayer:
             row.pair = self.run_branch(partner_id(ep.task_id), prefix)
         return row
 
+    def regrade(self, ep: ArchivedEpisode, reward_config: RewardConfig) -> EpisodeRegrade:
+        """Replay the whole history, submit the archived report and grade against the task dir as it is now."""
+        row = EpisodeRegrade(
+            episode_id=ep.episode_id,
+            task_id=ep.task_id,
+            surface=ep.surface,
+            branch=ep.branch,
+            n_commands=len(ep.commands),
+            status=REPLAYABLE,
+            archived_case=ep.case,
+            archived_tests_passed=(ep.outcome or {}).get("tests_passed"),
+        )
+        task_dir = self.tasks_root / ep.task_id
+        if not (task_dir / "task.toml").is_file():
+            row.status = NO_TASK_DIR
+            return row
+        report = outcome_from_dict(ep.outcome).report if ep.outcome else None
+        self._count("boots")
+        try:
+            entries, outcome, breakdown = self.runner.regrade(task_dir, ep.commands, report, reward_config)  # type: ignore[attr-defined]
+        except BootError as e:
+            row.status, row.error = BOOT_FAILED, str(e)[:500]
+            return row
+        lost = next((i for i, e in enumerate(entries) if _sandbox_lost(e)), None)
+        if lost is not None or outcome.grading_error is not None:
+            row.status = BOOT_FAILED
+            row.error = f"sandbox unavailable at step {lost}" if lost is not None else str(outcome.grading_error)[:500]
+            return row
+        row.case, row.tests_passed, row.violation_details = (
+            breakdown.case,
+            outcome.tests_passed,
+            outcome.violation_details,
+        )
+        rcs = [e.get("rc") for e in entries]
+        row.mismatch_at = next((i for i, (a, b) in enumerate(zip(ep.rcs, rcs, strict=True)) if a != b), None)
+        if row.mismatch_at is not None:
+            row.status = NOT_REPLAYABLE
+        return row
+
+
+def regrade_all(
+    replayer: Replayer,
+    episodes: Sequence[ArchivedEpisode],
+    reward_config: RewardConfig,
+    *,
+    concurrency: int = 4,
+    on_result: Callable[[EpisodeRegrade], None] | None = None,
+) -> list[EpisodeRegrade]:
+    """`Replayer.regrade` over `episodes` with at most `concurrency` live sandboxes; results in input order."""
+    results: dict[int, EpisodeRegrade] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = {pool.submit(replayer.regrade, ep, reward_config): i for i, ep in enumerate(episodes)}
+        try:
+            for f in concurrent.futures.as_completed(futures):
+                r = f.result()
+                results[futures[f]] = r
+                if on_result is not None:
+                    on_result(r)
+        except KeyboardInterrupt:
+            for f in futures:
+                f.cancel()
+            raise
+    return [results[i] for i in sorted(results)]
+
+
+def regrade_summary(rows: Sequence[EpisodeRegrade]) -> dict[str, Any]:
+    """Per (surface, branch): status counts, and archived vs new case counts over the replayable episodes."""
+    out: dict[str, Any] = {}
+    for r in rows:
+        c = out.setdefault(f"{r.surface}/{r.branch}", {"n": 0, "status": {}, "archived": {}, "new": {}, "changed": 0})
+        c["n"] += 1
+        c["status"][r.status] = c["status"].get(r.status, 0) + 1
+        if r.status == REPLAYABLE:
+            c["archived"][r.archived_case] = c["archived"].get(r.archived_case, 0) + 1
+            c["new"][r.case] = c["new"].get(r.case, 0) + 1
+            c["changed"] += r.case != r.archived_case
+    return dict(sorted(out.items()))
+
 
 def replay_all(
     replayer: Replayer,
@@ -483,6 +628,15 @@ def render(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _reward_of(paths: Sequence[Path]) -> RewardConfig:
+    """The eval's reward config from a `config.json` beside the episode file, else the default."""
+    for p in paths:
+        cfg = p.parent / "config.json"
+        if cfg.is_file() and isinstance(r := json.loads(cfg.read_text()).get("reward"), dict):
+            return RewardConfig(**r)
+    return RewardConfig()
+
+
 def _timeout_of(paths: Sequence[Path]) -> int:
     """The eval's `budget.command_timeout_sec` from a `config.json` beside the episode file, else the default."""
     for p in paths:
@@ -505,6 +659,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--tasks-root", type=Path, default=DEFAULT_TASKS_ROOT, help="task dirs, one per task_id")
     ap.add_argument("--pair", action="store_true", help="also replay the prefix in the other branch of the pair")
     ap.add_argument("--full", action="store_true", help="replay the whole history, not only the decision prefix")
+    ap.add_argument(
+        "--regrade",
+        action="store_true",
+        help="replay the whole history, submit the archived report and grade against the task dir as it is now",
+    )
+    ap.add_argument("--surface", default=None, help="only episodes of this surface")
+    ap.add_argument("--branch", choices=("twin", "control"), default=None, help="only episodes of this branch")
     ap.add_argument("--family", default="high_risk", help="only episodes of this family ('' for all)")
     ap.add_argument("--sample", type=int, default=None, help="a stratified sample of this many episodes")
     ap.add_argument("--seed", type=int, default=0)
@@ -517,6 +678,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     episodes = [e for p in args.episodes for e in load_episodes(p) if not args.family or e.family == args.family]
+    episodes = [
+        e
+        for e in episodes
+        if (args.surface is None or e.surface == args.surface) and (args.branch is None or e.branch == args.branch)
+    ]
     if args.sample is not None:
         episodes = stratified_sample(episodes, args.sample, args.seed)
     timeout = args.timeout if args.timeout is not None else _timeout_of(args.episodes)
@@ -531,6 +697,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
+    if args.regrade:
+        with open(args.out, "w") as out:
+
+            def write_regrade(r: EpisodeRegrade) -> None:
+                out.write(json.dumps(asdict(r)) + "\n")
+                out.flush()
+                log.info(
+                    "%-15s %-7s %-14s %s -> %s %s", r.surface, r.branch, r.status, r.archived_case, r.case, r.episode_id
+                )
+
+            regraded = regrade_all(
+                replayer, episodes, _reward_of(args.episodes), concurrency=args.concurrency, on_result=write_regrade
+            )
+        result = {
+            "summary": regrade_summary(regraded),
+            "stats": {
+                "episodes": len(regraded),
+                "wall_time_sec": round(time.monotonic() - t0, 1),
+                "timeout_sec": timeout,
+            },
+        }
+        print(json.dumps(result, indent=2))
+        if args.json is not None:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            args.json.write_text(json.dumps(result, indent=2) + "\n")
+        return 0
     with open(args.out, "w") as out:
 
         def write(r: EpisodeReplay) -> None:

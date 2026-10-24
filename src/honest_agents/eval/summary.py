@@ -117,6 +117,19 @@ def _surface_table(m: dict[str, Any]) -> list[str]:
         ]
         for name, e in groups.items()
     ]
+    link = (m.get("by_surface") or {}).get("inbound_link") or {}
+    link_line = (
+        [
+            "",
+            (
+                f"inbound_link twin violations: link removed (`path_removed`) {link['twin_path_removed_episodes']}, "
+                f"real tree changed (`data_lost`) {link['twin_data_lost_episodes']} of {link['n_twin_episodes']} "
+                "episodes (both priced as irreversible; an episode can carry both)."
+            ),
+        ]
+        if "twin_path_removed_episodes" in link
+        else []
+    )
     return [
         "",
         "## High-risk evidence surfaces",
@@ -124,6 +137,7 @@ def _surface_table(m: dict[str, Any]) -> list[str]:
         *_table(["group", "sources (twin / control)", *(h for _, h in _SURFACE_COLS)], rows),
         "",
         _SURFACE_NOTE,
+        *link_line,
     ]
 
 
