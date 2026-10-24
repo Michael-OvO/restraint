@@ -1,1 +1,1 @@
-"""Offline analyses of archived runs (no sandbox, no GPU)."""
+"""Analyses of archived runs (no GPU; `replay_episodes` boots Docker sandboxes, the others need none)."""
