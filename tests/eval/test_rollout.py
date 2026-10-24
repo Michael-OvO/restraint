@@ -468,7 +468,37 @@ async def test_end_to_end_with_real_honest_env(tmp_path, monkeypatch, grading_pa
     assert rec.outcome.n_actions == 1 and rec.rollout["report_turn"] == 2
     assert rec.outcome.stop_reason == STOP_REPORT
     assert transcript[0]["content"].startswith("You are an autonomous agent")
-    assert rec.extra["history"] == [{"command": "echo hi > hello.txt", "rc": 0}]
+    assert rec.extra["history"] == [harness.history_entry("echo hi > hello.txt", 0, "")]
+
+
+async def test_tool_outputs_round_trip_through_the_episode_record(tmp_path, monkeypatch, grading_paths):
+    """DEF-06 / sweep S6: each command's output reaches `extra.history` (capped at 4,000 chars, cut recorded) and
+    survives `episodes.jsonl`; a record written before DEF-06 still reads, with its outputs None."""
+    from honest_agents.env import HonestHarborEnv
+    from honest_agents.eval.records import HistoryStep, history_steps, read_records, write_records
+
+    commands = ["echo hi > hello.txt && cat hello.txt", "head -c 9000 /dev/zero | tr '\\0' a; echo; echo END", "exit 3"]
+
+    def policy(messages, i):
+        if i < len(commands):
+            return response("", [tool_call("bash", {"command": commands[i]})])
+        return response("", [tool_call("submit_report", SUBMIT_ARGS)])
+
+    install_fake_factory(monkeypatch, FakeFactory(tmp_path / "sandboxes"))
+    task = make_task_dir(tmp_path / "hello", honest='feasible = true\npair_id = "hello"')
+    env = HonestHarborEnv(environment_type="docker", budget=RolloutConfig(model="m").budget())
+    rec, _ = await run_episode(FakeClient(policy), RolloutConfig(model="m"), env, Task(str(task), {"task_dir": str(task)}))
+    path = tmp_path / "episodes.jsonl"
+    write_records(path, [rec])
+    (back,) = read_records(path)
+    small, big, failed = history_steps(back.extra)
+    assert small == HistoryStep(commands[0], 0, "hi\n", 3, False, harness.HISTORY_OUTPUT_CHARS)
+    assert big.rc == 0 and big.output_truncated and big.output_chars == 9005 and big.output_cap == 4000
+    assert big.output.startswith("a" * 2000) and big.output.endswith("a" * 1995 + "\nEND\n")
+    assert "[5005 chars truncated]" in big.output
+    assert failed == HistoryStep("exit 3", 3, "", 0, False, 4000)
+    old = {"history": [{"command": "ls", "rc": 0}]}  # an archived record (it15 and earlier)
+    assert history_steps(old) == [HistoryStep("ls", 0, None, None, None, None)]
 
 
 async def test_end_to_end_fabrication_detected(tmp_path, monkeypatch, grading_paths):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from honest_agents import bank, grading
+from honest_agents import bank, grading, harness
 from honest_agents.harness import EpisodeBudget
 from honest_agents.openenv_env import session as session_mod
 from honest_agents.openenv_env.session import (
@@ -68,7 +68,7 @@ def test_success_claimed(task_root: Path, fake_factory) -> None:
     md = res.to_metadata()
     assert md["reward_breakdown"]["case"] == "success_claimed" and md["outcome"]["report"]["status"] == "complete"
     assert md["masked_reason"] is None and md["stop_reason"] == "report" and md["grading_error"] is None
-    assert md["debug"]["history"] == [{"command": "echo hi > hello.txt && cat hello.txt", "rc": 0}]
+    assert md["debug"]["history"] == [harness.history_entry("echo hi > hello.txt && cat hello.txt", 0, "hi\n")]
     assert md["debug"]["report_source"] == "tool"
 
 

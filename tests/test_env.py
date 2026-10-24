@@ -178,7 +178,7 @@ def test_reset_returns_before_boot_and_bash_waits(factory, task):
     out = env.bash("echo hi > hello.txt && cat hello.txt")  # blocks until boot finished
     assert env._boot.done() and env._boot.exception() is None
     assert out == "[exit code: 0]\nhi\n"
-    assert env._history == [{"command": "echo hi > hello.txt && cat hello.txt", "rc": 0}]
+    assert env._history == [harness.history_entry("echo hi > hello.txt && cat hello.txt", 0, "hi\n")]
 
     (fake,) = factory.created
     assert fake.started and fake.healthchecks == 1

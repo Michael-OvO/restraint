@@ -40,7 +40,9 @@ __all__ = [
     "HARNESS_HONEST",
     "INFRA_MASKS",
     "EpisodeRecord",
+    "HistoryStep",
     "episodes_path",
+    "history_steps",
     "iter_records",
     "outcome_from_dict",
     "outcome_to_dict",
@@ -54,6 +56,39 @@ HARNESS_HONEST = "honest"  # our own tool surface (bash / submit_report / abstai
 # Masks that mean "the sandbox or the grader failed, not the policy". A leak mask is not one of them: it says the
 # variant's label is wrong, which the metrics report (leak rate) instead of hiding.
 INFRA_MASKS = frozenset({MASK_BOOT_FAILURE, MASK_TOOLCHAIN, MASK_REWARD_ERROR})
+
+
+@dataclass(frozen=True)
+class HistoryStep:
+    """One executed command of `extra.history` (`harness.history_entry`). Records written before DEF-06 stored only the
+    command and its exit code: their output fields are None, never an empty string, so "not recorded" and "printed
+    nothing" stay apart."""
+
+    command: str
+    rc: int | None
+    output: str | None = None
+    output_chars: int | None = None
+    output_truncated: bool | None = None
+    output_cap: int | None = None
+
+
+def history_steps(extra: dict[str, Any] | None) -> list[HistoryStep]:
+    """`extra.history` of a record (or of an `episodes.jsonl` row's `extra`) as typed steps, old records included."""
+    steps: list[HistoryStep] = []
+    for h in (extra or {}).get("history") or []:
+        if not isinstance(h, dict):
+            continue
+        steps.append(
+            HistoryStep(
+                command=str(h.get("command") or ""),
+                rc=h.get("rc"),
+                output=h.get("output"),
+                output_chars=h.get("output_chars"),
+                output_truncated=h.get("output_truncated"),
+                output_cap=h.get("output_cap"),
+            )
+        )
+    return steps
 
 
 @dataclass

@@ -248,6 +248,33 @@ def format_bash_output(rc: int | None, out: str, max_chars: int = MAX_OUTPUT_CHA
     return f"[exit code: {rc}]\n{out}" if out else f"[exit code: {rc}] (no output)"
 
 
+# Characters of one command's output kept in the rollout record (`extra.history[i].output`, DEF-06). Twice the model's
+# per-output cap, and cut the same way (head and tail), so the record holds everything the model was shown.
+HISTORY_OUTPUT_CHARS = 4000
+
+
+def history_entry(command: str, rc: int | None, out: str | None, cap: int = HISTORY_OUTPUT_CHARS) -> dict[str, Any]:
+    """One `extra.history` step: the command, its exit code and its output as captured, before the model-facing shrink.
+
+    Over `cap` characters the head and tail are kept around a `[N chars truncated]` line, as `format_bash_output`
+    does, and the cut is recorded: `output_chars` is the full length, `output_truncated` whether it was cut and
+    `output_cap` the cap in force. Records written before DEF-06 have none of these keys (see
+    `records.history_steps`)."""
+    out = out or ""
+    kept = out
+    if len(out) > cap:
+        half = cap // 2
+        kept = out[:half] + f"\n... [{len(out) - 2 * half} chars truncated] ...\n" + out[len(out) - half :]
+    return {
+        "command": command,
+        "rc": rc,
+        "output": kept,
+        "output_chars": len(out),
+        "output_truncated": len(out) > cap,
+        "output_cap": cap,
+    }
+
+
 def _unit_float(v: Any) -> float | None:
     if v is None:
         return None

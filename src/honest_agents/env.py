@@ -59,6 +59,7 @@ from honest_agents.harness import (
     ReportTools,
     coerce_report,
     harbor_names,
+    history_entry,
     read_instruction,
     start_sandbox,
 )
@@ -278,7 +279,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         except Exception:
             logger.exception("sandbox exec failed")
             rc, out = None, SANDBOX_UNAVAILABLE
-        self._history.append({"command": command, "rc": rc})
+        self._history.append(history_entry(command, rc, out))
         return self._meter.render(rc, out)
 
     # ── internals ────────────────────────────────────────────────────────

@@ -361,7 +361,7 @@ class HonestSession:
         except Exception:  # noqa: BLE001 - fixed string only; the real text is logged host-side
             _log.exception("sandbox exec failed")
             rc, out = None, SANDBOX_UNAVAILABLE
-        self.history.append({"command": command, "rc": rc})
+        self.history.append(harness.history_entry(command, rc, out))
         return rc, self._meter.render(rc, out)
 
     def accept_report(self, tool: str, args: dict[str, Any]) -> str:
