@@ -13,7 +13,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-03 | metric | open | read window ends at the first destructive command, so decliners get a longer window |
 | DEF-04 | metric / tooling | open | three conflicting "inspected" metrics; `decl_reads` is computed outside the repo |
 | DEF-05 | task data | open | source 17a590fc has no task dir; 48 of 960 episodes per model are silently skipped |
-| DEF-06 | recording | open | rollout records store only `{command, rc}`, not tool outputs |
+| DEF-06 | recording | closed | rollout records store only `{command, rc}`, not tool outputs |
 | DEF-07 | build | open | `_pick_pair` reassigns every existing variant when a pool grows |
 | DEF-08 | tooling | open | checkpoint selection uses `task_success`, which ignores honesty |
 | DEF-09 | tooling | open | decision probe hard-codes `harness.SYSTEM_PROMPT` |
@@ -91,14 +91,36 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** sweep S5. Recompute the it15 read metrics with 20 sources.
 
 ### DEF-06: tool outputs are not recorded
-- **Area:** recording. **Status:** open. **Found:** it15 diagnosis section 7, re-checked 2026-10-23.
+- **Area:** recording. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 7, re-checked 2026-10-23.
 - **Evidence:** `src/honest_agents/env.py:281` appends `{"command", "rc"}` only. `outcome.evidence` holds grader re-runs,
-  often after the `rm`.
+  often after the `rm`. The OpenEnv session (`openenv_env/session.py`) and the Harbor agent (`eval/harbor_agent.py`)
+  did the same.
 - **Impact:** we cannot tell a twin that was read and misjudged from one that was read and ignored. Every reveal metric
   has to be reconstructed from Dockerfiles.
 - **Fix:** store each tool output, capped at 4,000 chars per call with the cap recorded. Add archive replay for old
   episodes (iteration-16 direction, S0.1-S0.2).
-- **Closure test:** sweep S6.
+  - All three runtimes write `harness.history_entry`: `command`, `rc`, `output` (head and tail kept over 4,000 chars,
+    a superset of the at most 2,000 chars the model was shown), `output_chars`, `output_truncated`, `output_cap`.
+    `eval.records.history_steps` reads any record; a pre-fix record has `output` None (never `""`).
+  - `python -m honest_agents.analysis.replay_episodes`: replays an archived episode's decision prefix (the commands
+    before the first destructive command naming the surface target or a protected path, else the whole history;
+    `--full` for all of it) through the real `HonestHarborEnv.bash` on the existing task dir, records the outputs,
+    checks fidelity (replayed rc sequence = archived), `--pair` replays the same prefix in the other branch, and caches
+    results content-addressed under `~/.cache/honest-agents/gate/` (key: task dir, `env.py`/`harness.py`/`grading.py`,
+    commands, timeout, base image digest). Missing task dirs are reported as `no_task_dir`, not skipped.
+- **Closure test:** sweep S6. `tests/eval/test_rollout.py::test_tool_outputs_round_trip_through_the_episode_record` (a
+  stub episode through the real env and `episodes.jsonl`; fails on the old code). `tests/test_replay_episodes.py` (prefix,
+  fidelity, pair, cache, CLI, real env on the fake sandbox).
+- **Impact note:** no archived number changes: the defect removed information, it did not bias a computed metric. Every
+  archived episode (it15 and earlier) still has no stored outputs, so every reveal-type number from the archive stays
+  **pending** until it is replayed. The prefix rule agrees exactly with the grader on G2 s1 surface4 twins
+  (188/188 irreversible violations end the prefix at a destructive command, 268/268 non-violations do not).
+  Fidelity, **provisional** (stratified sample, not the full run): 24 G2 s1 `it15_g2_surface4` episodes (2 per surface
+  and branch, seed 0, `--pair`): 22/22 replayable, 0 rc mismatches on 202 replayed commands, 2 `no_task_dir` (source
+  17a590fc, DEF-05), 42 sandbox boots, 418 s at concurrency 2; a rerun was 42 cache hits, 0 boots. In 15 of the 21
+  non-empty prefixes the raw twin and control outputs differ (before any `revealed` normalisation, S0.8). The full
+  replays (G2 s1+s2 912 episodes, about 5 h; SFT-v2; G4 sample) are iteration-16 S0.2 work, not part of this closure.
+- **Commits:** `0e2809f` (record outputs), `3328eeb` (replay CLI).
 
 ### DEF-07: growing a pool reassigns existing variants
 - **Area:** build. **Status:** open. **Found:** it16 design, re-checked 2026-10-23.
