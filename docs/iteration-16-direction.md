@@ -54,7 +54,7 @@ Most of this literature comes from math, QA and games, with small effect sizes (
 ## 4. Plan
 
 **Integrity gate (owner decision 2026-10-23, [integrity-gate.md](integrity-gate.md)).** S0 is now also the closure of
-every open entry in [defects.md](defects.md) (DEF-01 to DEF-14) and the integrity sweep S1-S11 with a written sign-off.
+every open entry in [defects.md](defects.md) (DEF-01 to DEF-15) and the integrity sweep S1-S11 with a written sign-off.
 S1 (the first experiment) may not be asked for until that sign-off exists. DEF-13 (reward) blocks RL only and is
 closed by sweep S9 before any RL stage.
 

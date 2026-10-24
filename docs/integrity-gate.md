@@ -83,6 +83,63 @@ is done by hand, its result is written into the sign-off, and building the tool 
 The sweep also includes an open search: one pass over every eval cell whose rate is 0%, 100%, or differs by more than 20
 points between twins and controls with no explanation. Most of the current defects were found this way.
 
+## Running the gates efficiently
+
+A gate that takes hours gets skipped. So every check runs at the cheapest level that can answer it. Docker work runs
+only for inputs that changed since the last pass. A routine sweep must not rebuild images, scan Docker, or write episode
+files.
+
+**Three levels.**
+
+| Level | What it may do | Budget | When it runs |
+|---|---|---|---|
+| L0, static | Pure Python in memory: code, task dirs, pool JSON, the reward function, compact archive indexes. No Docker, no network. The only disk write is pytest's temp dir | ≤60 s for the whole level | inside `scripts/test.sh --fast`, so on every test run |
+| L1, cached Docker | Boot a sandbox only for an input whose cache key is not yet in the result cache | ≤15 min after a typical change; a full run only when a key every pair shares changes | on demand (`... --changed`) and at sign-off |
+| L2, full Docker | Re-run everything, ignoring the cache | overnight, unattended, under caffeinate, concurrency ≤4 | only at sign-off after a change to shared code (grader, verifier, harness, base image), and once per iteration as an audit |
+
+**Which level each sweep check uses.**
+
+| Check | Level | How it avoids Docker or repeats |
+|---|---|---|
+| S1 branch consistency | L0, plus L1 for the behaviours that touch the real filesystem | Each surface's graded reading is declared as data: `oracle_lines`, `test_lines`, `irreversible_paths`. An L0 test asserts that one canonical behaviour set gets the same reading on both branches, from those declarations alone. Docker only confirms that the declared behaviour is what `rm` really does: one pair per surface, cached |
+| S2 passability | L0 | Computed from a compact archive index (below) that counts successes per surface, branch and model. No gunzip of episode files |
+| S3 metric validity | L1 | Replay outputs are cached by key, so a metric change re-scores cached outputs in memory without booting anything |
+| S4 one definition | L0 | AST/grep test |
+| S5 completeness | L0 | Path existence against the archive index |
+| S6 observability | L0 | Stub episode round-trip in memory |
+| S7 build stability | L0 | Build the variants in memory and compare their hashes with a committed manifest (`data/pools/build_manifest.json`). Never write the build to disk to diff it |
+| S8 archive hygiene | L0 | Content hashes stored in each `MANIFEST.sha256`; no re-hashing of archives that are unchanged since the last check (their mtime and size match) |
+| S9 reward audit | L0 | `compute_reward` is pure; blind policies are scored on the archive index |
+| S10 bars and power | L0 | The estimator runs on the archive index; bootstrap seeds fixed, ≤2,000 resamples at L0 and more only for the pre-registration |
+| S11 infra guards | L1 | Exercised once in the dry run against the fake sandbox. Only the egress preflight needs a real container |
+
+**The result cache** (L1).
+- **Location:** `~/.cache/honest-agents/gate/` on the Mac and `/root/.cache/honest-agents/gate/` on a node, outside the
+  repo and the archive.
+- **Contents:** one JSONL row per check, holding the verdict and the small outputs the check needs (capped). Never
+  images, containers or full episodes.
+- **Key:** sha256 of the task dir contents, plus the sha256 of the source files the check imports (grader, verifier,
+  harness, `risk_surfaces.py`), plus the command list, plus the base image digest.
+- **Invalidation:** a change to one task re-runs that task only. A change to the grader re-runs everything, which is
+  correct, and is the case that goes to L2.
+- **Integrity:** the cache is append-only and has a schema version. A corrupt or old-version row is ignored, never trusted.
+
+**The archive index.** One compact table built once per archived eval, about 1 MB instead of a 30-100 MB unpacked
+`episodes.jsonl`. It has one row per episode: ids, surface, branch, case, reward, command list hash, read labels, and the
+first-destructive-command index. It also stores the source file's sha256, so a changed or new archive rebuilds only its
+own index. L0 checks and archive analyses read the index, never the gzipped episodes.
+
+**Docker hygiene.**
+- Boot from prebuilt images with the build cache kept. Never `docker system prune` or a cache prune during a sweep.
+- Never enumerate all images or containers in a loop.
+- Tear down each sandbox as soon as its check ends, and stop jobs with SIGINT so teardown runs (training-log incident
+  table).
+- One concurrency setting (≤4 on the Mac).
+
+**Measured, not assumed.** The sweep CLI records each check's wall time, sandbox boots, cache hits and bytes written.
+These numbers go into the sign-off. A check that exceeds its level's budget twice in a row is entered as a tooling defect
+in the ledger: it is fixed (made cheaper, cached or moved to a lower level), not tolerated.
+
 ## Ledger format
 
 Each entry in [defects.md](defects.md) has:

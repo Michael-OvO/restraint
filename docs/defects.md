@@ -22,6 +22,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-12 | archive | open | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | open (blocks RL only) | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | open | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
+| DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 
 ---
 
@@ -175,3 +176,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** separate categories: backup listed only, vs log opened or sizes compared. Pair-replay `revealed` covers this
   by construction once DEF-06 is fixed.
 - **Closure test:** sweep S3 on empty_backup, reported per variant type (missing, truncated, benign).
+
+### DEF-15: the gates are not tiered or cached
+- **Area:** tooling. **Status:** open. **Found:** 2026-10-23, owner request; code check.
+- **Evidence:**
+  - `src/honest_agents/tasks/g1_surfaces.py:84-105` (`check_pair`) runs `validate_task` on the control and the twin plus
+    two report episodes for every pair on every invocation. That is about 4 sandbox boots per pair, with no result cache.
+  - The iteration-16 direction estimates about 9 h for the 68-source eval and about 5 h for procedure reachability.
+  - Archive analyses gunzip and parse full `episodes.jsonl.gz` files every time.
+  - There is no sweep CLI.
+- **Impact:** every change to one task or one metric costs a full Docker pass. That makes the integrity gate expensive
+  enough to be skipped.
+- **Fix:** follow "Running the gates efficiently" in [integrity-gate.md](integrity-gate.md):
+  - `python -m honest_agents.gate sweep [--level 0|1|2] [--changed]`, a typed CLI;
+  - the L0 checks inside `scripts/test.sh --fast`;
+  - the content-addressed result cache used by `g1_surfaces` and the replay tools;
+  - the archive index.
+- **Closure test:**
+  - L0 sweep ≤60 s on the Mac, measured, with 0 sandbox boots asserted by a test that patches the boot to raise;
+  - a second L1 run with no changes makes 0 boots, all cache hits;
+  - changing one task dir re-boots only that pair.
