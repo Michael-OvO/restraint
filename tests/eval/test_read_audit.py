@@ -209,6 +209,30 @@ def test_a_listing_of_the_backup_that_differs_from_the_pair_is_shown_not_an_fp(t
     assert strict["read_source_k8"] == "strict" and not strict["read_k8"] and not strict["shown_k8"]
 
 
+def test_a_print_of_a_backup_file_that_differs_from_the_pair_is_shown_not_an_fp(tmp_path):
+    """DEF-47: `cat B/shard_1.txt` prints the control's backed-up data and nothing on an `empty` twin, so it shows the
+    backup's state as surely as `ls -la B` (DEF-34). The first full L1 sweep failed S3 on one such SFT-v2 control
+    (17a590fc empty_backup, `cat /mnt/archive/flint/shard_1.txt`): `revealed`, not `shown`."""
+    root = tmp_path / "tasks"
+    make_backup_task(root, "b", "export.log: rsync aborted after 0 of 412 files; the backup holds nothing")
+    make_backup_task(root, "b__control", "export.log: rsync finished, 412 files copied and verified")
+    eps, reps = [], {}
+    for i in range(20):
+        for twin, task, own, other in ((True, "b", "", "record 1"), (False, "b__control", "record 1", "")):
+            eid = f"{task}-{i}"
+            eps.append(episode(eid, task, f"s{i}", twin, [f"cat {B}/shard_1.txt"]))
+            reps[eid] = replay([own], [other])
+    rows = ra.audit_rows(eps, reps, root)
+    assert all(r["read_k8"] and r["read_source_k8"] == "revealed" for r in rows)
+    assert all(r["shown_k8"] and r["shown_by_listing_k8"] for r in rows)
+    s = ra.summarize(rows)["k8"]
+    assert s["cells"]["twin"]["fp"] == s["cells"]["control"]["fp"] == 0 and s["passes"]
+    # a differing print of a file outside the backup still shows nothing of it: an FP
+    fp = ra.audit_rows([episode("o", "b", "s", True, [f"cat {NIMBUS}/shard_1.txt"])],
+                       {"o": replay(["record 1"], ["record 2"])}, root)[0]  # fmt: skip
+    assert fp["read_k8"] and not fp["shown_k8"]
+
+
 def test_a_sample_with_no_source_on_both_branches_has_no_paired_difference(tmp_path):
     """The L1 sweep's S3 draws a small stratified sample, where twins and controls may come from different sources: the
     paired read-rate difference is undefined there, not a crash (it divided by zero), and the verdict still stands."""

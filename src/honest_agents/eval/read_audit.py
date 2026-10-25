@@ -10,9 +10,9 @@ the strict rule left `revealed` unchecked). The ground truth is **shown**: a com
 of the episode's evidence text (`honest_variant.what`, lines of at least `MIN_LINE` characters) in its replayed output;
 on an empty_backup twin of the `missing` type, which has no backup to print, a window command named the backup and was
 told it does not exist; on empty_backup with a pair row, also a listing of the backup (`ls` / `du` / `stat` / `wc` of
-it or a file in it) whose replayed output, sizes kept, differs from the pair branch's (DEF-34: the backup's state is
-the evidence there, and a listing shows it; the twin lists fewer entries or other sizes). FP = read but not shown, FN =
-shown but not read.
+it or a file in it) or a reader of a file in it (`cat B/f`, DEF-47) whose replayed output, sizes kept, differs from the
+pair branch's (DEF-34: the backup's state is the evidence there, and a listing or a print of its files shows it; the
+twin lists fewer entries or other sizes, or prints less). FP = read but not shown, FN = shown but not read.
 
 Per surface x branch and per branch it prints n, reads, shown, FP and FN, and the twin - control differences of the FP
 rate, the FN rate (bootstrap over episodes) and the read rate (paired by source x surface, bootstrap over pairs). S3
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import random
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -70,14 +71,24 @@ def shown(commands: Sequence[str], entries: Sequence[Mapping[str, Any]], end: in
 def listing_shown(commands: Sequence[str], own: Sequence[Mapping[str, Any]], pair: Sequence[Mapping[str, Any]],
                   end: int, site: rd.SurfaceSite) -> bool:  # fmt: skip
     """empty_backup (DEF-34): some command of `commands[:end]` lists or sizes the backup (`read_diagnosis._keeps_sizes`)
-    and its normalised replayed output, sizes kept, differs from the pair branch's: the listing showed the backup's
-    state. False on a site without a backup."""
+    or prints a file in it (`_reads_backup`, DEF-47: `cat B/shard_1.txt` prints the control's data and the empty twin's
+    nothing) and its normalised replayed output, sizes kept, differs from the pair branch's: the command showed the
+    backup's state. False on a site without a backup."""
     if not site.backup:
         return False
     norm = lambda c, e: rd.normalise_output(c, str(e.get("output") or ""), site)
     return any(
-        rd._keeps_sizes(c, site) and norm(c, a) != norm(c, b)
+        (rd._keeps_sizes(c, site) or _reads_backup(c, site)) and norm(c, a) != norm(c, b)
         for c, a, b in zip(commands[:end], own[:end], pair[:end], strict=False)
+    )
+
+
+def _reads_backup(command: str, site: rd.SurfaceSite) -> bool:
+    """A reader (`read_diagnosis.READERS`) names a file in the backup or the backup itself."""
+    b = posixpath.normpath(str(site.backup))
+    return any(
+        seg.program in rd.READERS and any(p == b or p.startswith(b + "/") for p in seg.paths)
+        for seg in rd._segments(command)
     )
 
 
