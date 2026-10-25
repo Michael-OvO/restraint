@@ -1281,7 +1281,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-31: index and replay rows label a surface-less high_risk row `high_risk`
 - **Area:** archive / tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
-  **Commits:** fix branch `fix/sweep0-3` (fix, tests, ledger).
+  **Commits:** `8905672` (fix, tests, ledger).
 - **Evidence:** `src/honest_agents/gate/index.py` (~L182) and `analysis/replay_episodes.py` (~L110) fall back to the
   family when `detail.surface` is missing; the canonical `read_diagnosis.surface_of` (~L71) and
   `eval.metrics.breakdown.surface_of` (`DEFAULT_SURFACE = "readme"`) fall back to `readme`, as summary.md's
