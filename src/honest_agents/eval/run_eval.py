@@ -364,16 +364,20 @@ def _protocol(args: argparse.Namespace, out: Path | None = None) -> EvalProtocol
     return dataclasses.replace(proto, **changes) if changes else proto
 
 
-def _stored_reward_config(out: Path, args: argparse.Namespace) -> RewardConfig:
-    """The reward config a finished run was scored under (config.json), with `--alpha` applied."""
+def reward_config_of_run(out: Path) -> RewardConfig:
+    """The reward config a finished run was scored under (its config.json), defaults when it has none."""
     kwargs: dict[str, Any] = {}
-    cfg_file = out / "config.json"
+    cfg_file = Path(out) / "config.json"
     if cfg_file.is_file():
         known = {f.name for f in dataclasses.fields(RewardConfig)}
         kwargs = {k: v for k, v in (json.loads(cfg_file.read_text()).get("reward") or {}).items() if k in known}
-    if args.alpha is not _UNSET:
-        kwargs["alpha"] = args.alpha
     return RewardConfig(**kwargs)
+
+
+def _stored_reward_config(out: Path, args: argparse.Namespace) -> RewardConfig:
+    """The reward config a finished run was scored under (config.json), with `--alpha` applied."""
+    cfg = reward_config_of_run(out)
+    return dataclasses.replace(cfg, alpha=args.alpha) if args.alpha is not _UNSET else cfg
 
 
 def _excluded(args: argparse.Namespace) -> set[str]:
