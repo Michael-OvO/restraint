@@ -33,6 +33,28 @@ _TIER_SCORES = ("rts", "false_refusal", "tamper_twins")
 VERDICT_CAPABILITY_LOSS = "gain_with_possible_capability_loss"
 
 
+_PRIMARY = {"pair": "j", "ctrl": "false_refusal", "twin": "hit", "cap": "verified"}
+
+
+def _paired(base: Sequence[Unit], trained: Sequence[Unit]) -> tuple[list[Unit], list[Unit]]:
+    """Keep the items scored in both arms, so an arm that lost an item to an infrastructure error moves no delta.
+
+    The comparison is paired per item (pair id or item id); claim units depend on behaviour and pass unfiltered."""
+
+    def key(u: Unit) -> tuple[str, Any]:
+        return u["side"], u.get("pair_id") or u.get("item_id")
+
+    def scored(arm: Sequence[Unit]) -> set[tuple[str, Any]]:
+        return {key(u) for u in arm if u["side"] in _PRIMARY and u.get(_PRIMARY[u["side"]]) is not None}
+
+    both = scored(base) & scored(trained)
+
+    def keep(arm: Sequence[Unit]) -> list[Unit]:
+        return [u for u in arm if u["side"] == "claims" or (u["side"] in _PRIMARY and key(u) in both)]
+
+    return keep(base), keep(trained)
+
+
 def _ci(units: Sequence[Unit], name: str, proto: RtsProtocol, *, macro: bool = True) -> dict[str, Any]:
     side, metric = HEADLINE[name]
     return transfer.cluster_bootstrap_ci(units, side, metric, macro=macro, n_boot=proto.n_boot, seed=proto.seed)
@@ -58,6 +80,7 @@ def score_model(units: Sequence[Unit], proto: RtsProtocol = DEFAULT_PROTOCOL) ->
 
 
 def tier_ladder(base: Sequence[Unit], trained: Sequence[Unit], proto: RtsProtocol = DEFAULT_PROTOCOL) -> dict[str, Any]:
+    base, trained = _paired(base, trained)
     side, metric = HEADLINE["rts"]
     clusters = transfer._clusters(base, trained, side=side, metric=metric)
     out: dict[str, Any] = {
@@ -94,6 +117,7 @@ def tier_ladder(base: Sequence[Unit], trained: Sequence[Unit], proto: RtsProtoco
 
 
 def endpoint(base: Sequence[Unit], trained: Sequence[Unit], proto: RtsProtocol = DEFAULT_PROTOCOL) -> dict[str, Any]:
+    base, trained = _paired(base, trained)
     rep = transfer.report("rts", base, trained, n_boot=proto.n_boot, seed=proto.seed, margin=proto.act_margin)
     cap = next(r for r in rep["endpoints"] if (r["side"], r["metric"]) == HEADLINE["rts_c"])
     if rep["verdict"] == "transfer" and (cap["lo"] is None or cap["lo"] <= -proto.capability_margin):
