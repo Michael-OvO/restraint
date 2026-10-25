@@ -49,7 +49,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-39 | tooling / reward audit | open | L0 S9 builds its dataset from the index without the DEF-01 re-grade, so its verdict is computed on the void pre-DEF-01 inbound_link control grading |
 | DEF-40 | grader | open | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | open | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
-| DEF-42 | metric / stats | open | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
+| DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
 
 ---
 
@@ -1719,7 +1719,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   (1 on the old code), in both the point metric and the bootstrap.
 
 ### DEF-42: `budget_exhausted` leaves out truncated stops
-- **Area:** metric / stats. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric / stats. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `9a83d9a` (fix, tests).
 - **Evidence:** `analysis/power.py` (~L199) `budget_exhausted = stop_reason in (STOP_CALL_BUDGET, STOP_CHAR_BUDGET)`, and
   `callbacks.py` (~L801) matches it. The eval's definition is `_BUDGET_STOPS = {call_budget, char_budget, truncated}`
   (`eval/metrics/scored.py` ~L33), used by `implicit_budget_rate_infeasible` and `missing_report_budget_rate`;
@@ -1730,3 +1731,22 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** use the eval's budget-stop set in `power` and the callback (one shared constant); re-run the power numbers
   for it15_g2_s2_surface4.
 - **Closure test:** a truncated-stop row counts as budget-exhausted in `power` and the callback (not on the old code).
+- **Fix (done):** `analysis.power.load_surface_run` (`budget_exhausted`) and `callbacks.pool_stats`
+  (`budget_exhaustion_rate_feasible`, also the `work_vs_quit_gap` input) test `stop_reason in _BUDGET_STOPS`, imported
+  read-only from `eval/metrics/scored.py` (as `eval/metrics/episode.py` already does), so the eval, the power tool and
+  the callback share one constant. scored.py is unchanged.
+- **Tests:** `tests/test_power.py::test_surface_budget_exhausted_counts_a_truncated_stop_like_the_eval` (truncated,
+  call, char and a report stop on twin and control: 6/8) and
+  `tests/test_callbacks.py::test_pool_stats_budget_exhaustion_counts_a_truncated_stop_like_the_eval` (3/4). Both fail on
+  the old code (4/8, 2/4).
+- **Impact note (re-scored, post-fix).** (1) Power, `budget_exhausted` per archived surface4 run (high_risk, after the
+  DEF-30 exclusions): G2 s1 2/960 and SFT-v2 4/960 unchanged (no truncated stops); **G2 s2 4/960 (0.42 %), was 3/960**
+  (3 call_budget + 1 truncated), now equal to the eval. Full `python -m honest_agents.analysis.power report` run old vs
+  new: only the `budget_exhausted` rows change: value G2 s2 0.3 -> 0.4 %; seed x source / seed x pair components 0.1 /
+  0.3 -> 0.3 / 0.5 pp^2; estimator G2 s2 - G2 s1 +0.1 [-0.1, +0.3] (p 1.000 / 1.000) -> +0.2 [-0.0, +0.5] (p 0.497 /
+  0.686), not significant either way; guard seed clone-pass at ni10 71 % -> 49 % and at the MDE 57 % -> 41 % (both were
+  and stay FLAG). The MDE table rows (K = 20: 0.5 / 0.6 / 0.7 / 0.6 / 0.7; K = 68 0.3 / 0.3 / 0.3 / 0.3 / 0.4) and the
+  ni10 sim (0.7) are unchanged, so docs/research/it16-power.md (L85, which quotes only the MDE row and G2 s1 0.2 %)
+  needs no edit. (2) Callback: over 441 archived `bank*.jsonl*` files one changes:
+  `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 %; its other pool stats do not
+  depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
