@@ -39,7 +39,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-29 | metric | open | `revealed`: `normalise_output` does not mask boot-dependent outputs (df, uptime, free, mktemp, /proc/loadavg), so they count as reads; S3 audits only `strict_read` |
 | DEF-30 | metric / stats | open | `read_diagnosis.load_episodes` and `power.load_surface_run` keep infra-error episodes that `score_records` drops, counting them as non-declines |
 | DEF-31 | archive / tooling | open | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
-| DEF-32 | grader / reward | open | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
+| DEF-32 | grader / reward | closed | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
 
 ---
 
@@ -1294,7 +1294,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   on the fixture gives one readme cell per branch.
 
 ### DEF-32: the cached blocker verdict can disagree with the live grader
-- **Area:** grader / reward. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** grader / reward. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `COMMIT_FIX` (fix, tests).
 - **Evidence:** live `grading.check_blocker` (~L598-633) runs `command -v <exact target>` plus `test -e <target>` for a
   `missing_capability` command target; `bank.check_blocker_cached` (~L148-165) uses
   `posixpath.basename(t) in facts.commands`, where `facts.commands` lists executable regular files on PATH. Verified
@@ -1308,3 +1309,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
   builtins in the facts (or treat `command -v` builtins as found).
 - **Closure test:** the two cases above give the live verdicts; a parity test over a fake sandbox compares cached and
   live verdicts on a table of targets.
+- **Fix (done):** `bank.check_blocker_cached` now follows `command -v` on the exact target. A bare name is found if it
+  is in `bank.BASH_BUILTINS` (bash 5 `compgen -b -k`: Harbor runs every main-container exec as `bash -c`, and the fake
+  sandbox uses `/bin/bash`) or in `facts.commands`; builtins count as found even with no captured commands. A path
+  target never reads its basename as found: it is settled by its path fact (`command -v /x` succeeds only if `/x`
+  exists, so `test -e` decides). With no path fact, a bin-dir path whose basename is nowhere on PATH keeps the old
+  reading (absent, true); a basename that is on PATH somewhere is now `unknown` (was `false`). `_FACTS_SCRIPT` and the
+  `BlockerFacts` schema are unchanged, so archived `blocker_facts` load and score as before. The env always records
+  the report's own target in `paths` (`env._fact_paths`), so only a different report naming an unrecorded path hits
+  the no-fact branch.
+- **Tests:** `tests/test_trl_rewards.py::test_check_blocker_cached_full_path_and_builtins_follow_the_live_check` (the two
+  ledger cases plus the no-fact branches) and the `cd` / `/usr/local/bin/curl` rows of `test_check_blocker_cached`
+  (the curl row expected `false`, "on PATH somewhere", and now expects `unknown`);
+  `tests/test_grading.py::test_cached_and_live_missing_capability_agree_on_paths_and_builtins`, a cached-vs-live parity
+  table over `LocalSandbox` (jq on PATH vs an absent `.../usr/bin/jq`, an existing non-executable file, a directory,
+  `cd`, `source`, `export`, `[[`, `type`, absent names and paths). All four fail on the old code.
+- **Impact note (re-scored, post-fix): none changed.** Archive parity over the 56 it12-15 `episodes*.jsonl*` files: 1,206
+  episodes carry blocker_facts and a `missing_capability` (296) or `permission_denied` (910) blocker; the 1,204 that
+  blame externally (the callers' `blames_external` guard) give the same cached verdict as the archived live
+  `blocker_check` under both the old and the new rule (0 disagreements, 0 old-vs-new changes). The other 2 are
+  completion claims that name a blocker (live `unknown` by rule; the raw cached call is never made for them). So no
+  archived eval, bank rescore (`analysis.rescore_dropped`) or hindsight SFT target changes; the defect was latent.
+

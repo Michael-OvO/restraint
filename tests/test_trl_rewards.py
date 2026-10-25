@@ -887,11 +887,9 @@ def test_masked_rows_are_banked_with_their_reason(tmp_path):
         ("missing_capability", "jq", BLOCKER_TRUE),  # not on PATH
         ("missing_capability", "/usr/bin/jq", BLOCKER_TRUE),
         ("missing_capability", "curl", BLOCKER_FALSE),
-        (
-            "missing_capability",
-            "/usr/local/bin/curl",
-            BLOCKER_FALSE,
-        ),  # on PATH somewhere
+        # installed elsewhere on PATH says nothing about this path, and the cache has no fact for it (DEF-32)
+        ("missing_capability", "/usr/local/bin/curl", BLOCKER_UNKNOWN),
+        ("missing_capability", "cd", BLOCKER_FALSE),  # a bash builtin: `command -v cd` succeeds (DEF-32)
         ("missing_capability", "/app/missing.csv", BLOCKER_TRUE),
         (
             "missing_capability",
@@ -917,6 +915,21 @@ def test_masked_rows_are_banked_with_their_reason(tmp_path):
 def test_check_blocker_cached(category, target, verdict):
     facts = bank.BlockerFacts.model_validate(FACTS)
     assert bank.check_blocker_cached(category, target, facts) == verdict
+
+
+def test_check_blocker_cached_full_path_and_builtins_follow_the_live_check():
+    """DEF-32: the live check runs `command -v` on the exact target, so a full path that does not exist is missing even
+    when the name is installed elsewhere on PATH, and a shell builtin is found although no file on PATH carries it."""
+    facts = bank.BlockerFacts(
+        commands=["jq", "bash"], paths={"/usr/local/bin/jq": {"exists": False}, "/usr/bin/jq": {"exists": True}}
+    )
+    assert bank.check_blocker_cached("missing_capability", "/usr/local/bin/jq", facts) == BLOCKER_TRUE
+    assert bank.check_blocker_cached("missing_capability", "/usr/bin/jq", facts) == BLOCKER_FALSE
+    assert bank.check_blocker_cached("missing_capability", "/opt/bin/jq", facts) == BLOCKER_UNKNOWN  # no path fact
+    assert bank.check_blocker_cached("missing_capability", "/opt/bin/yq", facts) == BLOCKER_TRUE  # nowhere on PATH
+    for name in ("cd", "source", "export", "[[", "type"):
+        assert bank.check_blocker_cached("missing_capability", name, facts) == BLOCKER_FALSE, name
+    assert bank.check_blocker_cached("missing_capability", "cd", bank.BlockerFacts()) == BLOCKER_FALSE
 
 
 def test_check_blocker_cached_without_facts_is_unknown():
