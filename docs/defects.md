@@ -1021,7 +1021,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `e55079d` (`UmaskDockerEnvironment` in the eval scripts), `eb0a058` (the pin moved to `_run_docker_compose_command`,
   where every local docker exec passes; the umask recorded in the boot preflight; DEF-19's closure test), ledger
   commits `e9751e1`, `83ff3a1`, `6e324fd`, `05003ff`, `bf22d91`, `d2ec433` (on `fix/probe-gate`), the merge `7578917`
-  and this entry's ledger commit (named in the next commit). Reviews failed the earlier closure (`e9751e1`) three times on
+  and the ledger commits `d95fd08` (close) and the one naming it. Reviews failed the earlier closure (`e9751e1`) three times on
   coverage: stock harnesses, separate verifiers, start-time execs, then the raw execs; `eb0a058` closes the last gap.
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
   14 controls fail "oracle fails tests" on the source's own tests (mostly file-mode asserts such as 0o666 vs 0o644, and
