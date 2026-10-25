@@ -421,8 +421,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 ### DEF-10: bars at a point estimate, no power check
 - **Area:** stats. **Status:** fixing (tool done; the pre-registration that the closure test names does not exist yet).
   **Found:** it15 diagnosis (noise-and-power). Marked closed 2026-10-24, reopened 2026-10-25 on review.
-  **Commits:** `8a83083` (tool, tests, `docs/research/it16-power.md`); repair 2026-10-25 (conjunctive bars, own-CI rule,
-  probe and guard metrics, simulated ni10; commit in this entry's history).
+  **Commits:** `8a83083` (tool, tests, `docs/research/it16-power.md`); `0b95777` (repair 2026-10-25: conjunctive bars, own-CI
+  rule, probe and guard metrics, simulated ni10); ledger `7db3f36`.
 - **Evidence:** soup bars S1/R2 were set at G2 seed 1's point estimate (+16.2). A simulated G2 clone passes R2 29-50% and
   S1 18-36% of the time. The held-out gap MDE is 18-20 at 20 sources.
 - **Impact:** the soup verdict, and the held-out-gap verdicts of G3 and G4, are uninterpretable.
