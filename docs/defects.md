@@ -237,7 +237,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-07: growing a pool reassigns existing variants
 - **Area:** build. **Status:** closed 2026-10-24. **Found:** it16 design, re-checked 2026-10-23.
-  **Commits:** `8f7d412` (fix, assignments, manifest, tests).
+  **Commits:** `8f7d412` (fix, assignments, manifest, tests); `49e8965` (repair after review: whole-split draw for
+  unrecorded variants, self-contained manifest).
 - **Evidence:** `risk_surfaces.py` `_pick_pair` (was L724) `chosen = pairs[rng.randrange(len(pairs))]`, and the
   `{context}` draw after it on the same stream. Appending a pair changes which pair and context existing variants draw.
   Measured on the surface eval build (20 val sources x 6 surfaces, varied, split test; 240 variants): appending 3
@@ -246,25 +247,46 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact:** none on archived numbers: no pool has grown since the it15 eval build. Before the change, a rebuild in a
   temporary directory gives the live `data/decision/surfaces_val/tasks` dirs byte-identical (228/228 by
   `validate.task_hash`), and the recorded build reproduces the same 240 hashes, so no archived eval is re-scored.
-  It no longer blocks enlarging the eval.
+  It no longer blocks enlarging the eval (measured below on the 98-source build).
+- **Review finding (repaired in `49e8965`):** the first fix made an unrecorded variant draw only from pairs no recorded
+  variant holds. New sources are recorded only after the whole build, so in one build they all drew from the 1-2
+  leftover held-out pairs. Measured on the planned expanded eval (it16 item 13: all 98 val sources, varied, split test,
+  seed 0, giving 68 sources and 816 variants), twins per surface, distinct pairs and the top pair:
+
+  | surface | pre-DEF-07 code | `8f7d412` | `49e8965` |
+  |---|---|---|---|
+  | readme | 22 pairs, top 8 | 23, top 9 | 22, top 8 |
+  | file_header | 19, top 8 | 20, top 8 | 19, top 8 |
+  | config_comment | 20, top 7 | 20, top 9 | 20, top 7 |
+  | manifest | 19, top 7 | 20, top 13 | 19, top 7 |
+  | empty_backup | 13, top 8 | 13, top 26 (backup-31 26, backup-44 22) | 13, top 8 |
+  | inbound_link | 13, top 7 | 13, top 48 (link-56) | 13, top 7 |
+
+  The repair goes back to the whole-split draw for unrecorded variants. Pinned variants ignore the RNG, so they do not
+  need the exclusion. With the repair, the 98-source build is identical to the pre-DEF-07 code: 816/816 hashes, and the
+  same pair and context for every variant. After appending 3 held-out pairs to every pool, 244 of the 816 variants move,
+  and **0 of the 240 recorded** move. The 576 unrecorded variants follow the pool until they are recorded, so the
+  expanded eval must be recorded (`pool_build record --ids-file <98 ids>`) before its oracle gate and before any pool
+  grows. The test that required the concentrating draw was replaced (below).
 - **Fix (done):**
   - `data/pools/pair_assignments.json`: twin variant id → `{surface, pair, context, split, seed}` for the 120 twins of
     the eval build (controls share their twin's plan). The `{context}` is recorded too: it is drawn after the pair from the
     same stream, so it moves when the pool grows even if the pair is pinned. `load_pool` loads it from the pool dir's parent
     (a test pool in a temporary dir has none, so it draws as before) and refuses a pool that has lost an assigned pair.
   - `_pick_pair`: a recorded variant (same seed) gets its pair and context. A split mismatch, or a recorded pair whose
-    `heldout` flag was flipped, raises `PoolError`. An unrecorded variant draws only from pairs no recorded variant holds;
-    once all are held, it draws from the whole split. A forced `pool_pair` (decision probe and SFT, `assign_pool_pairs`)
-    keeps the old draw. The training split has no recorded pairs, so training builds draw exactly as before.
+    `heldout` flag was flipped, raises `PoolError`. An unrecorded variant draws over the whole split, exactly as before
+    (repair `49e8965`). A forced `pool_pair` (decision probe and SFT, `assign_pool_pairs`) keeps the old draw. Training
+    builds draw exactly as before.
   - Explicit `heldout`: the hash-of-id split was written into all 98 pairs that lacked a flag, with the value unchanged
     (checked per pair: 109/527 held out, the same as before). `load_pool(strict=True)` (`surfaces_cli check --strict`) now
     fails on a pair without the flag, so new pairs must choose their split. The non-strict loader keeps the hash fallback
     for test fixtures. Rules are in `data/pools/surfaces/README.md`.
   - `python -m honest_agents.tasks.pool_build record | check` (`src/honest_agents/tasks/pool_build.py`). `record` builds
     the eval (bank `data/tasks`, `data/decision/val_high_risk_sources.txt`) in a temporary directory, adds new twins to the
-    assignments, and writes `data/pools/build_manifest.json` (build parameters and 240 variant hashes). `check` is sweep
-    S7 at L0: it rebuilds, hashes, deletes the temporary build and exits 1 on any changed, missing or new variant (about
-    2 s). The builder writes task dirs, so the build is not literally in memory. Nothing stays on disk, and no tree is
+    assignments, and writes `data/pools/build_manifest.json` (build parameters, the 20 source ids and 240 variant hashes).
+    `check` is sweep S7 at L0: it rebuilds the manifest's own source list (since `49e8965`; the ids file is gitignored and
+    no longer needed), hashes, deletes the temporary build and exits 1 on any changed, missing or new variant, or when
+    the ids file exists and no longer lists the recorded sources (about 2 s). The builder writes task dirs, so the build is not literally in memory. Nothing stays on disk, and no tree is
     diffed.
   - The manifest includes the 12 variants of source 17a590fc (DEF-05), whose live dirs are missing. Their pairs are the
     current deterministic draw (readme-04, header-99, config-26, manifest-90, backup-07, link-29). The archived episodes
@@ -274,9 +296,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - Building 10 sources x 6 surfaces, recording, appending 3 held-out pairs per pool, then rebuilding gives identical
     hashes, pairs and contexts. A sensitivity twin shows that the same growth without the record moves variants (the
     old behaviour).
-  - Also covered: new variants draw only unassigned pairs; a removed assigned pair or a crossed split is an error; strict
-    loading requires `heldout`; a test that the committed manifest matches a rebuild (S7; skipped without the local
-    bank).
+  - Also covered: an unrecorded variant draws the same pair and context with or without the record
+    (`test_a_new_variant_draws_as_if_nothing_were_recorded`; it fails on `8f7d412`); a removed assigned pair or a crossed
+    split is an error; strict loading requires `heldout`; the committed manifest matches a rebuild (S7), also with the ids
+    file absent, and `check` fails on a drifted ids file (skipped only without the local bank `data/tasks`).
 - **Not covered:** the probe and SFT builds (`data/decision/surfaces/tasks`) force their pairs through
   `decision_surfaces.assign_pool_pairs`, which has the same flaw (DEF-18).
 
