@@ -20,22 +20,25 @@ W, H = 680, 300
 ML, MR, MT, MB = 48, 104, 16, 44
 
 CSS = """
-.viz-root { color-scheme: light; --surface: #fcfcfb; --page: #f9f9f7; --ink-1: #0b0b0b; --ink-2: #52514e;
+/* tokens live on the root so body and the page canvas resolve them too */
+:root { color-scheme: light; --surface: #fcfcfb; --page: #f9f9f7; --ink-1: #0b0b0b; --ink-2: #52514e;
   --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; }
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark; --surface: #1a1a19; --page: #0d0d0d;
+  :root:where(:not([data-theme="light"])) { color-scheme: dark; --surface: #1a1a19; --page: #0d0d0d;
     --ink-1: #f0efec; --ink-2: #c3c2b7; --grid: #2c2c2a; --axis: #383835;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; }
 }
-:root[data-theme="dark"] .viz-root { color-scheme: dark; --surface: #1a1a19; --page: #0d0d0d; --ink-1: #f0efec;
+:root[data-theme="dark"] { color-scheme: dark; --surface: #1a1a19; --page: #0d0d0d; --ink-1: #f0efec;
   --ink-2: #c3c2b7; --grid: #2c2c2a; --axis: #383835; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; }
 body { margin: 0; background: var(--page); }
-.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink-1); background: var(--page);
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink-1);
   padding: 24px 16px; max-width: 760px; margin: 0 auto; }
 .panel { background: var(--surface); border-radius: 8px; padding: 12px; margin: 0 0 20px; }
 h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 0 0 4px; }
 p.note { color: var(--ink-2); font-size: 13px; margin: 0 0 8px; }
+.chart { overflow-x: auto; }
+.chart svg { min-width: 560px; }
 svg { width: 100%; height: auto; display: block; }
 svg text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
 svg text.lab { fill: var(--ink-2); font-size: 12px; }
@@ -66,7 +69,7 @@ def _fmt(s: Score) -> str:
     if v is None:
         return "-"
     lo, hi = _v(s, "lo"), _v(s, "hi")
-    return f"{v:.1f}" + ("" if lo is None else f" [{lo:.1f}, {hi:.1f}]")
+    return f"{v:.1f}" + ("" if lo is None or hi is None else f" [{lo:.1f}, {hi:.1f}]")
 
 
 class _Ax:
@@ -108,6 +111,28 @@ def _y_floor(rows: list[dict[str, Any]], getters: list[Getter]) -> float:
     return min(0.0, 20.0 * (min(lows) // 20.0)) if lows else 0.0
 
 
+LABEL_GAP = 14
+
+
+def _end_labels(ends: list[tuple[float, str, str]]) -> list[str]:
+    """Direct end labels, at least LABEL_GAP apart; a moved label gets a leader line from its line end."""
+    out: list[str] = []
+    placed = -1e9
+    for y_end, name, color in sorted(ends):
+        y = max(y_end, placed + LABEL_GAP)
+        placed = y
+        x0 = W - MR + 8
+        if abs(y - y_end) > 0.05:
+            out.append(
+                f'<line x1="{x0 - 4}" x2="{x0}" y1="{y_end:.1f}" y2="{y:.1f}" stroke="var(--muted)" stroke-width="1"/>'
+            )
+        out.append(
+            f'<line x1="{x0}" x2="{x0 + 12}" y1="{y:.1f}" y2="{y:.1f}" stroke="var({color})" stroke-width="2"/>'
+            f'<text class="lab" x="{x0 + 16}" y="{y + 4:.1f}">{html.escape(name)}</text>'
+        )
+    return out
+
+
 def _line_panel(
     rows: list[dict[str, Any]],
     series: list[tuple[Getter, str, str, bool]],
@@ -118,18 +143,30 @@ def _line_panel(
 ) -> str:
     ax = _Ax(0, max(len(rows) - 1, 1), y0, y1)
     p = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{html.escape(aria)}">', *_grid(ax, 20)]
-    if zero_note and y0 < 0 <= y1:
+    if zero_note and y0 <= 0 <= y1:
         p.append(f'<text x="{W - MR - 4}" y="{ax.y(0) - 6:.1f}" text-anchor="end">0 = any blind policy</text>')
     for k, r in enumerate(rows):
         p.append(f'<text x="{ax.x(k):.1f}" y="{H - MB + 18}" text-anchor="middle">{html.escape(r["label"])}</text>')
+    ends: list[tuple[float, str, str]] = []
     for get, name, color, band in series:
         vals = [(ax.x(k), _v(get(r))) for k, r in enumerate(rows)]
         if band:
-            for seg in _segments([(ax.x(k), _v(get(r), "lo")) for k, r in enumerate(rows)]):
-                xs = {x for x, _ in seg}
-                his = [(ax.x(k), _v(get(r), "hi")) for k, r in enumerate(rows) if ax.x(k) in xs]
-                pts = [f"{x:.1f},{ax.y(v):.1f}" for x, v in seg] + [f"{x:.1f},{ax.y(v):.1f}" for x, v in reversed(his)]
-                p.append(f'<polygon points="{" ".join(pts)}" fill="var({color})" opacity="0.15"/>')
+            both = [
+                (ax.x(k), _v(get(r), "lo"), _v(get(r), "hi"))
+                if _v(get(r), "lo") is not None and _v(get(r), "hi") is not None
+                else None
+                for k, r in enumerate(rows)
+            ]
+            run: list[tuple[float, float, float]] = []
+            for item in [*both, None]:
+                if item is not None:
+                    run.append(item)
+                    continue
+                if run:
+                    pts = [f"{x:.1f},{ax.y(lo):.1f}" for x, lo, _ in run]
+                    pts += [f"{x:.1f},{ax.y(hi):.1f}" for x, _, hi in reversed(run)]
+                    p.append(f'<polygon points="{" ".join(pts)}" fill="var({color})" opacity="0.15"/>')
+                run = []
         for seg in _segments(vals):
             d = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{ax.y(v):.1f}" for i, (x, v) in enumerate(seg))
             p.append(f'<path d="{d}" fill="none" stroke="var({color})" stroke-width="2"/>')
@@ -142,16 +179,12 @@ def _line_panel(
                 f'<circle cx="{ax.x(k):.1f}" cy="{ax.y(v):.1f}" r="4" fill="var({color})" stroke="var(--surface)" '
                 f'stroke-width="2"><title>{tip}</title></circle>'
             )
-        last = [(x, v) for x, v in vals if v is not None]
+        last = [v for _, v in vals if v is not None]
         if last:
-            _, v = last[-1]
-            y = ax.y(v)
-            p.append(
-                f'<line x1="{W - MR + 8}" x2="{W - MR + 20}" y1="{y:.1f}" y2="{y:.1f}" stroke="var({color})" '
-                f'stroke-width="2"/><text class="lab" x="{W - MR + 24}" y="{y + 4:.1f}">{html.escape(name)}</text>'
-            )
+            ends.append((ax.y(last[-1]), name, color))
+    p.extend(_end_labels(ends))
     p.append("</svg>")
-    return "".join(p)
+    return '<div class="chart">' + "".join(p) + "</div>"
 
 
 def _frontier(rows: list[dict[str, Any]]) -> str:
@@ -167,7 +200,7 @@ def _frontier(rows: list[dict[str, Any]]) -> str:
     for v in range(0, 101, 20):
         p.append(f'<text x="{ax.x(v):.1f}" y="{H - MB + 18}" text-anchor="middle">{v}</text>')
     p.append(f'<text x="{(ML + W - MR) / 2:.1f}" y="{H - 6}" text-anchor="middle">RTS-C (capability)</text>')
-    if y0 < 0:
+    if y0 <= 0:
         p.append(f'<text x="{W - MR - 4}" y="{ax.y(0) - 6:.1f}" text-anchor="end">0 = any blind policy</text>')
     for (_, xa, ya), (_, xb, yb) in pairwise(pts):
         p.append(
@@ -185,7 +218,7 @@ def _frontier(rows: list[dict[str, Any]]) -> str:
             f'<text class="lab" x="{ax.x(x) + 9:.1f}" y="{ax.y(y) - 7:.1f}">{html.escape(r["label"])}</text>'
         )
     p.append("</svg>")
-    return "".join(p)
+    return '<div class="chart">' + "".join(p) + "</div>"
 
 
 def _table(rows: list[dict[str, Any]]) -> str:
@@ -236,7 +269,8 @@ def render_html(board: dict[str, Any]) -> str:
         body = "".join(
             [
                 (
-                    '<div class="panel"><h2>Restraint (RTS, Youden J × 100)</h2><p class="note">P(decline | impossible twin) '
+                    '<div class="panel"><h2>Restraint (RTS, Youden J × 100)</h2>'
+                    '<p class="note">P(decline | impossible twin) '
                     "minus P(false refusal | solvable control); band = 95% interval over source tasks.</p>"
                 ),
                 _line_panel(rows, restraint, y0, 100, "RTS and its tiers by model", True),
