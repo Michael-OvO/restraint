@@ -52,7 +52,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
 | DEF-43 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
-| DEF-45 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
+| DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 | DEF-46 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
 
@@ -2436,7 +2436,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
 
 ### DEF-45: the emitted task.toml depends on which TOML writer is installed
-- **Area:** build / tooling. **Status:** open. **Found:** 2026-10-25, DEF-22 fix (S7 failed in a fresh worktree).
+- **Area:** build / tooling. **Status:** closed 2026-10-25. **Found:** 2026-10-25, DEF-22 fix (S7 failed in a fresh worktree).
+  **Commits:** `8a79378` (fix, tests, pin).
 - **Evidence:** `src/honest_agents/tasks/taskfs.py` `dumps_toml` (~L139) uses `tomli_w` if importable, else `tomlkit`,
   else `toml` (0.10, a Harbor dependency). The three write different bytes (`tags = [ "echos",]` with `toml`; one item
   per line and the tables in another order with `tomli_w`). The repo's `train`+`eval` environment has only `toml`;
@@ -2449,8 +2450,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `validate.is_current` or G1 cache key computed in an environment with tomli_w or tomlkit installed differs from one
   made without, while the task's content is the same, so S7 fails for a reason that is not a build change, and a build
   made in such an environment would not reproduce on a node.
-- **Fix (proposed):** pin one writer (use `toml`, which Harbor guarantees, or add `tomli-w` as a core dependency and use
-  only it, then re-record both manifests), and add a test that `dumps_toml` gives fixed bytes for a fixed table.
+- **Fix (done):** `dumps_toml` uses only `toml`, the writer the committed builds were made with, and `toml==0.10.2` is
+  now a direct dependency in pyproject (it was only Harbor's), so `uv.lock` pins the version that defines the bytes.
+  tomli_w and tomlkit are never imported. Manifests are not re-recorded (they were made with `toml` and are unchanged).
+- **Regression test:** `tests/tasks/test_taskfs_toml.py`: golden bytes for a fixed table; the same bytes with stand-in
+  `tomli_w`/`tomlkit` modules present or absent (each combination); the same bytes with the real ones when installed
+  (skipped otherwise); `write_task_toml` round trip. On the old code, 7 of 8 fail with tomli_w and tomlkit installed,
+  and the stand-in cases fail in the toml-only environment too.
+- **S7 proof (L0, `gate sweep --level 0 --only S7`, task bank from the main tree):** toml-only env (exact
+  `uv sync --frozen --extra train --extra eval`): eval 240/240, decision 1048/1048 byte-identical. Same env plus
+  tomli-w 1.2.0 and tomlkit 0.15.2: fixed code 240/240 and 1048/1048; old code (reproduced) 0/240 and 0/1048.
+- **Impact note:** no archived number changes; nothing re-scored or void. Both committed manifests reproduce byte for
+  byte in the toml-only env, so the committed builds were written by `toml`, which is now the only writer. The nodes
+  run the `train`+`eval` extras (no tomli_w or tomlkit), so their task hashes used the same bytes. The one known
+  mixed-env build (the DEF-22 worktree S7 run) was redone in the exact env and not committed.
 
 ### DEF-46: the sanity-run guard did not run for six iteration-15 merged models
 - **Area:** tooling / infra. **Status:** open. **Found:** 2026-10-25, the first S11 run (DEF-23), by
