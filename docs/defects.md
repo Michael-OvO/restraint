@@ -26,6 +26,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
+| DEF-NEW-build-pins-1 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 
 ---
 
@@ -409,8 +410,14 @@ section 7 critique) and from re-checks against the code and the archive on that 
   already running finish and tear their sandboxes down.
 - **Impact:** none on archived numbers (tooling only: it changes how a run stops, not what a finished run reports).
 - **Closure test:** `tests/tasks/test_eval_set_tools.py::test_ctrl_c_cancels_queued_pairs` (fake `check_pair`, one
-  worker, 12 pairs, the first raises KeyboardInterrupt): at most 2 pairs start. On the old code all 12 run, and the test
-  fails.
+  worker, 12 pairs, the first raises KeyboardInterrupt): at most 2 pairs start, and `main` calls `cancel()` on all 12
+  futures. On the old code all 12 run, and the test fails (checked by restoring the pre-fix `g1_surfaces.py`).
+- **Repair (2026-10-24, review):** the first version of the test was flaky (the reviewer saw 1 failure in 60 runs next
+  to `scripts/test.sh --fast`, and `assert 11 <= 2` in 6 x 40 parallel runs): the queued fakes returned at once, so the
+  single worker could drain several pairs before the main thread woke from `f.result()` and cancelled. Now the pair the
+  worker takes after p0 blocks on a `threading.Event` that a wrapped `Future.cancel` sets once `main` has cancelled
+  every future (5 s safety timeout, so the old code fails in ~5 s rather than hanging). 200 sequential runs and 6 x 40
+  parallel runs with separate `--basetemp`: 0 failures. The production fix is unchanged.
 
 ### DEF-18: probe and SFT surface builds move when a pool grows
 - **Area:** build. **Status:** closed 2026-10-24. **Found:** 2026-10-24, while fixing DEF-07.
@@ -450,13 +457,33 @@ section 7 critique) and from re-checks against the code and the archive on that 
     delete, exit 1 on any changed, missing, new or unbuildable variant.
   - Verified on the live root: with the pins, growing every pool by 3 training + 3 held-out pairs leaves 1,048/1,048
     byte-identical; without the pins file, 490/1,048 (the 478 above, and the 80 leftovers cannot be rebuilt).
+  - Growth recipe (the moved counts depend on it, the pinned result does not): for each pool file, copy the first
+    held-out pair and the first training pair three times each, with ids `<template id>-new{k}` (k = 0..2) and the
+    template's `heldout` flag, then run `check-decision` on the copied pools (fixer's scratch
+    `scratchpad/fix/build-pins/grow_check.py pins|nopins`). That gives the 478 CHANGED (old selection) and 490/1,048
+    (no pins file). Pair ids enter the hash ranking, so other ids give other counts: the reviewer's ids
+    `<template id>-new{k}-{held}` give 434 CHANGED and 534/1,048. With the pins, both id schemes give 1,048/1,048
+    (re-checked 2026-10-24 with `grow_check_altids.py pins`).
 - **Closure test:** `tests/tasks/test_decision_pins.py` (synthetic bank: 4 SFT, 4 probe and 2 held-out-only sources, one
   unlisted leftover dir). Record, grow every pool (3 training + 3 held-out pairs), `check-decision` passes and the
   default `build_sft_rows` / `build_probe_rows` give the same hashes; the sensitivity twin shows growth moves variants
   without the pins; an unpinned source draws as if nothing were pinned; a removed or split-crossing pin is a `PoolError`;
-  `record-decision` refuses a hand-edited root. All five fail on the old code. The committed manifest test
+  `record-decision` refuses a hand-edited root. On the true pre-fix code the five fail only because `record-decision`
+  and the `pin=` argument do not exist (argparse error / TypeError), not on behaviour. Behavioural sensitivity was
+  checked by the reviewer with mutations: `build_row` ignoring the pin fails the closure test and the `PoolError` test;
+  `_pick_pair` ignoring `pool_context` fails the closure test. The committed manifest test
   (`test_committed_decision_manifest_matches_a_rebuild`) needs the local bank and root, so it skips in a worktree;
   `check-decision` run from the main tree gave 1,048/1,048.
 - **Not covered:** the sweep text in `integrity-gate.md` (S7 method row) names only `build_manifest.json`; S7 should
   also run `pool_build check-decision`. A later `decision_surfaces build` that adds sources must be followed by
   `record-decision`, as DEF-07's `record` after an eval build.
+
+### DEF-NEW-build-pins-1: a timing-dependent grading test can fail the `--fast` gate
+- **Area:** tooling / tests. **Status:** open. **Found:** 2026-10-24, while repairing DEF-17's test.
+- **Evidence:** `tests/test_grading.py::test_background_agent_process_cannot_forge_reward` (~L413) races a background
+  loop (`sleep 0.02` between writes of a forged `reward.json`) against the verifier (`sleep 0.5`) and asserts
+  `reward_files_disagree`. One `scripts/test.sh --fast` run on `fix/build-pins` (machine loaded by parallel lanes) failed
+  only this test (`1 failed, 4207 passed`); it passed 3 of 3 alone and the next full `--fast` run was green. The
+  assertion text was not captured. The test is unchanged by this lane.
+- **Fix (proposed):** make the forger's first write happen before grading starts (wait for `reward.json` to exist
+  before `run_grade`), so the outcome does not depend on scheduling.
