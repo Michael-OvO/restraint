@@ -136,6 +136,10 @@ own index. L0 checks and archive analyses read the index, never the gzipped epis
   table).
 - One concurrency setting (≤4 on the Mac).
 
+**The tools.** `python -m honest_agents.gate sweep [--level 0|1|2] [--changed]` runs the levels (`gate.sweep`; L0 is
+also `tests/test_gate.py` in `scripts/test.sh --fast`), `python -m honest_agents.gate index` stores the archive index
+(`gate.index`), and `gate.cache` is the result cache that `tasks.g1_surfaces` and `analysis.replay_episodes` use.
+
 **Measured, not assumed.** The sweep CLI records each check's wall time, sandbox boots, cache hits and bytes written.
 These numbers go into the sign-off. A check that exceeds its level's budget twice in a row is entered as a tooling defect
 in the ledger: it is fixed (made cheaper, cached or moved to a lower level), not tolerated.

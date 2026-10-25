@@ -22,7 +22,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | fixing | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | closed | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
-| DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
+| DEF-15 | tooling | closed | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
@@ -891,7 +891,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   32-79 % only list it. Per variant and every eval in [docs/research/it15-read-metric-recompute.md](research/it15-read-metric-recompute.md).
 
 ### DEF-15: the gates are not tiered or cached
-- **Area:** tooling. **Status:** open. **Found:** 2026-10-23, owner request; code check.
+- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-23, owner request; code check.
+  **Commits:** `79bf77e` (gate package, cached `g1_surfaces`, shared cache, archive index, tests).
 - **Evidence:**
   - `src/honest_agents/tasks/g1_surfaces.py:84-105` (`check_pair`) runs `validate_task` on the control and the twin plus
     two report episodes for every pair on every invocation. That is about 4 sandbox boots per pair, with no result cache.
@@ -900,15 +901,56 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - There is no sweep CLI.
 - **Impact:** every change to one task or one metric costs a full Docker pass. That makes the integrity gate expensive
   enough to be skipped.
-- **Fix:** follow "Running the gates efficiently" in [integrity-gate.md](integrity-gate.md):
-  - `python -m honest_agents.gate sweep [--level 0|1|2] [--changed]`, a typed CLI;
-  - the L0 checks inside `scripts/test.sh --fast`;
-  - the content-addressed result cache used by `g1_surfaces` and the replay tools;
-  - the archive index.
+- **Fix (done):** "Running the gates efficiently" in [integrity-gate.md](integrity-gate.md):
+  - `python -m honest_agents.gate sweep [--level 0|1|2] [--changed] [--only ...] [--json]` (`gate.sweep`). L0
+    (`gate.checks.L0_CHECKS`) in memory: S1 (every built pair of the eval build: `oracle_lines`, `test_lines` and the
+    twin's `irreversible_paths` agree with the dirs, and 9 canonical behaviours on an in-memory model of the site are
+    read one way: the control's declared test passes exactly when the twin's grader sees the cleanup done), S2 and S5
+    (archive index), S4 (AST), S6 (stub record round-trip), S7 (`pool_build.build` / `build_decision` against both
+    manifests), S8 (hash cache, read only), S9 (`reward_gate.evaluate` on G2 s1 from the index, archived and symmetric
+    configs; verdict = symmetric), S10 (the estimator's archive inputs, resample budgets). L1 adds the oracle gate
+    (`g1_surfaces`) behind the cache, refreshes the index and the hash cache; `--changed` runs only uncached pairs; L2
+    ignores cached verdicts. Every check's wall time, sandbox boots (Harbor environment creations, counted), cache hits
+    and bytes written (cache rows, index tables, temporary build dirs) are printed and go to `--json`.
+  - L0 in `scripts/test.sh --fast`: `tests/test_gate.py`.
+  - `gate.cache`: the append-only result cache, now shared by `replay_episodes` (its keys and rows are unchanged, so
+    the existing replay cache stays valid) and `g1_surfaces` (`CachedChecker`: key = both task dirs, the imported
+    grader / verifier / harness / env / reward / `risk_surfaces` / `validate` sources, the inspection commands, both
+    base image digests, the oracle timeout; a pair with an infrastructure error is never cached; `--cache-dir`,
+    `--no-cache`, `--refresh`, `--changed`; default concurrency 6 -> 4).
+  - `gate.index` (`python -m honest_agents.gate index`): one gzipped table per archived `episodes.jsonl[.gz]` in
+    `~/.cache/honest-agents/gate/index/` (68 evals, 35,606 episodes, 13.9 MB in all, built in 12 s): ids, surface, branch,
+    case, reward, commands and their hash, the `inspected` read label (K = 8), the first destructive command and the
+    outcome without its `evidence`. Rebuilt only when the source's sha256 or the label code changes; at L0 a stale
+    table is rebuilt in memory, never written.
 - **Closure test:**
-  - L0 sweep ≤60 s on the Mac, measured, with 0 sandbox boots asserted by a test that patches the boot to raise;
-  - a second L1 run with no changes makes 0 boots, all cache hits;
-  - changing one task dir re-boots only that pair.
+  - L0 sweep ≤60 s on the Mac, measured, with 0 sandbox boots asserted by a test that patches the boot to raise:
+    `tests/test_gate.py::test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget` (Harbor's environment
+    factory, `harness._start_throttled`, the image-digest lookup and any `docker` subprocess raise). Measured on the
+    Mac at `79bf77e`: 10.5 s with a fresh index, 20-23 s when the index is stale and rebuilt in memory; 0 boots; the
+    only bytes written are S7's temporary rebuild (18.8 MB, deleted). `scripts/test.sh --fast`: 95 s, as before.
+  - a second L1 run with no changes makes 0 boots, all cache hits; changing one task dir re-boots only that pair:
+    `::test_a_second_l1_run_boots_nothing_and_a_changed_task_reboots_only_its_pair` (fake `check_pair` that creates 4
+    environments per pair through Harbor's factory, counted by the sweep's meter: 12 boots, then 0 with 3 hits, then 4
+    for the one changed pair; `--changed` checks only that pair; L2 re-runs all 3). Also `::test_g1_cli_caches_...`,
+    `::test_an_infrastructure_error_is_never_cached`, `::test_the_cache_key_covers_...`, `::test_the_index_is_rebuilt_only_when_its_source_changes`.
+  - Fails on the old code: the pre-fix tree has no `gate` package and no `CachedChecker` (the tests fail at import),
+    and S1's behaviour check fails on the pre-DEF-01 control test (`::test_s1_fails_on_the_pre_def01_inbound_link_reading`:
+    `rm -rf link` fails that control while the twin reads `path_removed`; the link-only oracle fails it too).
+  - `tests/test_gate.py::test_s9_from_the_index_equals_reward_gate_on_the_episodes` (slow, needs the archive): S9 from
+    the index equals `reward_gate.load_eval` on the gzipped episodes for both configs (checked: identical JSON).
+- **Impact note:** tooling only; no archived number changes and nothing is re-scored. The replay cache's keys are
+  unchanged. The first L0 sweep (2026-10-24, `79bf77e`): S1 120/120 pairs, S2 no cell without a success (14 cells, 68
+  evals; inbound_link/control has 2 successes, in `it15_g3_c15_surface4`), S4, S5 (3,520 high_risk episodes of the 8
+  evals in use resolve; the tier evals record node paths `/root/restraint/data/...`, mapped to this checkout's
+  `data/`), S6, S7 (240/240 and 1,048/1,048), S8 (1 declared copy), S10 pass; **S9 fails** on G2 s1 under both configs
+  (archived: blind and adversarial not below start, break-even 0.39; symmetric: blind and adversarial not below start),
+  which is DEF-13, still open. The fast-suite test asserts the checks of closed defects and reports S9.
+- **Not covered here** (proposed as follow-ups, not part of this closure test): S7 still writes its rebuild to a
+  temporary directory (hashed, then deleted; measured) instead of building in memory, which needs a change in the
+  build code (`risk_surfaces` / `pool_build`); S3 runs through `replay_episodes` / `read_audit` (now on the shared
+  cache) and S11 by hand, not through the sweep; the L1 cache was exercised with fakes only (the Docker daemon was not
+  running), so the first real `--level 1` run is the one that fills it.
 
 ### DEF-16: probe-role surface builds were never oracle-gated
 - **Area:** task data. **Status:** open. **Found:** 2026-10-24, while closing DEF-01.
