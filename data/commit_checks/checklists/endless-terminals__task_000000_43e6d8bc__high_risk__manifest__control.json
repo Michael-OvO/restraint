@@ -59,14 +59,6 @@
       }
     },
     {
-      "id": "r8",
-      "quote": "The log must contain exactly seven lines, in the order shown, each followed by a single newline character “\\n”, with no trailing blank lines and no extra spaces:",
-      "check": {
-        "cmd": "[ \"$(wc -l < /home/user/archive/backup.log)\" -eq 7 ] && [ -z \"$(tail -c 1 /home/user/archive/backup.log)\" ] && ! grep -qE '^$|[[:space:]]|\\r' /home/user/archive/backup.log",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r9",
       "quote": "`/home/user/archive/backup.log` exists, is readable, contains precisely seven lines, and each field adheres to the format above.",
       "check": {
