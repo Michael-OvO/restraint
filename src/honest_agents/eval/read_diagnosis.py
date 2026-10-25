@@ -53,6 +53,8 @@ from typing import Any
 
 from honest_agents.analysis.replay_episodes import REPLAYABLE, decision_index
 from honest_agents.behaviour import FAMILY_HIGH_RISK
+from honest_agents.eval.metrics.scored import score_records
+from honest_agents.eval.records import EpisodeRecord
 from honest_agents.readme_read import segments
 from honest_agents.tasks.perturb.risk_surfaces import (
     SURFACES_HELDOUT,
@@ -347,6 +349,27 @@ _TIMES = re.compile(
     r"|\b\d{4}-\d{2}-\d{2}\b|\b\d{8}[T_]?\d{6}\b|\b\d{2}:\d{2}:\d{2}\b|\b1[6-9]\d{8}\b"
 )
 _HEX = re.compile(r"\b[0-9a-f]{12,}\b")
+_MKTEMP = re.compile(r"\btmp\.[A-Za-z0-9]{6,}\b")  # `mktemp` names, wherever they are printed later
+# Commands whose output depends on the boot, not on the variant: two replays of one environment differ (DEF-29). Disk
+# and memory use, uptime and load, process ids, the clock, random names, `/proc` and `/sys`.
+BOOT_DEPENDENT = frozenset({"df", "uptime", "free", "mktemp", "date", "vmstat", "iostat", "mpstat", "sar", "top", "ps",
+                            "pgrep", "pidof", "w", "who", "users", "last", "dmesg", "lsof", "uuidgen", "shuf"})  # fmt: skip
+_BOOT_PATHS = ("/proc", "/sys", "/dev/urandom", "/dev/random")
+_BOOT_VARS = re.compile(r"\$(?:RANDOM\b|\{RANDOM\}|\$|BASHPID\b|SECONDS\b|EPOCH)")
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*(?:[KMGTPEkmgtpe]i?)?\b")
+_UPTIME = re.compile(r"\bup\b.*\bload averages?:.*$")
+
+
+def boot_dependent(command: str) -> bool:
+    """Some simple command of the call (substitutions included) prints what differs between two boots of one
+    environment: a `BOOT_DEPENDENT` program, a path under `/proc`, `/sys` or a random device, `$RANDOM`, `$$`."""
+    if _BOOT_VARS.search(command or ""):
+        return True
+    return any(
+        seg.program in BOOT_DEPENDENT
+        or any(p == b or p.startswith(b + "/") for p in (*seg.paths, *seg.inputs) for b in _BOOT_PATHS)
+        for seg in _segments(command)
+    )
 
 
 def _keeps_sizes(command: str, site: SurfaceSite) -> bool:
@@ -363,8 +386,11 @@ def _keeps_sizes(command: str, site: SurfaceSite) -> bool:
 
 def normalise_output(command: str, output: str, site: SurfaceSite) -> str:
     """A replayed output without what differs between any two boots: mtimes and other times, inode numbers, link
-    counts, long hex ids (container hostnames, checksums), and sizes unless `_keeps_sizes`."""
+    counts, long hex ids (container hostnames, checksums), `mktemp` names, sizes unless `_keeps_sizes`, and every number
+    (with its unit) in the output of a `boot_dependent` command (DEF-29: `df /` printed other block counts on every
+    boot, so it counted as revealing; its words, and a file printed beside it, still compare)."""
     keep = _keeps_sizes(command, site)
+    boot = boot_dependent(command)
     lines = []
     for line in (output or "").splitlines():
         if m := _LS_LINE.match(line):
@@ -377,7 +403,10 @@ def normalise_output(command: str, output: str, site: SurfaceSite) -> str:
             line = _STAT_FIELDS.sub(r"\1:", line)
             if not keep:
                 line = _STAT_SIZE.sub("Size:", line)
-        lines.append(_HEX.sub("<hex>", _TIMES.sub("<time>", line)).rstrip())
+        line = _MKTEMP.sub("tmp.<rand>", _HEX.sub("<hex>", _TIMES.sub("<time>", line)))
+        if boot:
+            line = _NUMBER.sub("<n>", _UPTIME.sub("up <uptime>", line))
+        lines.append(line.rstrip())
     return "\n".join(lines)
 
 
@@ -454,19 +483,31 @@ def load_replays(paths: Iterable[Path]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def scored_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The episode rows the eval's metrics count (DEF-30): `eval.metrics.scored.score_records` drops infra errors (a
+    rollout error or an `INFRA_MASKS` mask) and masks every sample of a leaked variant. `rows` is a whole episodes file,
+    since a leak voids its variant across samples. Every surface loader filters through this one predicate."""
+    recs = [EpisodeRecord.from_dict(r) for r in rows]
+    kept = {id(e.rec) for e in score_records(recs) if e.scored}
+    return [r for r, rec in zip(rows, recs, strict=True) if id(rec) in kept]
+
+
+def episode_rows(path: Path) -> list[dict[str, Any]]:
+    """The scored rows (`scored_rows`) of an episodes file; `path` may be gzipped."""
+    return scored_rows([json.loads(line) for line in _lines(path) if line.strip()])
+
+
 def load_episodes(
     path: Path, tasks_root: Path, replays: Mapping[str, Mapping[str, Any]] | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """High_risk rows (`surface`, `twin`, `declined`, ...; `read` = `inspected` at K = 8, `read_k5` at K = 5,
     `read_prefix` = the strict rule over the whole decision prefix, `read_source`; on empty_backup `backup` and `fill`),
-    and the rows (`task_id`, `surface`, `twin`) skipped for a missing task dir. `path` may be gzipped."""
+    and the rows (`task_id`, `surface`, `twin`) skipped for a missing task dir. `path` may be gzipped. Infra errors and
+    leak-voided variants are left out, as every eval metric leaves them out (`scored_rows`)."""
     rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     replays = replays or {}
-    for line in _lines(path):
-        if not line.strip():
-            continue
-        r = json.loads(line)
+    for r in episode_rows(path):
         if r.get("family") != FAMILY_HIGH_RISK:
             continue
         task_dir = tasks_root / str(r.get("task_id"))

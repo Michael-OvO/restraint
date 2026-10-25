@@ -4,11 +4,12 @@
         [--tasks-root data/decision/surfaces_val/tasks] [--surface empty_backup --surface inbound_link] [--json out.json]
 
 `REPLAY.jsonl` are `analysis.replay_episodes` rows of the same episodes (own branch; `--pair` rows add the divergence
-column). The label audited is `read_diagnosis.strict_read` (the strict rule, at K = 8 and over the whole decision
-prefix). The ground truth is **shown**: a command of the same window printed a line of the episode's evidence text
-(`honest_variant.what`, lines of at least `MIN_LINE` characters) in its replayed output; on an empty_backup twin of the
-`missing` type, which has no backup to print, a window command named the backup and was told it does not exist. FP =
-strict read but not shown, FN = shown but no strict read.
+column). The label audited is the reported one, `read_diagnosis.inspected` (at K = 8 and over the whole decision
+prefix): the pair-replay `revealed` label where the row has a pair branch, else the strict rule (DEF-29: auditing only
+the strict rule left `revealed` unchecked). The ground truth is **shown**: a command of the same window printed a line
+of the episode's evidence text (`honest_variant.what`, lines of at least `MIN_LINE` characters) in its replayed output;
+on an empty_backup twin of the `missing` type, which has no backup to print, a window command named the backup and was
+told it does not exist. FP = read but not shown, FN = shown but not read.
 
 Per surface x branch and per branch it prints n, reads, shown, FP and FN, and the twin - control differences of the FP
 rate, the FN rate (bootstrap over episodes) and the read rate (paired by source x surface, bootstrap over pairs). S3
@@ -84,7 +85,8 @@ def _first_hit(commands: Sequence[str], site: rd.SurfaceSite, end: int) -> int |
 
 def audit_rows(episodes: Iterable[Mapping[str, Any]], replays: Mapping[str, Mapping[str, Any]], tasks_root: Path,
                surfaces: Sequence[str] = ()) -> list[dict[str, Any]]:  # fmt: skip
-    """One row per high_risk episode with a replayable own-branch replay: its strict label and `shown` per window."""
+    """One row per high_risk episode with a replayable own-branch replay: its `inspected` label (`read_<window>`, from
+    `read_source_<window>`: "revealed" or "strict") and `shown` per window."""
     out: list[dict[str, Any]] = []
     for r in episodes:
         if r.get("family") != rd.FAMILY_HIGH_RISK or (surfaces and rd.surface_of(dict(r)) not in surfaces):
@@ -107,7 +109,7 @@ def audit_rows(episodes: Iterable[Mapping[str, Any]], replays: Mapping[str, Mapp
         }  # fmt: skip
         for tag, k in WINDOWS:
             end = min(rd.landmark_end(cmds, site, k), len(entries))
-            row[f"strict_{tag}"] = rd.strict_read(cmds, site, k)
+            row[f"read_{tag}"], row[f"read_source_{tag}"] = rd.inspected(cmds, site, replay, k)
             row[f"shown_{tag}"] = shown(cmds, entries, end, lines, site.backup if twin and fill == "missing" else None)
         prefix_end = rd.landmark_end(cmds, site, None)
         row["first_hit"] = _first_hit(cmds, site, prefix_end)
@@ -136,7 +138,7 @@ def _paired_diff(rows: Sequence[Mapping[str, Any]], key: str, seed: int = 0) -> 
 
 
 def cell(rows: Sequence[Mapping[str, Any]], tag: str) -> dict[str, Any]:
-    s, k = f"strict_{tag}", f"shown_{tag}"
+    s, k = f"read_{tag}", f"shown_{tag}"
     fp = sum(r[s] and not r[k] for r in rows)
     fn = sum(r[k] and not r[s] for r in rows)
     return {"n": len(rows), "reads": sum(bool(r[s]) for r in rows), "shown": sum(bool(r[k]) for r in rows),
@@ -166,7 +168,7 @@ def summarize(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                     cells[f"empty_backup {fill}/{br}"] = cell(g, tag)
         res: dict[str, Any] = {"cells": cells}
         if twin and ctrl:
-            s, k = f"strict_{tag}", f"shown_{tag}"
+            s, k = f"read_{tag}", f"shown_{tag}"
             fp = _boot_diff([r[s] and not r[k] for r in twin], [r[s] and not r[k] for r in ctrl])
             fn = _boot_diff([r[k] and not r[s] for r in twin], [r[k] and not r[s] for r in ctrl])
             res["fp_diff"], res["fn_diff"] = fp, fn
@@ -198,7 +200,7 @@ def render(name: str, summary: Mapping[str, Any]) -> str:
     out = [f"## {name}: {summary['n']} replayed episodes"]
     for tag, _ in WINDOWS:
         res = summary[tag]
-        out += ["", f"### window {tag}", "", "| cell | n | strict reads | shown | FP | FN | FP % | FN % |",
+        out += ["", f"### window {tag}", "", "| cell | n | reads | shown | FP | FN | FP % | FN % |",
                 "|---|---|---|---|---|---|---|---|"]  # fmt: skip
         for name_, c in res["cells"].items():
             out.append(f"| {name_} | {c['n']} | {c['reads']} | {c['shown']} | {c['fp']} | {c['fn']} | "

@@ -1,4 +1,4 @@
-"""read_audit (sweep S3, DEF-11): the strict rule audited per branch against what the replayed sandbox showed."""
+"""read_audit (sweep S3, DEF-11, DEF-29): the reported read label audited per branch against what the replay showed."""
 
 from __future__ import annotations
 
@@ -97,6 +97,33 @@ def test_a_classifier_blind_on_one_branch_fails_s3(tmp_path):
     assert s["cells"]["twin"]["fp"] == s["cells"]["control"]["fp"] == 0
     assert s["read_diff"][0] == -0.5 and s["shown_diff"][0] == 0.0
     assert not s["passes"]
+
+
+def test_with_pair_rows_the_audited_label_is_inspected_not_the_strict_rule(tmp_path):
+    """DEF-29: S3 audited `strict_read` only, so the `revealed` label every paired number uses was never checked. A
+    relative `cat README` (the strict rule never counts it) that the pair replay shows differs is a read under
+    `inspected`; and a boot-dependent `df /` beside it is not a reason to call an unread episode read."""
+    root = tmp_path / "tasks"
+    make_task(root, "t", TWIN_TEXT)
+    make_task(root, "t__control", CONTROL_TEXT)
+    df = ("overlay 310706176 52414764 258291412  17% /", "overlay 318373888 51315464 267058424  16% /")
+    eps, reps = [], {}
+    for i in range(20):
+        for twin, task, own, other in ((True, "t", TWIN_TEXT, CONTROL_TEXT), (False, "t__control", CONTROL_TEXT,
+                                                                             TWIN_TEXT)):  # fmt: skip
+            eid = f"{task}-{i}"
+            if i % 2:
+                eps.append(episode(eid, task, f"s{i}", twin, ["cat README"]))
+                reps[eid] = replay([own], [other])
+            else:
+                eps.append(episode(eid, task, f"s{i}", twin, ["df /"]))
+                reps[eid] = replay([df[0]], [df[1]])
+    rows = ra.audit_rows(eps, reps, root)
+    assert {r["read_source_k8"] for r in rows} == {"revealed"}
+    s = ra.summarize(rows)["k8"]
+    assert s["cells"]["twin"] == s["cells"]["control"] == {
+        "n": 20, "reads": 10, "shown": 10, "fp": 0, "fn": 0, "fp_rate": 0.0, "fn_rate": 0.0}  # fmt: skip
+    assert s["passes"]
 
 
 def test_a_rule_that_invents_reads_on_one_branch_fails_s3(tmp_path):
