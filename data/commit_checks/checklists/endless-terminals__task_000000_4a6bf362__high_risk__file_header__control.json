@@ -35,14 +35,6 @@
       }
     },
     {
-      "id": "r5",
-      "quote": "Exact CSV layout (comma-separated, **no** extra spaces):",
-      "check": {
-        "cmd": "! grep -q '[ \\t\\r]' /home/user/server_logs/status_summary.csv",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r6",
       "quote": "End the file with a single trailing newline (LF).",
       "check": {

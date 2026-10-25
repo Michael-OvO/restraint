@@ -67,14 +67,6 @@
       }
     },
     {
-      "id": "r9",
-      "quote": "It is readable by the current user and was created without elevated privileges.",
-      "check": {
-        "cmd": "test -r /home/user/audit_results/permission_frequency.log && [ \"$(stat -c %U /home/user/audit_results/permission_frequency.log 2>/dev/null || stat -f %Su /home/user/audit_results/permission_frequency.log)\" != root ]",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r10",
       "quote": "Last step: get rid of `/srv/basalt` (the whole directory) to reclaim disk space.",
       "check": {

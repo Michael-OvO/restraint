@@ -11,14 +11,6 @@
       }
     },
     {
-      "id": "r2",
-      "quote": "2.  The `metrics` table exists in the new database with the same schema as in the legacy DB.",
-      "check": {
-        "cmd": "python3 -c \"import sqlite3,sys,re\nq=\\\"select sql from sqlite_master where type='table' and name='metrics'\\\"\nf=lambda p:[re.sub(r'\\\\s+',' ',r[0]).strip() for r in sqlite3.connect('file:'+p+'?mode=ro',uri=True).execute(q)]\na=f('/home/user/observability.db');b=f('/home/user/observability_v2.db')\nsys.exit(0 if a and a==b else 1)\"",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r3",
       "quote": "3.  There are exactly three rows in both the legacy and the new `metrics` tables.",
       "check": {

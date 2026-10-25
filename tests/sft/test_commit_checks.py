@@ -359,6 +359,33 @@ def test_build_writes_examples_and_counts(env: dict[str, Path], tmp_path: Path):
     assert (tmp_path / "out" / "dpo_pairs.jsonl").is_file()
 
 
+def test_build_writes_the_manifest_the_coverage_report_reads(env: dict[str, Path], tmp_path: Path):
+    from honest_agents.commit_points import coverage, schema
+
+    res = results_for(episodes().values(), env)
+    path = tmp_path / "results.jsonl"
+    path.write_text("".join(json.dumps(r.__dict__) + "\n" for r in res.values()))
+    cc.build(_cfg(env, tmp_path, check_results=[str(path)], quota=cc.Quota(cap_per_task=4)))
+    m = schema.read_manifest(tmp_path / "out" / cc.MANIFEST_FILE)
+    assert len(m.examples) == 4 and m.quota.cap_per_task == 4
+    assert all(e.point == schema.CLAIM and e.checklist_agrees and e.split == "train" for e in m.examples)
+    assert sorted((e.outcome, e.committed) for e in m.examples) == [("fail", False)] * 2 + [("pass", True)] * 2
+    r = coverage.coverage(m, excluded=set())
+    assert not (r.decision_mismatches or r.cap_violations or r.schema_problems or r.split_violations)
+    assert r.checklist_agreement["rate"] == 1.0 and m.build["agreement"]["checked"] == 4
+
+
+def test_agreement_over_all_points_counts_eval_records_without_transcripts(env: dict[str, Path]):
+    rec = cc.episode_from_record(_record("e1", TASK, commands=["ls"], control=True, report=CLAIM, tests_passed=False))
+    pts = cc.mine_points(rec)
+    cls, _ = cc.load_checklists(env["checklists"], {TASK}, [env["tasks"]])
+    res = {r.episode_id: r for r in cc.run_checks([rec], cls, FakeRunner(), [env["tasks"]])}
+    eb = cc.build_claim_examples(pts, cls, res)
+    assert eb.examples == [] and eb.dropped[cc.DROP_NO_MESSAGES] == 1  # an eval record is never an example
+    assert eb.agreement["checked"] == 0
+    assert eb.agreement["all_points"] == {"checked": 1, "agree": 1, "rate": 1.0, "by_outcome": {"fail/agree": 1}}
+
+
 def test_build_refuses_excluded_sources(env: dict[str, Path], tmp_path: Path):
     leak = write_bank(tmp_path / "leak", [row("v1", passed=True, report=CLAIM, commands=[WRITES], source="val/task_y")])
     with pytest.raises(cc.ExcludedSourceError, match="val/task_y"):
