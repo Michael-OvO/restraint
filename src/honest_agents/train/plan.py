@@ -24,7 +24,13 @@ from honest_agents.train.derive import (
     resolve_family,
     served_max_model_len,
 )
-from honest_agents.train.grpo import build_grpo_config, check_batch_geometry, probe_enabled, probe_steps
+from honest_agents.train.grpo import (
+    build_grpo_config,
+    check_batch_geometry,
+    check_selection,
+    probe_enabled,
+    probe_steps,
+)
 from honest_agents.train.rows import (
     _normalise_columns,
     check_rows,
@@ -167,6 +173,7 @@ class Plan:
                     **dataclasses.asdict(self.cfg.probe),
                     "file": self.cfg.data.probe_file or self.cfg.data.eval_file,
                     "file_sha256": self.data_counts.get("validation", {}).get("source_sha256"),
+                    "selection": check_selection(self.cfg),  # how best_checkpoint.json is chosen (DEF-08)
                     **probe_composition(list(self.eval_dataset)),
                     **probe_cost(self.cfg, len(self.eval_dataset), self.generation_batch_size),
                 }

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import math
+from pathlib import Path
 from typing import Any
 
 from honest_agents.models import (
@@ -134,6 +136,69 @@ def probe_steps(cfg: TrainRunConfig) -> list[int] | None:
     return sorted(steps)
 
 
+# Probe metrics that measure the work and not honesty: selecting on one picks the checkpoint that does the most, which on a
+# restraint run rewards ignoring the evidence (DEF-08). Matched as substrings, so per-family and per-cell variants count.
+CAPABILITY_SELECTION_METRICS = ("task_success", "verified_success", "claim_rate_feasible", "reward/outcome")
+
+
+def is_capability_metric(metric: str) -> bool:
+    return any(k in metric for k in CAPABILITY_SELECTION_METRICS)
+
+
+def check_selection(cfg: TrainRunConfig) -> dict[str, Any]:
+    """How the run's checkpoint is chosen (`ValidationProbe` writes it into `best_checkpoint.json`), or ValueError.
+
+    A restraint run (`restraint_run`, the default) selects either at `probe.fixed_checkpoint_step` or on a
+    `probe.selection_metric` that is not a capability metric and that the `probe.preregistration` file names. The
+    file's sha256 is recorded, so the endpoint the run was chosen on is the one that was committed.
+    `probe.legacy_capability_selection` re-runs a config from before this rule as it was."""
+    p = cfg.probe
+    rule: dict[str, Any] = {"metric": p.selection_metric, "greater_is_better": p.greater_is_better}
+    if p.fixed_checkpoint_step is not None:
+        step = p.fixed_checkpoint_step
+        save_steps = int(cfg.grpo.get("save_steps", 500))
+        max_steps = int(cfg.grpo.get("max_steps", -1))
+        if isinstance(step, bool) or not isinstance(step, int) or step < 1 or step % save_steps:
+            raise ValueError(
+                f"probe.fixed_checkpoint_step={step!r} must be a step >= 1 and a multiple of grpo.save_steps={save_steps}"
+            )
+        if max_steps > 0 and step > max_steps:
+            raise ValueError(f"probe.fixed_checkpoint_step={step} is past grpo.max_steps={max_steps}")
+        return {**rule, "rule": "fixed_step", "fixed_step": step, **_preregistration(p.preregistration)}
+    if not cfg.restraint_run:
+        return {**rule, "rule": "metric (not a restraint run)"}
+    if p.legacy_capability_selection:
+        return {**rule, "rule": "legacy (probe.legacy_capability_selection)"}
+    if is_capability_metric(p.selection_metric):
+        raise ValueError(
+            f"probe.selection_metric={p.selection_metric!r} is a capability metric, refused on a restraint run (DEF-08): "
+            "it ignores honesty. Set probe.fixed_checkpoint_step (fixed in the pre-registration), or a pre-registered "
+            "endpoint with probe.preregistration; probe.legacy_capability_selection=true re-runs a pre-DEF-08 config"
+        )
+    if p.preregistration is None:
+        raise ValueError(
+            f"probe.selection_metric={p.selection_metric!r} on a restraint run needs probe.preregistration: the file that "
+            "names it as the endpoint (DEF-08)"
+        )
+    record = _preregistration(p.preregistration)
+    text = Path(p.preregistration).read_text()
+    names = {p.selection_metric, p.selection_metric.removeprefix("eval_")}
+    if not any(n in text for n in names):
+        raise ValueError(
+            f"probe.preregistration {p.preregistration} does not name probe.selection_metric={p.selection_metric!r}"
+        )
+    return {**rule, "rule": "preregistered_metric", **record}
+
+
+def _preregistration(path: str | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    f = Path(path)
+    if not f.is_file():
+        raise ValueError(f"probe.preregistration {path} is not a file")
+    return {"preregistration": {"file": str(path), "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}}
+
+
 def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits | None = None):
     from trl import GRPOConfig
 
@@ -190,6 +255,7 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
             )
         if p.min_infeasible < 0 or p.min_feasible < 0:
             raise ValueError("probe.min_infeasible and probe.min_feasible must be >= 0")
+        check_selection(cfg)
         save_steps = grpo.get("save_steps", 500)
         steps = probe_steps(cfg)
         bad = [s for s in steps or [p.every_steps] if s % int(save_steps)]

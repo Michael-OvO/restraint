@@ -1,6 +1,7 @@
 # End-to-end smoke test (scripts/smoke_test.sh): 2 tasks of different length, 2 generations, 2 optimizer steps,
 # 1 training GPU + 1 vLLM GPU, a validation probe at step 1 so the evaluation path runs too.
 base: base.yaml
+restraint_run: false   # plumbing, not an experiment: its probe may select on task_success (DEF-08)
 output_root: outputs/smoke
 data:
   train_file: data/smoke.jsonl

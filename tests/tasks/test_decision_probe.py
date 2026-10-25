@@ -178,3 +178,56 @@ def test_write_outputs_fixture_matches_the_real_command_set(tmp_path: Path):
     d = write_task_dir(tmp_path, "a", control=False)
     rows = dp.read_outputs(write_outputs(tmp_path / "o.jsonl", [d]))
     assert rows["a__high_risk"].ok and [c.command for c in rows["a__high_risk"].commands] == list(dp.read_commands(T))
+
+
+def _prompts_cli(fx: Fixture, tmp_path: Path, out: Path, *extra: str) -> list[dict]:
+    from honest_agents.bank import append_rows
+
+    bank = tmp_path / "bank"
+    if not bank.exists():
+        append_rows(fx.bank_rows, bank)
+    argv = ["prompts", "--bank", str(bank), "--rl-pool", str(fx.pool), "--zero-pools", str(fx.pool)]
+    argv += ["--outputs", str(fx.outputs), "--tasks-root", str(fx.tasks_root), "--out", str(out)]
+    argv += ["--phrasings-file", str(tmp_path / "phrasings.json"), *extra]
+    assert dp.main(argv) == 0
+    return [json.loads(line) for line in out.read_text().splitlines()]
+
+
+def test_system_prompt_file_builds_its_own_probe_and_the_default_is_unchanged(tmp_path: Path):
+    """DEF-09: `--system-prompt-file` puts the given prompt on every prompt (zero-prefix and own-prefix) and records its
+    sha256 in that file's manifest; without it the probe is the harness-prompt probe, byte for byte."""
+    import hashlib
+
+    fx = Fixture(tmp_path, n_pairs=2)
+    default = _prompts_cli(fx, tmp_path, tmp_path / "default.jsonl")
+    assert {p["set"] for p in default} == {dp.SET_OWN_PREFIX, dp.SET_ZERO_PREFIX}
+    assert all(p["messages"][0] == {"role": "system", "content": harness.SYSTEM_PROMPT} for p in default if p["set"] == dp.SET_ZERO_PREFIX)
+    assert "system_prompt" not in json.loads((tmp_path / "default.jsonl.manifest.json").read_text())
+    # the same prompt passed as a file gives the same zero-prefix bytes: the default path is the harness prompt
+    same = tmp_path / "harness.txt"
+    same.write_text(harness.SYSTEM_PROMPT)
+    _prompts_cli(fx, tmp_path, tmp_path / "same.jsonl", "--system-prompt-file", str(same))
+    def zero(path: Path) -> list[str]:
+        return [x for x in path.read_text().splitlines() if '"set": "zero_prefix"' in x]
+
+    assert zero(tmp_path / "same.jsonl") == zero(tmp_path / "default.jsonl") != []
+
+    procedure = tmp_path / "procedure.txt"
+    procedure.write_text("You are a careful agent. Inspect before you delete.\n")
+    custom = _prompts_cli(fx, tmp_path, tmp_path / "procedure.jsonl", "--system-prompt-file", str(procedure))
+    assert all(p["messages"][0] == {"role": "system", "content": procedure.read_text()} for p in custom)
+    assert [p["messages"][1:] for p in custom] == [p["messages"][1:] for p in default]  # nothing else changes
+    assert [{**p, "messages": None} for p in custom] == [{**p, "messages": None} for p in default]
+    manifest = json.loads((tmp_path / "procedure.jsonl.manifest.json").read_text())
+    assert manifest["system_prompt"] == {
+        "file": str(procedure),
+        "sha256": hashlib.sha256(procedure.read_bytes()).hexdigest(),
+        "chars": len(procedure.read_text()),
+    }
+    # a custom-prompt probe never overwrites the harness-prompt probe file
+    with pytest.raises(SystemExit, match="its own --out"):
+        dp.custom_system_prompt(str(procedure), dp.PROBE_PROMPTS, dp.PROBE_PROMPTS)
+    empty = tmp_path / "empty.txt"
+    empty.write_text("\n")
+    with pytest.raises(ValueError, match="empty"):
+        dp.custom_system_prompt(str(empty), tmp_path / "x.jsonl", dp.PROBE_PROMPTS)

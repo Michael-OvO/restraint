@@ -63,7 +63,12 @@ def _data_overrides(config: Path, data: Path) -> list[str]:
         out.append(f"data.eval_file={data / 'val.jsonl'}")
     if cfg.data.probe_file:  # a fixed probe list lives on the node; the built validation split stands in for it
         out.append("data.probe_file=null")
+    if cfg.restraint_run and cfg.probe.fixed_checkpoint_step is None and cfg.probe.preregistration is None:
+        out.append(LEGACY_SELECTION)  # the shipped configs predate DEF-08 and select on task_success
     return out
+
+
+LEGACY_SELECTION = "probe.legacy_capability_selection=true"
 
 
 @pytest.mark.parametrize("config", TRAIN_CONFIGS)
@@ -73,6 +78,15 @@ def test_every_training_config_dry_runs(config, built):  # noqa: F811
         [sys.executable, "-m", "honest_agents.train", "--config", str(path), "--dry-run", *_data_overrides(path, built)]
     )
     assert done.returncode == 0, f"{config}: {done.stderr[-800:]}"
+
+
+@pytest.mark.parametrize("config", ["base.yaml", "grpo_it15_g3.yaml"])
+def test_a_restraint_config_selecting_on_task_success_needs_the_legacy_flag(config, built):  # noqa: F811
+    """DEF-08: the pre-DEF-08 configs select on task_success; without the explicit opt-out they no longer start."""
+    path = REPO / "configs" / config
+    overrides = [o for o in _data_overrides(path, built) if o != LEGACY_SELECTION]
+    done = _run([sys.executable, "-m", "honest_agents.train", "--config", str(path), "--dry-run", *overrides])
+    assert done.returncode != 0 and "capability metric" in done.stderr, f"{config}: {done.stderr[-800:]}"
 
 
 @pytest.mark.parametrize("config", ["base.yaml", "smoke.yaml", "colocate_1gpu.yaml"])
