@@ -23,9 +23,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-13 | reward | open (blocks RL only) | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | open | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
-| DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
+| DEF-16 | task data / grader | closed | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests (cause: local `docker exec` umask 0000) |
 | DEF-17 | tooling | open | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | open | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
+| DEF-NEW-probe-gate-1 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 
 ---
 
@@ -391,14 +392,62 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - changing one task dir re-boots only that pair.
 
 ### DEF-16: probe-role surface builds were never oracle-gated
-- **Area:** task data. **Status:** open. **Found:** 2026-10-24, while closing DEF-01.
+- **Area:** task data / grader (local sandboxes). **Status:** closed 2026-10-24. **Found:** 2026-10-24, while closing
+  DEF-01. **Commits:** `aa805be` (fix and tests).
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
   14 controls fail "oracle fails tests" on the source's own tests (mostly file-mode asserts such as 0o666 vs 0o644, and
   one HTTP server test). The pre-DEF-01 build fails identically, so the cause predates DEF-01. The other surfaces of this root
   were not gated.
-- **Impact:** none on graded evals (the probe never runs the tests). Any future use of these dirs as sandbox-graded tasks
-  would inherit failing controls.
-- **Fix:** gate the whole root and prune or repair (umask in the build?) before any graded use.
+- **Cause (two, neither in the build).**
+  - **Umask, 13 of 14.** `docker exec` processes take the Docker daemon's umask, not the image's. Under the Mac's
+    OrbStack Docker 29.8.2, `docker exec <c> sh -c umask` prints `0000` (`docker run` prints `0022`). So every file an
+    oracle or agent command creates locally is 0o666 and source tests asserting 0o644 fail. The bank sources fail the same
+    way locally (`00e67104__feasible`: "are 0o666, but should be 0o644"). On the node the same tests pass with no `chmod`
+    in the commands (archive `03-passk-bank` passk and `15-g4-read-rft` episodes of 00e67104: 6/6 passed, no chmod), so
+    the nodes run under 0022. The surface build, the source tests and the solve scripts are not at fault.
+  - **Background process, 1 of 14 (0a02897a) plus bf24b7fb.** The oracle starts a detached server/deploy process and the
+    source tests need it alive; grading kills background processes before the tests on Docker
+    (`grading.py` ~L215, `kill_background`), so these controls fail on every host. Both sources were already in
+    `data/select_quarantine.txt` for this reason. Static scan of all 127 sources' `solve.sh` for `nohup`/`disown`/`setsid`/`&`:
+    only these two keep a process past the oracle.
+- **Fix (done, at the cause):** `harness.start_sandbox` pins every command of a Harbor `DockerEnvironment` to
+  `umask 022` (`harness.pin_exec_umask`, `SANDBOX_UMASK`): agent commands, the oracle, grading and Harbor's own execs.
+  On the nodes it is a no-op (they already run under 0022). Fakes and other backends are left as they are.
+  - **No rebuild:** no build code or task file changed, so every dir of the root is byte-identical (diff empty).
+  - **No prune:** 0a02897a (probe role: `inbound_link`, `empty_backup`) and bf24b7fb (4 dirs per training surface, not in
+    `surface_pairs.jsonl`, an older build's leftovers) stay. They cannot be sandbox-graded, but the probe is a
+    single-step decision prompt that never runs the tests, and neither graded consumer can draw them: `rl_pool_v3` takes RL-pool
+    sources only and `read_rft_tasks` refuses select sources; both are select sources. Deleting the probe pair would change the
+    probe set and its cached outputs for no gain. Recorded reason: background process killed before grading.
+- **Gate (post-fix, local Docker, 2 sandboxes; stratified, since the full root is 524 pairs, ~9 h at 2 sandboxes):** full
+  `g1_surfaces` (control oracle, twin destroy, twin report, control report, evidence visible) on 134 pairs = 268 dirs, in
+  two background jobs of 72 and 65 min. The strata: the 14 failing inbound_link pairs, all 30 pairs G3 trained on
+  (`train_rl_v3`), one pair for every remaining source (all 127 sources of the root are covered once), topped up to at
+  least 12 pairs per surface. By surface: readme 24/24, file_header 22/23, config_comment 24/24, manifest 23/23,
+  inbound_link 21/22, empty_backup 18/18. **132/134 pass.** The 2 failures are the background-process controls
+  (bf24b7fb file_header, 0a02897a inbound_link). 13 of the 14 earlier failures pass now, and 30/30 G3 pairs pass.
+  Results: scratchpad `fix/probe-gate/job1a.jsonl`, `job1b.jsonl`.
+  - Not gated: the other 390 pairs. Their control oracle differs from a gated pair of the same source only by the surface's
+    cleanup line, and the twin checks are covered per surface by the sample.
+- **Closure tests:**
+  - L0: `tests/test_env.py::test_a_docker_sandbox_runs_every_command_under_the_nodes_umask`. It checks that
+    `start_sandbox` prefixes `umask 022;` once on a `DockerEnvironment`, and leaves other envs alone. It fails on the old
+    code (`'touch out.txt' != 'umask 022; touch out.txt'`).
+  - L1 (docker marker): `tests/test_docker_integration.py::test_commands_and_the_oracle_create_files_under_the_nodes_umask`.
+    In a real sandbox, `umask` prints 0022 and a new file is 644, and an oracle whose test asserts 644 passes
+    `validate_task`. It passes on the new code. On the old code it fails locally with `0000` / `666`.
+- **Impact note.**
+  - Node results (all graded evals, G3 GRPO, G4 sampling): **unchanged**. The nodes already ran under 0022.
+  - Local Docker results before `aa805be` ran under 0000. Re-measured:
+    - DEF-01's probe oracle gate: 58/72 → 71/72 inbound_link (re-scored, post-fix). The remaining one is 0a02897a.
+    - DEF-01's replay regrade: 24 episodes were at risk (control, source with mode asserts, replay tests failed, case not
+      `false_blame`). Re-replayed post-fix: **24/24 unchanged** (same case, same tests verdict), so DEF-01's numbers stand.
+      The 819fc6d0 replay divergence is not this cause.
+    - Select G1 quarantine (2026-10-14, local): **24 of its 32 variants pass post-fix** (12 sources). Only 0a02897a (3),
+      bf24b7fb (2) and a72096a7 (3) still fail. Opened as DEF-NEW-probe-gate-1.
+  - Other local Docker runs before the fix (DEF-05's local G1 prune, probe sandbox outputs) are not re-measured here. The
+    probe outputs come from read-only inspection commands of files the image build wrote (`RUN` uses 0022), so they do
+    not depend on the exec umask.
 
 ### DEF-17: `g1_surfaces` ignores Ctrl-C for queued pairs
 - **Area:** tooling. **Status:** open. **Found:** 2026-10-24.
@@ -420,3 +469,17 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** record the probe/SFT builds in `pair_assignments.json` (pair and context, keyed by twin variant id and role)
   and honour them on the forced path too; extend `build_manifest.json` (or add a second manifest) for those roots.
 - **Closure test:** grow every pool in a copy, rebuild the probe set in memory and compare hashes with the manifest.
+
+### DEF-NEW-probe-gate-1: the select quarantine holds variants that only failed under the local umask
+- **Area:** task data / eval build. **Status:** open. **Found:** 2026-10-24, while closing DEF-16.
+- **Evidence:** `data/select_quarantine.txt` (32 variants, all "G1 select: feasible: oracle fails tests", written
+  2026-10-14 by a local `validate` run). Every select and surface evaluation in the chains excludes them
+  (`--exclude-quarantined data/select_quarantine.txt`; 32 of 212 select variants). Re-validated post-`aa805be`
+  (`validate_task`, local Docker under umask 022): 24 pass. The 12 sources are 2fa63c4b, 388e6d59, 38af60bb, 3bbd0081,
+  3db1d1fe, 5d2af6e4, 601a0226, 6e663bad, 7d66dd84, c3d2450e, d01a1f48, f48072b1. Only 0a02897a (3), bf24b7fb (2) and
+  a72096a7 (3) still fail. Results: scratchpad `fix/probe-gate/quarantine_post.jsonl`.
+- **Impact:** every select-tier and surface eval since iteration 14 was scored without these 24 variants, about 11% of
+  select. Their tests assert file modes, so the excluded set is not random.
+- **Fix:** rewrite the quarantine from a post-fix validation (keep the 8 that still fail, with their reasons). Then
+  report which archived select numbers move (re-score from the archive where these variants were sampled, else `void`).
+  This changes the eval set, so it needs the owner's decision. It is not done in the DEF-16 lane.
