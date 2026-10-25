@@ -44,7 +44,7 @@ All numbers below were recomputed from the archived surface4, tier S and tier F 
    - On inbound_link, under a strict full-path rule, SFT-v2 reads 59% and G2 27% (16 of 19 sources point the same way).
    - On empty_backup the difference (+8.6 [-1.3, +20.8]) is inconclusive. Trained surfaces are unchanged (+0.3).
 
-7. **Declining without reading is the largest source of control failure, and it is noise.** Unread episodes decline about 36% on twins and controls alike (gap +0.6 over 3,041 lineage episodes). 65% of G2's control declines come from episodes that never read. G3 raised exactly this (unread twin declines 36% to 48%).
+7. **Declining without reading is the largest source of control failure, and it is noise.** Unread episodes decline about 36% on twins and controls alike (gap +0.6 over 3,041 lineage episodes). 65% of G2's control declines come from episodes that never read. G3 raised exactly this (unread twin declines 36% to 48%). (DEF-38, re-scored, post-fix: this holds under the canonical label with the anchored landmark window, unread gap +0.9 over the nine it14/it15 surface evals, 35.2% vs 34.3%; under the pre-DEF-38 window, K=8 counted from the first command, late readers counted as unread and the gap was +10.3, readme +30.2.)
 
 8. **Part of the held-out metric is broken.** No model passes an inbound_link control: 0/76 in every run, because the test requires emptying the real directory and the model's normal `rm` removes only the link. Likewise 70 of 71 inbound_link twin "violations" removed only the link and left the data intact.
 
@@ -65,7 +65,7 @@ All numbers below were recomputed from the archived surface4, tier S and tier F 
 | G3's pair-reward gain is real | +0.096 [0.003, 0.194] vs seed 1; vs seed 2 the CI includes 0 | Partial (marginal) | Low |
 | G4's update was tiny | Loss = entropy; 2% of tokens are decision turns. Loss ≈ entropy is automatic for on-policy T=1 data, so it is not proof of no update | Partial | Medium |
 | Concentrated read-turn SFT does not raise reveal | G2 trained sources 52% vs untrained 55-56%; G4 combined moves 8% to 10% | Confirmed (from the verifiers) | Medium |
-| Unread declines carry no signal | Lineage unread gap +0.6; empty_backup -0.03 [-0.21, 0.14]; inbound_link -0.07 [-0.18, 0.05] | Confirmed | High |
+| Unread declines carry no signal | Lineage unread gap +0.6; empty_backup -0.03 [-0.21, 0.14]; inbound_link -0.07 [-0.18, 0.05]. Holds under the anchored K=8 window (+0.9), not under the pre-DEF-38 one (+10.3; see DEF-38) | Confirmed | High |
 | G2 judges well given a read, within a task cell | +38.9 / -37.7 within cell vs about 0 for SFT-v2 | Confirmed | Medium (selection between samples within a task is still possible) |
 | Deferred wording predicts reading | +14.5 [+9.3, +20.9] with source fixed effects | Partial (observational; templates sit in 1-7 sources) | Medium |
 | inbound_link control cannot be passed | 0/76 in all 9 runs; 95/96 claimed controls graded fabrication | Confirmed | High |

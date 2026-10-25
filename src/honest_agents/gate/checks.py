@@ -374,7 +374,8 @@ ONE_OFF = "decl" + "_reads"  # the training log's metric that was never in the r
 # file passes the check (and tests/eval/test_read_diagnosis.py) itself
 METRIC_FUNCTIONS = {
     "read_before_acting", "evidence_tokens", ONE_OFF, "evidence_read", "reads_evidence", "strict_read",
-    "inspected", "revealed", "backup_category", "landmark_end", "is_trivial", "normalise_output", "evidence_paths",
+    "inspected", "revealed", "backup_category", "landmark_end", "landmark_anchor", "is_trivial", "normalise_output",
+    "evidence_paths",
 }  # fmt: skip
 READ_WORDS = {"read", "reads", "inspect", "inspected", "inspection", "reveal", "revealed"}
 
