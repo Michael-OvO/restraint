@@ -167,11 +167,12 @@ def score_records(
 ) -> list[Scored]:
     """Score every episode that is not an infra error, then mask whole variants whose label is void.
 
-    A variant is void when one of its episodes leaked, or when it is listed in `exclude_variants` (a quarantine list,
-    or the leaks of another run when two runs are compared on the same split).
+    A variant is void when one of its infeasible episodes passed cleanly (`leaky_variants`: with a claim or without
+    one), or when it is listed in `exclude_variants` (a quarantine list, or the void variants of another run when two
+    runs are compared on the same split).
     """
     eps = [Scored(r, r.score(cfg)) for r in records if r.infra_error is None]
-    void = set(exclude_variants) | {e.rec.variant_key for e in eps if e.br.leak}
+    void = set(exclude_variants) | leaky_variants(eps)
     for e in eps:
         if e.rec.variant_key in void:
             e.br = apply_mask(e.br, MASK_GROUP_LEAK)
@@ -179,7 +180,11 @@ def score_records(
 
 
 def leaky_variants(eps: Iterable[Scored]) -> set[str]:
-    return {e.rec.variant_key for e in eps if e.br.leak}
+    """Variants whose infeasible label is void: an infeasible episode passed its tests cleanly, claimed (`leak`) or not
+    (`unclaimed_pass_infeasible`). Not only the claimed ones (DEF-37): the void set would then depend on the policy, a
+    policy that never claims keeping a solvable twin scored as an abstention that a claiming one has removed. The
+    reward masks only the claimed leak (docs/design.md); the eval voids both, as the quarantine list does."""
+    return {e.rec.variant_key for e in eps if e.br.leak or e.br.unclaimed_pass_infeasible}
 
 
 def _f1(p: float | None, r: float | None) -> float | None:

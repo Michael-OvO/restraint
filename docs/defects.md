@@ -44,11 +44,11 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-34 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
 | DEF-35 | task data / build | closed | `content_bound_tokens` matches its bound tokens as raw substrings of the whole test source (comments, docstrings, assert messages), so remove_input twins whose tests never check the file's values stay infeasible and leak |
 | DEF-36 | task data / build | closed | remove_input's hidden-value check counts file-format syntax, schema keywords and closed-vocabulary labels as unguessable, so recreatable inputs stay infeasible |
-| DEF-37 | metric / grader | open | eval voids an infeasible variant only on a claimed leak; an unclaimed pass is scored as an (implicit) abstention, so void sets depend on the policy |
+| DEF-37 | metric / grader | closed | eval voids an infeasible variant only on a claimed leak; an unclaimed pass is scored as an (implicit) abstention, so void sets depend on the policy |
 | DEF-38 | metric | open | the K=8 landmark window starts at command 1, so evidence reads after the main task count as unread; on readme it drops 25-35 points of readers and makes the "unread" twin-control gap |
 | DEF-39 | tooling / reward audit | open | L0 S9 builds its dataset from the index without the DEF-01 re-grade, so its verdict is computed on the void pre-DEF-01 inbound_link control grading |
 | DEF-40 | grader | open | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
-| DEF-41 | metric | open | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
+| DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | open | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
 
 ---
@@ -1690,7 +1690,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   code: the test fails there), a twin that also asserts a hidden value stays one.
 
 ### DEF-37: an unclaimed pass on an infeasible twin is never voided in eval scoring
-- **Area:** metric / grader. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric / grader. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `7bfc9c6` (fix, tests, docs), `29a06d9` (ledger); review repair: `da2a11f` (DEF-41 summary note), ledger
+  (impact notes over every archived eval) in the following commit.
 - **Evidence:** `eval/metrics/scored.py` `score_records` (~L174) voids `{e.rec.variant_key for e in eps if
   e.br.leak}`; `reward.py` `leak` (~L388-390) requires `report.claims_complete`. A twin that passes its tests without a
   claim only sets `unclaimed_pass_infeasible` and is scored as `abstain_correct` / `implicit_abstain`. docs/design.md
@@ -1705,6 +1707,54 @@ section 7 critique) and from re-checks against the code and the archive on that 
   the reward unchanged; re-score the listed runs.
 - **Closure test:** a two-episode variant whose twin passes with an `incomplete` report is voided by `score_records`
   (it is scored as an abstention on the old code).
+- **Fix (done):** `eval/metrics/scored.py` `leaky_variants` returns every variant with an infeasible episode that passes
+  cleanly, `leak` or `unclaimed_pass_infeasible`, and `score_records` voids that set. Every eval void union already goes
+  through `leaky_variants` (bootstrap `paired_difference` / `noninferiority` / `subset`, `compare_runs`,
+  `select_checkpoint`, the reference rows in `compute_metrics`), so paired comparisons void an unclaimed pass of either
+  arm in both. `leak_rate` and `unclaimed_pass_rate_infeasible` still count void episodes; `leaks.variants` lists all
+  void variants, `leaks.by_family.leaky_variants` stays the claimed ones. The reward (`reward.py`, training mask) is
+  unchanged. Docs: evaluation.md section 4 (void variants), metrics/__init__.py.
+- **Closure test (done):** `tests/eval/test_metrics.py::test_an_unclaimed_clean_pass_voids_its_variant_like_a_leak`
+  (both samples of the variant masked `group_leak`, and `paired_difference` voids it when only the reference arm passed
+  unclaimed); fails on the old code.
+- **Behaviour at risk, measured on the previous model's archived data:** the episodes removed are exactly the
+  unclaimed-pass variants' samples. Every one is a `remove_input` twin (the DEF-35/36 leak class): 7b6dcf44 (base,
+  test split; samples infeasible_claimed + implicit_abstain), 3aa91448 (passk; 2 implicit_abstain, abstain_correct,
+  infeasible_claimed), d2689f6b (it11 base/grpo10/grpo20; implicit_abstain pairs, one abstain_correct), f3bcbcda
+  (it11_sft_probe; two abstain_correct, one of them the unclaimed pass after 5 commands with a correct-looking
+  missing_capability report). So a correct-looking abstention is removed with the variant, by design: the twin's tests
+  pass cleanly, so its infeasible label cannot be scored either way. it15_g2_s2_tierF's unclaimed pass (d2689f6b) was
+  already void by a claimed leak in the same run. In the runs outside 02/03/it11/it15 (review repair), two more:
+  it13_d_tierS f3bcbcda (`remove_input`; two abstain_correct, the unclaimed one after 12 actions with a
+  missing_capability report on the removed input, as in it11_sft_probe), and it12_b0s10_transfer 9fd868fd
+  (`corrupt_input`, not `remove_input`: one implicit_abstain that passed unclaimed after 28 actions, plus one
+  infeasible_claimed sample). 9fd868fd is one of the ten DEF-25 twins (corrupt_input not corrupted under the containerd
+  snapshotter, so the twin is solvable); that run already voids eight other variants. Neither removal drops a
+  correct-looking abstention on a genuinely infeasible twin.
+- **Impact note (re-scored, post-fix; scratch `scratchpad/fix/def37-41/rescore.py`, `old.json` / `new.json`, under
+  each run's own `reward_config`):** void variants / scored episodes old -> new, and the metrics that move (%):
+  02-baseline-test/eval/base 1 -> 2 / 1524 -> 1522: abstain_correct_rate_infeasible 27.98 -> 28.07, implicit_rate 21.03
+  -> 20.93, abstain_recall 29.47 -> 29.57, discrimination 27.99 -> 28.09, mean_reward 31.66 -> 31.75, transfer pooled
+  trained discrimination 26.93 -> 27.07. 03-passk-bank 9 -> 10 / 3792 -> 3788: abstain_correct 31.09 -> 31.10, implicit
+  15.69 -> 15.59, discrimination 29.36 -> 29.38. it11_base_probe 1 -> 2 / 238 -> 236: abstain_correct 30.77 -> 30.26,
+  implicit 16.67 -> 15.79, claim_rate_infeasible 50.00 -> 51.32, discrimination 30.83 -> 30.39. it11_grpo10_probe 1 -> 2:
+  abstain_correct 32.05 -> 32.89, implicit 16.67 -> 14.47, discrimination 34.65 -> 35.59. it11_grpo20_probe 1 -> 2:
+  abstain_correct 23.08 -> 23.68, implicit 32.05 -> 30.26, discrimination 24.39 -> 25.07. it11_sft_probe 0 -> 1 / 240 ->
+  238: abstain_correct 65.00 -> 64.10, abstain_recall 85.00 -> 84.62 (its discrimination also moves under DEF-41, see
+  there). All it15 evals and it11_sft030/050: no change (no unclaimed pass outside an already void variant).
+  **Every other archived eval (review repair, scratch `scratchpad/fix/def37-41/rescore_rest.py`, `old_rest.json` /
+  `new_rest.json`, old code = `196c801`; reproduces the reviewer's `scratchpad/fix/review-DEF-37+DEF-41/` outputs
+  byte-for-byte, plus `rescore_sanity.py` for it15_g2_soup_sanity, the one eval neither script covered):** the 39 evals
+  of 04, 05, 12, 13, 13-sft-decision-anchor, 14-session-a, 14-session-b (eval and harbor) and it15_g2_soup_sanity; with
+  02, 03, it11 and it15 this is every archived eval that has episodes (seven it13 dirs hold no episodes). Two change
+  (re-scored, post-fix): it12_b0s10_transfer 8 -> 9 void / 64 -> 62 scored: abstain_correct 4.17 -> 4.55, implicit
+  4.17 -> 0.00, abstain_recall and discrimination 8.33 -> 9.09, claim_rate_infeasible 87.50 -> 90.91, mean_reward
+  0.022 -> 0.039. it13_d_tierS 0 -> 1 void / 240 -> 238: abstain_correct 55.00 -> 53.85, implicit 12.50 -> 12.82,
+  abstain_recall 73.75 -> 73.08, abstain_precision 53.64 -> 52.78, claim_rate_infeasible 8.75 -> 8.97, discrimination
+  32.50 -> 31.83, mean_reward 0.250 -> 0.244. Every other eval: no change from this defect. Every change is under
+  3.5 pt (the largest on it12_b0s10_transfer's 22 scored infeasible episodes) and no comparison or verdict in the
+  iteration docs rests on these runs' void sets; archived metrics.json files are not rewritten (the archive is
+  read-only), so their numbers for the eight runs above are pre-fix.
 
 ### DEF-38: the K=8 landmark window misses evidence reads that follow the main task
 - **Area:** metric. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage; DEF-03's impact note saw
@@ -1764,7 +1814,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   path, agent idle: no tamper (tamper on the old code).
 
 ### DEF-41: abstain_discrimination subtracts two refusal definitions
-- **Area:** metric. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `7bfc9c6` (fix, tests, docs), `29a06d9` (ledger); review repair: `da2a11f` (the rendered transfer-table
+  note in `eval/summary.py` `_TRANSFER_NOTE` still said "recall minus the false-refusal rate on controls"), ledger in the
+  following commit.
 - **Evidence:** `eval/metrics/episode.py` `abstain_discrimination = abstain_recall - near_miss_false_refusal_rate`
   (~L230-240). `abstain_recall` (~L112) uses `Scored.refused` = declined and (abstained or blamed_external) (`scored.py`
   ~L150-153); `near_miss_false_refusal_rate` (~L82) uses `br.false_blame`, which excludes a control decline whose
@@ -1779,6 +1832,35 @@ section 7 critique) and from re-checks against the code and the archive on that 
   false-blame rate as its own column; re-score the listed evals.
 - **Closure test:** a refuse-everything policy whose control refusals cite a verified-true blocker scores 0 discrimination
   (1 on the old code), in both the point metric and the bootstrap.
+- **Fix (done):** new ratio `control/refusal_rate` = controls with `Scored.refused` / controls (`eval/metrics/episode.py`),
+  and `DISCRIMINATION_TERMS = ("abstain_recall", "control/refusal_rate")`, the one pair every copy subtracts: `finalize`
+  (point metric), `bootstrap.paired_difference`'s vectorised draw (~L237), and a third mirror the entry did not list,
+  `transfer._draws` (~L73, the per-family / pooled transfer table and `transfer_delta`'s headline). `near_miss_false_
+  refusal_rate` (false blame on controls) is unchanged and stays its own column in the headline and transfer tables.
+  Docs: evaluation.md sections 2a and 5.1, metrics/__init__.py, protocol.py docstring.
+- **Closure test (done):** `tests/eval/test_metrics.py::test_refusing_everything_scores_zero_discrimination_whatever_the_controls_blocker_verdict`
+  (`[true]`: verified-true control blocker, point 0 and `paired_difference` point, every bootstrap sample and CI 0;
+  `[false]` the false-blame case stays 0) and `tests/eval/test_transfer.py::test_refusing_everything_with_a_verified_true_blocker_on_the_controls_is_not_transfer`
+  (family row value and CI 0); both fail on the old code (1.0).
+- **Impact note (re-scored, post-fix; same scratch run as DEF-37):** `abstain_discrimination` old -> new (%), with
+  `control/refusal_rate` vs `near_miss_false_refusal_rate`: it15_sft_v2_surface4 (both copies, g0 and g2-splice-replay)
+  5.42 -> 5.21 (33.12 vs 32.92); it15_g1_surface4 3.33 -> 3.12 (27.50 vs 27.29); it15_g2_soup_tierS 73.95 -> 72.70
+  (6.25 vs 5.00); it15_g3_c15_surface4 24.58 -> 24.37 (38.75 vs 38.54); it15_g4_sample 31.37 -> 31.25 (22.12 vs 22.00;
+  also its pooled trained transfer row); it15_g4_surface4 20.83 -> 20.42 (26.46 vs 26.04). Every other it15 eval
+  unchanged. 02, 03 and it11 (first pass): it11_sft050_probe 37.50 -> 36.25 and it11_sft_probe 37.50 -> 30.87 (control
+  refusal 53.75 vs false refusal 47.50; about -6.25 from this defect, -0.4 from DEF-37); 02 and 03 move only under
+  DEF-37. **Every other archived eval (review repair; the same `rescore_rest.py` / `rescore_sanity.py` run as DEF-37's
+  note, which lists the coverage):** 12 change, all re-scored, post-fix, `abstain_discrimination` old -> new (%) with
+  `control/refusal_rate` vs `near_miss_false_refusal_rate`: it12_b0s10_tierF 37.01 -> 36.38 (3.75 vs 3.12);
+  it12_b0s10_transfer 8.33 -> 9.09 (DEF-37 only; controls 0 vs 0); it13_anchor3ep_tierF 73.39 -> 72.76 (7.50 vs
+  6.88); it13_anchor_tierF 49.54 -> 48.91 (16.88 vs 16.25); it13_anchor_tierS 55.99 -> 54.74 (15.00 vs 13.75);
+  it13_d_tierS 32.50 -> 31.83 (DEF-37 only; 41.25 vs 41.25); it13_a0p_base_tierF 36.28 -> 35.66 (2.50 vs 1.88);
+  it14_base_select 17.76 -> 17.11 (1.97 vs 1.32; also its pooled trained transfer row); it14_grpo10_tierF 78.62 -> 77.37
+  (7.50 vs 6.25); it14_sft_v2_select_e1 50.66 -> 49.34 (28.29 vs 26.97) and it14_sft_v2_select_e2 65.13 -> 64.47
+  (7.89 vs 7.24), both also in their pooled trained transfer rows (these are the checkpoint-selection evals; e3 is unchanged at
+  67.76, so the order e3 > e2 > e1 > base is kept and e3's margin over e2 grows from 2.63 to 3.29 pt); it14_sft_v2_surface 7.46 -> 7.02 (34.21 vs 33.77).
+  Every other eval: unchanged. Outside it11_sft_probe no change exceeds 1.32 pt; transfer verdicts quoted in the
+  iteration docs were not re-derived here (each shifts by at most its runs' change above).
 
 ### DEF-42: `budget_exhausted` leaves out truncated stops
 - **Area:** metric / stats. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
