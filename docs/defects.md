@@ -53,7 +53,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-43 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
-| DEF-46 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
+| DEF-46 | tooling / infra | fixing | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
 
 ---
@@ -2466,8 +2466,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   mixed-env build (the DEF-22 worktree S7 run) was redone in the exact env and not committed.
 
 ### DEF-46: the sanity-run guard did not run for six iteration-15 merged models
-- **Area:** tooling / infra. **Status:** open. **Found:** 2026-10-25, the first S11 run (DEF-23), by
-  `gate.guards.sanity_problems` on `configs/chains/*.yaml`.
+- **Area:** tooling / infra. **Status:** fixing (the guard is fixed; the six sanity runs need a GPU). **Found:**
+  2026-10-25, the first S11 run (DEF-23), by `gate.guards.sanity_problems` on `configs/chains/*.yaml`.
+  **Commits:** `2d0b492` (fail-closed guard, tests); ledger and training log in the commit that follows it.
 - **Evidence:** the training log's incident table: "every merged model gets a 12-task vLLM sanity run before a full
   evaluation" (`025b827`+). In iteration 15, `outputs/it15/g0_merged` (`it15_g0.yaml` g0_evals), `g1_merged`
   (`it15_g1.yaml` g1_evals), `g2_merged` (`it15_g2.yaml` g2_evals, the reference model), `g2_s2_merged`
@@ -2485,6 +2486,39 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `--dry-run`) refuse a job file that fails `gate.guards.sanity_problems`, with a declared exemption for models
   sanity-checked in an earlier chain.
 - **Closure test:** a job file that evaluates a merged model with no sanity run is refused before launch.
+- **Fix (done, `2d0b492`):** the rule moves to `node_chain.sanity_problems` (`gate.guards` imports it
+  for S11) and fails closed:
+  - `python -m honest_agents.node_chain check` and `run`, and `python -m honest_agents.node chain` (with or without
+    `--dry-run`, before any ssh) refuse, exit 2, a job file that breaks it. There is no CLI bypass.
+  - The served model is the `model.name=` override, else the config's own `model.name` (`base:` followed, read
+    without importing the training stack); a model that cannot be resolved counts as unchecked. A checkpoint is
+    anything but a bare hub id (`org/name`), so `/root/restraint/outputs/...` is caught too.
+  - The first command group against a checkpoint's server must be `eval_heldout.sh ... --limit N`, 1 <= N <= 12 (a
+    `decision_probe` before it, `--limit 0` or `--limit 48` do not count), unless a step it depends on ran one.
+  - A model sanity-checked in an earlier chain is declared in the new top-level `sanity_runs: {model: eval_dir}`;
+    `run` (node side) also refuses when `<eval_dir>/metrics.json` is not on disk.
+- **Behaviour at risk, measured first:** what the guard now refuses, on all 13 job files under `configs/chains` (the
+  entry above counted 14; there are 13): `node_chain check` exits 2 on every one, with exactly the 24 step findings
+  the old S11 rule printed (the new config resolution and first-group rule add none on these files). No archived job
+  file is re-run, so nothing else changes; an iteration-16 job file must carry the sanity run or a `sanity_runs` record.
+- **Tests:** `tests/test_node_chain.py`: `test_check_and_run_refuse_a_merged_model_with_no_sanity_run`,
+  `test_the_sanity_rule` (8 cases), `test_a_served_model_is_read_from_the_config_and_an_unresolved_one_is_refused`,
+  `test_a_recorded_sanity_run_of_an_earlier_chain_must_be_on_disk_for_run`,
+  `test_the_six_iteration_15_models_would_be_refused_now` (it15_g0, g1, g2, g2_seed2, g3);
+  `tests/test_node_watch.py::test_chain_command_refuses_a_merged_model_with_no_sanity_run_even_on_dry_run`. All 17 fail
+  on the old code. `test_chain_command_refuses_placeholders_and_passes_no_secret_in_argv` now dry-runs a sane job file
+  (it14_session.yaml is refused); the S11 test's base-model case names a real config.
+- **Impact note.** No archived number changes; nothing is re-scored. The six iteration-15 models are recorded as
+  **sanity pending (needs GPU)**: G0 `g0_merged`, G1 `g1_merged`, G2 s1 `g2_merged`, G2 s2 `g2_s2_merged`, G3 c10
+  `g3_c10_merged`, G3 c15 `g3_c15_merged` (also in the training log's incident table). Their tier F / surface4 / tier S
+  numbers stand as before (coherent evaluations, see Impact) but carry this label until the runs exist.
+- **Remaining (GPU, not allowed in this lane):** for each of the six, rebuild the merged model on a node (`sft.merge`
+  from the archived adapters: `15-g0-judgment`, `15-g1-splice`, `15-g2-splice-replay`, `15-g2-seed2` `run/.../final`,
+  `15-g3-grpo/run/checkpoint-15` onto G2) and run `scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+  model.name=<model> -- scripts/eval_heldout.sh data/val.jsonl runs/eval/<model>_sanity --limit 12 --n-samples 1`;
+  archive the six `metrics.json`. **G3 c10 cannot be rebuilt from the archive:** `checkpoint-10` of `it15-g3-grpo` was
+  not archived (only `checkpoint-15`), so its sanity run needs the G3 GRPO run repeated or the model declared
+  unrecoverable. Closure then: the six sanity evals coherent (no garbled commands), and the label removed.
 
 ### DEF-47: S3 audits a print of a backup file as a false positive
 - **Area:** metric / tooling (S3 audit ground truth). **Status:** closed 2026-10-25 (the found date; the prescribed

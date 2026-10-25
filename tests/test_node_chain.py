@@ -102,6 +102,100 @@ def test_placeholders_are_reported(tmp_path: Path) -> None:
     assert any("<CMD" in p for p in placeholders(nc.load_chain(job)))
 
 
+# ── sanity rule (DEF-46) ─────────────────────────────────────────────────────
+
+SERVE = "scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it16/g_merged"
+FULL = "scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/g_surface4 --n-samples 4"
+SANITY = "scripts/eval_heldout.sh data/val.jsonl runs/eval/g_sanity --limit 12 --n-samples 1"
+PROBE = "env -u VIRTUAL_ENV uv run python -m honest_agents.eval.decision_probe --out runs/probe/g --model policy"
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_check_and_run_refuse_a_merged_model_with_no_sanity_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    job = tmp_path / "job.json"
+    job.write_text(json.dumps({"name": "t", "steps": [step("a", f"{SERVE} -- {FULL}")]}))
+    for argv in (["check", str(job), "--cwd", str(REPO)], ["run", str(job), "--cwd", str(tmp_path)]):
+        assert nc.main(argv) == 2
+        assert "t/a: outputs/it16/g_merged is evaluated with no 12-task sanity run first" in capsys.readouterr().err
+    assert not (tmp_path / "outputs").exists() and not (tmp_path / "m").exists()  # refused before any lock or step
+    job.write_text(json.dumps({"name": "t", "steps": [step("a", f"{SERVE} -- {SANITY} -- {FULL}")]}))
+    assert nc.main(["check", str(job), "--cwd", str(REPO)]) == 0
+
+
+@pytest.mark.parametrize(
+    ("steps", "flagged"),
+    [
+        ([step("a", f"{SERVE} -- {PROBE} -- {SANITY} -- {FULL}")], True),  # the server is used before the sanity run
+        ([step("a", f"{SERVE} -- {SANITY.replace('12', '0')} -- {FULL}")], True),  # --limit 0 is no sanity run
+        ([step("a", f"{SERVE} -- {SANITY.replace('12', '48')} -- {FULL}")], True),
+        ([step("a", f"{SERVE} -- {SANITY}"), step("b", f"{SERVE} -- {FULL}")], False),  # b depends on a
+        ([step("a", f"{SERVE} -- {SANITY}"), step("b", f"{SERVE} -- {FULL}", after=[])], True),  # a sibling's
+        ([step("a", f"{SERVE} -- {FULL}".replace("outputs/it16/g_merged", "/root/restraint/outputs/g_merged"))], True),
+        ([step("a", "scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml -- " + FULL)], False),  # Qwen/Qwen3.5-4B
+        ([step("a", "env -u VIRTUAL_ENV uv run python -m honest_agents.sft.merge --out outputs/it16/g_merged")], False),
+    ],
+)
+def test_the_sanity_rule(steps: list[dict[str, Any]], flagged: bool) -> None:
+    assert bool(nc.sanity_problems(chain_of(steps), REPO)) is flagged
+
+
+def test_a_served_model_is_read_from_the_config_and_an_unresolved_one_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "base.yaml").write_text("model:\n  name: outputs/it16/g_merged\n")
+    (tmp_path / "configs" / "child.yaml").write_text("base: base.yaml\ngrpo:\n  max_steps: 1\n")
+    (tmp_path / "configs" / "hub.yaml").write_text("base: base.yaml\nmodel:\n  name: Qwen/Qwen3.5-4B\n")
+    assert (
+        nc.served_model(f"scripts/serve_and_run.sh configs/child.yaml -- {FULL}", tmp_path) == "outputs/it16/g_merged"
+    )
+    assert nc.served_model(f"scripts/serve_and_run.sh configs/hub.yaml -- {FULL}", tmp_path) == "Qwen/Qwen3.5-4B"
+    child = chain_of([step("a", f"scripts/serve_and_run.sh configs/child.yaml -- {FULL}")])
+    assert nc.sanity_problems(child, tmp_path) == [
+        "t/a: outputs/it16/g_merged is evaluated with no 12-task sanity run first"
+    ]
+    missing = chain_of([step("a", f"scripts/serve_and_run.sh configs/nope.yaml -- {FULL}")])
+    (problem,) = nc.sanity_problems(missing, tmp_path)
+    assert "cannot resolve the served model" in problem and "counts as unchecked" in problem
+
+
+def test_a_recorded_sanity_run_of_an_earlier_chain_must_be_on_disk_for_run(tmp_path: Path) -> None:
+    job = tmp_path / "job.json"
+    record = {"outputs/it16/g_merged": "runs/eval/g_sanity"}
+    job.write_text(json.dumps({"name": "t", "state_dir": "state", "sanity_runs": record,
+                               "steps": [step("a", f"{SERVE} -- {FULL}")]}))  # fmt: skip
+    chain = nc.load_chain(job)
+    assert chain.sanity_runs == record and nc.sanity_problems(chain, REPO) == []
+    assert nc.main(["check", str(job), "--cwd", str(REPO)]) == 0
+    assert nc.sanity_problems(chain, REPO, records=tmp_path) == [
+        "t: the sanity run recorded for outputs/it16/g_merged (runs/eval/g_sanity/metrics.json) is not on disk",
+        "t/a: outputs/it16/g_merged is evaluated with no 12-task sanity run first",
+    ]
+    assert nc.main(["run", str(job), "--cwd", str(tmp_path)]) == 2
+    (tmp_path / "runs" / "eval" / "g_sanity").mkdir(parents=True)
+    (tmp_path / "runs" / "eval" / "g_sanity" / "metrics.json").write_text("{}")
+    assert nc.sanity_problems(chain, REPO, records=tmp_path) == []
+    with pytest.raises(ChainError, match="sanity_runs: must be a mapping"):
+        chain_of([step("a")], sanity_runs=["outputs/it16/g_merged"])
+
+
+@pytest.mark.parametrize(
+    ("jobfile", "models"),
+    [
+        ("it15_g0.yaml", {"outputs/it15/g0_merged"}),
+        ("it15_g1.yaml", {"outputs/it15/g1_merged"}),
+        ("it15_g2.yaml", {"outputs/it15/g2_merged"}),
+        ("it15_g2_seed2.yaml", {"outputs/it15/g2_s2_merged"}),
+        ("it15_g3.yaml", {"outputs/it15/g3_c10_merged", "outputs/it15/g3_c15_merged"}),
+    ],
+)
+def test_the_six_iteration_15_models_would_be_refused_now(jobfile: str, models: set[str]) -> None:
+    """DEF-46: the job files that evaluated G0, G1, G2 s1, G2 s2, G3 c10 and G3 c15 with no sanity run fail the rule."""
+    problems = nc.sanity_problems(nc.load_chain(REPO / "configs" / "chains" / jobfile), REPO)
+    assert models <= {p.split(": ")[1].split(" is evaluated")[0] for p in problems}
+    assert nc.main(["check", str(REPO / "configs" / "chains" / jobfile), "--cwd", str(REPO)]) == 2
+
+
 def test_progress_last_match() -> None:
     p = nc.Progress(r"^\[(\d+)/712\]", 712)
     assert p.last("noise\n[3/712] a\n[40/712] b\nx") == 40

@@ -29,8 +29,6 @@ from __future__ import annotations
 import ast
 import contextlib
 import logging
-import re
-import shlex
 import subprocess
 import tempfile
 import time
@@ -39,11 +37,10 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents.gate.cache import SRC
+from honest_agents.node_chain import sanity_problems  # the rule lives where the chain runs (DEF-46)
 
 # The error harbor's Docker environment raised on every boot after the probe's False was cached (training log).
 REFUSED_BOOT = "network_mode='no-network' is not supported"
-SANITY_LIMIT = 12
-_MODEL = re.compile(r"\bmodel\.name=(\S+)")
 _TASK_TOML = """schema_version = "1.4"
 
 [task]
@@ -202,50 +199,6 @@ def masked_share_problems(n: int = 4) -> list[str]:
 
 
 # ── sanity run ────────────────────────────────────────────────────────────────
-
-
-def _evals(command: str) -> list[list[str]]:
-    """The `eval_heldout.sh` calls of a `serve_and_run.sh CONFIG [overrides] -- CMD -- CMD ...` step, in order."""
-    out = []
-    for part in command.split(" -- ")[1:]:
-        try:
-            words = shlex.split(part)
-        except ValueError:
-            continue
-        if words and words[0].endswith("eval_heldout.sh"):
-            out.append(words)
-    return out
-
-
-def _limit(words: Sequence[str]) -> int | None:
-    for i, w in enumerate(words):
-        if w == "--limit" and i + 1 < len(words) and words[i + 1].isdigit():
-            return int(words[i + 1])
-        if w.startswith("--limit=") and w.split("=", 1)[1].isdigit():
-            return int(w.split("=", 1)[1])
-    return None
-
-
-def sanity_problems(chain: Any) -> list[str]:
-    """The sanity-run rule on a `node_chain.Chain`: a step that serves a checkpoint we wrote (`model.name=outputs/...`)
-    and evaluates it runs a `--limit <= 12` evaluation of it first, in that step or in a step it depends on."""
-    sane: dict[str, set[str]] = {}  # step -> models with a sanity run in it or before it
-    out = []
-    for step in chain.steps:
-        before = set().union(*(sane.get(a, set()) for a in step.after))
-        m = _MODEL.search(step.command.split(" -- ")[0]) if "serve_and_run.sh" in step.command else None
-        model = m.group(1) if m else None
-        evals = _evals(step.command)
-        if model is not None and model.startswith("outputs/") and evals:
-            first = _limit(evals[0])
-            if model not in before and (first is None or first > SANITY_LIMIT):
-                out.append(
-                    f"{chain.name}/{step.name}: {model} is evaluated with no {SANITY_LIMIT}-task sanity run first"
-                )
-            if first is not None and first <= SANITY_LIMIT:
-                before.add(model)
-        sane[step.name] = before
-    return out
 
 
 _SERVE = "scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/x/m_merged"

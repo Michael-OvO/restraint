@@ -314,15 +314,34 @@ def test_watch_dry_run_prints_pulls_and_stop(capsys: pytest.CaptureFixture[str],
 
 
 def test_chain_command_refuses_placeholders_and_passes_no_secret_in_argv(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     unfilled = tmp_path / "unfilled.json"
     unfilled.write_text(json.dumps({"name": "t", "steps": [{"name": "a", "command": "<CMD: x>", "done": "m/a"}]}))
     assert nodemod.main(["chain", "--host", "h", "--no-secrets", str(unfilled)]) == 2
-    template = nodemod.REPO / "configs" / "chains" / "it14_session.yaml"
+    serve = "scripts/serve_and_run.sh configs/c.yaml model.name=outputs/x/m_merged"
+    sane = "scripts/eval_heldout.sh data/val.jsonl runs/eval/m_sanity --limit 12"
+    (tmp_path / "configs" / "chains").mkdir(parents=True)
+    template = tmp_path / "configs" / "chains" / "ok.json"
+    template.write_text(
+        json.dumps({"name": "it14", "steps": [{"name": "a", "command": f"{serve} -- {sane}", "done": "m/a"}]})
+    )
+    monkeypatch.setattr(nodemod, "REPO", tmp_path)
     assert nodemod.main(["chain", "--host", "h", "--no-secrets", "--dry-run", str(template)]) == 0
     out = capsys.readouterr().out
-    assert "honest_agents.node_chain run configs/chains/it14_session.yaml" in out and "secrets over stdin: none" in out
+    assert "honest_agents.node_chain run configs/chains/ok.json" in out and "secrets over stdin: none" in out
     assert (
         "rm -f outputs/chain/it14/ALL_DONE &&" in out
     )  # a stale ALL_DONE must not trigger the watcher's pull-and-stop
+
+
+def test_chain_command_refuses_a_merged_model_with_no_sanity_run_even_on_dry_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DEF-46: the iteration-14 session chain evaluates five merged models with no sanity run; it is refused before
+    anything is sent, `--dry-run` included."""
+    template = nodemod.REPO / "configs" / "chains" / "it14_session.yaml"
+    assert nodemod.main(["chain", "--host", "h", "--no-secrets", "--dry-run", str(template)]) == 2
+    captured = capsys.readouterr()
+    assert "the sanity-run rule refuses" in captured.err and "sft_v2_e1_merged is evaluated with no" in captured.err
+    assert "ssh" not in captured.out and "remote script" not in captured.out
