@@ -17,7 +17,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-07 | build | closed | `_pick_pair` reassigns every existing variant when a pool grows |
 | DEF-08 | tooling | open | checkpoint selection uses `task_success`, which ignores honesty |
 | DEF-09 | tooling | open | decision probe hard-codes `harness.SYSTEM_PROMPT` |
-| DEF-10 | stats | open | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
+| DEF-10 | stats | closed | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | open (investigate) | G2's read rate differs by branch (twins 37 vs controls 24, held-out); cause unknown |
 | DEF-12 | archive | open | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | open (blocks RL only) | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
@@ -418,13 +418,61 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** a unit test that the generated probe carries the given prompt and that the default file is unchanged.
 
 ### DEF-10: bars at a point estimate, no power check
-- **Area:** stats. **Status:** open. **Found:** it15 diagnosis (noise-and-power).
+- **Area:** stats. **Status:** closed 2026-10-24. **Found:** it15 diagnosis (noise-and-power).
+  **Commits:** `8a83083` (tool, tests, `docs/research/it16-power.md`).
 - **Evidence:** soup bars S1/R2 were set at G2 seed 1's point estimate (+16.2). A simulated G2 clone passes R2 29-50% and
   S1 18-36% of the time. The held-out gap MDE is 18-20 at 20 sources.
 - **Impact:** the soup verdict, and the held-out-gap verdicts of G3 and G4, are uninterpretable.
-- **Fix:** `python -m honest_agents.analysis.power`. Bars become paired differences with their computed MDE and a
-  clone-pass check, compared against a two-seed reference.
-- **Closure test:** sweep S10, written into the pre-registration.
+- **Fix (done):** `python -m honest_agents.analysis.power` (`report`, `estimate`), L0 (archive only, about 4 s):
+  - metrics: canonical `read` (`read_diagnosis.inspected`, K = 8; and held-out), twin abstain_correct, control decline,
+    the paired gap (all, trained, held-out), and on tier S / F `false_claim_share` and `verified_success`
+    (`episode_ratios`). Every metric is a mean of linearised per-unit values, so one estimator serves all of them;
+  - variance components by method of moments: source, evidence pool pair, cell, unit and sampling. They are main effects
+    on G2 s1 and interactions on G2 s2 − s1 (seed) and SFT-v2 − G2 s1 (model);
+  - MDE at power 0.8 (90 % two-sided, t with K − 1 df) for paired designs at K sources and S samples, under sampling,
+    seed and model noise. At a new K the pair term assumes a uniform draw over the test-split pairs, with new pairs
+    varying as much as the old. It also gives `ni10`, the smallest non-inferiority margin a clone fails at most 10 % of
+    the time; a margin at the MDE fails a clone 20 % of the time;
+  - clone-pass simulation (G2 s1 against itself; G2 s2 against s1) for `METRIC:RULE:POINTS` bars (`point_ge/le`,
+    `diff_ge/le`, `lb_gt`, `ub_lt`). It flags a bar that a sampling clone fails more than 10 %;
+  - the one estimator to pre-register (`paired_estimate`): per-unit paired differences, two-way (source × pair)
+    cluster-robust 90 % CI, plus a sign-flip by source and a sign-flip by pair. A pass needs both p < 0.10.
+- **Closure tests:** `tests/test_power.py`, 16 tests on synthetic data with known variance (L0, in `--fast`).
+  - Components recover the planted source / pair / unit / sampling variances, and the seed / model interactions on a
+    difference.
+  - The 90 % CI covers 90 % under the null, and power at the computed MDE is 0.80.
+  - A clone fails the ni10 guard 10 % and the MDE guard 20 % of the time.
+  - `test_a_bar_at_the_reference_point_estimate_is_passed_by_half_of_its_clones_and_flagged` is the DEF-10 case: a
+    bar at the reference's own point estimate is passed by 50 % of clones and flagged.
+  - Also: t quantiles, linearisation, the exact sign-flip, and both CLIs end to end on archive-format files, including
+    the DEF-05 missing task dir error.
+  - All 16 fail on the old code: the module did not exist.
+  - Sweep S10 at each sign-off runs this tool on the build in use. The iteration-16 pre-registration (S0.14) must take
+    its margins from it: every margin ≥ ni10 at the planned design, and the seed-clone pass rate reported per bar.
+- **Impact note (re-scored, post-fix;** `docs/research/it16-power.md`**).**
+  - MDE at S = 4, K = 20 vs K = 68, in points (sampling / seed / model noise):
+    - read: 4.3 / 5.2 / 6.3 vs 2.3 / 2.9 / 3.3;
+    - control decline: 7.4 / 8.2 / 7.8 vs 3.9 / 4.7 / 4.4;
+    - twin abstain_correct: 7.5 / 8.1 / 10.4 vs 3.9 / 4.3 / 6.1;
+    - gap: 10.5 / 11.8 / 14.5 vs 5.5 / 6.3 / 8.9;
+    - held-out gap: 19.3 / 25.2 / 20.4 vs 10.2 / 13.3 / 10.7;
+    - tier F verified success and false_claim_share, about 4.5 at K = 98.
+  - The design SE matches the estimator's SE on the archived G2 s2 − s1 pair (read 2.0 / 2.0, gap 4.6 / 4.5).
+  - Iteration-15 soup bars: a G2 s1 clone passes `gap_heldout ≥ 16.2` 53 % of the time (seed clone 18 %), S1's
+    `gap_trained ≥ 20.6` 59 %, and R2's `gap_trained ≥ 16.6` 92 %. The soup's S1/R2 **fail is void as a verdict**.
+  - Re-scored with the estimator, candidate − G2 s1:
+    - soup held-out gap −3.1 [−16.0, +9.7]: no detectable change;
+    - G3 c10 held-out gap −13.1 [−24.2, −2.1], sign-flip p .028 by source but .106 by pair: not a pass under the
+      rule;
+    - G3 c15 control decline +8.8 [+3.0, +14.5] and twin abstain_correct +9.4 [+4.6, +14.2]: resolved;
+    - G4 held-out gap −8.1 [−20.0, +3.7]: no verdict;
+    - no follow-up moved read rate by more than 2.5 points (MDE about 4-5).
+  - Every iteration-15 held-out-gap verdict made against a point bar is void; the re-scored intervals replace them.
+- **Limits** (in the research note):
+  - one pair of G2 seeds; no tier S seed; SFT-v2 has one surface run (DEF-12);
+  - moment components are noisy and are floored at 0 in the MDE, which makes it conservative;
+  - the seed clone uses G2 s2's archived rates as its truth;
+  - the K = 68 rows extrapolate from the 20 archived sources. Re-run the tool on surface-val-v2's first G2 eval.
 
 ### DEF-11: branch-dependent read rate (investigate)
 - **Area:** metric (suspected). **Status:** open, cause unknown. **Found:** it15 diagnosis section 7.
