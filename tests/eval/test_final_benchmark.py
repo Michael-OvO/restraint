@@ -92,6 +92,7 @@ def fake_sources(monkeypatch):
     def definitions(archive):
         return {
             n: {
+                "role": "headline",
                 "status": "frozen",
                 "sources": [{"kind": "github", "commit": "c0"}],
                 "metrics": [fb._metric("s", "m", "", "up")],
@@ -205,6 +206,35 @@ def test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged(fake_
     assert fb.freeze(tmp_path, out=out, items_dir=items)["refrozen"] == [log]
 
 
+@pytest.mark.parametrize("field", ["role", "sources", "items"])
+def test_every_compared_field_is_logged_in_full_on_a_refreeze(fake_sources, tmp_path, monkeypatch, field):
+    """DEF-NEW-bench-8: a benchmark's role (headline or not) was not frozen at all, the sources were logged as hashes
+    and the items record as n and sha256, though the refusal also compared its file, so a moved items file logged
+    identical before and after."""
+    out, items = tmp_path / "manifest.json", tmp_path / "items"
+    m = fb.freeze(tmp_path, out=out, items_dir=items)
+    before = m["benchmarks"]["bench_a"][field]
+    defs = fb.definitions
+    if field == "role":
+        monkeypatch.setattr(fb, "definitions", lambda a: {n: {**b, "role": "secondary"} for n, b in defs(a).items()})
+    elif field == "sources":
+        new = [{"kind": "github", "commit": "c1"}]
+        monkeypatch.setattr(fb, "definitions", lambda a: {n: {**b, "sources": new} for n, b in defs(a).items()})
+    else:
+        items = tmp_path / "moved"  # same ids, another items file
+    if field != "items":
+        assert fb.check(m, archive=tmp_path)[0] == (
+            f"bench_a: {field} changed from the definitions (freeze --refreeze to accept and log)"
+        )
+    with pytest.raises(ValueError, match=f"bench_a: {field} changed"):
+        fb.freeze(tmp_path, out=out, items_dir=items)
+
+    again = fb.freeze(tmp_path, out=out, items_dir=items, refreeze=True)
+    (log,) = again["refrozen"]
+    assert log["changed"]["bench_a"][field] == {"before": before, "after": again["benchmarks"]["bench_a"][field]}
+    assert before != again["benchmarks"]["bench_a"][field]
+
+
 def test_check_with_the_archive_flags_metrics_the_manifest_does_not_define(fake_sources, tmp_path):
     out, items = tmp_path / "manifest.json", tmp_path / "items"
     m = fb.freeze(tmp_path, out=out, items_dir=items)
@@ -213,7 +243,7 @@ def test_check_with_the_archive_flags_metrics_the_manifest_does_not_define(fake_
     m["benchmarks"]["bench_a"]["metrics"][0]["direction"] = "down"
     assert fb.check(m) == bench_b  # the manifest alone is consistent
     assert fb.check(m, archive=tmp_path) == [
-        "bench_a: metrics differ from the definitions (freeze --refreeze to accept and log)",
+        "bench_a: metrics changed from the definitions (freeze --refreeze to accept and log)",
         *bench_b,
     ]
     del m["refrozen"]

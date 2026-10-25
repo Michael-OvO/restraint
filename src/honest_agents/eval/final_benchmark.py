@@ -8,8 +8,8 @@ cluster-bootstrap CIs (`transfer.cluster_bootstrap_delta`). Results stay `null` 
 Commands (all offline; `--archive` = the honest-agents archive root):
 
 * `freeze --archive A`: write the items files and the manifest from the downloaded sources. Run once; a later run that
-  would change an item set, a source hash or a metric (any field), or add or remove a benchmark, is refused unless
-  `--refreeze` is given, and an accepted change is logged (before / after) in the manifest's `refrozen` list.
+  would change a benchmark's role, item set, sources or metrics (any field), or add or remove a benchmark, is refused
+  unless `--refreeze` is given, and an accepted change is logged (before / after) in the manifest's `refrozen` list.
 * `check [--archive A]`: the manifest is consistent (arms, metrics, result slots, items files match their hashes); with
   `--archive`, every pinned file's sha256 matches and the item ids re-derive from the sources.
 * `never-trained [--archive A] [--record]`: **fails** (exit 1) if any benchmark item id, benchmark source label or
@@ -369,14 +369,13 @@ def _empty_results(metrics: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], d
     return {a: {k: None for k in keys} for a in ARMS}, {a: {k: None for k in keys} for a in ARMS if a != "base"}
 
 
-FROZEN_FIELDS = ("items", "sources", "metrics")  # the pre-registration: changing any of them needs --refreeze
+# the pre-registration: changing any of them needs --refreeze (role says which benchmarks are headlines)
+FROZEN_FIELDS = ("role", "items", "sources", "metrics")
 
 
-def _frozen_change(field: str, before: Any, after: Any) -> dict[str, Any]:
-    """Before / after of one frozen field: the item set's size and hash, the sources and metrics in full (so a moved
-    headline or a renamed metric shows in the log)."""
-    if field == "items":
-        return {k: {x: (v or {}).get(x) for x in ("n", "sha256")} for k, v in (("before", before), ("after", after))}
+def _frozen_change(before: Any, after: Any) -> dict[str, Any]:
+    """Before / after of one frozen field, each in full (the items record: file, n, sha256), so the log shows every
+    value the refusal compared."""
     return {"before": before, "after": after}
 
 
@@ -384,8 +383,8 @@ def freeze(
     archive: Path, *, out: Path = MANIFEST, items_dir: Path = ITEMS_DIR, refreeze: bool = False
 ) -> dict[str, Any]:
     """Derive every item set and compare with the existing manifest before anything is written, so a refused freeze
-    leaves the items files and the manifest as they were. A benchmark whose items, sources or metrics (side, name,
-    direction, headline) changed, or that was added or removed since the freeze, is refused without `refreeze`; with it,
+    leaves the items files and the manifest as they were. A benchmark whose role, items, sources or metrics (side,
+    name, direction, headline) changed, or that was added or removed since the freeze, is refused without `refreeze`; with it,
     that benchmark's results are voided (a removed benchmark's are kept in the log) and the change is appended to the
     manifest's `refrozen` log (date, the earlier freeze date, before / after per field). The `frozen` date stays the
     first freeze's; unchanged benchmarks keep their results."""
@@ -412,14 +411,14 @@ def freeze(
             if not refreeze:
                 raise ValueError(f"{name}: benchmark added since the freeze (pass --refreeze to accept)")
             changes[name] = {"benchmark": {"before": None, "after": "added"}}
-            changes[name].update({f: _frozen_change(f, None, b[f]) for f in FROZEN_FIELDS})
+            changes[name].update({f: _frozen_change(None, b[f]) for f in FROZEN_FIELDS})
             continue
         prev = old["benchmarks"][name]
         changed = [f for f in FROZEN_FIELDS if prev.get(f) != b[f]]
         if changed and not refreeze:
             raise ValueError(f"{name}: {', '.join(changed)} changed since the freeze (pass --refreeze to accept)")
         if changed:
-            changes[name] = {f: _frozen_change(f, prev.get(f), b[f]) for f in changed}
+            changes[name] = {f: _frozen_change(prev.get(f), b[f]) for f in changed}
         else:  # same items, sources and metrics: the recorded results stand
             b["results"], b["deltas_vs_base"] = prev["results"], prev["deltas_vs_base"]
     for name, prev in (old or {}).get("benchmarks", {}).items():
@@ -428,7 +427,7 @@ def freeze(
         if not refreeze:
             raise ValueError(f"{name}: benchmark removed since the freeze (pass --refreeze to accept)")
         changes[name] = {"benchmark": {"before": "present", "after": "removed"}}
-        changes[name].update({f: _frozen_change(f, prev.get(f), None) for f in FROZEN_FIELDS})
+        changes[name].update({f: _frozen_change(prev.get(f), None) for f in FROZEN_FIELDS})
         changes[name]["dropped"] = {k: prev.get(k) for k in ("results", "deltas_vs_base")}
     refrozen = list((old or {}).get("refrozen", []))
     if changes:
@@ -477,8 +476,9 @@ def check(manifest: dict[str, Any], *, archive: Path | None = None, root: Path =
             if m.get("direction") not in DIRECTIONS:
                 bad.append(f"{name}: metric {m.get('metric')} has direction {m.get('direction')!r}")
             keys.append(f"{m['side']}.{m['metric']}")
-        if name in defs and b.get("metrics") != defs[name]["metrics"]:
-            bad.append(f"{name}: metrics differ from the definitions (freeze --refreeze to accept and log)")
+        for f in ("role", "sources", "metrics"):  # items: re-derived from the sources below
+            if name in defs and b.get(f) != defs[name][f]:
+                bad.append(f"{name}: {f} changed from the definitions (freeze --refreeze to accept and log)")
         if set(b.get("results", {})) != set(ARMS) or any(set(v) != set(keys) for v in b["results"].values()):
             bad.append(f"{name}: results must hold every arm x metric")
         if set(b.get("deltas_vs_base", {})) != set(ARMS) - {"base"}:

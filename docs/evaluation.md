@@ -758,11 +758,12 @@ pooled. **Cost: their judge is GPT-4o and o3-mini** (one call per answer); nothi
 (base, G2, final), every benchmark's pinned sources with sha256s, its item ids (`data/benchmarks/items/`), the metrics and
 their expected direction, and empty result and delta slots (filled by `... compute` from the scorers' units: paired
 cluster-bootstrap 95 % CIs; `... units --bench terminal_bench_2|abstentionbench` writes the units file for a TB2 job or an
-AbstentionBench responses file, the other adapters' scorers write their own). A later `freeze` whose items, sources or metrics
-(any field: side, name, direction, headline) differ, or that adds or removes a benchmark, is refused before anything is
-written, unless `--refreeze`, which voids that benchmark's results and logs the change in the manifest's `refrozen` list
-(items n and sha256, sources and metrics in full, before / after; a removed benchmark's results go into the log);
-`check --archive` also flags manifest metrics, or a benchmark set, that differ from the code's definitions. Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
+AbstentionBench responses file, the other adapters' scorers write their own). A later `freeze` whose role (headline or
+not), items record, sources or metrics (any field: side, name, direction, headline) differ, or that adds or removes a
+benchmark, is refused before anything is written, unless `--refreeze`, which voids that benchmark's results and logs the
+change in the manifest's `refrozen` list (every compared field in full, before / after; a removed benchmark's results go
+into the log); `check --archive` also flags a manifest role, sources, metrics or benchmark set that differ from the
+code's definitions. Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
 89 tasks at `69671fb`). `... never-trained [--archive A]` fails if any benchmark item id, source label, canary or (with the
 archive) instruction text appears in a training build (the archived builds are the files `ARCHIVE_TRAINING_GLOBS` lists:
 SFT / DPO builds, dataset splits and train_rl copies, trajectory banks, the it12 pools, teacher and training-pool own
