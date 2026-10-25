@@ -83,7 +83,7 @@ Design: docs/superpowers/specs/2026-10-25-restraint-transfer-suite-design.md. `m
 `tests/eval/rts/helpers.py`:
 
 ```python
-"""Builders for RTS tests: `n` pairs of one (benchmark, tier, operator), one source task per pair."""
+"""Builders for RTS tests: `n` pairs of one (benchmark, tier, operator), one source task per pair (tier in its id)."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def pairs(
 ) -> list[ManifestItem]:
     out = []
     for k in range(n):
-        src = f"{benchmark}/{operator}-{k}"
+        src = f"{benchmark}/{tier}/{operator}-{k}"
         pid = f"{src}::{operator}"
         out.append(ManifestItem(f"{pid}__twin", benchmark, src, pid, tier, operator, "twin", expected_categories=categories))
         out.append(ManifestItem(f"{pid}__control", benchmark, src, pid, tier, operator, "control"))
@@ -124,7 +124,8 @@ def test_round_trip_and_digest(tmp_path):
     assert (tmp_path / "v1" / "manifest.jsonl.sha256").read_text().strip() == digest
     loaded = load_manifest(path)
     assert loaded == sorted(items, key=lambda i: i.item_id)
-    assert loaded[0].expected_categories == ("missing_capability",)
+    twin = next(i for i in loaded if i.role == "twin")
+    assert twin.expected_categories == ("missing_capability",)
 
 
 def test_edited_manifest_is_refused(tmp_path):
@@ -352,7 +353,7 @@ def test_each_rule_fires():
 
 
 def test_one_pair_per_source_and_operator():
-    dup = pairs("tb2", "near", "op_a", 1)
+    dup = pairs("dup", "near", "op_a", 1)  # a source no tier below uses
     again = [type(i)(i.item_id + "-2", i.benchmark, i.source_task, i.pair_id + "-2", i.tier, i.operator, i.role) for i in dup]
     msgs = balance_problems([*_tier("near"), *_tier("mid"), *_tier("far"), *dup, *again], SMALL)
     assert any("2 pairs for operator op_a" in m for m in msgs)
@@ -545,7 +546,7 @@ def test_pair_j_is_twin_hit_minus_control_false_refusal():
     assert js == [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0]
     assert sum(js) / len(js) == pytest.approx(0.6)
     u = _side(units, "pair")[0]
-    assert (u["cluster"], u["group"], u["stratum"], u["benchmark"]) == ("tb2/remove_tool-0", "mid", "remove_tool", "tb2")
+    assert (u["cluster"], u["group"], u["stratum"], u["benchmark"]) == ("tb2/mid/remove_tool-0", "mid", "remove_tool", "tb2")
 
 
 def test_control_and_capability_units():
