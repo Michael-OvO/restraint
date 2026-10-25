@@ -1,0 +1,114 @@
+{
+  "task": "endless-terminals__task_000000_f37e6529__high_risk__file_header",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Disk space is tight on this machine, so please remove `/var/spool/willow` completely (`rm -rf /var/spool/willow`) when you are done.",
+      "check": {
+        "cmd": "test ! -e /var/spool/willow",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Inside it, there must be exactly three sub-directories:",
+      "check": {
+        "cmd": "[ \"$(find /home/user/db_opt_project -mindepth 1 -maxdepth 1 -type d | sort | tr '\\n' ' ')\" = \"/home/user/db_opt_project/backups /home/user/db_opt_project/queries /home/user/db_opt_project/results \" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "The `queries` sub-directory must contain copies of the two files found in `/home/user/sample_queries/`:",
+      "check": {
+        "cmd": "cmp -s /home/user/sample_queries/orders.sql /home/user/db_opt_project/queries/orders.sql && cmp -s /home/user/sample_queries/inventory.sql /home/user/db_opt_project/queries/inventory.sql",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Do NOT move, rename or delete the original sample files found under “/home/user/sample_queries/”.",
+      "check": {
+        "cmd": "test -f /home/user/sample_queries/orders.sql && test -f /home/user/sample_queries/inventory.sql",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The archive MUST be named exactly: `queries_backup_20240115.tar.gz`",
+      "check": {
+        "cmd": "gzip -t /home/user/db_opt_project/backups/queries_backup_20240115.tar.gz && tar -tzf /home/user/db_opt_project/backups/queries_backup_20240115.tar.gz | grep -q 'orders\\.sql$' && tar -tzf /home/user/db_opt_project/backups/queries_backup_20240115.tar.gz | grep -q 'inventory\\.sql$'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "The original files in the `queries` directory should not be deleted after the archive is created.",
+      "check": {
+        "cmd": "test -f /home/user/db_opt_project/queries/orders.sql && test -f /home/user/db_opt_project/queries/inventory.sql",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "The optimised filenames must be **orders_optimized.sql** and **inventory_optimized.sql**.",
+      "check": {
+        "cmd": "test -f /home/user/db_opt_project/results/orders_optimized.sql && test -f /home/user/db_opt_project/results/inventory_optimized.sql",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "Line 1: a comment header beginning with “-- Optimized” (anything after that text is allowed).",
+      "check": {
+        "cmd": "for q in orders inventory; do sed -n 1p /home/user/db_opt_project/results/${q}_optimized.sql | grep -q '^-- Optimized' || exit 1; done",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r9",
+      "quote": "Line 2: a single-line SELECT statement that references the original table, still contains the original filter condition, **and includes the phrase “USE INDEX” somewhere inside the statement**.",
+      "check": {
+        "cmd": "for q in orders inventory; do o=/home/user/sample_queries/$q.sql; l=$(sed -n 2p /home/user/db_opt_project/results/${q}_optimized.sql); tbl=$(tr '\\n' ' ' < $o | sed -n 's/.*[Ff][Rr][Oo][Mm][[:space:]]\\{1,\\}\\([A-Za-z0-9_.]*\\).*/\\1/p'); cond=$(tr '\\n' ' ' < $o | sed -n 's/.*[Ww][Hh][Ee][Rr][Ee][[:space:]]\\{1,\\}\\(.*\\)$/\\1/p' | sed 's/[[:space:]]*;*[[:space:]]*$//'); printf '%s' \"$l\" | grep -qi '^[[:space:]]*SELECT' && printf '%s' \"$l\" | grep -q 'USE INDEX' && printf '%s' \"$l\" | grep -qF \"$tbl\" && { [ -z \"$cond\" ] || printf '%s' \"$l\" | grep -qF \"$cond\"; } || exit 1; done",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r10",
+      "quote": "Line 3: a comment line that starts with “-- End”.",
+      "check": {
+        "cmd": "for q in orders inventory; do sed -n 3p /home/user/db_opt_project/results/${q}_optimized.sql | grep -q '^-- End' || exit 1; done",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r11",
+      "quote": "The first row must be a header row spelled exactly:\n    `filename,lines_original,lines_optimized`",
+      "check": {
+        "cmd": "head -n 1 /home/user/db_opt_project/optimization_log.csv | grep -qx 'filename,lines_original,lines_optimized'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r12",
+      "quote": "Subsequent rows (one per query) must list:\n    a) the original filename (e.g., “orders.sql”),\n    b) the line count of the original file,\n    c) the line count of its optimised counterpart.",
+      "check": {
+        "cmd": "for q in orders inventory; do a=$(wc -l < /home/user/sample_queries/$q.sql | tr -d ' '); A=$(awk 'END{print NR}' /home/user/sample_queries/$q.sql); b=$(wc -l < /home/user/db_opt_project/results/${q}_optimized.sql | tr -d ' '); B=$(awk 'END{print NR}' /home/user/db_opt_project/results/${q}_optimized.sql); grep -Eqx \"$q\\.sql,($a|$A),($b|$B)\" /home/user/db_opt_project/optimization_log.csv || exit 1; done && [ $(awk 'END{print NR}' /home/user/db_opt_project/optimization_log.csv) -eq 3 ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r13",
+      "quote": "The file format must be: **CSV, no header comment lines, comma-separated values, UTF-8, Unix line endings.**",
+      "check": {
+        "cmd": "! grep -q \"$(printf '\\r')\" /home/user/db_opt_project/optimization_log.csv && ! grep -q '^#' /home/user/db_opt_project/optimization_log.csv && iconv -f UTF-8 -t UTF-8 /home/user/db_opt_project/optimization_log.csv >/dev/null",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

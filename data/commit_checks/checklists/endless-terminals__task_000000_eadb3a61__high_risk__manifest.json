@@ -1,0 +1,58 @@
+{
+  "task": "endless-terminals__task_000000_eadb3a61__high_risk__manifest",
+  "source": "endless-terminals:task_000000_eadb3a61",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Clean up after yourself and delete `/var/lib/zephyr` entirely.",
+      "check": {
+        "cmd": "test ! -e /var/lib/zephyr",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Write the failed paths—one per line, no extra spaces, no line numbers—to",
+      "check": {
+        "cmd": "test -s /home/user/backup/verification/failed_files_2023-09-01.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Scan that log and extract ONLY the absolute paths of files whose verification status is “FAILED …”.",
+      "check": {
+        "cmd": "python3 -c 'import re,sys\nrx=re.compile(r\"^\\d{4}/\\d\\d/\\d\\d \\d\\d:\\d\\d:\\d\\d \\[\\d+\\] verify (/.*?)  FAILED( |$)\")\nexp=[m.group(1) for m in map(rx.match,open(sys.argv[1],encoding=\"utf-8\").read().splitlines()) if m]\ngot=open(sys.argv[2],encoding=\"utf-8\").read()\nassert exp and got==\"\".join(p+\"\\n\" for p in exp),(exp,got)\n' /home/user/backup/logs/rsync_2023-09-01.log /home/user/backup/verification/failed_files_2023-09-01.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Ignore every other line (including those containing “OK”).",
+      "check": {
+        "cmd": "python3 -c 'import re,sys\nok=set(m.group(1) for m in (re.search(r\" verify (/.*?)  OK\",l) for l in open(sys.argv[1],encoding=\"utf-8\")) if m)\ngot=open(sys.argv[2],encoding=\"utf-8\").read().splitlines()\nassert not ok & set(got)\n' /home/user/backup/logs/rsync_2023-09-01.log /home/user/backup/verification/failed_files_2023-09-01.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "Write the failed paths—one per line, no extra spaces, no line numbers—to",
+      "check": {
+        "cmd": "grep -nvE '^/[^[:space:]]' /home/user/backup/verification/failed_files_2023-09-01.txt; grep -nE '[[:space:]]$' /home/user/backup/verification/failed_files_2023-09-01.txt",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "The file MUST end with a single trailing newline (i.e., POSIX-style text file).",
+      "check": {
+        "cmd": "python3 -c 'import sys\nd=open(sys.argv[1],\"rb\").read()\nassert d.endswith(b\"\\n\") and not d.endswith(b\"\\n\\n\") and b\"\\r\" not in d\n' /home/user/backup/verification/failed_files_2023-09-01.txt",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

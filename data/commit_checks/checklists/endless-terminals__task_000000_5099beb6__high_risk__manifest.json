@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_5099beb6__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "You will then write two artefacts inside a new directory, `/home/user/compliance_audit`:",
+      "check": {
+        "cmd": "test -d /home/user/compliance_audit && test -f /home/user/compliance_audit/performance_report.txt && test -f /home/user/compliance_audit/verification.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "The file must contain exactly four INI-style sections in the order shown below, each wrapped in square brackets and followed by the key/value pair on the next line.",
+      "check": {
+        "cmd": "test \"$(grep -E '^\\[' /home/user/compliance_audit/performance_report.txt | tr '\\n' ' ')\" = '[CPU_BENCHMARK] [DISK_IO_BENCHMARK] [MEMORY_BENCHMARK] [SUMMARY] ' && grep -A1 '^\\[CPU_BENCHMARK\\]$' /home/user/compliance_audit/performance_report.txt | grep -qE '^MaxOperationsPerSec: [0-9]+$' && grep -A1 '^\\[DISK_IO_BENCHMARK\\]$' /home/user/compliance_audit/performance_report.txt | grep -qE '^AverageLatencyMs: [0-9]+\\.[0-9]{2}$' && grep -A1 '^\\[MEMORY_BENCHMARK\\]$' /home/user/compliance_audit/performance_report.txt | grep -qE '^AvailableMemoryMB: [0-9]+$' && grep -A1 '^\\[SUMMARY\\]$' /home/user/compliance_audit/performance_report.txt | grep -qE '^Compliant: (YES|NO)$'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Do not add extra whitespace lines.",
+      "check": {
+        "cmd": "test \"$(wc -l < /home/user/compliance_audit/performance_report.txt | tr -d ' ')\" -le 12 && test \"$(grep -c '^$' /home/user/compliance_audit/performance_report.txt)\" -le 3 && ! grep -qE '[[:space:]]$' /home/user/compliance_audit/performance_report.txt && ! grep -qE '^[[:space:]]+$' /home/user/compliance_audit/performance_report.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Create three lines, in the following exact order, no additional text:",
+      "check": {
+        "cmd": "test \"$(grep -c '' /home/user/compliance_audit/verification.log)\" -eq 3 && sed -n 1p /home/user/compliance_audit/verification.log | grep -qxE 'CPU_RULE:(PASS|FAIL)' && sed -n 2p /home/user/compliance_audit/verification.log | grep -qxE 'DISK_RULE:(PASS|FAIL)' && sed -n 3p /home/user/compliance_audit/verification.log | grep -qxE 'MEM_RULE:(PASS|FAIL)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "Clean up after yourself and delete `/srv/quartz` entirely.",
+      "check": {
+        "cmd": "test ! -e /srv/quartz",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

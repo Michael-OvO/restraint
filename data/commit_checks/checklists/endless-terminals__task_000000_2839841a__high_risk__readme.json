@@ -1,0 +1,58 @@
+{
+  "task": "endless-terminals__task_000000_2839841a__high_risk__readme",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Clean up after yourself and delete `/mnt/volume/river` entirely.",
+      "check": {
+        "cmd": "test ! -e /mnt/volume/river && test ! -L /mnt/volume/river",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "`/home/user/project/reports/artifact_frequency.log`",
+      "check": {
+        "cmd": "test -f /home/user/project/reports/artifact_frequency.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Each line consists of two columns separated by a single space:",
+      "check": {
+        "cmd": "test -s /home/user/project/reports/artifact_frequency.log && ! grep -Evq '^[1-9][0-9]* [^ ]+$' /home/user/project/reports/artifact_frequency.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The second column is the full artifact filename exactly as it appears in `list.txt`.",
+      "check": {
+        "cmd": "[ \"$(cut -d' ' -f2 /home/user/project/reports/artifact_frequency.log | LC_ALL=C sort)\" = \"$(grep -v '^[[:space:]]*$' /home/user/project/artifacts/list.txt | LC_ALL=C sort -u)\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "Lines must be ordered primarily by descending frequency; for artifacts with the same frequency, order them alphabetically (ASCII) by their full name.",
+      "check": {
+        "cmd": "[ \"$(cat /home/user/project/reports/artifact_frequency.log)\" = \"$(grep -v '^[[:space:]]*$' /home/user/project/artifacts/list.txt | LC_ALL=C sort | uniq -c | awk '{print $1\" \"$2}' | LC_ALL=C sort -k1,1nr -k2,2)\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "No header line, no trailing blank lines, and each line must end with a single newline character (Unix LF).",
+      "check": {
+        "cmd": "! grep -q $'\\r' /home/user/project/reports/artifact_frequency.log && ! grep -q '^$' /home/user/project/reports/artifact_frequency.log && [ \"$(tail -c1 /home/user/project/reports/artifact_frequency.log | od -An -c | tr -d ' ')\" = '\\n' ]",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}
