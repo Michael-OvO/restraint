@@ -961,6 +961,62 @@ def test_stale_result_is_revalidated_and_not_trusted(factory, tmp_path):
     assert len(factory.created) == n + 2  # content changed -> validated again (null check + one run)
 
 
+def test_resume_reruns_results_graded_before_the_umask_pin(factory, tmp_path):
+    """DEF-43: the select quarantine came from results graded under the local daemon's umask 0000 (no `sandbox_umask`
+    record); a resumed run that trusts them rewrites the same quarantine. They, and any recorded under another umask,
+    are validated again; a result recorded under 0022 is resumed."""
+    d = task(tmp_path, "p8__feasible", 'feasible = true\npair_id = "p8"', solve=FAIL)
+    out = tmp_path / "v.jsonl"
+    res = asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+    assert not res[d.name].ok and res[d.name].debug["sandbox_umask"] == "0022"
+    n = len(factory.created)
+    asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+    assert len(factory.created) == n  # recorded under the pin: resumed
+    for stale in ("absent", "0000"):
+        row = json.loads(out.read_text().splitlines()[-1])
+        if stale == "absent":
+            del row["debug"]["sandbox_umask"]
+        else:
+            row["debug"]["sandbox_umask"] = stale
+        out.write_text(json.dumps(row) + "\n")
+        n = len(factory.created)
+        res = asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+        assert len(factory.created) > n, stale  # validated again
+        assert res[d.name].debug["sandbox_umask"] == "0022"
+
+
+def test_a_result_that_never_booted_records_no_umask_and_is_resumed(factory, tmp_path):
+    d = task(tmp_path, "p7__feasible", 'feasible = true\npair_id = "p7"', solve=None)
+    out = tmp_path / "v.jsonl"
+    res = asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+    assert res[d.name].reason == "no oracle solution" and res[d.name].debug["sandbox_umask"] is None
+    asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+    assert len(out.read_text().splitlines()) == 1  # resumed, not appended again
+
+
+class _SilentUmaskProbeEnv(OracleHarborEnv):
+    async def _grade_episode(self):
+        self._sandbox_umask = None  # the boot preflight's `umask` printed nothing
+        return await super()._grade_episode()
+
+
+def test_a_booted_result_whose_umask_probe_printed_nothing_is_not_resumed(factory, tmp_path):
+    """DEF-43 review: a booted result with no umask is not 'never booted'; its umask is unknown, so it is re-run."""
+    d = task(tmp_path, "p6__feasible", 'feasible = true\npair_id = "p6"', solve=FAIL)
+    out = tmp_path / "v.jsonl"
+
+    def silent() -> OracleHarborEnv:
+        env = _SilentUmaskProbeEnv()
+        _LIVE.append(env)
+        return env
+
+    res = asyncio.run(validate_many([d], out, env_factory=silent, oracle_timeout_sec=30, oracle_runs=1))
+    assert res[d.name].debug["sandbox_umask"] == validate.UMASK_UNKNOWN
+    n = len(factory.created)
+    res = asyncio.run(validate_many([d], out, env_factory=new_env, oracle_timeout_sec=30, oracle_runs=1))
+    assert len(factory.created) > n and res[d.name].debug["sandbox_umask"] == "0022"
+
+
 def test_unreadable_spec_is_reported_not_raised(tmp_path):
     d = tmp_path / "broken"
     d.mkdir()

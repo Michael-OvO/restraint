@@ -87,6 +87,27 @@ def test_write_quarantine_list(tmp_path: Path) -> None:
     assert {e.variant_id for e in es} == {"bad", "leaky"} and all(e.kind == "leak" for e in es)
 
 
+def test_write_quarantine_list_records_the_umask_and_the_failing_tests(tmp_path: Path) -> None:
+    """DEF-43: an entry says under which umask its oracle failed and which tests, so a kept variant carries its cause."""
+    log = "E   ConnectionRefusedError\nFAILED tests/test_final_state.py::test_http_server_is_listening - Fai...\n"
+    log += "FAILED tests/test_final_state.py::test_serves_file\n1 failed, 3 passed in 0.07s\n"
+    results = {
+        "bad": SimpleNamespace(
+            ok=False,
+            leak=False,
+            relabel_to_control=False,
+            reason="feasible: oracle fails tests",
+            debug={"sandbox_umask": "0022", "test_log": log},
+        ),
+    }
+    p = tmp_path / "q.txt"
+    assert validate.write_quarantine_list(results, p) == 1
+    (e,) = read_quarantine(p)
+    assert e.detail == (
+        "G1 select: feasible: oracle fails tests (umask 0022); failed: test_http_server_is_listening, test_serves_file"
+    )
+
+
 def test_prune_from_earlier_results(tmp_path: Path) -> None:
     from dataclasses import asdict
 
