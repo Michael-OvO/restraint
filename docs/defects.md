@@ -50,10 +50,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
-| DEF-NEW-probe-gate-1 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
-| DEF-NEW-probe-gate-2 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
-| DEF-NEW-gate-cache-1 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
-| DEF-NEW-gate-s3s11-1 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
+| DEF-43 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
+| DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
+| DEF-45 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
+| DEF-46 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 
 ---
 
@@ -1193,7 +1193,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
       were re-run post-fix and 42 carried over unrun.
     - DEF-01's replay regrade: the 24 at-risk episodes re-replayed under `aa805be`'s pin: 24/24 unchanged (carried over,
       not re-run at `eb0a058`).
-    - The select G1 quarantine: 24 of its 32 variants pass under the pin (`aa805be`, carried over); DEF-NEW-probe-gate-1.
+    - The select G1 quarantine: 24 of its 32 variants pass under the pin (`aa805be`, carried over); DEF-43.
   - Local runs between `aa805be` and `eb0a058` differ only when Harbor's `compose cp` failed and the tar fallback ran;
     no gate log shows that, so none is re-measured.
   - DEF-05's local G1 prune (17a590fc, DEF-19's trigger) and DEF-25's 4 failing corrupt_input controls: re-gated
@@ -1202,7 +1202,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - The change edits `harness.py` and `env.py`, so every replay and gate cache key over them changes (DEF-15/DEF-24):
     cached verdicts re-run once.
 
-### DEF-NEW-probe-gate-2: a Harbor separate-verifier container is not umask-pinned
+### DEF-44: a Harbor separate-verifier container is not umask-pinned
 - **Area:** grader (harbor-trial evals, local Docker). **Status:** closed 2026-10-25. **Found:** 2026-10-25, while
   repairing DEF-16. **Commits:** `e55079d` (fix and tests, shared with DEF-16).
 - **Evidence:** DEF-16's pin reaches a harbor trial through `HonestPolicyAgent.setup`, which gets only the agent
@@ -1297,7 +1297,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   also run `pool_build check-decision`. A later `decision_surfaces build` that adds sources must be followed by
   `record-decision`, as DEF-07's `record` after an eval build.
 
-### DEF-NEW-probe-gate-1: the select quarantine holds variants that only failed under the local umask
+### DEF-43: the select quarantine holds variants that only failed under the local umask
 - **Area:** task data / eval build. **Status:** open. **Found:** 2026-10-24, while closing DEF-16.
 - **Evidence:** `data/select_quarantine.txt` (32 variants, all "G1 select: feasible: oracle fails tests", written
   2026-10-14 by a local `validate` run). Every select and surface evaluation in the chains excludes them
@@ -1349,7 +1349,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
     `ci_validation.jsonl`, `ci.log`.
 - **Impact note:** DEF-16's (node results unchanged), plus the two re-gates above: DEF-05's local 17a590fc G1 verdicts
   and DEF-25's 4 control verdicts were umask artifacts and now pass, re-scored post-fix. No other local gate is known to
-  have been handed to this entry; DEF-NEW-probe-gate-1 (the select quarantine) is measured (24/32 pass under the pin)
+  have been handed to this entry; DEF-43 (the select quarantine) is measured (24/32 pass under the pin)
   but its rewrite waits for the owner.
 
 ### DEF-20: iteration-16 guards with no powered metric
@@ -1556,7 +1556,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note:** tooling only; no archived number changes. Every earlier sign-off that ran S3 ran it by hand
   (DEF-11, DEF-29, DEF-38 entries: strict-rule rows or own-branch replays); those results stand as recorded. S11 had
   never been run: running it found that the sanity-run guard did not run for six iteration-15 merged models
-  (DEF-NEW-gate-s3s11-1). The iteration-16 sign-off draft's "S3, S11: not run by the sweep" line can now cite this run.
+  (DEF-46). The iteration-16 sign-off draft's "S3, S11: not run by the sweep" line can now cite this run.
 
 ### DEF-24: the replay cache key misses imported sources and library versions
 - **Area:** tooling. **Status:** closed 2026-10-25 (the found date; the prescribed 2026-10-24 precedes it).
@@ -2433,7 +2433,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 % (and with it `work_vs_quit_gap`); the other pool stats do not
   depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
 
-### DEF-NEW-gate-cache-1: the emitted task.toml depends on which TOML writer is installed
+### DEF-45: the emitted task.toml depends on which TOML writer is installed
 - **Area:** build / tooling. **Status:** open. **Found:** 2026-10-25, DEF-22 fix (S7 failed in a fresh worktree).
 - **Evidence:** `src/honest_agents/tasks/taskfs.py` `dumps_toml` (~L139) uses `tomli_w` if importable, else `tomlkit`,
   else `toml` (0.10, a Harbor dependency). The three write different bytes (`tags = [ "echos",]` with `toml`; one item
@@ -2450,7 +2450,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (proposed):** pin one writer (use `toml`, which Harbor guarantees, or add `tomli-w` as a core dependency and use
   only it, then re-record both manifests), and add a test that `dumps_toml` gives fixed bytes for a fixed table.
 
-### DEF-NEW-gate-s3s11-1: the sanity-run guard did not run for six iteration-15 merged models
+### DEF-46: the sanity-run guard did not run for six iteration-15 merged models
 - **Area:** tooling / infra. **Status:** open. **Found:** 2026-10-25, the first S11 run (DEF-23), by
   `gate.guards.sanity_problems` on `configs/chains/*.yaml`.
 - **Evidence:** the training log's incident table: "every merged model gets a 12-task vLLM sanity run before a full
