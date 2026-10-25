@@ -1,6 +1,25 @@
 {
   "schema": 1,
   "frozen": "2026-10-25",
+  "refrozen": [
+    {
+      "date": "2026-10-25",
+      "previous_frozen": "2026-10-25",
+      "changed": {
+        "abstentionbench": {
+          "metrics": {
+            "before": [
+              "qa.f1:non_inferior"
+            ],
+            "after": [
+              "abstain.abstained:non_inferior",
+              "answer.abstained:report"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "description": "iteration-16 final benchmark: arms base / G2 / final, deltas vs base with cluster-bootstrap 95% CIs; every benchmark is never trained on (`never_trained`)",
   "ci": {
     "method": "paired cluster bootstrap (transfer.cluster_bootstrap_delta)",

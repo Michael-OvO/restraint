@@ -113,7 +113,7 @@ def test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were(fake_
     before = {p.name: p.read_text() for p in (out, items / "bench_a.txt")}
 
     fake_sources["bench_a"] = ["a/1", "a/3"]
-    with pytest.raises(ValueError, match="bench_a: items or sources changed"):
+    with pytest.raises(ValueError, match="bench_a: items changed"):
         fb.freeze(tmp_path, out=out, items_dir=items)
     assert {p.name: p.read_text() for p in (out, items / "bench_a.txt")} == before
 
@@ -122,20 +122,67 @@ def test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were(fake_
     assert json.loads(out.read_text())["benchmarks"]["bench_a"]["results"]["base"]["s.m"] is None  # voided
 
 
-def test_an_unchanged_freeze_keeps_the_results_of_the_metrics_still_defined(fake_sources, tmp_path, monkeypatch):
+def test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date(fake_sources, tmp_path):
     out, items = tmp_path / "manifest.json", tmp_path / "items"
     m = fb.freeze(tmp_path, out=out, items_dir=items)
     m["benchmarks"]["bench_a"]["results"]["G2"]["s.m"] = {"value": 0.5}
+    m["frozen"] = "2026-01-01"
     out.write_text(json.dumps(m))
+    again = fb.freeze(tmp_path, out=out, items_dir=items)
+    assert again["benchmarks"]["bench_a"]["results"]["G2"] == {"s.m": {"value": 0.5}}
+    assert again["frozen"] == "2026-01-01" and again["refrozen"] == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda ms: [{**ms[0], "direction": "down"}], id="direction"),
+        pytest.param(lambda ms: [fb._metric("s", "x", "", "up")], id="renamed"),
+        pytest.param(lambda ms: [*ms, fb._metric("s", "n", "", "up")], id="added"),
+    ],
+)
+def test_a_changed_metric_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_path, monkeypatch, change):
+    """DEF-NEW-bench-6: freeze without --refreeze accepted changed metric definitions and directions silently, kept
+    the surviving metrics' results and the first freeze date, so a pre-registered metric could be swapped unseen."""
+    out, items = tmp_path / "manifest.json", tmp_path / "items"
+    m = fb.freeze(tmp_path, out=out, items_dir=items)
+    m["benchmarks"]["bench_a"]["results"]["G2"]["s.m"] = {"value": 0.5}
+    m["frozen"] = "2026-01-01"
+    out.write_text(json.dumps(m))
+    before = out.read_text()
     defs = fb.definitions
     monkeypatch.setattr(
-        fb,
-        "definitions",
-        lambda a: {n: {**b, "metrics": [*b["metrics"], fb._metric("s", "n", "", "up")]} for n, b in defs(a).items()},
+        fb, "definitions", lambda a: {n: {**b, "metrics": change(b["metrics"])} for n, b in defs(a).items()}
     )
-    again = fb.freeze(tmp_path, out=out, items_dir=items)
-    assert again["benchmarks"]["bench_a"]["results"]["G2"] == {"s.m": {"value": 0.5}, "s.n": None}
-    assert again["frozen"] == m["frozen"]
+    with pytest.raises(ValueError, match="bench_a: metrics changed"):
+        fb.freeze(tmp_path, out=out, items_dir=items)
+    assert out.read_text() == before
+
+    again = fb.freeze(tmp_path, out=out, items_dir=items, refreeze=True)
+    assert all(v is None for r in again["benchmarks"]["bench_a"]["results"].values() for v in r.values())  # voided
+    (log,) = again["refrozen"]
+    assert log["previous_frozen"] == again["frozen"] == "2026-01-01"
+    assert set(log["changed"]) == {"bench_a", "bench_b"}
+    assert log["changed"]["bench_a"]["metrics"] == {
+        "before": ["s.m:up"],
+        "after": fb._metric_keys(again["benchmarks"]["bench_a"]["metrics"]),
+    }
+    assert fb.freeze(tmp_path, out=out, items_dir=items)["refrozen"] == [log]  # accepted: no longer refused
+
+
+def test_check_with_the_archive_flags_metrics_the_manifest_does_not_define(fake_sources, tmp_path):
+    out, items = tmp_path / "manifest.json", tmp_path / "items"
+    m = fb.freeze(tmp_path, out=out, items_dir=items)
+    bench_b = ["bench_b: frozen without items"]  # the fixture's second benchmark has no items
+    assert fb.check(m, archive=tmp_path) == bench_b
+    m["benchmarks"]["bench_a"]["metrics"][0]["direction"] = "down"
+    assert fb.check(m) == bench_b  # the manifest alone is consistent
+    assert fb.check(m, archive=tmp_path) == [
+        "bench_a: metrics differ from the definitions (freeze --refreeze to accept and log)",
+        *bench_b,
+    ]
+    del m["refrozen"]
+    assert "refrozen must be a list (the log of accepted re-freezes)" in fb.check(m)
 
 
 # ── never trained on ─────────────────────────────────────────────────────────────────────────────────────────────────

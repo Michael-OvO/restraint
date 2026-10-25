@@ -8,7 +8,8 @@ cluster-bootstrap CIs (`transfer.cluster_bootstrap_delta`). Results stay `null` 
 Commands (all offline; `--archive` = the honest-agents archive root):
 
 * `freeze --archive A`: write the items files and the manifest from the downloaded sources. Run once; a later run that
-  would change an item set or a source hash is refused unless `--refreeze` is given.
+  would change an item set, a source hash or a metric (definition or direction) is refused unless `--refreeze` is
+  given, and an accepted change is logged in the manifest's `refrozen` list.
 * `check [--archive A]`: the manifest is consistent (arms, metrics, result slots, items files match their hashes); with
   `--archive`, every pinned file's sha256 matches and the item ids re-derive from the sources.
 * `never-trained [--archive A] [--record]`: **fails** (exit 1) if any benchmark item id, benchmark source label or
@@ -368,14 +369,36 @@ def _empty_results(metrics: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], d
     return {a: {k: None for k in keys} for a in ARMS}, {a: {k: None for k in keys} for a in ARMS if a != "base"}
 
 
+FROZEN_FIELDS = ("items", "sources", "metrics")  # the pre-registration: changing any of them needs --refreeze
+
+
+def _metric_keys(metrics: Sequence[dict[str, Any]] | None) -> list[str]:
+    return [f"{m['side']}.{m['metric']}:{m['direction']}" for m in metrics or []]
+
+
+def _frozen_change(field: str, before: Any, after: Any) -> dict[str, Any]:
+    if field == "metrics":
+        return {"before": _metric_keys(before), "after": _metric_keys(after)}
+    if field == "items":
+        return {k: {x: (v or {}).get(x) for x in ("n", "sha256")} for k, v in (("before", before), ("after", after))}
+    return {
+        k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest()
+        for k, v in (("before", before), ("after", after))
+    }
+
+
 def freeze(
     archive: Path, *, out: Path = MANIFEST, items_dir: Path = ITEMS_DIR, refreeze: bool = False
 ) -> dict[str, Any]:
     """Derive every item set and compare with the existing manifest before anything is written, so a refused freeze
-    leaves the items files and the manifest as they were."""
+    leaves the items files and the manifest as they were. A benchmark whose items, sources or metrics (side, name,
+    direction, headline) changed is refused without `refreeze`; with it, that benchmark's results are voided and the
+    change is appended to the manifest's `refrozen` log (date, the earlier freeze date, before / after per field). The
+    `frozen` date stays the first freeze's; unchanged benchmarks keep their results."""
     old = json.loads(out.read_text()) if out.is_file() else None
     benches = definitions(archive)
     item_ids: dict[str, list[str]] = {}
+    changes: dict[str, dict[str, Any]] = {}
     for name, b in benches.items():
         ids = benchmark_ids(name, archive)
         if ids is None:
@@ -389,21 +412,26 @@ def freeze(
                 "sha256": ids_sha256(ids),
             }
         b["results"], b["deltas_vs_base"] = _empty_results(b["metrics"])
-        if old and name in old.get("benchmarks", {}) and not refreeze:
-            prev = old["benchmarks"][name]
-            if prev.get("items") != b["items"] or prev.get("sources") != b["sources"]:
-                raise ValueError(f"{name}: items or sources changed since the freeze (pass --refreeze to accept)")
-            # keep the recorded results of the metrics that are still defined
-            for slot in ("results", "deltas_vs_base"):
-                for arm, vals in b[slot].items():
-                    for key in vals:
-                        vals[key] = prev.get(slot, {}).get(arm, {}).get(key)
+        if not old or name not in old.get("benchmarks", {}):
+            continue
+        prev = old["benchmarks"][name]
+        changed = [f for f in FROZEN_FIELDS if prev.get(f) != b[f]]
+        if changed and not refreeze:
+            raise ValueError(f"{name}: {', '.join(changed)} changed since the freeze (pass --refreeze to accept)")
+        if changed:
+            changes[name] = {f: _frozen_change(f, prev.get(f), b[f]) for f in changed}
+        else:  # same items, sources and metrics: the recorded results stand
+            b["results"], b["deltas_vs_base"] = prev["results"], prev["deltas_vs_base"]
+    refrozen = list((old or {}).get("refrozen", []))
+    if changes:
+        refrozen.append({"date": _today(), "previous_frozen": old["frozen"], "changed": changes})
     items_dir.mkdir(parents=True, exist_ok=True)
     for name, ids in item_ids.items():
         (items_dir / f"{name}.txt").write_text("".join(f"{i}\n" for i in ids))
     manifest = {
         "schema": SCHEMA,
-        "frozen": (old or {}).get("frozen") if old and not refreeze else _today(),
+        "frozen": (old or {}).get("frozen") or _today(),
+        "refrozen": refrozen,
         "description": "iteration-16 final benchmark: arms base / G2 / final, deltas vs base with cluster-bootstrap "
         "95% CIs; every benchmark is never trained on (`never_trained`)",
         "ci": {
@@ -427,12 +455,17 @@ def check(manifest: dict[str, Any], *, archive: Path | None = None, root: Path =
         bad.append(f"schema {manifest.get('schema')} != {SCHEMA}")
     if tuple(manifest.get("arms", {})) != ARMS:
         bad.append(f"arms {tuple(manifest.get('arms', {}))} != {ARMS}")
+    if not isinstance(manifest.get("refrozen"), list):
+        bad.append("refrozen must be a list (the log of accepted re-freezes)")
+    defs = definitions(archive) if archive is not None else {}
     for name, b in manifest.get("benchmarks", {}).items():
         keys = []
         for m in b.get("metrics", []):
             if m.get("direction") not in DIRECTIONS:
                 bad.append(f"{name}: metric {m.get('metric')} has direction {m.get('direction')!r}")
             keys.append(f"{m['side']}.{m['metric']}")
+        if name in defs and b.get("metrics") != defs[name]["metrics"]:
+            bad.append(f"{name}: metrics differ from the definitions (freeze --refreeze to accept and log)")
         if set(b.get("results", {})) != set(ARMS) or any(set(v) != set(keys) for v in b["results"].values()):
             bad.append(f"{name}: results must hold every arm x metric")
         if set(b.get("deltas_vs_base", {})) != set(ARMS) - {"base"}:
@@ -776,7 +809,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("freeze", help="write the items files and the manifest from the archive")
     f.add_argument("--archive", required=True)
-    f.add_argument("--refreeze", action="store_true", help="accept changed items or sources (voids old results)")
+    f.add_argument(
+        "--refreeze",
+        action="store_true",
+        help="accept changed items, sources or metrics (voids those benchmarks' results, logged in `refrozen`)",
+    )
     c = sub.add_parser("check", help="manifest consistency; with --archive, pinned hashes and item derivation")
     c.add_argument("--archive")
     n = sub.add_parser("never-trained", help="fail if a benchmark item id, source or text appears in a training build")

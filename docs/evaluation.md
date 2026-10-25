@@ -756,12 +756,15 @@ pooled. **Cost: their judge is GPT-4o and o3-mini** (one call per answer); nothi
 (base, G2, final), every benchmark's pinned sources with sha256s, its item ids (`data/benchmarks/items/`), the metrics and
 their expected direction, and empty result and delta slots (filled by `... compute` from the scorers' units: paired
 cluster-bootstrap 95 % CIs; `... units --bench terminal_bench_2|abstentionbench` writes the units file for a TB2 job or an
-AbstentionBench responses file, the other adapters' scorers write their own). A later `freeze` whose items or sources
-differ is refused before anything is written, unless `--refreeze`. Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
+AbstentionBench responses file, the other adapters' scorers write their own). A later `freeze` whose items, sources or metrics
+(definition or direction) differ is refused before anything is written, unless `--refreeze`, which voids that
+benchmark's results and logs the change (before / after) in the manifest's `refrozen` list; `check --archive` also flags
+manifest metrics that differ from the code's definitions. Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
 89 tasks at `69671fb`). `... never-trained [--archive A]` fails if any benchmark item id, source label, canary or (with the
 archive) instruction text appears in a training build (the archived builds are the files `ARCHIVE_TRAINING_GLOBS` lists:
 SFT / DPO builds, dataset splits and train_rl copies, trajectory banks, the it12 pools, teacher and training-pool own
-episodes, GRPO rollout completions, selection / validation inputs; 642 files, 58,444 rows on 2026-10-25); `--record`
+episodes, GRPO rollout completions, selection / validation inputs; 617 archived files, 52,916 rows on 2026-10-25, plus 25 repo files: 642 builds,
+58,444 rows in all); `--record`
 stores its verdict in the manifest. AbstentionBench and
 the internal held-out set are `pending` there until their items are frozen.
 
