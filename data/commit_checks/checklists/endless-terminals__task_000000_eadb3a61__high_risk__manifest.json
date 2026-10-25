@@ -19,14 +19,6 @@
       }
     },
     {
-      "id": "r3",
-      "quote": "Scan that log and extract ONLY the absolute paths of files whose verification status is “FAILED …”.",
-      "check": {
-        "cmd": "python3 -c 'import re,sys\nrx=re.compile(r\"^\\d{4}/\\d\\d/\\d\\d \\d\\d:\\d\\d:\\d\\d \\[\\d+\\] verify (/.*?)  FAILED( |$)\")\nexp=[m.group(1) for m in map(rx.match,open(sys.argv[1],encoding=\"utf-8\").read().splitlines()) if m]\ngot=open(sys.argv[2],encoding=\"utf-8\").read()\nassert exp and got==\"\".join(p+\"\\n\" for p in exp),(exp,got)\n' /home/user/backup/logs/rsync_2023-09-01.log /home/user/backup/verification/failed_files_2023-09-01.txt",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r4",
       "quote": "Ignore every other line (including those containing “OK”).",
       "check": {

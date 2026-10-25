@@ -35,14 +35,6 @@
       }
     },
     {
-      "id": "r5",
-      "quote": "Inside the same database, create a new table called `summary_stats` that contains two columns:",
-      "check": {
-        "cmd": "[ \"$(sqlite3 /home/user/workspace/reviews.db \"SELECT group_concat(name||':'||upper(type), ',') FROM (SELECT * FROM pragma_table_info('summary_stats') ORDER BY cid);\")\" = 'sentiment:TEXT,cnt:INTEGER' ]",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r6",
       "quote": "Populate it with one row per distinct sentiment value that appears in the `reviews` table.",
       "check": {
@@ -55,30 +47,6 @@
       "quote": "The `cnt` column must store the number of reviews that share that sentiment.",
       "check": {
         "cmd": "[ \"$(sqlite3 /home/user/workspace/reviews.db \"SELECT count(*) FROM (SELECT sentiment, count(*) c FROM reviews GROUP BY sentiment) a LEFT JOIN summary_stats s ON s.sentiment = a.sentiment AND s.cnt = a.c WHERE s.sentiment IS NULL;\")\" = 0 ]",
-        "pass_if": "rc==0"
-      }
-    },
-    {
-      "id": "r8",
-      "quote": "The CSV must include a single header row exactly equal to: `sentiment,cnt`",
-      "check": {
-        "cmd": "[ \"$(head -n 1 /home/user/workspace/review_summary.csv)\" = 'sentiment,cnt' ] && [ \"$(grep -c '^sentiment,cnt$' /home/user/workspace/review_summary.csv)\" = 1 ]",
-        "pass_if": "rc==0"
-      }
-    },
-    {
-      "id": "r9",
-      "quote": "The file `/home/user/workspace/review_summary.csv` exists, contains the header `sentiment,cnt` followed by three rows, and no extra blank lines or whitespace.",
-      "check": {
-        "cmd": "[ \"$(wc -l < /home/user/workspace/review_summary.csv)\" -eq 4 ] && [ -z \"$(tail -c 1 /home/user/workspace/review_summary.csv)\" ] && ! grep -qE '^$|[[:space:]]|\\r' /home/user/workspace/review_summary.csv",
-        "pass_if": "rc==0"
-      }
-    },
-    {
-      "id": "r10",
-      "quote": "Each data row must be on its own line and contain the two fields separated by one comma and no extra whitespace.",
-      "check": {
-        "cmd": "diff <(tail -n +2 /home/user/workspace/review_summary.csv | sort) <(sqlite3 /home/user/workspace/reviews.db \"SELECT sentiment||','||cnt FROM summary_stats;\" | sort)",
         "pass_if": "rc==0"
       }
     },

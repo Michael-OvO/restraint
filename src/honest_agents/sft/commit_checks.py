@@ -103,6 +103,8 @@ from typing import Any
 
 from honest_agents import bank as bank_mod
 from honest_agents.bank import BankRow
+from honest_agents.commit_points.schema import BuildManifest, ExampleRef, write_manifest
+from honest_agents.commit_points.schema import Quota as ManifestQuota
 from honest_agents.eval.records import history_steps
 from honest_agents.harness import report_from_tool_args
 from honest_agents.mutation import is_mutating
@@ -957,11 +959,15 @@ def build_claim_examples(
     dropped: Counter[str] = Counter()
     candidates: list[tuple[str, str, str, str]] = []
     agree: Counter[tuple[str, bool]] = Counter()
+    agree_all: Counter[tuple[str, bool]] = Counter()  # every checked claim point, transcript or not (eval records)
     usable: list[CommitPoint] = []
     verdict_of: dict[str, bool] = {}
     for p in points:
         if p.point != POINT_CLAIM:
             continue
+        cl, r = checklists.get(p.task), results.get(p.episode.episode_id)
+        if claim_buildable(p) and cl is not None and r is not None and r.matches(cl) and r.replayable:
+            agree_all[(p.outcome, all(r.verdicts(cl)) == (p.outcome == PASS))] += 1
         if (reason := example_drop_reason(p.episode, flt)) is not None:
             dropped[reason] += 1
             continue
@@ -1030,14 +1036,19 @@ def build_claim_examples(
                 dropped[f"{FAIL}:{spliced}"] += 1
             else:
                 out.append(spliced)
+    # `all_points`: the same over every checked claim point, eval records (no transcript, never an example) included.
+    agreement = {**_agreement(agree), "all_points": _agreement(agree_all)}
+    return ExampleBuild(out, dropped, agreement, matched_counts(out), candidates)
+
+
+def _agreement(agree: Counter[tuple[str, bool]]) -> dict[str, Any]:
     n_checked = sum(agree.values())
-    agreement = {
+    return {
         "checked": n_checked,
         "agree": sum(v for (_, ok), v in agree.items() if ok),
         "rate": _rate(sum(v for (_, ok), v in agree.items() if ok), n_checked),
         "by_outcome": {f"{o}/{'agree' if ok else 'disagree'}": v for (o, ok), v in sorted(agree.items())},
     }
-    return ExampleBuild(out, dropped, agreement, matched_counts(out), candidates)
 
 
 def matched_counts(examples: Sequence[ClaimExample]) -> dict[str, int]:
@@ -1154,7 +1165,27 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
         "quota": asdict(cfg.quota),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n")
+    write_manifest(build_manifest(kept, cfg, summary), out / MANIFEST_FILE)
     return summary
+
+
+MANIFEST_FILE = "build_manifest.json"  # `commit_points.schema.BuildManifest`: what `commit_points.coverage` reads
+
+
+def build_manifest(kept: Sequence[ClaimExample], cfg: BuildConfig, summary: Mapping[str, Any]) -> BuildManifest:
+    """The coverage report's manifest of the kept examples: a claim example is kept only when its checklist agrees with
+    the hidden tests, and it trains the decision its outcome licenses (the own claim after a pass, the honest report
+    after a fail)."""
+    # Examples come from bank rows only, and `load_inputs` keeps a bank row only when its split is train.
+    refs = [
+        ExampleRef(e.example.id, e.task, e.source, e.point, e.outcome, e.outcome == PASS, e.origin, split="train",
+                   checklist_agrees=True)
+        for e in kept
+    ]  # fmt: skip
+    quota = ManifestQuota(cap_per_task=cfg.quota.cap_per_task, max_outcome_ratio=cfg.quota.max_outcome_ratio)
+    build = {"inputs": summary["inputs"], "checklists": cfg.checklists, "check_results": list(cfg.check_results),
+             "examples": summary["examples"], "agreement": summary["agreement"]}  # fmt: skip
+    return BuildManifest.of(refs, quota, build)
 
 
 def _by_input(points: Sequence[CommitPoint]) -> dict[str, dict[str, int]]:

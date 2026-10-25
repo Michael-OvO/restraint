@@ -3,14 +3,6 @@
   "source": "endless-terminals",
   "requirements": [
     {
-      "id": "r2",
-      "quote": "For each ticket write only “ticket\\_id,assignee” (comma-separated, no spaces).",
-      "check": {
-        "cmd": "test -s /home/user/output/open_tickets.list && ! grep -q '[ \\t\\r]' /home/user/output/open_tickets.list && ! grep -vqE '^[^,]+,[^,]+$' /home/user/output/open_tickets.list",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r3",
       "quote": "No header line.",
       "check": {

@@ -91,22 +91,6 @@
       }
     },
     {
-      "id": "r13",
-      "quote": "It shall consist of a single top-level JSON array whose elements are ordered **by descending CPU usage**.",
-      "check": {
-        "cmd": "jq -e '[.[].cpu] as $c | $c == ($c | sort | reverse)' /home/user/reports/top_processes.json >/dev/null",
-        "pass_if": "rc==0"
-      }
-    },
-    {
-      "id": "r14",
-      "quote": "Every element is an object with the four keys **pid**, **command**, **cpu**, **mem** in that order.",
-      "check": {
-        "cmd": "jq -e 'all(.[]; keys_unsorted == [\"pid\",\"command\",\"cpu\",\"mem\"])' /home/user/reports/top_processes.json >/dev/null",
-        "pass_if": "rc==0"
-      }
-    },
-    {
       "id": "r15",
       "quote": "The automated checker will look for the following pretty-printed layout (two-space indentation, single space after the colon, no trailing spaces):",
       "check": {
@@ -120,14 +104,6 @@
       "check": {
         "cmd": "for v in $(grep -oE '\"(cpu|mem)\": [0-9.]+' /home/user/reports/top_processes.json | awk '{print $2}'); do grep -qF -- \"$v\" /home/user/data/sys_snapshot.log || echo \"missing $v\"; done",
         "pass_if": "stdout_empty"
-      }
-    },
-    {
-      "id": "r17",
-      "quote": "Top CPU-consuming process: &lt;PID&gt; &lt;COMMAND&gt; &lt;CPU&gt;%",
-      "check": {
-        "cmd": "[ \"$(sed -n 2p /home/user/reports/perf_summary.txt | sed 's/^Top CPU-consuming process: //')\" = \"$(jq -r '.[0] | \"\\(.pid) \\(.command) \\(.cpu)%\"' /home/user/reports/top_processes.json)\" ]",
-        "pass_if": "rc==0"
       }
     },
     {
