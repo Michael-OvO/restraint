@@ -40,8 +40,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-30 | metric / stats | closed | `read_diagnosis.load_episodes` and `power.load_surface_run` keep infra-error episodes that `score_records` drops, counting them as non-declines |
 | DEF-31 | archive / tooling | closed | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
 | DEF-32 | grader / reward | closed | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
-| DEF-NEW-sweep0-0-1 | task data / build | closed | `input_candidates` skipped every content check for a CONTENT_KINDS file with no spelled content (binary COPY), so such an input became a remove_input / shortcut_trap candidate unchecked |
-| DEF-NEW-sweep0-2-1 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
+| DEF-33 | task data / build | closed | `input_candidates` skipped every content check for a CONTENT_KINDS file with no spelled content (binary COPY), so such an input became a remove_input / shortcut_trap candidate unchecked |
+| DEF-34 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
 
 ---
 
@@ -1169,7 +1169,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `library_versions("harbor", "trl")` in the key. Accept the one-time cache refill.
 
 ### DEF-25: corrupt_input twins are not corrupted under the containerd snapshotter
-- **Area:** task data / build. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** task data / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `510d04c` (fix with DEF-26/27, unit + docker tests, docs/data.md 3a); ledger repair (re-gate result) in the
   commit that follows it.
 - **Evidence:** `src/honest_agents/tasks/perturb/corrupt_input.py` `CORRUPT_PROGRAM` (~L86-91) rewrites the target in
@@ -1238,9 +1238,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   write-keeping host and are superseded by the rebuild (new task hashes, so the build treats them as unvalidated).
 
 ### DEF-26: remove_input skips the content-dependence checks for generated inputs
-- **Area:** task data / build. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** task data / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `510d04c` (fix with DEF-25/27, unit test, docs/data.md section 5); the commit that follows adds the
-  binary-COPY case (DEF-NEW-sweep0-0-1) to its test.
+  binary-COPY case (DEF-33) to its test.
 - **Evidence:** `src/honest_agents/tasks/perturb/remove_input.py` (~L96-112) runs the floor, overlap,
   `content_bound_tokens` and `guessable_tokens` checks only when `f.kind in CONTENT_KINDS and f.content is not None`.
   `tasks/analysis/image_files.py` (~L26-28) puts `sqlite3 db <<SQL` / `dd` outputs in `FILE_GENERATED`, outside
@@ -1266,7 +1266,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   the file has no spelled content (SQL syntax words such as PRAGMA and PRIMARY, which the tests' own queries spell, do
   not count as values: `remove_input._SQL_WORDS`), and a file with neither content nor generator data (`dd`, `cmd > f`,
   a binary COPY) is no candidate. The floor and overlap checks stay for spelled content only. The same change closes
-  DEF-NEW-sweep0-0-1 (binary COPY) and also applies to `shortcut_trap` (it calls `input_candidates` under the default
+  DEF-33 (binary COPY) and also applies to `shortcut_trap` (it calls `input_candidates` under the default
   rules; not built by default, no archived rows). `corrupt_input` is
   unaffected (its rules are `text_only`; its 558 dirs are byte-identical apart from the DEF-25 change).
 - **Tests:** `tests/tasks/test_tasks_perturb.py::test_remove_input_holds_a_generated_input_to_the_content_checks`:
@@ -1293,7 +1293,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   behaviour). `data/` on the Mac and node still holds them until rebuilt.
 
 ### DEF-27: conflicting_constraint twins are passable but stay in the test split
-- **Area:** task data / grader. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** task data / grader. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `510d04c` (fix with DEF-25/26, build tests, docs/data.md sections 2, 2a and 7).
 - **Evidence:** `02-baseline-test/eval/base`: 37/46 conflicting_constraint twin episodes have `tests_passed=True`
   (34 infeasible_claimed + 3 implicit_abstain, all `forbidden_violation=True`); `it12_base_transfer` 13/20,
@@ -1329,10 +1329,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   pairs) and `data/test.jsonl` (23 cc pairs) on the Mac are the old build and keep the rows until `data/` is rebuilt.
 
 ### DEF-28: Agentic Abstention counts budget-exhausted incompletes as abstentions
-- **Area:** metric. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `4e8f062`, `4061f90` (repair), `d980e54` (repair: spec).
-  Date note for the integrator: the closure date 2026-10-24 was prescribed by the fix task and precedes the found date;
-  the fix and both repairs were committed on 2026-10-25. Reconcile on merge.
 - **Evidence:** `src/honest_agents/eval/harbor_agent.py` `decision_from_report` (~L97-109) maps any report with
   `explains_non_completion` (`report.py` ~L250-254: not complete and has a blocker or reason) to `abstain`;
   `eval/external/agentic_abstention.py` `decision_and_turn` (~L141/144) uses it and `control_false_positive_rate` (~L298)
@@ -1382,7 +1380,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `tests/eval/test_harbor.py::test_a_bare_abstain_is_an_abstention_under_both_mappings`.
 
 ### DEF-29: `revealed` counts boot-dependent outputs as reads
-- **Area:** metric. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `167c2ee` (fix, tests).
 - **Evidence:** `src/honest_agents/eval/read_diagnosis.py` `normalise_output` (~L364) masks times, long hex, ls/du/stat
   sizes, inodes and link counts only; `revealed` (~L384) is True when any windowed command's normalised outputs differ
@@ -1413,7 +1411,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact (latent, re-checked post-fix):** no archived number changes: no G2/it15 pair replays are archived, so every
   archived `read` / `revealed` number is the strict rule (`read_source` "strict"), which this fix does not touch, and
   no archived S3 run audited `revealed`. Every iteration-16 `revealed` number and S3 run is computed post-fix.
-  S3's ground truth cannot see a reveal by a listing: entered as DEF-NEW-sweep0-2-1.
+  S3's ground truth cannot see a reveal by a listing: entered as DEF-34.
 - **Closure test (done):** `tests/eval/test_read_diagnosis.py::test_boot_dependent_outputs_do_not_reveal` (the `df /`,
   `df -h`, `uptime`, `free -h`, `/proc/loadavg`, `mktemp`, `date`, `ps` repro on the
   `endless-terminals__task_000000_0033979a__high_risk__readme` site gives `revealed` False and `inspected` (False,
@@ -1423,7 +1421,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   old code: the strict rule missed the relative reads).
 
 ### DEF-30: surface loaders keep infra-error episodes
-- **Area:** metric / stats. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric / stats. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `167c2ee` (fix, tests).
 - **Evidence:** `read_diagnosis.load_episodes` (~L457-492, filter ~L470) and `analysis/power.py` `load_surface_run`
   (~L177-213, filter ~L187) filter only on `family == high_risk`; neither applies `EpisodeRecord.infra_error`
@@ -1448,22 +1446,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `tests/test_power.py::test_surface_run_drops_infra_errors_and_leaked_variants_like_the_tier_run`; both fail on the
   old code.
 
-### DEF-NEW-sweep0-2-1: S3 audits a listing reveal as a false positive
-- **Area:** metric / tooling. **Status:** open. **Found:** 2026-10-24, while closing DEF-29 (S3 now audits `inspected`).
-- **Evidence:** `eval/read_audit.py` `shown` is True only when a window command printed a line of `honest_variant.what`
-  (or, on a `missing` empty_backup twin, named the backup and got "No such file"). `read_diagnosis.revealed` is True
-  whenever the normalised outputs differ, which on empty_backup includes a bare `ls -la B` (the `empty` / `truncated`
-  twin lists fewer entries or other sizes than its control, `_keeps_sizes`). Such an episode is read but not shown: an FP.
-- **Impact:** latent (no pair replays archived, so no S3 run has audited `revealed`). On the first S3 run with pair rows,
-  empty_backup listings inflate the FP rate of both branches unevenly (twins differ from controls by construction), so
-  S3 can fail on a correct label.
-- **Fix:** give `shown` a listing ground truth on empty_backup (the replayed listing of B differs from the pair's), or
-  audit `revealed` against `shown` only on surfaces whose evidence is text.
-- **Closure test:** an empty_backup twin/control pair whose only window command is `ls -la B` with differing replayed
-  listings is not an FP.
-
 ### DEF-31: index and replay rows label a surface-less high_risk row `high_risk`
-- **Area:** archive / tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** archive / tooling. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `8905672` (fix, tests, ledger).
 - **Evidence:** `src/honest_agents/gate/index.py` (~L182) and `analysis/replay_episodes.py` (~L110) fall back to the
   family when `detail.surface` is missing; the canonical `read_diagnosis.surface_of` (~L71) and
@@ -1494,7 +1478,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   now group them as `readme/<branch>`.
 
 ### DEF-32: the cached blocker verdict can disagree with the live grader
-- **Area:** grader / reward. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** grader / reward. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `f1f2742` (fix, tests); `c11903a` (impact note repair: hindsight changes on archived banks).
 - **Evidence:** live `grading.check_blocker` (~L598-633) runs `command -v <exact target>` plus `test -e <target>` for a
   `missing_capability` command target; `bank.check_blocker_cached` (~L148-165) uses
@@ -1558,8 +1542,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   where all four exist, so the list matches the live grader there. On an image with bash 3.x those four would be read
   `false` by the cache and `true` by the live check.
 
-### DEF-NEW-sweep0-0-1: input_candidates skipped every check for a CONTENT_KINDS file with no content
-- **Area:** task data / build. **Status:** closed 2026-10-24. **Found:** 2026-10-25, while fixing DEF-26.
+### DEF-33: input_candidates skipped every check for a CONTENT_KINDS file with no content
+- **Area:** task data / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, while fixing DEF-26.
   **Commits:** `510d04c` (fixed by the DEF-26 change); regression case in the ledger-repair commit that follows it.
 - **Evidence:** at acebe74, `src/honest_agents/tasks/perturb/remove_input.py` `input_candidates` (~L96-112) ran the
   floor, overlap, `content_bound_tokens` and `guessable_tokens` checks only under `f.kind in CONTENT_KINDS and
@@ -1577,3 +1561,17 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Tests:** `tests/tasks/test_tasks_perturb.py::test_remove_input_holds_a_generated_input_to_the_content_checks`
   now has a `binary_copy` case (a COPY of a non-UTF-8 `staff.db`): no candidate; on the acebe74 `remove_input.py` the
   case gives `['/home/user/data/staff.db']` and the test fails on it (checked 2026-10-25).
+
+### DEF-34: S3 audits a listing reveal as a false positive
+- **Area:** metric / tooling. **Status:** open. **Found:** 2026-10-25, while closing DEF-29 (S3 now audits `inspected`).
+- **Evidence:** `eval/read_audit.py` `shown` is True only when a window command printed a line of `honest_variant.what`
+  (or, on a `missing` empty_backup twin, named the backup and got "No such file"). `read_diagnosis.revealed` is True
+  whenever the normalised outputs differ, which on empty_backup includes a bare `ls -la B` (the `empty` / `truncated`
+  twin lists fewer entries or other sizes than its control, `_keeps_sizes`). Such an episode is read but not shown: an FP.
+- **Impact:** latent (no pair replays archived, so no S3 run has audited `revealed`). On the first S3 run with pair rows,
+  empty_backup listings inflate the FP rate of both branches unevenly (twins differ from controls by construction), so
+  S3 can fail on a correct label.
+- **Fix:** give `shown` a listing ground truth on empty_backup (the replayed listing of B differs from the pair's), or
+  audit `revealed` against `shown` only on surfaces whose evidence is text.
+- **Closure test:** an empty_backup twin/control pair whose only window command is `ls -la B` with differing replayed
+  listings is not an FP.

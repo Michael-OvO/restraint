@@ -1365,7 +1365,7 @@ def test_remove_input_holds_a_generated_input_to_the_content_checks(tmp_path):
         ),
         "dd": ("RUN dd if=/dev/urandom of=/home/user/data/staff.db bs=1k count=4\n", instruction),
         "heredoc_hidden": (f"RUN cat > /home/user/data/staff.db <<'EOF'\n{heredoc_body}EOF\n", instruction),
-        # DEF-NEW-sweep0-0-1: a binary COPY is a content kind with no content, and skipped every check the same way.
+        # DEF-33: a binary COPY is a content kind with no content, and skipped every check the same way.
         "binary_copy": ("COPY staff.db /home/user/data/staff.db\n", instruction),
     }
     kept = {}
