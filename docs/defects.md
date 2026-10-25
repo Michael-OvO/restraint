@@ -2768,7 +2768,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-51: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
-  **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests).
+  **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests),
+  `e8c8344` (review repair: the pilot's colocate path, `replace()` of a pinned section).
 - **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
   `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
   `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
@@ -2795,19 +2796,32 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `--revision` and `--tokenizer-revision` (every training, smoke, sync-check and eval server goes through it);
   `h1_tmax_check.sh` defaults `BASE_REVISION` to the pin and `setup_node.sh` downloads at it, both through
   `python -m honest_agents.models revision NAME`. TRL's colocated vLLM engine takes the model's `name_or_path` with no
-  revision (trl 1.14.1 `generation/vllm_generation.py`), so in colocate mode `train.run.trainer_model` hands the
-  trainer the pinned snapshot directory. The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
+  revision (trl 1.14.1 `generation/vllm_generation.py` L347-348; `GRPOConfig.vllm_mode` defaults to `colocate`), so in
+  colocate mode both trainer builds, `train.run.trainer_model` and the pilot's `pilot.run.trainer_model` (read from the
+  arm's built `GRPOConfig`), hand `GRPOTrainer` the pinned snapshot directory through one helper,
+  `models.colocated_model_path`. `d187316` covered only `train.run`: the pilot still passed `cfg.model.name`, so a pilot
+  config with `grpo.use_vllm: true` and no `vllm_mode` (or `grpo.vllm_mode=colocate`) would have loaded its vLLM engine
+  from Hub `main` while its trainer weights sat at the pin; `configs/pilot.yaml` uses server mode and the archive holds
+  no pilot run, so no run was affected (review finding, repaired in `e8c8344`). `pinned_revision` also drops another
+  model's pin before resolving, so `dataclasses.replace(section, name=...)` (which re-runs `__post_init__` with the old
+  pin) gives a local directory no revision and a different pinned id its own pin; before, the directory kept the old
+  pin (harmless: transformers ignores a revision for a local path) and `Qwen/Qwen3-4B` replacing `Qwen/Qwen3.5-4B` was
+  refused as a conflict. The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
   literal (bench lane's file); a test asserts it equals the pin.
 - **Closure test:** `tests/test_model_revision.py` (fails on the old code: no pin, every revision null):
   `::test_every_config_resolves_its_hub_model_to_the_pin` (each `configs/*.yaml` through its own loader: a Hub id must be
   in `PINNED_REVISIONS` and resolve to it, a merged directory to none), `::test_a_merged_model_has_no_revision_and_a_conflicting_revision_is_refused`,
   `::test_the_pins_are_commits_and_the_benchmark_base_arm_uses_the_same_one`, `::test_the_serve_script_reads_the_revision_with_the_model`,
   `::test_the_vllm_server_serves_a_hub_base_at_its_pin_and_a_merged_model_without_one` (slow: runs `serve_vllm.sh`
-  with a fake `uv`), `::test_the_merge_downloads_a_hub_base_at_its_pin`, `::test_the_colocated_engine_loads_the_pinned_snapshot`.
-  All L0, no network.
+  with a fake `uv`), `::test_the_merge_downloads_a_hub_base_at_its_pin`, `::test_the_colocated_engine_loads_the_pinned_snapshot`,
+  `::test_the_pilots_colocated_engine_loads_the_pinned_snapshot` (runs `pilot.run.run_arm` with a fake `GRPOTrainer`,
+  `vllm_mode` colocate and unset; fails at `d187316`: the trainer got `Qwen/Qwen3.5-4B`),
+  `::test_replacing_the_model_name_moves_the_pin_with_it` (fails at `d187316`). All L0, no network.
 - **Impact note:** none re-scored: no archived number changes, because the pin is the revision every archived run
   loaded. Not verified on a GPU node: that vLLM 0.30 accepts `--tokenizer-revision` (its engine log prints the
-  `tokenizer_revision` field) and the colocate snapshot path; both fail loudly at the next start, not silently.
+  `tokenizer_revision` field) and the colocate snapshot path (train and pilot); both fail loudly at the next start,
+  not silently. The pilot repair changes no number: the archive holds no pilot run (its 7 colocate `run_config.json`
+  files are `train.run` GRPO runs, covered above).
 
 ### DEF-52: a refused freeze still overwrites the frozen items files
 - **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
