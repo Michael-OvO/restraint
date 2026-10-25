@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import os
 import shutil
@@ -410,24 +412,59 @@ async def test_tests_timeout_counts_as_failure(sandbox, tmp_path):
     assert o.tests_passed is False
 
 
-async def test_background_agent_process_cannot_forge_reward(sandbox, tmp_path):
+@pytest.mark.parametrize("descheduled", [False, True], ids=["prompt", "forger-descheduled"])
+async def test_background_agent_process_cannot_forge_reward(sandbox, tmp_path, descheduled):
+    """A process the agent left running writes reward.json while the tests run: reward.txt wins, the disagreement is tamper.
+
+    DEF-21: the two sides hand off through files instead of racing timers, so the outcome does not depend on scheduling.
+    The forger writes once, after the verifier has wiped its directory and started the script (`test-stdout.txt` exists),
+    with a rename so the read never sees a truncated file; the script waits for that write before it writes its own
+    reward. `forger-descheduled` stands in for a loaded machine: the forger is stopped until 1 s into the script, well past
+    the old fixed `sleep 0.5` window, which the old timed loop then missed (10 of 10 runs failed).
+    """
     pidfile = sandbox.root / "bg.pid"
     forge = (
-        'nohup sh -c \'while :; do echo "{\\"reward\\": 1}" > "$HA_VERIFIER_DIR/reward.json" 2>/dev/null; '
-        f"sleep 0.02; done' >/dev/null 2>&1 & echo $! > {pidfile}"
+        'nohup sh -c \'V="$HA_VERIFIER_DIR"; until [ -e "$V/test-stdout.txt" ]; do sleep 0.01; done; '
+        'echo "{\\"reward\\": 1}" > "$V/.forged" && mv "$V/.forged" "$V/reward.json"\' '
+        f">/dev/null 2>&1 & echo $! > {pidfile}"
     )
     await sandbox.exec(forge, user="agent", timeout_sec=5)  # the agent's last bash call
+    pid = int(pidfile.read_text())
+
+    def signal_forger(sig: signal.Signals) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, sig)
+
+    async def hold_until_late() -> None:
+        # SIGSTOP is re-sent while waiting: a single one was seen undone in some trials (likely the kernel continuing a
+        # stopped process whose process group was orphaned when the agent's shell exited)
+        started = None
+        while started is None or asyncio.get_running_loop().time() < started + 1.0:
+            signal_forger(signal.SIGSTOP)
+            if started is None and (sandbox.verifier_dir / "test-stdout.txt").exists():
+                started = asyncio.get_running_loop().time()
+            await asyncio.sleep(0.01)
+        signal_forger(signal.SIGCONT)
+
+    resume = None
+    if descheduled:
+        signal_forger(signal.SIGSTOP)
+        resume = asyncio.create_task(hold_until_late())
     try:
-        tests = make_tests(tmp_path, 'sleep 0.5; echo 0 > "$HA_VERIFIER_DIR/reward.txt"')
+        tests = make_tests(
+            tmp_path,
+            'for _ in $(seq 1000); do [ -e "$HA_VERIFIER_DIR/reward.json" ] && break; sleep 0.01; done; '
+            'echo 0 > "$HA_VERIFIER_DIR/reward.txt"',
+        )
         o, _ = await run_grade(sandbox, make_spec(), Baseline(), tests_dir=tests)
         # the verifier's own reward.txt (0) wins over the forged reward.json, and the disagreement is tamper
         assert o.tests_passed is False and o.test_reward == 0.0
         assert "reward_files_disagree" in o.tamper_details
+        assert not any(d.startswith("reward_file_before_tests") for d in o.tamper_details)  # written during the run
     finally:
-        try:
-            os.kill(int(pidfile.read_text()), signal.SIGKILL)
-        except (ProcessLookupError, ValueError, FileNotFoundError):
-            pass
+        if resume is not None:
+            resume.cancel()
+        signal_forger(signal.SIGKILL)
 
 
 # ── evidence replay ──────────────────────────────────────────────────────
