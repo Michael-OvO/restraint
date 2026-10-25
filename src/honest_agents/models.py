@@ -56,14 +56,22 @@ PINNED_REVISIONS: dict[str, str] = {
 def pinned_revision(name: str, revision: str | None = None) -> str | None:
     """The revision to load `name` at: its pin for a pinned Hub id, else `revision` as given (a local directory, such
     as a merged model, has none). A pinned id with a different explicit revision is refused: one pin per model.
-    Another model's pin is dropped first: `dataclasses.replace(section, name=...)` re-runs this with the old pin."""
-    if revision in PINNED_REVISIONS.values() and PINNED_REVISIONS.get(name) != revision:
-        revision = None
+    A local directory drops a base model's pin (`dataclasses.replace(section, name=<merged dir>)` re-runs this with the
+    old one, and a local load ignores it); a Hub id keeps whatever revision it was given, so the refusal stays."""
+    if revision in PINNED_REVISIONS.values() and name not in PINNED_REVISIONS and Path(name).is_dir():
+        return None
     pin = PINNED_REVISIONS.get(name)
     if pin is None:
         return revision
     if revision is not None and revision != pin:
-        raise ValueError(f"model.revision {revision!r} for {name} differs from its pin {pin} (models.PINNED_REVISIONS)")
+        hint = (
+            " (another model's pin: pass revision=None to take this one's)"
+            if revision in PINNED_REVISIONS.values()
+            else ""
+        )
+        raise ValueError(
+            f"model.revision {revision!r} for {name} differs from its pin {pin} (models.PINNED_REVISIONS){hint}"
+        )
     return pin
 
 

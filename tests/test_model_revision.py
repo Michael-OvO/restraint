@@ -210,14 +210,21 @@ def test_the_pilots_colocated_engine_loads_the_pinned_snapshot(monkeypatch, tmp_
     assert seen == ["/snap", "Qwen/Qwen3.5-4B"] and len(asked) == 1
 
 
-def test_replacing_the_model_name_moves_the_pin_with_it(tmp_path):
-    """`dataclasses.replace(section, name=...)` re-runs `__post_init__` with the old name's pin: a local directory then
-    has none, and another pinned id gets its own pin rather than a refusal."""
+def test_replacing_the_name_with_a_local_directory_drops_the_pin_and_a_hub_id_keeps_the_refusal(tmp_path):
+    """`dataclasses.replace(section, name=...)` re-runs `__post_init__` with the old name's pin. A local directory drops
+    it (a local load ignores a revision). A Hub id keeps the strict rule: another pinned id given the Qwen3.5 pin is
+    refused rather than silently re-pinned, and an unpinned id keeps its explicit revision."""
     import dataclasses
 
     section = load_run_config(REPO / "configs/qwen35_4b.yaml").model
     assert section.revision == models.QWEN3_5_4B_REVISION
-    assert dataclasses.replace(section, name=str(tmp_path)).revision is None
-    assert dataclasses.replace(section, name="Qwen/Qwen3-4B").revision == models.QWEN3_4B_REVISION
     merged = dataclasses.replace(section, name=str(tmp_path))
+    assert merged.revision is None
     assert dataclasses.replace(merged, name="Qwen/Qwen3.5-4B").revision == models.QWEN3_5_4B_REVISION
+    with pytest.raises(ValueError, match="another model's pin"):
+        dataclasses.replace(section, name="Qwen/Qwen3-4B")
+    assert dataclasses.replace(section, name="Qwen/Qwen3-4B", revision=None).revision == models.QWEN3_4B_REVISION
+    with pytest.raises(ValueError, match="differs from its pin"):
+        models.pinned_revision("Qwen/Qwen3-4B", models.QWEN3_5_4B_REVISION)
+    assert models.pinned_revision("org/unpinned", models.QWEN3_5_4B_REVISION) == models.QWEN3_5_4B_REVISION
+    assert models.pinned_revision(str(tmp_path), "abc123") == "abc123"  # not a pin: left to the caller, as before
