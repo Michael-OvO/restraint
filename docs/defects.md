@@ -337,7 +337,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-12: duplicate archived eval
 - **Area:** archive. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 4.
-  **Commits:** `c32ba3e` (content hashes, duplicate warning, `check` command, tests).
+  **Commits:** `c32ba3e` (content hashes, duplicate warning, `check` command, tests); `78fbc31` (repair: gzip test that
+  fails on the old header, empty files never grouped; see "Repair" below).
 - **Evidence:** the SFT-v2 surface4 evals archived under `15-g0-judgment/eval/it15_sft_v2_surface4` and
   `15-g2-splice-replay/eval/it15_sft_v2_surface4` are the same episodes. The independent SFT-v2 run is
   `14-session-a/eval/it14_sft_v2_surface`.
@@ -347,9 +348,11 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - Cause: `archive.save` recorded no content hash and compared nothing with what was already archived, and
     `gzip_large_text` wrote the current time into each gzip header.
 - **Impact:** a reader can mistake one run for two (the diagnosis's first draft did). No archived number changes: the
-  two files hold the same episodes, so every analysis that read either one got the same rows. The it15 diagnosis
-  scripts (`analysis/it15-diagnosis/read-vs-decision/*.py`) already drop `sft_v2_b`; `read-vs-decision/decompose.json`
-  and `verify-history-meta/out.json` still show `sft_v2_a`/`sft_v2_b` (or `sftv2_b`) as separate rows. Read those
+  two files hold the same episodes, so every analysis that read either one got the same rows. In
+  `analysis/it15-diagnosis/read-vs-decision/`, `errors.py`, `explicit.py`, `items.py`, `show_items.py` and
+  `templates.py` drop `sft_v2_b`; `extract.py` still loads it from `15-g2-splice-replay` and `decompose.py` lists it in
+  `MODELS`. So `read-vs-decision/decompose.json` and `verify-history-meta/out.json` show `sft_v2_a`/`sft_v2_b` (or
+  `sftv2_b`) as separate rows. Read those
   as one run, not two. No pooled estimate and no rerun-noise figure uses the pair (`docs/research/it15-diagnosis-analyses.json`
   records it as one run copied twice). The DEF-01 re-score table counts it once.
 - **Fix (done):**
@@ -374,8 +377,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   duplicates (exit 0); it exited 1 before the notes. `tests/test_archive.py` (fails on the old code, where none of
   this exists) covers: a re-gzipped copy found by its unpacked content; a re-ordered copy found by its ids; distinct
   runs not grouped; `check` failing until the copy is declared the right way round; the cache skipping unchanged
-  files, re-hashing changed ones and ignoring corrupt or old-schema rows; deterministic gzip; and `save` recording
-  hashes and warning on a second save of the same eval.
+  files, re-hashing changed ones and ignoring corrupt or old-schema rows; deterministic gzip; empty or blank-only
+  files never grouped; and `save` recording hashes and warning on a second save of the same eval.
+- **Repair (2026-10-24, review findings):**
+  - The first `test_gzip_large_text_is_deterministic` passed on the old `gzip_large_text` 4 times in 5: the old header
+    held `time.time()` at 1 s resolution, and both writes usually fell in the same second. The test now sets the clock
+    `gzip` reads (`gzip.time.time`) to two values 10 s apart for the two writes. Checked against the old function
+    (d4dca4e) swapped into the current module: 4 of 4 runs fail on the assertion (header byte 4, the mtime), not on
+    an import error.
+  - `duplicate_groups` skipped empty files only for the ids hash, so two empty (or blank-line-only) episode files
+    were still grouped by raw or unpacked bytes. It now skips files with 0 episodes for every hash. New test
+    `test_empty_or_blank_episode_files_are_never_duplicates` fails on the old line. No real archive file is affected
+    (68 files, one group, unchanged).
+  - Departure from integrity-gate.md S8 (L0) text, disclosed: the gate says content hashes are stored in each
+    `MANIFEST.sha256`. They are kept in `~/.cache/honest-agents/archive-index/episode_hashes.jsonl` (recomputable
+    from the archive) and, for new saves, in the `ITERATION.md` record. MANIFEST files stay plain `shasum` files so
+    `shasum -a 256 -c` keeps working. The other half of S8 (each eval's manifest names its model, build and prompt) is
+    outside DEF-12 and not done.
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
 - **Area:** reward (design defect, not a code bug). **Status:** open. It blocks any RL experiment, not SFT or eval.
