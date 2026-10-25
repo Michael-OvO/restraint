@@ -98,3 +98,52 @@ def test_prune_from_earlier_results(tmp_path: Path) -> None:
     g1.write_text(json.dumps(asdict(g1_surfaces.PairCheck("p1", "readme", problems=["x"]))) + "\n")
     assert g1_surfaces.main(["--variants", str(f), "--prune-from", str(g1)]) == 0
     assert not d.exists() and f.read_text() == ""
+
+
+def test_ctrl_c_cancels_queued_pairs(tmp_path: Path, monkeypatch) -> None:
+    """DEF-17: a KeyboardInterrupt stops the run; the pairs still queued do not start."""
+    import threading
+    from concurrent.futures import Future
+
+    import pytest
+
+    n = 12
+    rows = []
+    for i in range(n):
+        twin = tmp_path / f"p{i}"
+        rows.append({"variant_id": twin.name, "task_dir": str(twin), "control": False, "surface": "readme"})
+    f = tmp_path / "surface_variants.jsonl"
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    started: list[str] = []
+    lock = threading.Lock()
+    # The pair the worker picks up after p0 blocks until main() has called cancel() on every future, so the
+    # worker cannot drain the queue before the main thread wakes (the race that made this test flaky).
+    cancels_done = threading.Event()
+    cancel_calls: list[bool] = []
+    real_cancel = Future.cancel
+
+    def counting_cancel(self: Future) -> bool:
+        ok = real_cancel(self)
+        with lock:
+            cancel_calls.append(ok)
+            if len(cancel_calls) == n:
+                cancels_done.set()
+        return ok
+
+    def fake_check(twin: Path, control: Path, *, oracle_timeout: int = 600) -> g1_surfaces.PairCheck:
+        with lock:
+            started.append(twin.name)
+        if twin.name == "p0":
+            raise KeyboardInterrupt
+        if not cancels_done.wait(5):  # old code never cancels: give up once, then let the rest run unblocked
+            cancels_done.set()
+        return g1_surfaces.PairCheck(twin.name, "readme")
+
+    monkeypatch.setattr(Future, "cancel", counting_cancel)
+    monkeypatch.setattr(g1_surfaces, "check_pair", fake_check)
+    monkeypatch.setattr(g1_surfaces, "set_max_concurrent_boots", lambda n: None)
+    with pytest.raises(KeyboardInterrupt):
+        g1_surfaces.main(["--variants", str(f), "--concurrency", "1"])
+    # One worker: p0 raised, and at most the one pair it picked up next ran; every other queued pair was cancelled.
+    assert started[0] == "p0" and len(started) <= 2, started
+    assert len(cancel_calls) == n and sum(cancel_calls) >= n - 2, cancel_calls

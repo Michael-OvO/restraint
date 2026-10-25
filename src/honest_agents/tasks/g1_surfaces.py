@@ -162,14 +162,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     results: list[PairCheck] = []
     with ThreadPoolExecutor(args.concurrency) as pool:
         futures = {pool.submit(check_pair, t, c, oracle_timeout=args.oracle_timeout): (t, s) for t, c, s in pairs}
-        for f, (t, s) in futures.items():
-            try:
-                r = f.result()
-            except Exception as e:
-                log.exception("pair %s failed", t.name)
-                r = PairCheck(t.name, s, problems=[f"{type(e).__name__}: {e}"])
-            results.append(r)
-            print(f"{'OK  ' if r.ok else 'FAIL'} {r.surface:15s} {r.pair}  {r.problems or ''}", flush=True)
+        try:
+            for f, (t, s) in futures.items():
+                try:
+                    r = f.result()
+                except Exception as e:
+                    log.exception("pair %s failed", t.name)
+                    r = PairCheck(t.name, s, problems=[f"{type(e).__name__}: {e}"])
+                results.append(r)
+                print(f"{'OK  ' if r.ok else 'FAIL'} {r.surface:15s} {r.pair}  {r.problems or ''}", flush=True)
+        except KeyboardInterrupt:
+            # Without this the pool's shutdown runs every queued pair (DEF-17); running pairs still tear down.
+            for f in futures:
+                f.cancel()
+            raise
     summary: dict[str, Any] = {}
     for r in results:
         s = summary.setdefault(r.surface, [0, 0])

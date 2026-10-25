@@ -22,6 +22,10 @@ non-held-out pool pair (`Pair.heldout` / `is_heldout`) of a training surface; po
 sources by a stable hash (`assign_pool_pairs`). **Probe rows** (`role: probe`) use RL-pool and select sources; a training
 surface gets, alternately by source hash, an SFT-used pool pair (seen) or a held-out one (unseen); the held-out surfaces
 (`empty_backup`, `inbound_link`) are built on select sources only.
+
+Pinned builds (DEF-18): a twin recorded in `data/pools/decision_pair_assignments.json` (role -> twin variant id -> pair
+and `{context}`, written by `python -m honest_agents.tasks.pool_build record-decision`) is built with that pair and
+context whatever is added to a pool; the round robin and the probe's pair rank above only choose for unrecorded twins.
 """
 
 from __future__ import annotations
@@ -37,16 +41,23 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from honest_agents.tasks import decision_probe as dp
 from honest_agents.tasks.decision_probe import VariantRef
+from honest_agents.tasks.perturb.core import variant_id
 from honest_agents.tasks.perturb.risk_surfaces import (
+    FAMILY,
     SURFACES,
     SURFACES_HELDOUT,
     SURFACES_TRAIN,
+    Assignment,
+    PoolError,
     SurfacePool,
     build_same_site,
     get_pool,
     is_heldout,
+    pool_dir,
 )
 from honest_agents.tasks.select_split import excluded_from_training, load_select_sources
 from honest_agents.tasks.taskfs import slug
@@ -71,6 +82,39 @@ DEFAULT_SFT_CONFIG = "configs/sft_decision_v2_qwen35.yaml"  # its `max_pairs_per
 
 def _rank(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
+
+
+# ── pinned pairs (DEF-18) ────────────────────────────────────────────────────
+
+PINS_FILE = "decision_pair_assignments.json"  # next to the pool directory: data/pools/decision_pair_assignments.json
+ROLE_UNLISTED = "unlisted"  # a twin dir of the root that surface_pairs.jsonl does not list (an earlier build's leftover)
+
+
+class PinsFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: int = 1
+    note: str = ""
+    roles: dict[str, dict[str, Assignment]] = {}  # role -> twin variant id (`<source>__high_risk__<surface>`) -> pin
+
+
+def pins_path(directory: Path | None = None) -> Path:
+    """`decision_pair_assignments.json` of a pool directory: its parent's (`data/pools/` for `data/pools/surfaces/`)."""
+    return (directory or pool_dir()).parent / PINS_FILE
+
+
+def load_pins(path: Path | None = None) -> PinsFile:
+    """The recorded pins, or none when the file does not exist (a test pool in a temporary dir draws as before)."""
+    p = path or pins_path()
+    if not p.is_file():
+        return PinsFile()
+    try:
+        return PinsFile.model_validate_json(p.read_text())
+    except ValueError as e:
+        raise PoolError(f"{p}: {e}") from e
+
+
+def twin_variant_id(source: str, surface: str) -> str:
+    return variant_id(source, f"{FAMILY}__{surface}")
 
 
 @dataclass(frozen=True)
@@ -217,10 +261,24 @@ def build_row(
     split: str,
     seen: bool | None = None,
     seed: int = 0,
+    pin: Assignment | None = None,
 ) -> SurfacePairRow | None:
-    """Build one (source, surface) twin/control pair on the bank's task directories; None when it cannot be built."""
+    """Build one (source, surface) twin/control pair on the bank's task directories; None when it cannot be built. A
+    `pin` (recorded with the same seed) replaces `pool_pair` and the drawn `{context}` (DEF-18)."""
+    context = None
+    if pin is not None and pin.seed == seed:
+        # checked before the build, whose errors only drop the row: a pin that cannot be honoured must stop the build
+        vid = twin_variant_id(source, surface)
+        if pin.surface != surface or pin.split != split:
+            raise PoolError(f"{vid} is pinned to {pin.surface} {pin.pair!r} for split={pin.split!r}, not {split!r}")
+        if pin.pair not in {p.id for p in pool.pairs}:
+            raise PoolError(f"{vid} is pinned to {pin.pair!r}, which is no longer in the {surface} pool")
+        if is_heldout(surface, pool.by_id(pin.pair)) != (split == "test"):
+            raise PoolError(f"{vid}: pinned pair {pin.pair!r} changed its `heldout` flag")
+        pool_pair, context = pin.pair, pin.context
     try:
-        built = build_same_site(bank_tasks, out_root, source, surface, pool=pool, seed=seed, split=split, pool_pair=pool_pair)
+        built = build_same_site(bank_tasks, out_root, source, surface, pool=pool, seed=seed, split=split,
+                                pool_pair=pool_pair, pool_context=context)  # fmt: skip
     except (FileNotFoundError, KeyError, ValueError) as e:
         logger.warning("%s %s: %s", source, surface, e)
         return None
@@ -256,16 +314,22 @@ def build_sft_rows(
     out_root: Path = SURFACE_TASKS,
     surfaces: Sequence[str] = SURFACES_TRAIN,
     salt: str = DEFAULT_SALT,
+    pins: Mapping[str, Assignment] | None = None,
+    pools: Mapping[str, SurfacePool] | None = None,
 ) -> tuple[list[SurfacePairRow], Counter[str]]:
+    """`pins`: twin variant id -> recorded pair (default: the SFT role of `load_pins()`); `pools`: surface -> pool
+    (default `get_pool`)."""
+    pins = load_pins().roles.get(ROLE_SFT, {}) if pins is None else pins
     rows: list[SurfacePairRow] = []
     counts: Counter[str] = Counter()
     for surface in surfaces:
         if surface not in SURFACES_TRAIN:
             raise ValueError(f"{surface} is a held-out surface: it never enters SFT")
-        pool = get_pool(surface)
+        pool = pools[surface] if pools is not None else get_pool(surface)
         assignment = assign_pool_pairs(sources, pool, salt)
         for source in sorted(sources):
-            row = build_row(ROLE_SFT, source, surface, pool, assignment[source], bank_tasks=bank_tasks, out_root=out_root, split="train")
+            row = build_row(ROLE_SFT, source, surface, pool, assignment[source], bank_tasks=bank_tasks, out_root=out_root,
+                            split="train", pin=pins.get(twin_variant_id(source, surface)))  # fmt: skip
             if row is None:
                 counts[f"{surface}_not_built"] += 1
                 continue
@@ -322,11 +386,15 @@ def build_probe_rows(
     bank_tasks: Path,
     out_root: Path = SURFACE_TASKS,
     salt: str = DEFAULT_SALT,
+    pins: Mapping[str, Assignment] | None = None,
+    pools: Mapping[str, SurfacePool] | None = None,
 ) -> tuple[list[SurfacePairRow], Counter[str]]:
+    """`pins` and `pools` as in `build_sft_rows` (default pins: the probe role of `load_pins()`)."""
+    pins = load_pins().roles.get(ROLE_PROBE, {}) if pins is None else pins
     rows: list[SurfacePairRow] = []
     counts: Counter[str] = Counter()
     for surface in SURFACES:
-        pool = get_pool(surface)
+        pool = pools[surface] if pools is not None else get_pool(surface)
         trained = surface in SURFACES_TRAIN
         sources = probe.for_surface(surface)
         if trained:
@@ -340,13 +408,14 @@ def build_probe_rows(
                     continue
                 pair = sorted(ids, key=lambda i: _rank(salt, surface, source, i))[0]
                 row = build_row(ROLE_PROBE, source, surface, pool, pair, bank_tasks=bank_tasks, out_root=out_root,
-                                split="train" if seen else "test", seen=seen)  # fmt: skip
+                                split="train" if seen else "test", seen=seen,
+                                pin=pins.get(twin_variant_id(source, surface)))  # fmt: skip
                 _record(rows, counts, surface, row)
         else:
             assignment = assign_pool_pairs(sources, pool, salt)
             for source in sources:
                 row = build_row(ROLE_PROBE, source, surface, pool, assignment[source], bank_tasks=bank_tasks, out_root=out_root,
-                                split="train", seen=False)  # fmt: skip
+                                split="train", seen=False, pin=pins.get(twin_variant_id(source, surface)))  # fmt: skip
                 _record(rows, counts, surface, row)
     return rows, counts
 
