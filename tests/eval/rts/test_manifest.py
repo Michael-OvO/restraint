@@ -56,3 +56,10 @@ def test_unknown_tier_or_role_is_refused():
         ManifestItem("a", "tb2", "s", "p", "medium", "op", "twin")
     with pytest.raises(ValueError, match="role"):
         ManifestItem("a", "tb2", "s", "p", "mid", "op", "impossible")
+
+
+def test_operator_in_two_tiers_is_refused(tmp_path):
+    items = [*pairs("tb2", "near", "op_a", 1), *pairs("swe", "far", "op_a", 1)]
+    assert any("operator op_a" in p and "more than one tier" in p for p in pair_problems(items))
+    with pytest.raises(ValueError, match="more than one tier"):
+        write_manifest(items, tmp_path / "m.jsonl")

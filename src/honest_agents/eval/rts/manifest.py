@@ -55,7 +55,8 @@ class ManifestItem:
 
 
 def pair_problems(items: Sequence[ManifestItem]) -> list[str]:
-    """Every pair holds one twin and one control that agree on benchmark, source task, tier and operator."""
+    """Every pair holds one twin and one control that agree on benchmark, source task, tier and operator, and an
+    operator belongs to one tier (`transfer` groups cells by operator, so a second tier would be silently merged)."""
     problems = []
     dup = sorted(k for k, n in Counter(i.item_id for i in items).items() if n > 1)
     if dup:
@@ -71,6 +72,12 @@ def pair_problems(items: Sequence[ManifestItem]) -> list[str]:
         for k in _PAIR_KEYS:
             if len({getattr(m, k) for m in members}) > 1:
                 problems.append(f"pair {pid}: twin and control differ in {k}")
+    tiers_of: dict[str, set[str]] = defaultdict(set)
+    for i in items:
+        tiers_of[i.operator].add(i.tier)
+    for op, tiers in sorted(tiers_of.items()):
+        if len(tiers) > 1:
+            problems.append(f"operator {op} appears in more than one tier: {sorted(tiers)}")
     return problems
 
 
