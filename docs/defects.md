@@ -19,7 +19,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-09 | tooling | open | decision probe hard-codes `harness.SYSTEM_PROMPT` |
 | DEF-10 | stats | open | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | open (investigate) | G2's read rate differs by branch (twins 37 vs controls 24, held-out); cause unknown |
-| DEF-12 | archive | open | the two archived SFT-v2 surface4 evals are the same episodes under two names |
+| DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | open (blocks RL only) | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | open | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
@@ -336,14 +336,46 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** sweep S3.
 
 ### DEF-12: duplicate archived eval
-- **Area:** archive. **Status:** open. **Found:** it15 diagnosis section 4.
+- **Area:** archive. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 4.
+  **Commits:** `c32ba3e` (content hashes, duplicate warning, `check` command, tests).
 - **Evidence:** the SFT-v2 surface4 evals archived under `15-g0-judgment/eval/it15_sft_v2_surface4` and
   `15-g2-splice-replay/eval/it15_sft_v2_surface4` are the same episodes. The independent SFT-v2 run is
   `14-session-a/eval/it14_sft_v2_surface`.
-- **Impact:** a reader can mistake one run for two (the diagnosis's first draft did).
-- **Fix:** mark the copy as a copy in both `ITERATION.md` files and in `iterations/README.md`. Make `archive` record a
-  content hash per eval and warn on duplicates.
-- **Closure test:** sweep S8.
+  - Measured 2026-10-24: 960 episodes each, the same unpacked bytes (sha256 `38bc648f…`) and the same sorted episode
+    ids, but different `.gz` bytes (the gzip header holds the write time). So the MANIFEST hashes differ and a
+    file-hash check alone misses the copy. G0's copy was saved first (2026-10-15 02:11 UTC), G2's 13 h later.
+  - Cause: `archive.save` recorded no content hash and compared nothing with what was already archived, and
+    `gzip_large_text` wrote the current time into each gzip header.
+- **Impact:** a reader can mistake one run for two (the diagnosis's first draft did). No archived number changes: the
+  two files hold the same episodes, so every analysis that read either one got the same rows. The it15 diagnosis
+  scripts (`analysis/it15-diagnosis/read-vs-decision/*.py`) already drop `sft_v2_b`; `read-vs-decision/decompose.json`
+  and `verify-history-meta/out.json` still show `sft_v2_a`/`sft_v2_b` (or `sftv2_b`) as separate rows. Read those
+  as one run, not two. No pooled estimate and no rerun-noise figure uses the pair (`docs/research/it15-diagnosis-analyses.json`
+  records it as one run copied twice). The DEF-01 re-score table counts it once.
+- **Fix (done):**
+  - `honest_agents.archive` hashes each eval's episodes three ways: raw file bytes, unpacked content, and sorted
+    episode ids. Ids carry a random per-rollout suffix (`eval/rollout.py:467`), so two runs never share them, and a
+    re-gzipped or re-ordered copy still matches.
+  - `save` writes `episodes_sha256`, `episode_ids_sha256` and `n_episodes` for each eval into the `ITERATION.md`
+    record. It compares each new eval with everything already archived and with the other evals of the same save. A
+    match prints a `WARNING` to stderr and adds a `- duplicate:` line to `ITERATION.md`.
+  - `gzip_large_text` writes a fixed gzip header (mtime 0, no name), so the same file always gzips to the same bytes.
+  - `python -m honest_agents.archive check [--dest] [--cache] [--no-cache] [--jobs]` is sweep S8. It lists every
+    duplicate group and exits 1 on any undeclared one. A copy is declared in the copy's `ITERATION.md` by a line of the
+    form `` `eval/<name>` is a copy of `<folder>/eval/<name>` ``. Hashes are cached in
+    `~/.cache/honest-agents/archive-index/episode_hashes.jsonl`, outside the archive, with a schema version. A file is
+    re-hashed only when its size or mtime changes (L0 per integrity-gate.md), and up to `--jobs` files are hashed in
+    parallel. On the whole archive (68 episode files): 1.2 s cold, 0.3 s warm.
+  - Archive (append-only notes): a dated DEF-12 section is appended to both `ITERATION.md` files. G2's declares its eval
+    as a copy of G0's; G0's names it the original. A `## Notes` section is appended to `iterations/README.md`. The
+    `ITERATION.md` line of each folder's `MANIFEST.sha256` was updated to the new hash, so `shasum -a 256 -c` still
+    passes. Both manifests were verified before and after the edit.
+- **Closure test:** sweep S8. `archive check` on the archive reports the one group as a declared copy and 0 undeclared
+  duplicates (exit 0); it exited 1 before the notes. `tests/test_archive.py` (fails on the old code, where none of
+  this exists) covers: a re-gzipped copy found by its unpacked content; a re-ordered copy found by its ids; distinct
+  runs not grouped; `check` failing until the copy is declared the right way round; the cache skipping unchanged
+  files, re-hashing changed ones and ignoring corrupt or old-schema rows; deterministic gzip; and `save` recording
+  hashes and warning on a second save of the same eval.
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
 - **Area:** reward (design defect, not a code bug). **Status:** open. It blocks any RL experiment, not SFT or eval.
