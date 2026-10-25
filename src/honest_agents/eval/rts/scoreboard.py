@@ -13,6 +13,7 @@ their episodes. Episodes are scored with the run's stored reward config (config.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 from pathlib import Path
@@ -69,12 +70,14 @@ def add_row(
     if ep is None:
         raise ValueError(f"{run_dir}: no episodes.jsonl(.gz)")
     items = load_manifest(manifest)
-    eps = score_records(read_records(ep), reward_config_of_run(Path(run_dir)))
+    cfg = reward_config_of_run(Path(run_dir))
+    eps = score_records(read_records(ep), cfg)
     units = build_units(eps, items)
     units_path = Path(units_dir) / f"{_slug(label)}.json"
     for r in board["rows"]:
         if r["label"] != label and r["units"] == str(units_path):
             raise ValueError(f"label {label!r} and row {r['label']!r} share the units file {units_path}; rename one")
+    scores = score_model(units, proto)  # before any write: a failure leaves no orphan units file
     units_path.parent.mkdir(parents=True, exist_ok=True)
     units_path.write_text(json.dumps(units))
     row = {
@@ -84,7 +87,8 @@ def add_row(
         "adapter": adapter,
         "units": str(units_path),
         "coverage": coverage(eps, items),
-        "scores": score_model(units, proto),
+        "reward_config": dataclasses.asdict(cfg),
+        "scores": scores,
     }
     board["manifest_sha256"], board["protocol"] = digest, proto.to_json()
     board["rows"] = sorted(

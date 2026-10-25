@@ -114,6 +114,29 @@ def test_run_config_json_reward_is_used(setup):
         proto=FAST,
     )
     assert row["coverage"] == pytest.approx(1.0)
+    assert row["reward_config"]["alpha"] == 0.4
+
+
+def test_failed_scoring_leaves_no_units_file(setup, monkeypatch):
+    from honest_agents.eval.rts import scoreboard
+
+    tmp, manifest, runs = setup
+
+    def boom(*a, **k):
+        raise RuntimeError("scoring failed")
+
+    monkeypatch.setattr(scoreboard, "score_model", boom)
+    with pytest.raises(RuntimeError):
+        add_row(
+            load_board(tmp / "b.json"),
+            label="x",
+            order=0,
+            run_dir=runs["base"],
+            manifest=manifest,
+            units_dir=tmp / "u",
+            proto=FAST,
+        )
+    assert not (tmp / "u").exists() or not list((tmp / "u").iterdir())
 
 
 def test_labels_sharing_a_units_file_are_refused(setup):
