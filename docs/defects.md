@@ -25,7 +25,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
-| DEF-18 | build | open | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
+| DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 
 ---
 
@@ -413,15 +413,50 @@ section 7 critique) and from re-checks against the code and the archive on that 
   fails.
 
 ### DEF-18: probe and SFT surface builds move when a pool grows
-- **Area:** build. **Status:** open. **Found:** 2026-10-24, while fixing DEF-07.
+- **Area:** build. **Status:** closed 2026-10-24. **Found:** 2026-10-24, while fixing DEF-07.
+  **Commits:** `42d1e7f` (fix, pins, manifest, tests).
 - **Evidence:** `src/honest_agents/tasks/decision_surfaces.py` `assign_pool_pairs` (L170-178) sorts the split's pairs by
   hash and deals them round robin (`pairs[i % len(pairs)]`), so an appended pair reassigns sources. The probe rows of
   held-out pairs take the first pair by `_rank` over the test pairs (~L340), so a new pair can take the first place.
   `_pick_pair` keeps the old `{context}` draw for a forced pair, which follows `randrange(len(pairs_for(split)))` on
   the same stream, so the context also moves with pool size. DEF-07 left the forced path unchanged on purpose: changing
   it would move the 1,048 probe/SFT dirs.
-- **Impact:** none yet (no pool has grown). A rebuild of `data/decision/surfaces/tasks` after a pool edit would change
-  probe prompts and void the cached sandbox outputs keyed by `task_signature`.
-- **Fix:** record the probe/SFT builds in `pair_assignments.json` (pair and context, keyed by twin variant id and role)
-  and honour them on the forced path too; extend `build_manifest.json` (or add a second manifest) for those roots.
-- **Closure test:** grow every pool in a copy, rebuild the probe set in memory and compare hashes with the manifest.
+- **Measured (old code, 2026-10-24):** the root holds 1,048 dirs: the 968 of the 484 rows of
+  `data/decision/surface_pairs.jsonl` (SFT 4 x 49, probe 4 x 48 + empty_backup 24 + inbound_link 72) and 80 dirs no row
+  lists (10 select sources x the 4 training surfaces, a leftover of an earlier build; they are in
+  `sandbox_outputs_surfaces.jsonl`). Rebuilding the 484 rows through the `decision_surfaces` selection (round robin,
+  probe pair rank, the SFT-v2 cap for "seen") over their recorded sources reproduces all 968 dirs byte for byte. After
+  appending 3 training and 3 held-out pairs to every pool, **478 of the 968** move (228 rows change pair, the others
+  only their `{context}`): SFT readme 66, file_header 52, config_comment 64, manifest 90; probe readme 18, file_header
+  16, config_comment 16, manifest 24, empty_backup 36, inbound_link 96. The 80 leftovers have no selection path at all.
+- **Impact:** none on archived numbers: no pool has grown since the build, and with the pins a rebuild reproduces the
+  live root (1,048/1,048 by `validate.task_hash`), so no prompt, cached sandbox output (`task_signature`) or archived
+  probe result changes and nothing is re-scored. The change touches no grader, label or data, so there was no behaviour
+  at risk to measure on the previous model.
+- **Fix (done):**
+  - `data/pools/decision_pair_assignments.json`: role (`sft` 196, `probe` 288, `unlisted` 40) -> twin variant id ->
+    `{surface, pair, context, split, seed}`, read from each live twin's `task.toml` (controls share their twin's plan).
+    Kept apart from `pair_assignments.json` (the eval's, DEF-07): `pool_build record` rewrites that file.
+  - `decision_surfaces.build_row` takes a `pin`: the pinned pair replaces the selected one and the pinned `{context}`
+    replaces the forced path's draw (`risk_surfaces.build_same_site(pool_context=...)`, threaded through `_make_plan` and
+    `_pick_pair`). A pin whose pair left the pool, whose split differs or whose pair changed its `heldout` flag raises
+    `PoolError` before the build (the build's own errors only drop the row). `build_sft_rows` / `build_probe_rows` load
+    the pins of their role by default (`load_pins`, next to `pool_dir()`), so `decision_surfaces build` honours them;
+    an unpinned twin is chosen exactly as before.
+  - `python -m honest_agents.tasks.pool_build record-decision | check-decision`. `record-decision` pins the live root,
+    rebuilds it through the selection into a temporary directory, refuses unless every live dir is reproduced, and
+    writes `data/pools/decision_build_manifest.json` (build parameters, sources per role, the 80 leftovers' sources,
+    1,048 hashes). `check-decision` is sweep S7 for this root at L0 (about 5 s): rebuild from the manifest alone, hash,
+    delete, exit 1 on any changed, missing, new or unbuildable variant.
+  - Verified on the live root: with the pins, growing every pool by 3 training + 3 held-out pairs leaves 1,048/1,048
+    byte-identical; without the pins file, 490/1,048 (the 478 above, and the 80 leftovers cannot be rebuilt).
+- **Closure test:** `tests/tasks/test_decision_pins.py` (synthetic bank: 4 SFT, 4 probe and 2 held-out-only sources, one
+  unlisted leftover dir). Record, grow every pool (3 training + 3 held-out pairs), `check-decision` passes and the
+  default `build_sft_rows` / `build_probe_rows` give the same hashes; the sensitivity twin shows growth moves variants
+  without the pins; an unpinned source draws as if nothing were pinned; a removed or split-crossing pin is a `PoolError`;
+  `record-decision` refuses a hand-edited root. All five fail on the old code. The committed manifest test
+  (`test_committed_decision_manifest_matches_a_rebuild`) needs the local bank and root, so it skips in a worktree;
+  `check-decision` run from the main tree gave 1,048/1,048.
+- **Not covered:** the sweep text in `integrity-gate.md` (S7 method row) names only `build_manifest.json`; S7 should
+  also run `pool_build check-decision`. A later `decision_surfaces build` that adds sources must be followed by
+  `record-decision`, as DEF-07's `record` after an eval build.
