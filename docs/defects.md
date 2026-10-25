@@ -29,9 +29,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-19 | tooling | open | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only |
 | DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
 | DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
-| DEF-22 | tooling / build | open | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
+| DEF-22 | tooling / build | closed | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
 | DEF-23 | tooling | open | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
-| DEF-24 | tooling | open | `replay_episodes`' cache key hashes only env/harness/grading, not what they import (bank, mutation, taskfs...) or the Harbor/TRL versions |
+| DEF-24 | tooling | closed | `replay_episodes`' cache key hashes only env/harness/grading, not what they import (bank, mutation, taskfs...) or the Harbor/TRL versions |
 | DEF-25 | task data / build | closed | corrupt_input: the same-size in-place write that restores mtime is dropped from the committed layer under the containerd snapshotter, so twins ship an intact input |
 | DEF-26 | task data / build | closed | remove_input: the content-dependence filters skip FILE_GENERATED inputs (sqlite3/dd DBs), so twins whose DB rows the instruction prints are emitted as infeasible |
 | DEF-27 | task data / grader | closed | conflicting_constraint twins are passable (37 of 46 base twin episodes pass tests) yet stay in test.jsonl, graded as infeasible, never voided |
@@ -50,6 +50,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
+| DEF-NEW-gate-cache-1 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 
 ---
 
@@ -1138,8 +1139,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   before `run_grade`), so the outcome does not depend on scheduling.
 
 ### DEF-22: L0's S7 writes the rebuild to disk
-- **Area:** tooling / build. **Status:** open. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered
-  2026-10-25 on review.
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the day of the fix; the prescribed 2026-10-24 precedes the
+  entry date). **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25 on review.
+  **Commits:** `9b43f14` (fix with DEF-24, tests); ledger in the commit that follows it.
 - **Evidence:** integrity-gate.md, "Running the gates efficiently": at L0 "the only disk write is pytest's temp dir";
   S7: "Never write the build to disk to diff it". `gate.checks.s7_build_stability` calls `pool_build.build` and
   `pool_build.build_decision`, which emit every variant into a `tempfile` directory, hash it, then delete it.
@@ -1151,6 +1153,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
   directory is deleted. The writes cost disk I/O on every test run, and the L0 contract as written is false.
 - **Fix (proposed, build lane):** have `risk_surfaces` emission / `pool_build` produce `{relative path: bytes}` in
   memory, or hash while emitting, so S7 compares hashes without writing. Then drop the S7 exemption from the L0 test.
+- **Fix (done):** `pool_build.build` and `pool_build.build_decision` (S7 at L0, and `check`, `record`,
+  `check-decision`, `record-decision`) build inside `pool_build.in_memory`: a pyfakefs in-memory filesystem in which
+  the repo, the root, the bank, the pools and the cwd show the real files (read lazily, case-sensitive) and every write,
+  the scratch dir included, stays in memory. The emission code (`risk_surfaces`, `emit`, `taskfs`, Harbor's `Task`
+  check, `label_leaks`, `task_hash`) is unchanged, so S7 still checks the production builder, not a second in-memory
+  copy of it. `pyfakefs>=6.2.0` (6.2.0, pure Python) is a new core dependency. The S7 exemption is gone from the L0
+  test, now `test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget` (every check: 0 bytes).
+- **Tests:** `tests/tasks/test_pool_build.py::test_a_rebuild_is_hashed_in_memory_and_writes_nothing_to_disk`: a
+  2-source x 6-surface synthetic build gives the hashes of the same build on disk, the temp dir (pointed at an empty
+  dir) keeps its mtime and stays empty, the bank is unchanged. It fails on the old code (the temp dir's mtime moves).
+  The L0 test fails on the old code where the bank exists (S7: 18,793,272 bytes).
+- **Impact note.** No archived number changes: S7's verdict is a comparison of hashes, and the in-memory rebuild gives
+  the committed manifests' hashes (`gate sweep --level 0 --only S7`: PASS, eval 240/240, decision 1048/1048
+  byte-identical, **0 bytes written**, was 18,793,272). Cost, measured with the machine shared by other lanes: the disk
+  rebuild took 12.3 s CPU (5.4 user + 6.8 system, 13.3 s wall), the in-memory one 20.1 s CPU (18.5 user + 1.6 system,
+  19.9 s wall); the full L0 test passed in 33 s (budget 60 s). pyfakefs patches `os`/`io`/`pathlib` process-wide
+  while the block is open, so a build must not run concurrently with other file work in the same process (the L0
+  sweep runs its checks one at a time).
 
 ### DEF-23: the sweep does not run S3 or S11
 - **Area:** tooling. **Status:** open. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
@@ -1167,8 +1187,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   preflight needs a real container.
 
 ### DEF-24: the replay cache key misses imported sources and library versions
-- **Area:** tooling. **Status:** open. **Found:** 2026-10-25, DEF-15 repair (the same gap the reviewer found in
-  `g1_surfaces` and `gate.index`, which are fixed there).
+- **Area:** tooling. **Status:** closed 2026-10-25 (the found date; the prescribed 2026-10-24 precedes it).
+  **Found:** 2026-10-25, DEF-15 repair (the same gap the reviewer found in `g1_surfaces` and `gate.index`, which are
+  fixed there). **Commits:** `9b43f14` (fix with DEF-22, tests); ledger in the commit that follows it.
 - **Evidence:** `src/honest_agents/analysis/replay_episodes.py:74`: `SOURCE_FILES = (env.py, harness.py, grading.py)`.
   `env.py` and `grading.py` import `bank`, `mutation`, `spec`, `report`, `reward` and `verifier/*`
   (`gate.cache.import_closure` of `replay_episodes.py` lists them). The key (`replay_episodes.cache_key`) also leaves
@@ -1179,6 +1200,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `~/.cache/honest-agents/gate/replay_episodes.v1.jsonl` (3.6 MB) would be re-run on the next S3 replay.
 - **Fix (proposed, DEF-06 / replay owner):** `SOURCE_FILES = gate.cache.import_closure(Path(__file__))`, plus
   `library_versions("harbor", "trl")` in the key. Accept the one-time cache refill.
+- **Fix (done):** as proposed. `replay_episodes.SOURCE_FILES = import_closure(Path(__file__))` (66 files: env,
+  harness, grading and what they import, plus what `replay_episodes` itself imports, lazily or not, e.g.
+  `eval/read_diagnosis` and the metrics it pulls in, which over-invalidates rather than under), `LIBRARIES = ("harbor",
+  "trl")`, `Replayer.libraries` (default `library_versions(*LIBRARIES)`) and `cache_key(..., libraries)`. `SCHEMA_VERSION`
+  stays 1: every key changes, so no old row can match.
+- **Tests:** `tests/test_replay_episodes.py::test_the_cache_key_covers_every_imported_module_and_the_library_versions`
+  (the closure holds bank, mutation, spec, report, reward, verifier/runner; the replayer carries the Harbor and TRL
+  versions; a cached branch re-runs when the Harbor version changes) and the extended
+  `test_cache_key_covers_sources_image_and_timeout`. Both fail on the old code.
+- **Impact note.** No archived number changes (the rows are cached command outputs, and none is known to differ).
+  Not re-scored. The one-time refill: the 1,097 rows (3.7 MB) of `~/.cache/honest-agents/gate/replay_episodes.v1.jsonl`
+  no longer match any key, so the next S3 replay or regrade boots every branch again; the rows stay in the file and
+  are ignored. `replay_episodes.py` is in `gate.index.LABEL_SOURCES`, so the stored archive index is stale after this
+  commit and L0 rebuilds it in memory (S2 about 20 s) until `python -m honest_agents.gate index` is re-run.
 
 ### DEF-25: corrupt_input twins are not corrupted under the containerd snapshotter
 - **Area:** task data / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
@@ -2005,3 +2040,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   needs no edit. (2) Callback: over 441 archived `bank*.jsonl*` files one changes:
   `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 % (and with it `work_vs_quit_gap`); the other pool stats do not
   depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
+
+### DEF-NEW-gate-cache-1: the emitted task.toml depends on which TOML writer is installed
+- **Area:** build / tooling. **Status:** open. **Found:** 2026-10-25, DEF-22 fix (S7 failed in a fresh worktree).
+- **Evidence:** `src/honest_agents/tasks/taskfs.py` `dumps_toml` (~L139) uses `tomli_w` if importable, else `tomlkit`,
+  else `toml` (0.10, a Harbor dependency). The three write different bytes (`tags = [ "echos",]` with `toml`; one item
+  per line and the tables in another order with `tomli_w`). The repo's `train`+`eval` environment has only `toml`;
+  `openenv` pulls in `tomli-w` and, through gradio, `tomlkit` (uv.lock). In a worktree venv that had been synced with
+  `--extra openenv` before `--extra train --extra eval` (uv run's sync is inexact, so tomli_w stayed),
+  `gate sweep --level 0 --only S7` on the unchanged code gave **FAIL: eval 0/240, decision 0/1048 byte-identical**,
+  and one rebuilt variant's `task.toml` differed from the main tree's only in its formatting. After an exact
+  `uv sync --frozen --extra train --extra eval` it was 240/240 and 1048/1048.
+- **Impact:** latent for the committed builds (made in the `toml`-only environment). Any build, S7 check, `task_hash`,
+  `validate.is_current` or G1 cache key computed in an environment with tomli_w or tomlkit installed differs from one
+  made without, while the task's content is the same, so S7 fails for a reason that is not a build change, and a build
+  made in such an environment would not reproduce on a node.
+- **Fix (proposed):** pin one writer (use `toml`, which Harbor guarantees, or add `tomli-w` as a core dependency and use
+  only it, then re-record both manifests), and add a test that `dumps_toml` gives fixed bytes for a fixed table.
