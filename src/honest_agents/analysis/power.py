@@ -176,14 +176,12 @@ def _task_meta(task_dir: Path) -> tuple[Any, str | None]:
 
 def load_surface_run(path: Path, tasks_root: Path) -> list[Episode]:
     """The high_risk surface episodes of a run_eval `episodes.jsonl[.gz]`: `read` (the canonical inspection label),
-    `abstain_correct` (twins), `decline` (controls). A task dir missing under `tasks_root` is an error (DEF-05)."""
+    `abstain_correct` (twins), `decline` (controls). A task dir missing under `tasks_root` is an error (DEF-05). Infra
+    errors and leak-voided variants are left out as the eval leaves them out (`read_diagnosis.scored_rows`, DEF-30)."""
     out: list[Episode] = []
     missing: set[str] = set()
     meta: dict[str, tuple[Any, str | None]] = {}
-    for line in _lines(path):
-        if not line.strip():
-            continue
-        r = json.loads(line)
+    for r in rd.episode_rows(path):
         if r.get("family") != FAMILY_HIGH_RISK:
             continue
         task = str(r.get("task_id"))
