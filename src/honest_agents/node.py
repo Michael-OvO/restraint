@@ -25,8 +25,8 @@ an already running server would not pass them on, so a name in use is refused), 
 `pull` copies node paths into a staging folder of the archive, keeping their repo-relative layout; the curated,
 self-describing save of an iteration remains `python -m honest_agents.archive`.
 
-`chain` validates a job file (`honest_agents.node_chain`: steps with GPUs, done markers, dependencies, a final archive step)
-and starts its node-side runner through the same secret-over-stdin path as `run`. `watch` (`honest_agents.node_watch`) is the
+`chain` validates a job file (`honest_agents.node_chain`: steps with GPUs, done markers, dependencies, a final archive step,
+the sanity-run rule) and starts its node-side runner through the same secret-over-stdin path as `run`. `watch` (`honest_agents.node_watch`) is the
 Mac-side monitor: terse event lines, then pull and `vastai stop instance` (never destroy) when the chain writes `ALL_DONE`.
 """
 
@@ -301,7 +301,14 @@ CHAIN_RUNNER = "env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval py
 
 
 def _chain(a: argparse.Namespace, node: Node) -> int:
-    from honest_agents.node_chain import ALL_DONE_FILE, ChainError, load_chain, placeholders, plan_lines
+    from honest_agents.node_chain import (
+        ALL_DONE_FILE,
+        ChainError,
+        load_chain,
+        placeholders,
+        plan_lines,
+        sanity_problems,
+    )
 
     jobfile = a.jobfile.expanduser().resolve()
     try:
@@ -316,6 +323,12 @@ def _chain(a: argparse.Namespace, node: Node) -> int:
     print("\n".join(plan_lines(chain)), flush=True)
     if placeholders(chain) and not a.dry_run:
         print("error: fill in the <PLACEHOLDER> tokens first (see the warning above)", file=sys.stderr)
+        return 2
+    # Fail closed, --dry-run included (DEF-46): a merged model with no sanity run in this chain or recorded in
+    # `sanity_runs` is refused before anything is sent. The records themselves are checked on the node by `run`.
+    insane = sanity_problems(chain, REPO)
+    if insane:
+        print("error: the sanity-run rule refuses this job file:\n  " + "\n  ".join(insane), file=sys.stderr)
         return 2
     # A stale ALL_DONE of an earlier run of this chain goes before the runner starts (it would unlink it itself, but
     # only after `uv run` has resolved the environment); a watcher armed in between would otherwise pull and stop the node.

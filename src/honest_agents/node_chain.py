@@ -27,6 +27,8 @@ Job file (YAML or JSON), paths relative to the repo root on the node:
         progress: {pattern: '^\\[(\\d+)/712\\]', total: 712}   # last match in the log tail, for the watcher
     final:
       command: uv run python -m honest_agents.archive --source /root/restraint --dest /root/staging ...
+    sanity_runs:                       # a merged model sanity-checked in an EARLIER chain: model -> its eval dir
+      outputs/x/m_merged: runs/eval/m_sanity
     watch:                             # used by the watcher only
       pull_paths: [/root/staging]
       archives: [{iteration: 14, name: it14-session, run: [outputs/x/y], no_weights: true}]
@@ -42,6 +44,13 @@ and fail the next step on that GPU. A step whose done marker already exists is n
 same chain file again); delete stale markers of an earlier attempt first. A restarted runner refuses to start while
 processes of an earlier run of the same chain are alive (status `refused`), so a step is never run twice at once. The final
 step always runs, so a failed or stopped chain still archives what exists.
+
+Sanity rule (training-log incident table; DEF-46). Every merged model gets a 12-task vLLM sanity run before anything
+else uses its server: a `serve_and_run.sh` step that serves a checkpoint we wrote (`model.name=outputs/...`, or the
+config's own `model.name` when there is no override) must open with `eval_heldout.sh ... --limit N` (N <= 12) of it,
+unless that step depends on one that did or the job file's `sanity_runs` records one. It fails closed: `check`,
+`run` and `honest_agents.node chain` (also `--dry-run`) refuse a job file that breaks it, a served model that cannot
+be resolved counts as unchecked, and `run` also refuses a `sanity_runs` record whose `metrics.json` is not on disk.
 """
 
 from __future__ import annotations
@@ -51,6 +60,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -76,7 +86,17 @@ CHAIN_TAG = "HA_CHAIN"  # the chain's name; a restarted runner looks for it befo
 PROC = Path("/proc")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _STEP_KEYS = {"name", "command", "gpus", "done", "after", "timeout_min", "on_failure", "env", "progress", "stall_min"}
-_TOP_KEYS = {"name", "state_dir", "sequential", "instance_id", "balance_floor", "steps", "final", "watch"}
+_TOP_KEYS = {
+    "name",
+    "state_dir",
+    "sequential",
+    "instance_id",
+    "balance_floor",
+    "steps",
+    "final",
+    "watch",
+    "sanity_runs",
+}
 _FINAL_KEYS = {"command", "timeout_min", "env"}
 
 
@@ -132,6 +152,7 @@ class Chain:
     instance_id: int | None = None
     balance_floor: float | None = None
     watch: Mapping[str, Any] = field(default_factory=dict)
+    sanity_runs: Mapping[str, str] = field(default_factory=dict)  # model -> eval dir of its sanity run, earlier chain
 
     def step(self, name: str) -> Step:
         return next(s for s in self.steps if s.name == name)
@@ -223,8 +244,9 @@ def parse_chain(raw: Mapping[str, Any]) -> Chain:
         raise ChainError("watch: must be a mapping")
     iid = raw.get("instance_id")
     floor = raw.get("balance_floor")
+    sanity_runs = _str_map("sanity_runs", raw.get("sanity_runs"))
     return Chain(name, state_dir, tuple(steps), final, int(iid) if iid is not None else None,
-                 float(floor) if floor is not None else None, dict(watch))  # fmt: skip
+                 float(floor) if floor is not None else None, dict(watch), sanity_runs)  # fmt: skip
 
 
 def _check_acyclic(steps: Sequence[Step]) -> None:
@@ -706,6 +728,111 @@ def placeholders(chain: Chain) -> list[str]:
     return [f"{n}: {m}" for n, t in texts.items() for m in _PLACEHOLDER.findall(t)]
 
 
+# ── sanity rule ──────────────────────────────────────────────────────────────
+
+SANITY_LIMIT = 12
+REPO = Path(__file__).resolve().parents[2]
+_MODEL = re.compile(r"\bmodel\.name=(\S+)")
+_HUB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$")  # org/name: a model we did not write
+
+
+def _groups(command: str) -> list[list[str]]:
+    """The command groups of a `serve_and_run.sh CONFIG [overrides] -- CMD -- CMD ...` step, in order."""
+    out = []
+    for part in command.split(" -- ")[1:]:
+        try:
+            out.append(shlex.split(part))
+        except ValueError:
+            out.append([part])
+    return out
+
+
+def _limit(words: Sequence[str]) -> int | None:
+    for i, w in enumerate(words):
+        if w == "--limit" and i + 1 < len(words) and words[i + 1].isdigit():
+            return int(words[i + 1])
+        if w.startswith("--limit=") and w.split("=", 1)[1].isdigit():
+            return int(w.split("=", 1)[1])
+    return None
+
+
+def _is_sanity_run(words: Sequence[str]) -> bool:
+    limit = _limit(words)
+    return bool(words) and words[0].endswith("eval_heldout.sh") and limit is not None and 0 < limit <= SANITY_LIMIT
+
+
+def _config_model(path: Path, seen: tuple[Path, ...] = ()) -> object:
+    """`model.name` of a training config, following `base:` as `train.config.load_config_dict` does (this file's
+    keys win), without importing the training stack."""
+    import yaml  # lazy, as in load_chain
+
+    path = path.resolve()
+    if path in seen:
+        raise ValueError(f"config inheritance cycle at {path}")
+    data = yaml.safe_load(path.read_text()) or {}
+    model = data.get("model") if isinstance(data, Mapping) else None
+    if isinstance(model, Mapping) and model.get("name"):
+        return model["name"]
+    base = data.get("base") if isinstance(data, Mapping) else None
+    return _config_model(path.parent / str(base), (*seen, path)) if base else None
+
+
+def served_model(command: str, root: Path = REPO) -> str | None:
+    """The model a `serve_and_run.sh` step serves: its `model.name=` override, else the config's `model.name` (read
+    under `root`, `base:` resolved). None: not a serve step. Raises ChainError when it cannot be resolved."""
+    if "serve_and_run.sh" not in command:
+        return None
+    head = command.split(" -- ")[0]
+    m = _MODEL.search(head)
+    if m:
+        return m.group(1)
+    try:
+        words = shlex.split(head)
+        config = words[next(i for i, w in enumerate(words) if w.endswith("serve_and_run.sh")) + 1]
+        name = _config_model(root / config)
+    except Exception as e:  # noqa: BLE001  # whatever the reason, an unresolved model is an unchecked one
+        raise ChainError(f"cannot resolve the served model ({type(e).__name__}: {e})") from None
+    if not name:
+        raise ChainError(f"cannot resolve the served model: {config} names no model.name")
+    return str(name)
+
+
+def is_checkpoint(model: str) -> bool:
+    """A model we wrote (merged, souped, trained): anything but a bare hub id such as `Qwen/Qwen3.5-4B`."""
+    return model.startswith(("outputs/", "./", "/", "~")) or "_merged" in model or not _HUB_ID.match(model)
+
+
+def sanity_problems(chain: Chain, root: Path = REPO, records: Path | None = None) -> list[str]:
+    """The sanity-run rule on a chain (empty: it passes). A step that serves a checkpoint we wrote opens with a
+    `--limit <= 12` evaluation of it, or depends on a step that ran one, or `chain.sanity_runs` records one; with
+    `records` (the node's repo root), each record's `<dir>/metrics.json` must exist there."""
+    out = []
+    recorded = set(chain.sanity_runs)
+    if records is not None:
+        for model, run in chain.sanity_runs.items():
+            if not (records / run / "metrics.json").is_file():
+                out.append(f"{chain.name}: the sanity run recorded for {model} ({run}/metrics.json) is not on disk")
+                recorded.discard(model)
+    sane: dict[str, set[str]] = {}  # step -> models with a sanity run in it or in a step it depends on
+    for step in chain.steps:
+        before = set(recorded).union(*(sane.get(a, set()) for a in step.after))
+        try:
+            model = served_model(step.command, root)
+        except ChainError as e:
+            out.append(f"{chain.name}/{step.name}: {e}; a model that cannot be resolved counts as unchecked")
+            model = None
+        groups = _groups(step.command) if model is not None else []
+        if model is not None and is_checkpoint(model) and groups:
+            if _is_sanity_run(groups[0]):
+                before.add(model)
+            elif model not in before:
+                out.append(
+                    f"{chain.name}/{step.name}: {model} is evaluated with no {SANITY_LIMIT}-task sanity run first"
+                )
+        sane[step.name] = before
+    return out
+
+
 def plan_lines(chain: Chain) -> list[str]:
     lines = [f"chain {chain.name}: {len(chain.steps)} steps, state in {chain.state_dir}"]
     for s in chain.steps:
@@ -724,6 +851,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="validate a job file and print the plan")
     c.add_argument("jobfile", type=Path)
+    c.add_argument("--cwd", type=Path, default=Path.cwd(), help="repo root (default: the current directory)")
     r = sub.add_parser("run", help="run the chain (node side)")
     r.add_argument("jobfile", type=Path)
     r.add_argument("--poll", type=float, default=5.0, help="seconds between scheduler passes")
@@ -735,14 +863,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ChainError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    cwd = a.cwd.expanduser().resolve()
+    insane = sanity_problems(chain, cwd, records=cwd if a.cmd == "run" else None)
     if a.cmd == "check":
         print("\n".join(plan_lines(chain)))
+    if insane:
+        print("error: the sanity-run rule refuses this job file:\n  " + "\n  ".join(insane), file=sys.stderr)
+        return 2
+    if a.cmd == "check":
         return 0
     left = placeholders(chain)
     if left and not a.allow_placeholders:
         print("error: placeholders left in the job file: " + "; ".join(left), file=sys.stderr)
         return 2
-    cwd = a.cwd.expanduser().resolve()
     lock = _acquire_lock(cwd / chain.state_dir)  # noqa: F841  # held for the process lifetime
     runner = Runner(chain, cwd, poll=a.poll)
 

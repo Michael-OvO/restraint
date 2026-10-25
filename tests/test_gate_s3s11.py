@@ -162,7 +162,7 @@ def test_the_sanity_rule_flags_a_merged_model_evaluated_without_one(tmp_path) ->
     serve = "scripts/serve_and_run.sh configs/c.yaml model.name=outputs/it16/g_merged"
     full = "scripts/eval_heldout.sh data/decision/surfaces_val/tasks runs/eval/g --n-samples 4"
     sanity = "scripts/eval_heldout.sh data/val.jsonl runs/eval/g_sanity --limit 12 --n-samples 1"
-    base = "scripts/serve_and_run.sh configs/c.yaml -- " + full  # the base model is not a checkpoint we wrote
+    base = "scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml -- " + full  # its model.name is the base model
 
     def chain(*steps: dict[str, Any]) -> Any:
         return parse_chain({"name": "c", "steps": [{"done": f"m/{s['name']}", **s} for s in steps]})
