@@ -162,7 +162,7 @@ def sites_sha256(rows: Sequence[dict[str, Any]], tasks_roots: Sequence[Path], to
 
 def index_row(r: dict[str, Any], sites: _Sites) -> dict[str, Any]:
     """One compact row of an archived `episodes.jsonl` line (any record version)."""
-    from honest_agents.analysis.replay_episodes import decision_index
+    from honest_agents.analysis.replay_episodes import decision_index, surface_label
     from honest_agents.eval.read_diagnosis import commands_of, declined, inspected
 
     commands = commands_of(r)
@@ -179,7 +179,7 @@ def index_row(r: dict[str, Any], sites: _Sites) -> dict[str, Any]:
         "model": r.get("model"),
         "sample": r.get("sample"),
         "family": r.get("family"),
-        "surface": str((r.get("detail") or {}).get("surface") or r.get("family") or "-"),
+        "surface": surface_label(r),
         "branch": _branch(r),
         "case": reward.get("case"),
         "reward": reward.get("total"),
