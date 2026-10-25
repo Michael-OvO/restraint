@@ -11,9 +11,11 @@ from honest_agents.tasks.analysis import (
     CONTENT_KINDS,
     SYSTEM_DIRS,
     TaskFacts,
+    code_values_of_tests,
     content_bound_tokens,
     content_shape,
     guessable_tokens,
+    hidden_counts,
     is_ignored_path,
     is_link_only,
     is_pass_through,
@@ -155,10 +157,14 @@ def input_candidates(facts: TaskFacts, rules: InputRules = REMOVAL_RULES) -> lis
                 continue
         seen = [facts.instruction, p, *(g.content or "" for q, g in files.items() if q != p)]
         visible = "\n".join([*seen, facts.solve or ""] if rules.hide_oracle else seen)
-        py_tests = "\n".join(t.read_text(errors="replace") for t in facts.test_files)  # not test.sh's boilerplate
+        # the values the tests' code compares, not their comments or messages (DEF-35); not test.sh's boilerplate
+        py_tests = "\n".join(code_values_of_tests(t.read_text(errors="replace")) for t in facts.test_files)
         bound = content_bound_tokens(data, py_tests, visible)
         if not spelled:
             bound = [t for t in bound if t.lower() not in _SQL_WORDS]
+        if spelled and hidden_counts(data, py_tests, visible):
+            out.append(p)  # the tests count lines of the file to a number the agent cannot see (DEF-35)
+            continue
         if not bound:
             continue  # the tests never depend on what the file held: a recreated file would pass
         if len(guessable_tokens(bound, visible)) == len(bound):
