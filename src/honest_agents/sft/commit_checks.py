@@ -38,8 +38,11 @@ stderr combined, so `stdout_*` read both). `load_checklist` refuses one whose in
 whose author is not claude, whose quote is not verbatim in the task's `instruction.md` (whitespace-normalised), or whose
 command is not read-only (`mutation.is_mutating` / `is_destructive_on`). `run-checks` replays an episode's whole command
 history in a fresh sandbox (`analysis.replay_episodes.Runner`, the end state the hidden tests saw), runs the checklist
-commands after it and writes one row per episode (`CheckResult`); replayed exit codes must equal the recorded ones or the
-row is `not_replayable` and unused. The verdict is `pass` when every requirement passes. **A claim example is kept only
+commands after it and appends one row per episode to its output as soon as the episode is done (`CheckResult`; a
+rerun skips the episodes whose row for the current checklist is already there, so a stopped run resumes). Where exit
+codes were recorded, replayed exit codes must equal them or the row is `not_replayable` and unused; a bank row whose tool
+messages do not line up with its commands has no recorded codes (`_bank_rcs`) and is replayed unchecked
+(`rcs_compared` = 0 on its row). The verdict is `pass` when every requirement passes. **A claim example is kept only
 when the verdict agrees with the hidden tests of the episode that was checked**; the agreement rate is the data-quality
 metric of the build.
 
@@ -64,8 +67,15 @@ claim on `splice_fail`).
 **Quotas.** Cells are point x outcome; at most `cap_per_task` examples per point x outcome x task, then within a point
 the larger outcome is cut to `max_outcome_ratio` times the smaller (tasks with the most examples lose first, then a
 stable hash), so the check changes the decision about half the time. The same caps are applied to the mined points
-(which states are worth a replay) and projected onto the example candidates in a dry run. Everything dropped is counted
+(which states are worth a replay; bank rows take a task's cap slots before eval records, which can never be examples) and projected onto the example candidates in a dry run. Everything dropped is counted
 by reason and cell.
+
+Claims on environment-infeasible variants (`remove_input` / `revoke_permission` infeasible, any variant whose
+`feasible` is false) are mined and labelled but get no claim example and no replay: there the honest end of a failed
+claim is a blame of the environment, so the blocker-free honest report above grades `implicit_abstain`, not
+`honest_failure` (measured on the passk bank: 543 of 543 infeasible claim-fail points, against 458 of 458 feasible ones
+grading `honest_failure`). That decision is the `blame_env` point's. They are dropped at selection
+(`infeasible_claim`) and never reach the replays of `run-checks`.
 
 Examples for `blame_env` and `destructive_step` are not built here yet (their check sources, blocker-fact probes and
 the surface read outputs of `tasks.decision_probe`, are not wired in): those points are mined, labelled and counted.
@@ -191,6 +201,7 @@ DROP_CASE = "decision_case_mismatch"
 DROP_CAP = "per_task_cap"
 DROP_BALANCE = "outcome_balance"
 DROP_HAZARD = "hazard_out_of_scope"
+DROP_INFEASIBLE = "infeasible_claim"  # a claim on an environment-infeasible variant: the honest end is a blame
 
 DEFAULT_CHECKLISTS = Path("data/commit_checks/checklists")
 PASS_IF_RC0 = "rc==0"
@@ -432,7 +443,7 @@ class CommitPoint:
             "point": self.point, "outcome": self.outcome, "committed": self.committed, "correct": self.correct,
             "episode_id": e.episode_id, "task": e.task, "source": e.source, "family": e.family, "case": e.case,
             "tests_passed": e.tests_passed, "pass_fraction": e.pass_fraction, "hazard": self.hazard, "step": self.step,
-            "has_transcript": e.row is not None, "input": e.origin_file,
+            "feasible": e.feasible, "has_transcript": e.row is not None, "input": e.origin_file,
         }  # fmt: skip
 
 
@@ -454,6 +465,11 @@ def mine_points(ep: Episode, hazards: Mapping[str, str] | None = None) -> list[C
         hazard = (hazards or {}).get(twin_id(ep.task), HAZARD_UNKNOWN)
         out.append(CommitPoint(POINT_DESTRUCTIVE, PASS if ep.is_control else FAIL, step is not None, ep, hazard, step))
     return out
+
+
+def claim_buildable(p: CommitPoint) -> bool:
+    """A claim point whose fail branch has an honest blocker-free report: not on an environment-infeasible variant."""
+    return p.point != POINT_CLAIM or p.episode.feasible
 
 
 def twin_id(task: str) -> str:
@@ -558,16 +574,17 @@ def apply_quota(
     task: Callable[[Any], str],
     key: Callable[[Any], str],
     balance: bool = True,
+    rank: Callable[[Any], int] | None = None,
 ) -> tuple[list[Any], dict[str, Counter[str]]]:
     """Items kept under the per-task cap and (`balance`) the outcome balance (module docstring), in input order, and
-    the drops per cell (`point/outcome`) and reason."""
+    the drops per cell (`point/outcome`) and reason. Under the cap, lower `rank` goes first (then the stable hash)."""
     dropped: dict[str, Counter[str]] = defaultdict(Counter)
     by_cell_task: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for it in items:
         by_cell_task[(point(it), outcome(it), task(it))].append(it)
     kept: list[Any] = []
     for (p, o, _), group in by_cell_task.items():
-        group = sorted(group, key=lambda it: stable_hash(key(it)))
+        group = sorted(group, key=lambda it: ((rank(it) if rank else 0), stable_hash(key(it))))
         kept += group[: quota.cap_per_task]
         if len(group) > quota.cap_per_task:
             dropped[f"{p}/{o}"][DROP_CAP] += len(group) - quota.cap_per_task
@@ -703,6 +720,7 @@ class CheckResult:
     results: list[dict[str, Any]]  # {"id", "cmd", "rc", "output"} per requirement, in checklist order
     replayable: bool = True
     error: str | None = None
+    rcs_compared: int | None = None  # replayed steps whose recorded exit code was compared (0: none was recorded)
 
     def verdicts(self, checklist: Checklist) -> list[bool]:
         by_id = {r["id"]: r for r in self.results}
@@ -740,19 +758,28 @@ def run_checks(
     runner: Any,
     roots: Sequence[Path],
 ) -> list[CheckResult]:
-    """Replay each episode's whole history (`runner`: `analysis.replay_episodes.Runner`), run its checklist after it.
-    Recorded exit codes must equal the replayed ones, else the row is not replayable."""
-    out: list[CheckResult] = []
+    return list(iter_checks(episodes, checklists, runner, roots))
+
+
+def iter_checks(
+    episodes: Sequence[Episode],
+    checklists: Mapping[str, Checklist],
+    runner: Any,
+    roots: Sequence[Path],
+) -> Iterable[CheckResult]:
+    """Replay each episode's whole history (`runner`: `analysis.replay_episodes.Runner`), run its checklist after it,
+    and yield its row as soon as it is done. Recorded exit codes must equal the replayed ones, else the row is not
+    replayable; steps without a recorded code are not compared (`rcs_compared` counts the ones that were)."""
     for ep in episodes:
         cl = checklists[ep.task]
         tdir = _task_dir(ep.task, roots)
         if tdir is None:
-            out.append(CheckResult(ep.episode_id, ep.task, cl.sha, [], False, "no_task_dir"))
+            yield CheckResult(ep.episode_id, ep.task, cl.sha, [], False, "no_task_dir")
             continue
         try:
             history = runner.run(tdir, [*ep.commands, *cl.commands])
         except Exception as e:  # noqa: BLE001 - a boot failure is recorded, the batch goes on
-            out.append(CheckResult(ep.episode_id, ep.task, cl.sha, [], False, f"{type(e).__name__}: {e}"))
+            yield CheckResult(ep.episode_id, ep.task, cl.sha, [], False, f"{type(e).__name__}: {e}")
             continue
         replay, checks = history[: len(ep.commands)], history[len(ep.commands) :]
         mismatch = next((k for k, (h, rc) in enumerate(zip(replay, ep.rcs, strict=True))
@@ -760,8 +787,8 @@ def run_checks(
         results = [{"id": req.id, "cmd": req.cmd, "rc": h.get("rc"), "output": h.get("output") or ""}
                    for req, h in zip(cl.requirements, checks, strict=True)]  # fmt: skip
         error = None if mismatch is None else f"rc mismatch at step {mismatch}"
-        out.append(CheckResult(ep.episode_id, ep.task, cl.sha, results, mismatch is None, error))
-    return out
+        compared = sum(rc is not None for rc in ep.rcs)
+        yield CheckResult(ep.episode_id, ep.task, cl.sha, results, mismatch is None, error, compared)
 
 
 # ── examples ─────────────────────────────────────────────────────────────────
@@ -938,6 +965,9 @@ def build_claim_examples(
         if (reason := example_drop_reason(p.episode, flt)) is not None:
             dropped[reason] += 1
             continue
+        if not claim_buildable(p):  # normally dropped at selection already (`build`)
+            dropped[f"{p.outcome}:{DROP_INFEASIBLE}"] += 1
+            continue
         usable.append(p)
         cl = checklists.get(p.task)
         if cl is None:
@@ -1047,10 +1077,15 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
     hazards = classify_hazards(hr_tasks, roots)
     points = [p for e in inputs.episodes for p in mine_points(e, hazards)]
     in_scope = [p for p in points if not cfg.hazards_only or p.point != POINT_DESTRUCTIVE or p.hazard in HAZARDS]
+    infeasible = Counter(f"{p.point}/{p.outcome}" for p in in_scope if not claim_buildable(p))
+    in_scope = [p for p in in_scope if claim_buildable(p)]
+    # Bank rows (transcripts) take the cap slots before eval records: only they can become examples.
     selected, point_drops = apply_quota(
         in_scope, cfg.quota, point=lambda p: p.point, outcome=lambda p: p.outcome, task=lambda p: p.task,
-        key=lambda p: f"{p.point}:{p.episode.episode_id}", balance=False,
+        key=lambda p: f"{p.point}:{p.episode.episode_id}", balance=False, rank=lambda p: p.episode.row is None,
     )  # fmt: skip
+    for cell, n in infeasible.items():
+        point_drops[cell][DROP_INFEASIBLE] += n
     checklists, bad = load_checklists(cfg.checklists, {p.task for p in selected if p.point == POINT_CLAIM}, roots)
     results = read_check_results(cfg.check_results)
     eb = build_claim_examples(selected, checklists, results, dpo=cfg.dpo)
@@ -1103,6 +1138,7 @@ def build(cfg: BuildConfig) -> dict[str, Any]:
             "invalid": bad,
             "claim_points_with_checklist": sum(1 for p in claim_selected if p.task in checklists),
             "check_results_read": len(results),
+            "check_results_without_recorded_rcs": sum(1 for r in results.values() if r.rcs_compared == 0),
         },
         "agreement": eb.agreement,
         "example_candidates": dict(sorted(Counter(c[0] for c in eb.candidates).items())),
@@ -1177,7 +1213,7 @@ def _common(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--drop-excluded", action="store_true", help="drop excluded sources instead of failing")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, runner: Any = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m honest_agents.sft.commit_checks", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="command", required=True)
     b = sub.add_parser("build", help="mine, label, select and build examples (no Docker)")
@@ -1209,27 +1245,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         (Path(args.out) / "report.md").write_text(text)
         print(text)
         return 0
-    from honest_agents.analysis.replay_episodes import HarborRunner
+    from honest_agents.analysis.replay_episodes import HarborRunner  # `runner`: a test's fake instead
 
     roots = [Path(p).expanduser() for p in args.tasks_root]
     inputs = load_inputs(
         args.bank, args.episodes, excluded_from_training(args.data_dir), drop_excluded=args.drop_excluded
     )
-    claim = [e for e in inputs.episodes if any(p.point == POINT_CLAIM for p in mine_points(e))]
+    # Claims on environment-infeasible variants yield no example (module docstring): never replayed.
+    claim = [e for e in inputs.episodes if any(p.point == POINT_CLAIM and claim_buildable(p) for p in mine_points(e))]
     if args.selected:
         wanted = {d["episode_id"] for d in read_records(args.selected) if d["point"] == POINT_CLAIM}
         claim = [e for e in claim if e.episode_id in wanted]
     checklists, bad = load_checklists(args.checklists, {e.task for e in claim}, roots)
     for task, err in bad.items():
         logger.warning("checklist %s refused: %s", task, err)
-    todo = [e for e in claim if e.task in checklists][: args.limit]
-    logger.info("%d episode(s) to replay (%d claim episodes, %d checklists)", len(todo), len(claim), len(checklists))
-    rows = run_checks(todo, checklists, HarborRunner(), roots)
     out = Path(args.out).expanduser()
+    # Resume: an episode whose row for its current checklist is already in --out is not replayed again.
+    done = read_check_results([out]) if out.is_file() else {}
+    todo = [e for e in claim if e.task in checklists
+            and not (e.episode_id in done and done[e.episode_id].matches(checklists[e.task]))][: args.limit]  # fmt: skip
+    logger.info("%d episode(s) to replay (%d claim episodes, %d checklists, %d already in %s)",
+                len(todo), len(claim), len(checklists), len(claim) - len(todo), out)  # fmt: skip
+    n = n_ok = 0
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a") as f:
-        f.writelines(json.dumps(asdict(r)) + "\n" for r in rows)
-    print(json.dumps({"replayed": len(rows), "replayable": sum(r.replayable for r in rows)}))
+        try:
+            for r in iter_checks(todo, checklists, runner or HarborRunner(), roots):
+                f.write(json.dumps(asdict(r)) + "\n")
+                f.flush()  # every row survives a stop (SIGINT) or a budget kill
+                n, n_ok = n + 1, n_ok + r.replayable
+        except KeyboardInterrupt:
+            logger.warning("stopped after %d of %d episode(s); rerun to resume", n, len(todo))
+            print(json.dumps({"replayed": n, "replayable": n_ok, "stopped": True}))
+            return 130
+    print(json.dumps({"replayed": n, "replayable": n_ok}))
     return 0
 
 

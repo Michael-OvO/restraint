@@ -3,6 +3,7 @@ runner, the claim examples (own, spliced, masks, DPO) and the excluded-source as
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -402,3 +403,90 @@ def test_a_high_risk_hold_is_no_blame_point_and_abstain_is_a_blame():
     assert sorted(p.point for p in cc.mine_points(c)) == [cc.POINT_CLAIM, cc.POINT_DESTRUCTIVE]
     abstain = cc.episode_from_row(row("a1", passed=False, report={"reason": "cannot"}, commands=["ls"], tool="abstain"))
     assert [(p.outcome, p.committed) for p in cc.mine_points(abstain) if p.point == cc.POINT_BLAME] == [(cc.FAIL, True)]
+
+
+# ── infeasible claims, resumable replays ─────────────────────────────────────
+
+
+def _infeasible_fail(eid: str = "x1"):
+    return row(eid, passed=False, report=CLAIM, commands=["cat /app/config"], feasible=False,
+               perturbation="remove_input")  # fmt: skip
+
+
+def test_an_infeasible_claim_fail_is_no_candidate_and_no_replay(env: dict[str, Path], tmp_path: Path):
+    inf = cc.episode_from_row(_infeasible_fail())
+    cl = cc.load_checklists(env["checklists"], {TASK}, [env["tasks"]])[0][TASK]
+    res = cc.run_checks([inf], {TASK: cl}, FakeRunner(), [env["tasks"]])[0]
+    # Why: there the blocker-free honest report grades implicit_abstain, so the example could never be built.
+    assert cc.decision_case(inf, cc.honest_report_args(cl, res.verdicts(cl))) == "implicit_abstain"
+    assert cc.build_claim_example(inf, inf, cl, res, cc.ORIGIN_OWN_FAIL) == cc.DROP_CASE
+    pts = [p for p in cc.mine_points(inf) if p.point == cc.POINT_CLAIM]
+    assert [(p.outcome, p.committed) for p in pts] == [(cc.FAIL, True)]  # still mined and labelled
+    eb = cc.build_claim_examples(pts, {TASK: cl}, {inf.episode_id: res})
+    assert eb.candidates == [] and eb.examples == [] and eb.dropped == {f"{cc.FAIL}:{cc.DROP_INFEASIBLE}": 1}
+    bank = write_bank(tmp_path / "inf", [*own_runs(), _infeasible_fail()])
+    summary = cc.build(_cfg(env, tmp_path, banks=[str(bank)]))
+    assert summary["points"]["claim_done/fail"] == 3 and summary["selected_points"]["claim_done/fail"] == 2
+    assert summary["point_quota_drops"]["claim_done/fail"] == {cc.DROP_INFEASIBLE: 1}
+    assert summary["example_candidates"] == {"own_fail": 2, "own_pass": 2, "splice_fail": 2}
+    runner = FakeRunner()
+    out = tmp_path / "res.jsonl"
+    argv = ["run-checks", "--bank", str(bank), "--data-dir", str(env["data"]), "--tasks-root", str(env["tasks"]),
+            "--checklists", str(env["checklists"]), "--out", str(out)]  # fmt: skip
+    assert cc.main(argv, runner=runner) == 0
+    replayed = {json.loads(x)["episode_id"] for x in out.read_text().splitlines()}
+    assert len(runner.calls) == 4 and replayed == {"p1", "p2", "f1", "f2"}
+
+
+class StopAfter(FakeRunner):
+    """A FakeRunner that is stopped (SIGINT) on its `n`-th replay."""
+
+    def __init__(self, n: int):
+        super().__init__()
+        self.n = n
+
+    def run(self, task_dir: Path, commands):
+        if len(self.calls) + 1 == self.n:
+            raise KeyboardInterrupt
+        return super().run(task_dir, commands)
+
+
+def test_run_checks_writes_each_row_at_once_and_resumes(env: dict[str, Path], tmp_path: Path):
+    out = tmp_path / "res.jsonl"
+    argv = ["run-checks", "--bank", str(env["bank"]), "--data-dir", str(env["data"]), "--tasks-root",
+            str(env["tasks"]), "--checklists", str(env["checklists"]), "--out", str(out)]  # fmt: skip
+    assert cc.main(argv, runner=StopAfter(3)) == 130
+    first = [json.loads(x)["episode_id"] for x in out.read_text().splitlines()]
+    assert len(first) == 2  # the rows done before the stop are on disk
+    rest = FakeRunner()
+    assert cc.main(argv, runner=rest) == 0
+    assert len(rest.calls) == 2  # only the two episodes not yet in --out are replayed
+    ids = [json.loads(x)["episode_id"] for x in out.read_text().splitlines()]
+    assert sorted(ids) == ["f1", "f2", "p1", "p2"] and ids[:2] == first
+    # A changed checklist makes every row stale: all four are replayed again.
+    cl_path = env["checklists"] / f"{TASK}.json"
+    cl_path.write_text(json.dumps(checklist(source=SOURCE + " ")))
+    again = FakeRunner()
+    assert cc.main(argv, runner=again) == 0 and len(again.calls) == 4
+
+
+def test_rows_without_recorded_exit_codes_are_replayed_unchecked(env: dict[str, Path]):
+    cl = cc.load_checklists(env["checklists"], {TASK}, [env["tasks"]])[0][TASK]
+    ep = dataclasses.replace(episodes()["p1"], rcs=[0, 0])  # codes recorded for both steps
+    assert cc.run_checks([ep], {TASK: cl}, FakeRunner(), [env["tasks"]])[0].rcs_compared == 2
+    assert not cc.run_checks([ep], {TASK: cl}, FakeRunner({"cat /app/config": 3}), [env["tasks"]])[0].replayable
+    unaligned = dataclasses.replace(ep, rcs=[None] * len(ep.commands))  # what `_bank_rcs` gives when they do not align
+    r = cc.run_checks([unaligned], {TASK: cl}, FakeRunner({"cat /app/config": 3}), [env["tasks"]])[0]
+    assert r.replayable and r.rcs_compared == 0  # nothing to compare: the guard cannot fire
+
+
+def test_point_cap_gives_bank_rows_the_slots_before_eval_records():
+    recs = [cc.episode_from_record(_record(f"r{k}", "t__high_risk", commands=["ls"], control=False, report=None))
+            for k in range(3)]  # fmt: skip
+    pts = [p for e in recs for p in cc.mine_points(e)]
+    bank_pt = dataclasses.replace(pts[0], episode=dataclasses.replace(pts[0].episode, episode_id="b0", row=object()))
+    kept, _ = cc.apply_quota(
+        [*pts, bank_pt], cc.Quota(cap_per_task=1), point=lambda p: p.point, outcome=lambda p: p.outcome,
+        task=lambda p: p.task, key=lambda p: p.episode.episode_id, balance=False, rank=lambda p: p.episode.row is None,
+    )  # fmt: skip
+    assert [p.episode.episode_id for p in kept] == ["b0"]
