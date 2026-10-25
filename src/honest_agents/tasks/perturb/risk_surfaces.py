@@ -70,6 +70,10 @@ Build modes
 * Varied (`build_varied`, `surface_operator`): site, request phrasing, position and the pair are drawn from the source id
   (select / val / test sets). The phrasing comes from the pool (`_common.json`, 80 % for `split="train"`, 20 % for
   `"test"`); `empty_backup` adds a backup sentence.
+* Pair assignments (DEF-07): a variant recorded in `data/pools/pair_assignments.json` (twin variant id -> pair and
+  context, written by `python -m honest_agents.tasks.pool_build record`) keeps that pair and context whatever is added to
+  the pool; a variant not recorded there draws only from the pairs no recorded variant holds (all pairs of the split
+  once every one is held). Without the file, a build draws as before. A pair forced with `pool_pair` ignores both.
 
 Variant ids are `<pair>__high_risk__<surface>` and `<pair>__high_risk__<surface>__control`, so they never collide with
 the iteration-3 `<pair>__high_risk[__control]`.
@@ -117,7 +121,8 @@ FAMILY = "high_risk"
 POOL_ENV = "HONEST_SURFACE_POOLS"
 POOL_DIR = Path(__file__).resolve().parents[4] / "data" / "pools" / "surfaces"
 COMMON_FILE = "_common.json"
-HELDOUT_PAIR_SHARE = 5  # 1 pair, phrasing or note in 5 (by hash, or `"heldout": true`) is test-only
+HELDOUT_PAIR_SHARE = 5  # 1 phrasing or note in 5 (by hash) is test-only; pairs carry an explicit `heldout` flag
+ASSIGNMENTS_FILE = "pair_assignments.json"  # next to the pool directory: data/pools/pair_assignments.json
 MAX_LINES = 12
 MAX_CHARS = 1200
 HEAD_LINES = 5  # `file_header`: `head -n 5` is the inspection, so a header has at most this many lines
@@ -274,7 +279,7 @@ class Pair(BaseModel):
     benign: Side
     hard_negative: bool = False  # danger vocabulary in the benign text and the reverse (a "backup" in a cache README)
     name: str = ""  # config_comment / manifest: the file next to the target; empty_backup: the log inside the backup
-    heldout: bool | None = None  # reserved for split="test"; None = by hash of the id
+    heldout: bool | None = None  # reserved for split="test"; required by `strict`; None = by hash of the id
     note: str = ""  # authoring comment (why this pair is hard); never emitted
 
 
@@ -289,6 +294,24 @@ class PoolFile(BaseModel):
     # inbound_link: shared phrasing -> the sentence this surface uses in its place (no "free disk space" reason: removing
     # a link frees nothing); applied after the draw, so the draw and the phrasing split stay those of the shared text
     request_rewrites: dict[str, str] = {}
+
+
+class Assignment(BaseModel):
+    """The pair (and `{context}`) a recorded variant was built with, and the split and seed it was built for."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    surface: str
+    pair: str
+    context: str = ""
+    split: str = "test"
+    seed: int = 0
+
+
+class AssignmentsFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: int = 1
+    note: str = ""
+    variants: dict[str, Assignment] = {}  # twin variant id (`<pair>__high_risk__<surface>`) -> assignment
 
 
 class CommonFile(BaseModel):
@@ -415,6 +438,14 @@ class SurfacePool:
     backup_notes: tuple[str, ...]
     dropped: tuple[tuple[str, str], ...] = ()  # (pair id or phrasing, why)
     request_rewrites: tuple[tuple[str, str], ...] = ()  # (drawn phrasing, sentence emitted in its place)
+    assignments: tuple[tuple[str, Assignment], ...] = ()  # (twin variant id, assignment) of this surface
+
+    def assignment(self, vid: str) -> Assignment | None:
+        return dict(self.assignments).get(vid)
+
+    @property
+    def assigned_pair_ids(self) -> frozenset[str]:
+        return frozenset(a.pair for _, a in self.assignments)
 
     def request_template(self, phrasing: str) -> str:
         """The sentence a variant carries for a drawn `phrasing`: its rewrite (`request_rewrites`) or itself."""
@@ -446,6 +477,21 @@ class SurfacePool:
 
 def pool_dir() -> Path:
     return Path(os.environ.get(POOL_ENV) or POOL_DIR)
+
+
+def assignments_path(directory: Path | None = None) -> Path:
+    """`pair_assignments.json` of a pool directory: its parent's (`data/pools/` for `data/pools/surfaces/`)."""
+    return (directory or pool_dir()).parent / ASSIGNMENTS_FILE
+
+
+def load_assignments(path: Path) -> AssignmentsFile:
+    """The recorded assignments, or none when the file does not exist."""
+    if not path.is_file():
+        return AssignmentsFile()
+    try:
+        return AssignmentsFile.model_validate(_read_json(path))
+    except ValidationError as e:
+        raise PoolError(f"{path}: {e}") from e
 
 
 def _read_json(path: Path) -> Any:
@@ -528,11 +574,26 @@ def load_pool(surface: str, *, directory: Path | None = None, strict: bool = Fal
             dropped.append((c[:60], "; ".join(problems)))
         else:
             contexts.append(c)
+    assigned = sorted(
+        (v, a) for v, a in load_assignments(assignments_path(directory)).variants.items() if a.surface == surface
+    )
+    ids = {p.id for p in pairs}
+    if lost := sorted({a.pair for _, a in assigned} - ids):  # a recorded variant could no longer be rebuilt
+        raise PoolError(f"{surface}: pairs {lost[:5]} are assigned in {ASSIGNMENTS_FILE} but not in the pool")
     pool = SurfacePool(
-        surface, tuple(pairs), tuple(phrasings), tuple(contexts), tuple(notes), tuple(dropped), tuple(rewrites)
+        surface,
+        tuple(pairs),
+        tuple(phrasings),
+        tuple(contexts),
+        tuple(notes),
+        tuple(dropped),
+        tuple(rewrites),
+        tuple(assigned),
     )
     if strict and dropped:
         raise PoolError(f"{surface}: {len(dropped)} dropped: {dropped[:3]}")
+    if strict and (implicit := [p.id for p in pairs if p.heldout is None]):
+        raise PoolError(f"{surface}: pairs {implicit[:5]} have no explicit `heldout` flag (the hash split is retired)")
     if surface == "empty_backup" and not notes:
         raise PoolError("empty_backup needs `backup_notes`")
     return pool
@@ -721,7 +782,17 @@ def _pick_pair(
     pairs = pool.pairs_for(split)
     if not pairs:
         return None
-    chosen = pairs[rng.randrange(len(pairs))]
+    vid = variant_id(pair_id, f"{FAMILY}__{pool.surface}")
+    if not pool_pair and (a := pool.assignment(vid)) is not None and a.seed == seed:
+        recorded = pool.by_id(a.pair)
+        if a.split != split or is_heldout(pool.surface, recorded) != (split == "test"):
+            raise PoolError(
+                f"{vid} is recorded with {a.pair!r} for split={a.split!r}; it cannot be built for split={split!r}"
+            )
+        return recorded, a.context
+    # a new variant draws from the pairs no recorded variant holds; a forced pair keeps the draw over the whole split
+    fresh = pairs if pool_pair else (tuple(p for p in pairs if p.id not in pool.assigned_pair_ids) or pairs)
+    chosen = fresh[rng.randrange(len(fresh))]
     context = pool.contexts[rng.randrange(len(pool.contexts))] if pool.contexts else ""
     if pool_pair:
         forced = pool.by_id(pool_pair)
@@ -1234,10 +1305,13 @@ def shape_stats(pool: SurfacePool) -> dict[str, float]:
 
 
 __all__ = [
+    "ASSIGNMENTS_FILE",
     "SURFACES",
     "SURFACES_HELDOUT",
     "SURFACES_TRAIN",
     "SURFACE_COMMANDS",
+    "Assignment",
+    "AssignmentsFile",
     "BankSite",
     "Pair",
     "PoolError",
@@ -1245,6 +1319,7 @@ __all__ = [
     "SurfacePlan",
     "SurfacePool",
     "SurfaceSite",
+    "assignments_path",
     "auc_report",
     "bank_base",
     "build_same_site",
@@ -1253,6 +1328,7 @@ __all__ = [
     "inspection_commands",
     "is_heldout",
     "is_heldout_sentence",
+    "load_assignments",
     "load_pool",
     "pool_json_schema",
     "site_of_task",

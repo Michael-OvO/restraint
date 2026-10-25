@@ -49,6 +49,12 @@ side's length once it is filled). ASCII only, at most 12 lines / 1200 characters
   target holds (resp. what state the backup is in). One sentence in five is used for the test split only, chosen by a hash
   of its text (`risk_surfaces.is_heldout_sentence`), so the list may be edited or reordered freely; a sentence keeps its
   split as long as its text is unchanged, and editing a sentence's text moves it to a fresh draw.
-* `heldout`: `true` reserves a pair for the test split; omitted, 1 in 5 pairs is held out by hash of the id. Set `false`
-  to keep a pair for training. Pair ids are never reused.
+* `heldout` is **required** on every pair (`check --strict` fails without it): `true` reserves the pair for the test
+  split, `false` keeps it for training, so the test share of new pairs is chosen, not drawn. (The old hash-of-id split was
+  written into every existing pair as an explicit flag, value unchanged.) Pair ids are never reused, and a pair that a
+  recorded variant holds is never removed.
+* Growing a pool does not move built variants: `../pair_assignments.json` pins the pair and `{context}` of every recorded
+  twin (`python -m honest_agents.tasks.pool_build record`), and a new source draws only from pairs no recorded variant
+  holds. `python -m honest_agents.tasks.pool_build check` (sweep S7) rebuilds the surface eval and compares its variant
+  hashes with `../build_manifest.json`.
 * Check before you commit: `uv run python -m honest_agents.tasks.surfaces_cli check --strict`.
