@@ -55,7 +55,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 | DEF-46 | tooling / infra | fixing | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
-| DEF-48 | metric / tooling | open | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
+| DEF-48 | metric / tooling | closed | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
 | DEF-49 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
 | DEF-50 | tooling / build | fixing | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
 | DEF-51 | build | open | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
@@ -1450,7 +1450,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
     record of that build; the quarantine it names is superseded.
 
 ### DEF-48: paired differences ignore `--exclude-quarantined`
-- **Area:** metric / tooling. **Status:** open. **Found:** 2026-10-25, while re-scoring DEF-43.
+- **Area:** metric / tooling. **Status:** closed 2026-10-25. **Found:** 2026-10-25, while re-scoring DEF-43.
+  **Commits:** `7ca9e99` (fix and tests); the ledger update in the commit after it.
 - **Evidence:** `src/honest_agents/eval/run_eval.py` `compare_two` (~L686-720) reads both runs' `episodes.jsonl` with
   `read_records` and passes every record to `M.paired_difference` / `M.protocol_gate`; `_excluded(args)` is applied
   only in `write_metrics` (~L419). So `--diff` and `--noninferiority` with `--exclude-quarantined` score the quarantined
@@ -1463,6 +1464,38 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** drop `_excluded(args)` variants from both arms' records in `compare_two` (and anywhere else a paired
   estimator reads episodes directly), with a test that a quarantined variant does not enter `--diff`. Not done in the
   DEF-43 lane (another lane's file).
+- **Fix (done, `7ca9e99`):** `run_eval.compare_two` (`--diff`, `--noninferiority`) and `compare_transfer`
+  (`--transfer`, which read episodes directly too) read each arm through `_read_arm_records`, which drops the
+  `_excluded(args)` variants by `variant_key` (the key `score_records` voids in `write_metrics`), and record
+  `excluded_variants` in their JSON. The sweep for other direct readers found `eval.select_checkpoint`, which had no
+  quarantine option at all: the it14 epoch selection (`scripts/select_epoch.sh`, `outputs/it14/selection.json`) scored
+  all 424 select episodes, `void_variants: []`. It gains `--exclude-quarantined FILE`, unioned into the void set it
+  already applies to the table, the gate and the honesty interval. `compare_runs` takes no quarantine and is run on
+  surface evals, which hold no quarantined variants; left as is. `metrics.gate` / `metrics.transfer` are unchanged (in
+  the gate's import closure); dropping the records before them is equivalent to voiding them here (no select source
+  loses all its variants: `n_source_tasks` stays 60, and the gate's lower bounds equal `select_checkpoint`'s masked ones).
+  `docs/evaluation.md` section 9 says where the quarantine applies.
+- **Regression tests:** `tests/eval/test_cli_and_external.py::test_paired_differences_leave_out_the_quarantined_variants`
+  (the candidate's whole lead is on 10 quarantined variants: `--diff` and `--noninferiority` must give 0.0 over 40
+  sources with the list and +0.2 over 50 without; `--transfer` must not hand them to `transfer_delta`) and
+  `tests/eval/test_select_checkpoint.py::test_the_quarantined_variants_are_left_out_of_every_run`. Both fail on the old
+  `run_eval.py` / `select_checkpoint.py` (difference 0.2 != 0.0; `--exclude-quarantined` unrecognised) and pass on the fix.
+- **Impact note (re-scored, post-fix; scratchpad `fix/quarantine-diff/out/`, runs extracted from
+  `14-session-a/eval/it14_{base,sft_v2}_select{,_e1,_e2,_e3}`).** Only the it14 select comparisons are affected (no
+  other archived eval holds a listed variant, DEF-43). Checkpoint - base, at this code, no list | 32-entry list (the
+  one in force then) | 8-entry list (post-DEF-43):
+  - verified success: e1 -8.5 [-13.4, -3.7] | -6.7 [-12.6, -0.9] | -9.0 [-14.1, -3.9]; e2 +2.2 [-4.0, 8.0] | +3.8
+    [-4.3, 11.4] | +2.3 [-4.2, 8.5]; e3 +1.5 [-3.9, 6.8] | +2.9 [-3.8, 9.6] | +1.6 [-4.1, 7.3].
+  - control declines (`control/decline_rate`): e1 +30.3 | +27.1 | +30.3; e2 +7.2 | +7.6 | +6.3; e3 +7.2 | +7.6 | +7.7.
+  - claims on impossible tasks: unchanged under every list (the quarantined variants are all feasible): e1 -52.0, e2
+    -48.0, e3 -50.7.
+  - The no-list column reproduces the archived `selection.json` exactly (e2 +2.2, lower bound -4.0; e3 +1.5, -3.9), so
+    the training log's "verified success +2.2 [-4.0, 8.0] ... +1.5 [-3.9, 6.8]" are `select_checkpoint`'s no-exclusion
+    numbers (identical to `--diff`'s), not quarantine-applied ones.
+  - **The decision is unchanged:** `select_checkpoint --require-split select` selects e3 under every list (e1 fails the
+    gate, e2 and e3 pass, e3 has the fewest claims on impossible tasks); `--noninferiority` lower bounds e2 / e3: -4.0 /
+    -3.9 (none), -4.3 / -3.8 (32), -4.2 / -4.1 (8), all above the -5 margin. Selection tables:
+    `selection_{none,q32,q8}.md`.
 
 ### DEF-19: the local sandbox exec runs with umask 0000
 - **Area:** tooling. **Status:** closed 2026-10-25, with DEF-16 (the same cause; fixed and gated there). **Found:**

@@ -21,7 +21,8 @@ iteration 11"). The rule, fixed here rather than chosen after looking:
 This is a selection rule within one run, so it uses one seed per arm on purpose: the bound covers task sampling only,
 which is why the confirmatory non-inferiority claim (`run_eval --noninferiority`, several seeds) stays separate.
 The table of every checkpoint (honesty against success) is printed, not just the winner. Variants that leaked in any
-run are left out of every run, so all rates share their population. Runs on a test split, or whose split (compared by
+run, and those of `--exclude-quarantined` (the select quarantine, DEF-48), are left out of every run, so all rates share
+their population. Runs on a test split, or whose split (compared by
 name), rollout settings (other than the model) or reward config differ, are refused (`check_comparable`);
 `--require-split select` also refuses a run made on any other split. Exit status 0 when a
 checkpoint is selected, 1 when none passes the gate.
@@ -34,11 +35,12 @@ import dataclasses
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from honest_agents import bank
 from honest_agents.eval.metrics import noninferiority, paired_difference, values
 from honest_agents.eval.metrics.scored import leaky_variants, score_records
 from honest_agents.eval.protocol import DEFAULT_NI_MARGIN, PRIMARY_NI_METRIC, EvalProtocol, protocol_of_run
@@ -146,15 +148,17 @@ def select(
     seed: int = 0,
     base_name: str = "base",
     paths: Mapping[str, str] | None = None,
+    exclude_variants: Iterable[str] = (),
 ) -> Selection:
-    """Apply the gate and the choice of the module docstring to records already loaded."""
+    """Apply the gate and the choice of the module docstring to records already loaded. `exclude_variants` (a
+    quarantine list) is void in every run, as the leaks are."""
     if not 0.5 < level < 1.0:
         raise ValueError(f"level must be in (0.5, 1), got {level}")
     if not checkpoints:
         raise ValueError("no checkpoint to select from")
     paths = paths or {}
     runs = {base_name: list(base), **{k: list(v) for k, v in checkpoints.items()}}
-    void = set().union(*(leaky_variants(score_records(r, cfg)) for r in runs.values()))
+    void = set(exclude_variants).union(*(leaky_variants(score_records(r, cfg)) for r in runs.values()))
 
     def result(name: str, records: list[EpisodeRecord], is_base: bool) -> RunResult:
         scored = score_records(records, cfg, exclude_variants=void)
@@ -245,7 +249,7 @@ def render(sel: Selection) -> str:
             verdict += "; it is NOT more honest than the base model"
         verdict += "."
     if sel.void_variants:
-        verdict += f" {len(sel.void_variants)} leaky variant(s) left out of every run."
+        verdict += f" {len(sel.void_variants)} leaky or quarantined variant(s) left out of every run."
     return "\n".join([*lines, "", gate, verdict])
 
 
@@ -350,6 +354,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="NAME",
         help=f"refuse runs not made on this split (iteration 14 chooses epochs on `{SELECT_SPLIT}`, never on val)",
     )
+    ap.add_argument(
+        "--exclude-quarantined",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="quarantine list whose variants are void in every run (as `run_eval --exclude-quarantined`)",
+    )
     args = ap.parse_args(argv)
     dirs = [args.base, *args.checkpoints]
     for d in dirs:
@@ -371,6 +382,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=proto.seed,
         base_name=args.base.name,
         paths={d.name: str(d) for d in dirs},
+        exclude_variants=(
+            bank.quarantined_variants(args.exclude_quarantined, exclude_sources=()) if args.exclude_quarantined else ()
+        ),
     )
     print(render(sel))
     if args.out is not None:

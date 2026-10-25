@@ -544,7 +544,8 @@ outcome as a dict, cached blocker facts, `reward_mode = "eval"`), the format the
 returns text, so evaluation rows carry no token ids; the pilot docs say its contexts are not token-identical to the live
 loop. `--quarantine-file FILE` appends every variant that leaked (`leak`) or was cleanly passed without a claim
 (`unclaimed_pass`) to the quarantine list, once per variant and kind; `--exclude-quarantined FILE` makes the listed
-variants void for the metrics.
+variants void for the metrics, and for the paired comparisons (`--diff`, `--noninferiority`, `--transfer`, which drop
+them from both arms; DEF-48). `select_checkpoint --exclude-quarantined FILE` voids them in every run of a selection.
 
 ## 10. External benchmarks
 

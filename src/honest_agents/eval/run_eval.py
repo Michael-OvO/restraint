@@ -382,6 +382,12 @@ def _excluded(args: argparse.Namespace) -> set[str]:
     )
 
 
+def _read_arm_records(run_dir: Path, excluded: set[str]) -> list[EpisodeRecord]:
+    """A run's records without the `--exclude-quarantined` variants, for the paired estimators, which read episodes
+    directly rather than through `write_metrics` (DEF-48). Dropped by `variant_key`, the key `score_records` voids."""
+    return [r for r in read_records(run_dir / "episodes.jsonl") if r.variant_key not in excluded]
+
+
 # ── outputs ──────────────────────────────────────────────────────────────
 
 
@@ -674,9 +680,10 @@ def compare_transfer(args: argparse.Namespace, dirs: list[str]) -> dict[str, Any
     arms = [[Path(d) for d in arm.split(",") if d] for arm in dirs]
     proto = _same_protocol(args, [d for arm in arms for d in arm])
     cfg = _stored_reward_config(arms[0][0], args)
-    recs = [[read_records(d / "episodes.jsonl") for d in arm] for arm in arms]
+    excluded = _excluded(args)
+    recs = [[_read_arm_records(d, excluded) for d in arm] for arm in arms]
     cand, *refs = (r if len(r) > 1 else r[0] for r in recs)
-    out: dict[str, Any] = {"protocol": proto.to_dict()}
+    out: dict[str, Any] = {"protocol": proto.to_dict(), "excluded_variants": len(excluded)}
     for name, ref in zip(("base", "prompt_only"), refs, strict=False):
         out[f"vs_{name}"] = M.transfer_delta(cand, ref, proto, cfg)
     print(render_transfer_delta(out, [",".join(d.name for d in arm) for arm in arms]))
@@ -692,7 +699,8 @@ def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool)
             "the margin cannot be changed after the fact"
         )
     cfg = _stored_reward_config(arms[0][0], args)
-    recs = [[read_records(d / "episodes.jsonl") for d in arm] for arm in arms]
+    excluded = _excluded(args)
+    recs = [[_read_arm_records(d, excluded) for d in arm] for arm in arms]
     cand, ref = (r if len(r) > 1 else r[0] for r in recs)  # a single run stays a flat list
     metric = args.metric or proto.ni_metric
     names = [",".join(d.name for d in arm) for arm in arms]
@@ -708,12 +716,14 @@ def compare_two(args: argparse.Namespace, dirs: list[str], noninferiority: bool)
         # A forced pair defaults to the verified pass rate (metrics.gate.FORCED_ATTEMPT_METRIC), not verified success.
         t = M.protocol_gate(cand, ref, cfg, proto, metric=args.metric, capability_only=modes == [MODE_FORCED_ATTEMPT])
         t["mode"] = modes[0]
+        t["excluded_variants"] = len(excluded)
         t["endpoint"] = endpoint_role(t["metric"])
         print(render_gate(t, f"Protocol gate: {names[0]} against {names[1]}"))
         return t
     t = M.paired_difference(cand, ref, metric, cfg, n_boot=proto.n_boot, seed=proto.seed, level=proto.ci_level)
     t.pop("samples")
     t["endpoint"] = endpoint_role(metric)
+    t["excluded_variants"] = len(excluded)
     print(render_test(t, f"Paired difference: {names[0]} − {names[1]}"))
     return t
 
