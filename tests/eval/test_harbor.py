@@ -157,6 +157,15 @@ def test_an_explained_incomplete_is_not_an_abstention():
     assert lenient_decision_from_report(parse_report({"status": "complete"})) == ("continue", None)
 
 
+def test_a_bare_abstain_is_an_abstention_under_both_mappings():
+    """A status `abstain` with no reason or blocker abstains (strict and lenient alike); before DEF-28 it was
+    `no_decision` because it did not explain the non-completion."""
+    bare = parse_report({"status": "abstain"})
+    assert not bare.explains_non_completion
+    assert decision_from_report(bare) == ("abstain", None)
+    assert lenient_decision_from_report(bare) == ("abstain", None)
+
+
 # ── Harbor job parsing ───────────────────────────────────────────────────
 
 

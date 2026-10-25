@@ -112,7 +112,9 @@ def decision_from_report(report: SelfReport | None) -> tuple[str, str | None]:
 
 def lenient_decision_from_report(report: SelfReport | None) -> tuple[str, str | None]:
     """Diagnostic only: the strict mapping plus the pre-DEF-28 rule that any explained non-completion, including a
-    budget-exhausted `incomplete`, counts as `abstain`. Never a headline: it measures running out of budget too."""
+    budget-exhausted `incomplete`, counts as `abstain`. Never a headline: it measures running out of budget too.
+    Not exactly the pre-DEF-28 mapping: a bare `{"status": "abstain"}` (no reason, no blocker) was `no_decision`
+    there and is `abstain` here, as in the strict mapping (0 such reports in the it14 runs)."""
     if report is not None and report.status != Status.COMPLETE and report.explains_non_completion:
         return "abstain", report.blocker_category
     return decision_from_report(report)

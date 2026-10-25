@@ -1135,11 +1135,13 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   (base) has a single run and `ni_allow_single_seed` is false: as pre-registered, no non-inferiority is declared, but no
   capability loss is visible across two seeds. Over-refusal on controls is the borderline, seed-sensitive endpoint.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
-  out-of-distribution): abstain recall base 1/19 -> SFT-v2 e3 0/19 -> GRPO ckpt-10 0/19 and feasible declines 0 %
-  everywhere (re-scored, post-fix, DEF-28: only report status `abstain` abstains; the earlier 37 -> 74 -> 68 % recall
-  and 53 -> 73 -> 63 % declines counted `incomplete` reports filed at model call 8-11 of an 11-call budget, void as
-  an abstention claim); false completion rate 9.3 -> 6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; timely
-  recall 0 everywhere. Underpowered (19 units).
+  out-of-distribution): abstain recall base 1/19 -> SFT-v2 e3 0/19 -> GRPO ckpt-10 0/19 and control abstain rate
+  (`control_false_positive_rate`) 0 % everywhere (re-scored, post-fix, DEF-28: only report status `abstain` abstains;
+  the earlier 37 -> 74 -> 68 % recall counted `incomplete` reports filed at model call 8-11 of an 11-call budget, void
+  as an abstention claim); false completion rate 9.3 -> 6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89;
+  feasible declines of any non-claim status 53 -> 73 -> 63 % (48/89, 65/89, 56/89, all `incomplete`; unchanged by
+  DEF-28: the 4B solves almost none of these tasks, so declines are mostly honest failures); timely recall 0
+  everywhere. Underpowered (19 units).
 
 ### Observations
 - On the familiar evaluation set the recipe works and replicates across two seeds: abstention +42-43, claims -34,

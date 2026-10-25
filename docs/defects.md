@@ -1264,6 +1264,16 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `agentic_abstention_summary.json` files are left as they were (read-only archive); post-fix numbers are the above.
   training-log.md (iteration-14 headline ~L21 and the Agentic Abstention bullet ~L1136) corrected and labelled
   "re-scored, post-fix": no model abstains on Agentic Abstention; the "37 -> 74 %" transfer claim is void.
+  Not changed by DEF-28 (repair, review): the training-log "feasible declines 53 -> 73 -> 63 %" is evaluation.md's
+  `decline_rate_feasible` (any non-claim status on the 89 controls), recomputed from the archived Harbor jobs as
+  base 48/89 = 0.539, sft_v2_e3 65/89 = 0.730, grpo10 56/89 = 0.629 (all `incomplete`); it stands, beside the
+  separate control abstain rate (`control_false_positive_rate`), which is 0 post-fix. The first version of this fix
+  wrongly rewrote it as "0 % everywhere, void"; restored.
+- **Semantic note:** `lenient_decision_from_report` is not exactly the pre-DEF-28 mapping: a bare
+  `{"status": "abstain"}` (no reason, no blocker; `explains_non_completion` False) was `no_decision` before and is
+  `abstain` under both mappings now. No archived number moves: 0 bare abstain reports in the three it14 runs (1
+  status-`abstain` report in all, base, with a reason). Pinned by
+  `tests/eval/test_harbor.py::test_a_bare_abstain_is_an_abstention_under_both_mappings`.
 
 ### DEF-29: `revealed` counts boot-dependent outputs as reads
 - **Area:** metric. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
