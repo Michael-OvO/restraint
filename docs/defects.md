@@ -2924,7 +2924,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Area:** tooling / build. **Status:** fixing (verdict re-recorded over the main tree; the scope is still whatever
   gitignored files are on disk). **Found:** 2026-10-25, integrator round2b: after merging fix/bench into main,
   `scripts/test.sh --fast` failed `tests/eval/test_final_benchmark.py::test_the_archived_training_inputs_are_all_in_scope`
-  (`labels <= recorded`). **Commits:** the integrator commit that re-records `data/benchmarks/final_benchmark.json`.
+  (`labels <= recorded`). **Commits:** `0d87a2a` (re-recorded `data/benchmarks/final_benchmark.json` `never_trained`).
 - **Evidence:** `REPO_TRAINING_GLOBS` (`src/honest_agents/eval/final_benchmark.py:55`) globs `data/decision/*.jsonl`, but
   `data/` is gitignored (`.gitignore:8`); only `data/decision/read_rft_tasks.jsonl` is tracked. The DEF-53 re-record ran in
   the `restraint-wt/bench` worktree, which has no copy of the main tree's untracked `data/decision/probe_prompts.jsonl`,
