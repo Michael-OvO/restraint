@@ -27,7 +27,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-17 | tooling | open | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | open | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-NEW-probe-gate-1 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
-| DEF-NEW-probe-gate-2 | grader (harbor trial) | open (blocks only local harbor-trial evals of tasks with a separate verifier) | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 |
+| DEF-NEW-probe-gate-2 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 
 ---
 
@@ -395,7 +395,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 ### DEF-16: probe-role surface builds were never oracle-gated
 - **Area:** task data / grader (local sandboxes). **Status:** closed 2026-10-24. **Found:** 2026-10-24, while closing
   DEF-01. **Commits:** `aa805be` (fix and tests), `e9751e1` (ledger: close), `83ff3a1` (ledger repair: re-score scope,
-  harbor-trial gap, gate provenance), `3d68f98` (harbor-trial pin, 2026-10-25), `6e324fd` (ledger, 2026-10-25).
+  harbor-trial gap, gate provenance), `3d68f98` (harbor-trial pin in `HonestPolicyAgent.setup`, 2026-10-25), `6e324fd`
+  (ledger, 2026-10-25), `e55079d` (the pin moved into the Harbor environment the eval scripts pass, so stock harnesses
+  and separate verifiers get it, 2026-10-25).
   - **Integrator:** the main tree's `0133f19` opens DEF-19 ("exec runs with umask 0000"), the same cause this entry fixes
     at `aa805be`. Merge DEF-19 into DEF-16 (or close it as a duplicate of it) when the branches are integrated.
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
@@ -418,15 +420,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `umask 022` (`harness.pin_exec_umask`, `SANDBOX_UMASK`): agent commands, the oracle, grading and Harbor's own execs.
   On the nodes it is a no-op (they already run under 0022). Fakes and other backends are left as they are.
   - **Scope:** `harness.start_sandbox` covers the environments it starts (`env.py`, `openenv_env/session.py`,
-    `tasks/decision_probe.py`). Harbor-trial evals (`eval/harbor_agent.py`, run by `scripts/eval_harness.sh`,
-    `eval_tb.sh`, `eval_agentic_abstention.sh` with `harbor run -e docker`) get their environment from Harbor's trial,
-    which never calls `start_sandbox`. Since `3d68f98` (2026-10-25), `HonestPolicyAgent.setup` pins that environment too
-    (`harness.pin_docker_umask`, shared with `start_sandbox`). Harbor runs `agent.setup` on the trial's agent environment
-    before the agent's turn, and in the default (shared) verifier mode the verifier execs on that same object
-    (`harbor/trial/trial.py` L882), so the agent's commands and the source tests both run under 022.
-  - **Residual, opened as DEF-NEW-probe-gate-2:** a task that declares a separate verifier (`[verifier] environment` or
-    `environment_mode = "separate"`) is graded in a second container the trial creates itself (`trial.py` ~L940); the
-    agent never sees it, so it is not pinned.
+    `tasks/decision_probe.py`) and pins before `env.start()`, so Harbor's start-time execs are covered too. Harbor-trial
+    evals (`scripts/eval_harness.sh`, `eval_tb.sh`, `eval_agentic_abstention.sh`) get their environments from Harbor's
+    trial, which never calls `start_sandbox`.
+    - `3d68f98` pinned only in `HonestPolicyAgent.setup`. That missed stock harnesses: `eval_harness.sh` defaults to
+      `AGENT=terminus-2` and `eval_tb.sh` runs `-a terminus-2` for its baseline. It also missed a separate verifier's
+      container, and Harbor's start-time execs, which run before `setup`. The `3d68f98` wording ("the agent's commands
+      and the source tests both run under 022") held only for `HonestPolicyAgent` with a shared verifier.
+    - Since `e55079d` the three scripts pass `-e honest_agents.eval.harbor_env:UmaskDockerEnvironment` instead of
+      `-e docker`. That is a `DockerEnvironment` whose `exec` prefixes `umask 022;` (Linux containers only). Harbor
+      builds every environment of a trial from that one config: the agent's (`trial.py` L1331) and a separate
+      verifier's (`trial.py` L977-984, a copy of `config.environment`, `import_path` included). Every main-container
+      exec goes through `exec`: the agent's (any harness), the verifier's, and Harbor's own (the readiness probe
+      `true`; `service_exec` on the main service). So all of them run under 022, from the first exec on. Not covered:
+      execs in non-main sidecar services (Harbor's egress sidecar). They create no task files.
+    - Still not covered: a hand-typed `harbor run -e docker` that bypasses the scripts. `docs/evaluation.md` and the
+      `harbor_agent.py` docstring now give the pinned spec. `HonestPolicyAgent.setup` keeps its pin as a fallback for
+      that case (shared verifier only). On the pinned class the setup pin is a no-op, so there is no second prefix.
   - **No rebuild:** no build code or task file changed, so every dir of the root is byte-identical (diff empty).
   - **No prune:** 0a02897a (probe role: `inbound_link`, `empty_backup`) and bf24b7fb (4 dirs per training surface, not in
     `surface_pairs.jsonl`, an older build's leftovers) stay. They cannot be sandbox-graded, but the probe is a
@@ -459,10 +469,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - L0, harbor-trial path: `tests/eval/test_harbor.py::test_a_harbor_trial_docker_sandbox_runs_under_the_nodes_umask`.
     After `HonestPolicyAgent.setup`, a verifier-style exec on the same `DockerEnvironment` is prefixed `umask 022;` and
     a non-Docker env is left alone. It fails on `83ff3a1` (`'bash /tests/test.sh' != 'umask 022; bash /tests/test.sh'`).
+  - L0, stock harnesses and separate verifiers (`e55079d`):
+    - `tests/eval/test_scripts.py::test_harbor_eval_scripts_run_in_the_umask_pinned_docker_environment`: the three
+      scripts pass the pinned environment, and none pass `-e docker`. It fails on `bf22d91` (3/3).
+    - `tests/eval/test_harbor.py::test_the_eval_scripts_harbor_environment_runs_every_harness_under_the_nodes_umask`:
+      Harbor resolves the spec to `UmaskDockerEnvironment`. Its `exec` prefixes once, also after `pin_docker_umask` /
+      `setup`, and leaves a Windows container alone. It fails on `bf22d91` (no `honest_agents.eval.harbor_env`).
+  - L1 (docker + slow markers):
+    `tests/test_docker_integration.py::test_a_harbor_run_with_a_stock_agent_and_a_separate_verifier_runs_under_the_nodes_umask`.
+    This is a real `harbor run` with Harbor's stock `oracle` agent, so no `HonestPolicyAgent` is involved. It runs two
+    tasks. In one, the shared verifier asserts that the agent's file is 644. The other has
+    `environment_mode = "separate"`, and its verifier asserts that a file it creates in its own container is 644.
+    Locally both get reward 1.0. The same run with `-e docker` (the scripts before `e55079d`) gives **0.0 on both**
+    (scratchpad `fix/probe-gate/stock/control_e_docker.txt`).
 - **Impact note.**
   - Node results (all graded evals, G3 GRPO, G4 sampling): **unchanged**. The nodes already ran under 0022.
-  - Harbor-trial results (TB Lite / TB 2.0 / Agentic Abstention / harness evals): **unchanged**. Those evals ran only on
-    the nodes; the `3d68f98` pin is a no-op there.
+  - Harbor-trial results (TB Lite / TB 2.0 / Agentic Abstention / harness evals, terminus-2 baselines included):
+    **unchanged**. Those evals ran only on the nodes, and the `3d68f98` / `e55079d` pins are no-ops there.
   - Local Docker results before `aa805be` ran under 0000. Re-measured:
     - DEF-01's probe oracle gate, inbound_link: 58/72 before. Post-fix only 22 of the 72 pairs were re-run (job1a/job1b):
       **21/22 pass (re-scored, post-fix, on that subset)**. That subset is the 14 earlier failures (13 pass now; the one
@@ -478,8 +501,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
     not depend on the exec umask.
 
 ### DEF-NEW-probe-gate-2: a Harbor separate-verifier container is not umask-pinned
-- **Area:** grader (harbor-trial evals, local Docker). **Status:** open (blocks only local harbor-trial evals of tasks
-  with a separate verifier). **Found:** 2026-10-25, while repairing DEF-16.
+- **Area:** grader (harbor-trial evals, local Docker). **Status:** closed 2026-10-25. **Found:** 2026-10-25, while
+  repairing DEF-16. **Commits:** `e55079d` (fix and tests, shared with DEF-16).
 - **Evidence:** DEF-16's pin reaches a harbor trial through `HonestPolicyAgent.setup`, which gets only the agent
   environment. When a task's `task.toml` declares `[verifier] environment` or `environment_mode = "separate"`
   (`harbor/models/task/verifier_mode.py` `_resolve_mode`), `harbor/trial/trial.py` (~L920-950) grades in a second
@@ -487,9 +510,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact:** none archived. Harbor-trial evals ran only on the nodes (0022). None of the repo's task dirs declare a
   separate verifier (grep of `task.toml` under `data/` and the archive). The registry datasets of `eval_tb.sh` and
   `eval_agentic_abstention.sh` are not cached locally and were not checked.
-- **Fix:** pin the verifier container too (e.g. pin `DockerEnvironment.exec` for the harbor-run process, or a hook in
-  Harbor's trial), or refuse a local `-e docker` run of a separate-verifier task. Alternatively: owner waiver, since the
-  evals run on the nodes.
+- **Fix (done, `e55079d`):** the eval scripts pass `-e honest_agents.eval.harbor_env:UmaskDockerEnvironment`. The trial
+  builds the separate verifier's container from a copy of the same environment config (`trial.py` L977-984), so its
+  execs are pinned too. The same fix also covers stock harnesses (the residual DEF-16's `3d68f98` did not disclose).
+  See DEF-16 Scope.
+- **Closure test:** DEF-16's L1 `harbor run` test. Its `environment_mode = "separate"` task gets reward 1.0 locally,
+  against 0.0 with `-e docker`.
+- **Impact note:** none. No archived run used a separate verifier or a local harbor-trial eval.
 
 ### DEF-17: `g1_surfaces` ignores Ctrl-C for queued pairs
 - **Area:** tooling. **Status:** open. **Found:** 2026-10-24.
