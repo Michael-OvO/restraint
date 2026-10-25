@@ -50,6 +50,8 @@ from honest_agents.gate.index import (
 PASS, FAIL, SKIP, ERROR = "pass", "fail", "skip", "error"
 EVAL_TASKS = REPO / "data" / "decision" / "surfaces_val" / "tasks"
 EVAL_IDS = REPO / "data" / "decision" / "val_high_risk_sources.txt"
+# DEF-01's `replay_episodes --regrade` rows for S9's eval (the inbound_link controls its test log leaves undecided)
+DEF01_REGRADES = (REPO / "data" / "def01" / "regrade_g2s1.jsonl",)
 # S2 cells with 0 successes in every archived eval that a ledger entry explains: the archive predates the fix.
 EXPLAINED = {
     ("inbound_link", "control"): "DEF-01: graded under the twin's opposite reading before f332f7e",
@@ -82,6 +84,7 @@ class Context:
     eval_ids: Path = EVAL_IDS
     write: bool = False  # L0 writes nothing: a stale index is rebuilt in memory
     hash_cache: Path | None = None  # S8's hash cache (None: `archive.HASH_CACHE`)
+    def01_regrades: tuple[Path, ...] = DEF01_REGRADES  # S9's DEF-01 re-grade rows
     _indexes: list[EvalIndex] | None = None
     index_stats: IndexStats = field(default_factory=IndexStats)
 
@@ -545,19 +548,27 @@ S9_EVAL = "15-g2-splice-replay/eval/it15_g2_surface4"  # power.RUNS["surface"][R
 S9_GATE_CONFIG = "symmetric"
 
 
-def dataset_of(idx: EvalIndex, tasks_roots: Sequence[Path]) -> Any:
-    """`reward_gate.load_eval` from an index table instead of the gzipped episodes (same reproduction filter)."""
+def dataset_of(idx: EvalIndex, tasks_roots: Sequence[Path], regrades: dict[str, dict[str, Any]]) -> Any:
+    """`reward_gate.load_eval(def01_postfix=True)` from an index table instead of the gzipped episodes (same
+    reproduction filter, same DEF-01 re-grade of the inbound_link controls: the pre-DEF-01 grading is void, DEF-39)."""
     from honest_agents.analysis import reward_gate as rg
-    from honest_agents.reward import RewardConfig, outcome_from_dict
+    from honest_agents.reward import EpisodeOutcome, RewardConfig, outcome_from_dict
 
-    ds = rg.Dataset(Path(idx.eval_dir).name, RewardConfig.as_stored(**rg._known(idx.reward)))
+    name = Path(idx.eval_dir).name + " (DEF-01 re-scored, post-fix)"
+    ds = rg.Dataset(name, RewardConfig.as_stored(**rg._known(idx.reward)))
     rows = []
     for r in idx.rows:
         if not isinstance(r.get("outcome"), dict) or r.get("reward") is None:
             ds.unreproduced += 1
             continue
-        o = outcome_from_dict(r["outcome"])
+        o: EpisodeOutcome | None = outcome_from_dict(r["outcome"])
         if not rg._reproduces(o, ds.config, float(r["reward"]), r.get("case")):
+            ds.unreproduced += 1
+            continue
+        row = {"episode_id": r.get("episode_id"), "detail": {"surface": r.get("surface")},
+               "extra": {"test_log": r.get("test_log")}}  # fmt: skip
+        o = rg.inbound_link_postfix(row, o, regrades)
+        if o is None:
             ds.unreproduced += 1
             continue
         vid = r["variant_id"]
@@ -572,7 +583,10 @@ def s9_reward_audit(ctx: Context) -> CheckResult:
     idx = ctx.index_of(S9_EVAL)
     if idx is None:
         return _result("S9", "reward audit", None, f"{S9_EVAL} is not in the archive")
-    ds = dataset_of(idx, ctx.tasks_roots)
+    absent = [str(p) for p in ctx.def01_regrades if not p.is_file()]
+    if absent:
+        return _result("S9", "reward audit", False, f"no DEF-01 regrade rows at {', '.join(absent)}")
+    ds = dataset_of(idx, ctx.tasks_roots, rg.read_regrades(ctx.def01_regrades))
     if ds.missing_dirs:
         return _result("S9", "reward audit", False, f"{len(ds.missing_dirs)} variants have no task dir")
     res = {name: rg.evaluate(ds, rg.config_for(name, ds.config)) for name in ("archived", S9_GATE_CONFIG)}

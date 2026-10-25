@@ -193,6 +193,15 @@ def index_row(r: dict[str, Any], sites: _Sites) -> dict[str, Any]:
         "outcome": (
             {k: v for k, v in outcome.items() if k not in DROPPED_OUTCOME_FIELDS} if isinstance(outcome, dict) else None
         ),
+        # DEF-39: the archived test log of a failed inbound_link episode, which `reward_gate.inbound_link_postfix`
+        # reads to re-grade it under the DEF-01 test (capped at 2000 chars by the eval)
+        "test_log": (
+            str((r.get("extra") or {}).get("test_log") or "")
+            if (r.get("detail") or {}).get("surface") == "inbound_link"
+            and isinstance(outcome, dict)
+            and outcome.get("tests_passed") is False
+            else None
+        ),
     }
 
 
