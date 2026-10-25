@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from honest_agents.gate import checks, index, sweep
-from honest_agents.gate.cache import ResultCache
+from honest_agents.gate.cache import SRC, ResultCache
 from honest_agents.tasks import g1_surfaces
 from honest_agents.tasks.perturb import risk_surfaces
 from honest_agents.tasks.perturb.risk_surfaces import SURFACES, build_varied
@@ -54,9 +54,10 @@ def _no_boots(monkeypatch) -> None:
 # ── L0 on this checkout ───────────────────────────────────────────────────────
 
 
-def test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget(monkeypatch) -> None:
+def test_the_l0_sweep_boots_nothing_writes_only_s7s_rebuild_and_fits_its_budget(monkeypatch) -> None:
     """The closure test: every L0 check runs on this checkout's code, data and archive index with the boot and Docker
-    patched to raise; 0 boots, nothing written but S7's temporary rebuild, <= 60 s. Checks whose inputs are absent
+    patched to raise; 0 boots, nothing written but S7's temporary rebuild (DEF-22, open: integrity-gate.md says never
+    write the build to disk), <= 60 s. Checks whose inputs are absent
     (a node has no archive, a worktree no `data/`) skip. The checks of closed defects must pass; S9 is reported, not
     asserted (DEF-13 is open: `symmetric` still fails the blind and adversarial conditions on G2 s1)."""
     _no_boots(monkeypatch)
@@ -337,6 +338,100 @@ def test_an_infrastructure_error_is_never_cached(tmp_path, monkeypatch) -> None:
     checker(twin, control)
     checker(twin, control)
     assert len(calls) == 2 and checker.cache_hits == 0 and not (tmp_path / "cache").exists()
+
+
+class _LostSandboxEnv:
+    """`OracleHarborEnv` whose sandbox is gone: every `bash` is `SANDBOX_UNAVAILABLE` and grading is masked."""
+
+    def __init__(self, *, boot_fails: bool, reward_config: Any = None) -> None:
+        self.boot_fails, self._history = boot_fails, []
+
+    def reset(self, task_dir: str) -> str:
+        return ""
+
+    def bash(self, command: str) -> str:
+        from honest_agents.harness import SANDBOX_UNAVAILABLE
+
+        if not self.boot_fails:  # an exec that raised is recorded, as `HonestHarborEnv.bash` does
+            self._history.append({"command": command, "rc": None, "output": SANDBOX_UNAVAILABLE})
+        return SANDBOX_UNAVAILABLE
+
+    def abstain(self, **k: Any) -> str:
+        return ""
+
+    def _graded(self) -> tuple[Any, Any, dict]:
+        from types import SimpleNamespace
+
+        outcome = SimpleNamespace(irreversible_violation=None, grading_error="boot: docker died")
+        return outcome, SimpleNamespace(case="masked"), {}
+
+
+@pytest.mark.parametrize("boot_fails", [True, False])
+def test_a_report_episode_that_loses_its_sandbox_is_never_cached(rich, tmp_path, monkeypatch, boot_fails) -> None:
+    """Both validations pass but the report episodes' sandbox is unavailable: the pair is an infrastructure error, not
+    a FAIL verdict ('the inspection commands did not print the evidence'), so it is re-run, never replayed from the
+    cache."""
+    from honest_agents.tasks.validate import ValidationResult
+
+    twin, control = build_varied(rich, tmp_path / "out", pair_id=PAIR, surface="readme")
+
+    async def ok(task_dir: Path, **k: Any) -> ValidationResult:
+        return ValidationResult(Path(task_dir).name, str(task_dir), PAIR, True, None, True, "ok",
+                                irreversible_violation=True)  # fmt: skip
+
+    monkeypatch.setattr(g1_surfaces, "validate_task", ok)
+    monkeypatch.setattr(g1_surfaces, "OracleHarborEnv", lambda **k: _LostSandboxEnv(boot_fails=boot_fails, **k))
+    row = g1_surfaces.check_pair(twin.task_dir, control.task_dir)
+    assert row.infra_error.startswith("twin report: sandbox ") and not row.ok, row
+    checker = g1_surfaces.CachedChecker(ResultCache("g", 1, tmp_path / "cache"), image_digest=lambda i: "img")
+    checker(twin.task_dir, control.task_dir)
+    checker(twin.task_dir, control.task_dir)
+    assert (checker.pairs_run, checker.cache_hits) == (2, 0) and not (tmp_path / "cache").exists()
+
+
+def test_a_report_episode_that_cannot_be_graded_is_an_infrastructure_error(rich, tmp_path, monkeypatch) -> None:
+    env = _LostSandboxEnv(boot_fails=False)
+    env.bash = lambda command: "evidence"  # type: ignore[method-assign]  # the commands ran; grading did not
+    monkeypatch.setattr(g1_surfaces, "OracleHarborEnv", lambda **k: env)
+    twin, _ = build_varied(rich, tmp_path / "out", pair_id=PAIR, surface="readme")
+    site = risk_surfaces.site_of_task(twin.task_dir)
+    *_, lost = g1_surfaces.report_episode(twin.task_dir, site, "evidence")
+    assert lost == "grading_error: boot: docker died"
+
+
+def test_the_source_hashes_cover_every_imported_module() -> None:
+    """The cache key and the index's label hash cover what their code imports, transitively (taskfs, bank, mutation,
+    readme_read were missing from the hand-written lists), and the g1 key carries the Harbor and TRL versions."""
+    g1 = {p.relative_to(SRC).as_posix() for p in g1_surfaces.SOURCE_FILES}
+    assert g1 >= {"tasks/taskfs.py", "bank.py", "mutation.py", "env.py", "tasks/validate.py", "tasks/g1_surfaces.py"}
+    labels = {p.relative_to(SRC).as_posix() for p in index.LABEL_SOURCES}
+    assert labels >= {"readme_read.py", "tasks/taskfs.py", "eval/read_diagnosis.py", "gate/index.py"}
+    checker = g1_surfaces.CachedChecker(ResultCache("g", 1, None))
+    assert set(checker.libraries) == {"harbor", "trl"} and all(checker.libraries.values())
+
+
+def test_a_changed_task_dir_rebuilds_the_tables_whose_read_labels_use_it(tmp_path, rich) -> None:
+    """The stored `read` label comes from the task dir's surface site: a changed `task.toml` (or a task dir that
+    appears) rebuilds the tables of that task, not a table of other tasks."""
+    twin, _ = build_varied(rich, tmp_path / "tasks" / "x", pair_id=PAIR, surface="readme")
+    roots = (twin.task_dir.parent,)
+    archive = tmp_path / "archive"
+    for name, tid in (("one", twin.task_dir.name), ("two", "absent")):
+        d = archive / "it" / name
+        d.mkdir(parents=True)
+        ep = {"episode_id": name, "task_id": tid, "family": "high_risk", "extra": {"history": []}}
+        (d / "episodes.jsonl").write_text(json.dumps(ep) + "\n")
+    idx_dir = tmp_path / "index"
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=roots)
+    assert stats.built == 2
+    toml = twin.task_dir / "task.toml"
+    toml.write_text(toml.read_text() + "\n# changed\n")
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=roots)
+    assert (stats.built, stats.fresh) == (1, 1)
+    (roots[0] / "absent").mkdir()
+    (roots[0] / "absent" / "task.toml").write_text("")
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=roots)
+    assert (stats.built, stats.fresh) == (1, 1)
 
 
 def test_g1_cli_caches_and_reports_its_stats(tmp_path, fake_pairs, capsys) -> None:

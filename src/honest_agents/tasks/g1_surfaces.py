@@ -16,11 +16,13 @@ For every twin/control pair listed in a `surface_variants.jsonl` (written by `su
     uv run python -m honest_agents.tasks.g1_surfaces --variants out/surfaces/surface_variants.jsonl --concurrency 4
 
 Results are cached content-addressed (docs/integrity-gate.md, "the result cache"; DEF-15): the key is the sha256 of
-the twin's and the control's task dir, of the source files a check imports (`SOURCE_FILES`: grader, verifier, harness,
-env, reward, `risk_surfaces.py`, this module), of the inspection commands, of the base image digests and of the oracle
+the twin's and the control's task dir, of every `honest_agents` source file this module imports, directly or
+transitively (`SOURCE_FILES`: grader, verifier, harness, env, bank, mutation, reward, taskfs, `risk_surfaces.py`, this
+module...), of the Harbor and TRL versions, of the inspection commands, of the base image digests and of the oracle
 timeout. A pair whose key is cached boots nothing, so a second run with no change makes 0 boots and a change to one
-task dir re-runs that pair only. A pair whose check hit an infrastructure error is never cached. `--refresh` re-runs
-every pair and rewrites the cache (the gate's L2); `--no-cache` neither reads nor writes it.
+task dir re-runs that pair only. A pair that hit an infrastructure error in any of its four episodes (either
+validation, or a report episode whose sandbox failed to boot, lost an exec or could not be graded) is never cached.
+`--refresh` re-runs every pair and rewrites the cache (the gate's L2); `--no-cache` neither reads nor writes it.
 """
 
 from __future__ import annotations
@@ -40,15 +42,16 @@ from typing import Any
 
 from honest_agents.gate.cache import (
     DEFAULT_CACHE_DIR,
-    SRC,
     ResultCache,
     base_image,
     cache_key,
     docker_image_digest,
+    import_closure,
+    library_versions,
     sha256_files,
     sha256_tree,
 )
-from honest_agents.harness import set_max_concurrent_boots
+from honest_agents.harness import SANDBOX_UNAVAILABLE, set_max_concurrent_boots
 from honest_agents.reward import RewardConfig
 from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite, inspection_commands, site_of_task
 from honest_agents.tasks.validate import OracleHarborEnv, validate_task
@@ -58,16 +61,11 @@ log = logging.getLogger(__name__)
 G1_REWARD = RewardConfig(alpha=0.1, false_blame=-0.4, implicit_abstain=0.0)
 CHECK = "g1_surfaces"
 SCHEMA_VERSION = 1
-# The source files a pair's verdict depends on: the grader and verifier, the sandbox harness and env, the reward, the
-# surface declarations and this module's own checks.
-SOURCE_FILES = (
-    *(SRC / n for n in ("env.py", "harness.py", "grading.py", "reward.py", "report.py", "spec.py")),
-    *sorted((SRC / "verifier").glob("*.py")),
-    SRC / "tasks" / "validate.py",
-    SRC / "tasks" / "hermetic.py",
-    SRC / "tasks" / "perturb" / "risk_surfaces.py",
-    Path(__file__).resolve(),
-)
+# The source files a pair's verdict depends on: every `honest_agents` module this one imports, directly or through
+# another (the grader and verifier, the sandbox harness, env, bank and mutation, the reward, taskfs, the surface
+# declarations and this module's own checks), and the libraries the env is built on.
+SOURCE_FILES = import_closure(Path(__file__))
+LIBRARIES = ("harbor", "trl")
 
 
 @dataclass
@@ -84,7 +82,7 @@ class PairCheck:
     evidence_visible: bool = False
     commands: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
-    infra_error: str = ""  # a validation hit an infrastructure error: the verdict is not a result and is never cached
+    infra_error: str = ""  # an episode hit an infrastructure error: the verdict is not a result and is never cached
 
     @property
     def ok(self) -> bool:
@@ -98,21 +96,35 @@ def _first_line(text: str) -> str:
     return next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
 
 
-def report_episode(task_dir: Path, site: SurfaceSite, evidence: str) -> tuple[str, bool | None, bool]:
-    """Inspect with the surface commands, then decline with the high_risk blocker; (case, irreversible, evidence shown)."""
+def report_episode(task_dir: Path, site: SurfaceSite, evidence: str) -> tuple[str, bool | None, bool, str]:
+    """Inspect with the surface commands, then decline with the high_risk blocker; (case, irreversible, evidence shown,
+    infrastructure error). The error is '' unless the sandbox failed to boot (`bash` returns `SANDBOX_UNAVAILABLE`
+    without recording a step), lost an exec (a step with rc None and `SANDBOX_UNAVAILABLE`, as `replay_episodes`
+    reads it) or the episode could not be graded: then the other three describe no sandbox and are not a result."""
     env = OracleHarborEnv(reward_config=G1_REWARD)
     env.reset(task_dir=str(task_dir))
     shown = ""
+    lost = ""
     for command in inspection_commands(site):
-        shown += str(env.bash(command)) + "\n"
+        out = str(env.bash(command))
+        if out == SANDBOX_UNAVAILABLE:
+            lost = lost or f"sandbox boot failed before {command!r}"
+        shown += out + "\n"
+    lost = lost or next(
+        (f"sandbox exec lost on {h.get('command')!r}" for h in env._history
+         if h.get("rc") is None and h.get("output") == SANDBOX_UNAVAILABLE),
+        "",
+    )  # fmt: skip
     env.abstain(
         reason="The evidence says this must not be deleted, so I did not.",
         blocker_category="high_risk",
         blocker_target=site.target,
     )
     outcome, breakdown, _ = env._graded()
+    if not lost and outcome.grading_error is not None:
+        lost = f"grading_error: {outcome.grading_error}"
     first = _first_line(evidence)
-    return breakdown.case, outcome.irreversible_violation, bool(first) and first in shown
+    return breakdown.case, outcome.irreversible_violation, bool(first) and first in shown, lost
 
 
 def check_pair(twin_dir: Path, control_dir: Path, *, oracle_timeout: int = 600) -> PairCheck:
@@ -123,14 +135,17 @@ def check_pair(twin_dir: Path, control_dir: Path, *, oracle_timeout: int = 600) 
     row.control_oracle_ok, row.control_reason = c.ok, c.reason
     t = asyncio.run(validate_task(twin_dir, oracle_timeout_sec=oracle_timeout, oracle_runs=1))
     row.twin_destroy_ok, row.twin_reason = t.ok and t.irreversible_violation, t.reason
-    row.infra_error = next(
-        (f"{name}: {v.error or v.reason}" for name, v in (("control", c), ("twin", t))
-         if v.error or "infrastructure error" in v.reason),
-        "",
-    )  # fmt: skip
     evidence = _evidence_of(twin_dir)
-    row.twin_report_case, row.twin_report_violation, row.evidence_visible = report_episode(twin_dir, site, evidence)
-    row.control_report_case, _, _ = report_episode(control_dir, site, _evidence_of(control_dir))
+    row.twin_report_case, row.twin_report_violation, row.evidence_visible, twin_lost = report_episode(
+        twin_dir, site, evidence
+    )
+    row.control_report_case, _, _, control_lost = report_episode(control_dir, site, _evidence_of(control_dir))
+    errors = [
+        *(f"{name}: {v.error or v.reason}" for name, v in (("control", c), ("twin", t))
+          if v.error or "infrastructure error" in v.reason),
+        *(f"{name} report: {lost}" for name, lost in (("twin", twin_lost), ("control", control_lost)) if lost),
+    ]  # fmt: skip
+    row.infra_error = errors[0] if errors else ""
     if not row.control_oracle_ok:
         row.problems.append(f"control oracle: {row.control_reason}")
     if not row.twin_destroy_ok:
@@ -176,6 +191,7 @@ class CachedChecker:
     refresh: bool = False  # L2: ignore cached verdicts (and rewrite them)
     image_digest: Callable[[str], str] | None = None  # None: `docker_image_digest` (local image id)
     source_hash: str = field(default_factory=lambda: sha256_files(SOURCE_FILES))
+    libraries: dict[str, str] = field(default_factory=lambda: library_versions(*LIBRARIES))
     pairs_run: int = 0
     cache_hits: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
@@ -188,6 +204,7 @@ class CachedChecker:
             twin=sha256_tree(twin_dir),
             control=sha256_tree(control_dir),
             sources=self.source_hash,
+            libraries=self.libraries,
             commands=inspection_commands(site) if site is not None else [],
             images=[(self.image_digest or docker_image_digest)(base_image(d)) for d in (twin_dir, control_dir)],
             oracle_timeout=self.oracle_timeout,

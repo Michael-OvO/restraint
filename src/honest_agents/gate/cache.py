@@ -10,7 +10,9 @@ corrupt, torn or old-version row is ignored, never trusted; a later row for the 
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.metadata
 import json
 import subprocess
 import threading
@@ -36,6 +38,57 @@ def sha256_files(paths: Iterable[Path]) -> str:
     for p in paths:
         h.update(p.name.encode() + b"\0" + hashlib.sha256(p.read_bytes()).digest())
     return h.hexdigest()
+
+
+def _module_file(name: str) -> Path | None:
+    """The file of an `honest_agents` module (a package's `__init__.py`), or None for any other module."""
+    parts = name.split(".")
+    if parts[0] != SRC.name:
+        return None
+    p = SRC.joinpath(*parts[1:])
+    if (p / "__init__.py").is_file():
+        return p / "__init__.py"
+    return p.with_suffix(".py") if p.with_suffix(".py").is_file() else None
+
+
+def _imported_modules(path: Path) -> list[str]:
+    """Every module name `path` imports, at the top level or inside a function (a lazy import still shapes a verdict),
+    with each `from m import x` also tried as the submodule `m.x` and every parent package of a name."""
+    pkg = [SRC.name, *path.relative_to(SRC).with_suffix("").parts][:-1]  # the package a relative import starts from
+    names: list[str] = []
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            names += [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = pkg[: len(pkg) - node.level + 1] if node.level else []
+            mod = ".".join([*base, *([node.module] if node.module else [])])
+            names += [mod, *(f"{mod}.{a.name}" for a in node.names)]
+    return [".".join(n.split(".")[: i + 1]) for n in names for i in range(len(n.split(".")))]
+
+
+def import_closure(*entries: Path) -> tuple[Path, ...]:
+    """The `honest_agents` source files `entries` import, directly or through each other (sorted, entries included):
+    what a cache key's source hash covers, so no imported module can change under a cached verdict."""
+    seen: set[Path] = set()
+    stack = [Path(e).resolve() for e in entries]
+    while stack:
+        p = stack.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        stack += [q for q in map(_module_file, _imported_modules(p)) if q is not None and q not in seen]
+    return tuple(sorted(seen))
+
+
+def library_versions(*dists: str) -> dict[str, str]:
+    """Installed versions of third-party distributions a verdict depends on (Harbor, TRL); '' when not installed."""
+    out = {}
+    for d in dists:
+        try:
+            out[d] = importlib.metadata.version(d)
+        except importlib.metadata.PackageNotFoundError:
+            out[d] = ""
+    return out
 
 
 def base_image(task_dir: Path) -> str:

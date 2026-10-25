@@ -22,13 +22,16 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | fixing | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | closed | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
-| DEF-15 | tooling | closed | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
+| DEF-15 | tooling | closed | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval); repaired 2026-10-25 (report-episode infra errors cached, keys missed imports; gaps entered as DEF-22/23/24) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-19 | tooling | open | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only |
 | DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
 | DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
+| DEF-22 | tooling / build | open | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
+| DEF-23 | tooling | open | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
+| DEF-24 | tooling | open | `replay_episodes`' cache key hashes only env/harness/grading, not what they import (bank, mutation, taskfs...) or the Harbor/TRL versions |
 
 ---
 
@@ -915,20 +918,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - L0 in `scripts/test.sh --fast`: `tests/test_gate.py`.
   - `gate.cache`: the append-only result cache, now shared by `replay_episodes` (its keys and rows are unchanged, so
     the existing replay cache stays valid) and `g1_surfaces` (`CachedChecker`: key = both task dirs, the imported
-    grader / verifier / harness / env / reward / `risk_surfaces` / `validate` sources, the inspection commands, both
-    base image digests, the oracle timeout; a pair with an infrastructure error is never cached; `--cache-dir`,
+    `honest_agents` sources `g1_surfaces` imports, directly or transitively (`gate.cache.import_closure`: 47 files,
+    taskfs / bank / mutation included), the Harbor and TRL versions, the inspection commands, both base image digests,
+    the oracle timeout; a pair with an infrastructure error in any of its four episodes (either validation, or a report
+    episode whose sandbox failed to boot, lost an exec or could not be graded) is never cached; `--cache-dir`,
     `--no-cache`, `--refresh`, `--changed`; default concurrency 6 -> 4).
   - `gate.index` (`python -m honest_agents.gate index`): one gzipped table per archived `episodes.jsonl[.gz]` in
     `~/.cache/honest-agents/gate/index/` (68 evals, 35,606 episodes, 13.9 MB in all, built in 12 s): ids, surface, branch,
     case, reward, commands and their hash, the `inspected` read label (K = 8), the first destructive command and the
-    outcome without its `evidence`. Rebuilt only when the source's sha256 or the label code changes; at L0 a stale
-    table is rebuilt in memory, never written.
+    outcome without its `evidence`. Rebuilt only when the source's sha256, the label code (the import closure of
+    `read_diagnosis` / `risk_surfaces` / `behaviour` / `replay_episodes` / `gate.index`, `readme_read` and `taskfs`
+    included) or the task dirs its read labels come from (`sites_sha256`: each high_risk task id's resolved dir and
+    `task.toml`) change; at L0 a stale table is rebuilt in memory, never written.
 - **Closure test:**
   - L0 sweep ≤60 s on the Mac, measured, with 0 sandbox boots asserted by a test that patches the boot to raise:
-    `tests/test_gate.py::test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget` (Harbor's environment
+    `tests/test_gate.py::test_the_l0_sweep_boots_nothing_writes_only_s7s_rebuild_and_fits_its_budget` (Harbor's environment
     factory, `harness._start_throttled`, the image-digest lookup and any `docker` subprocess raise). Measured on the
     Mac at `79bf77e`: 10.5 s with a fresh index, 20-23 s when the index is stale and rebuilt in memory; 0 boots; the
-    only bytes written are S7's temporary rebuild (18.8 MB, deleted). `scripts/test.sh --fast`: 95 s, as before.
+    only bytes written are S7's temporary rebuild (18,793,272 bytes, deleted), a deviation from the L0 contract
+    entered as DEF-22 (open). `scripts/test.sh --fast`: 95 s, as before.
   - a second L1 run with no changes makes 0 boots, all cache hits; changing one task dir re-boots only that pair:
     `::test_a_second_l1_run_boots_nothing_and_a_changed_task_reboots_only_its_pair` (fake `check_pair` that creates 4
     environments per pair through Harbor's factory, counted by the sweep's meter: 12 boots, then 0 with 3 hits, then 4
@@ -946,11 +954,40 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `data/`), S6, S7 (240/240 and 1,048/1,048), S8 (1 declared copy), S10 pass; **S9 fails** on G2 s1 under both configs
   (archived: blind and adversarial not below start, break-even 0.39; symmetric: blind and adversarial not below start),
   which is DEF-13, still open. The fast-suite test asserts the checks of closed defects and reports S9.
-- **Not covered here** (proposed as follow-ups, not part of this closure test): S7 still writes its rebuild to a
-  temporary directory (hashed, then deleted; measured) instead of building in memory, which needs a change in the
-  build code (`risk_surfaces` / `pool_build`); S3 runs through `replay_episodes` / `read_audit` (now on the shared
-  cache) and S11 by hand, not through the sweep; the L1 cache was exercised with fakes only (the Docker daemon was not
-  running), so the first real `--level 1` run is the one that fills it.
+  Repair (2026-10-25): tooling only again; nothing re-scored.
+  - The rebuilt index (68 tables, 35,606 rows, 10.2 s in memory) has rows identical to the stored tables. Every
+    stored table is stale once under the new label hash, so it was rewritten with `python -m honest_agents.gate index`.
+  - No `g1_surfaces` cache existed, so no cached verdict was invalidated.
+  - First real L1 run with Docker (OrbStack, 2 pairs from `data/decision/surfaces_val`, readme and file_header,
+    concurrency 2, scratch cache): pass 1 `pairs_run 2, cache_hits 0`, 109.6 s, both OK, 1,236 cache bytes. Pass 2,
+    through `gate sweep --level 1 --only G1`: 0.4 s, **0 boots**, 2 cache hits, 0 bytes.
+  - The report-episode infrastructure path was exercised with a fake env only. No real sandbox loss occurred.
+- **Repair (2026-10-25, review of the first closure):**
+  - The claim "a pair with an infrastructure error is never cached" was false for half of a pair's boots.
+    `check_pair` took `infra_error` from the two `validate_task` runs only. A report episode whose sandbox died got
+    `[sandbox unavailable]` back from `env.bash` (`env.py:251/280`), so the evidence never printed. The pair then
+    failed with "the inspection commands did not print the evidence" and was cached as a FAIL verdict, which later L1
+    runs replayed until `--refresh`. That is a false FAIL that sticks, never a false PASS. Fixed:
+    `report_episode` returns an infrastructure error when a `bash` returns `SANDBOX_UNAVAILABLE` (boot failed, so no
+    step was recorded), when a step has rc None and `SANDBOX_UNAVAILABLE` (lost exec, read the same way as
+    `replay_episodes._sandbox_lost`), or when grading sets `grading_error`. `check_pair` folds both report episodes
+    into `infra_error`, and `CachedChecker` does not cache the pair.
+    Tests: `::test_a_report_episode_that_loses_its_sandbox_is_never_cached[True/False]` (the reviewer's probe:
+    validations ok, report sandbox lost; on the old code `infra_error=''` and the row is cached) and
+    `::test_a_report_episode_that_cannot_be_graded_is_an_infrastructure_error`.
+  - Cache keys missed imported sources. `g1_surfaces.SOURCE_FILES` left out `tasks/taskfs.py`, `bank.py`,
+    `mutation.py` and the Harbor/TRL versions. `gate.index.LABEL_SOURCES` left out `readme_read.py`, `taskfs.py` and
+    the task dirs the read label is computed from. Both now use `gate.cache.import_closure` (an AST walk of
+    `honest_agents` imports, lazy imports and parent packages included). The g1 key adds
+    `library_versions("harbor", "trl")`, and each index table stores `sites_sha256`.
+    Tests: `::test_the_source_hashes_cover_every_imported_module` and
+    `::test_a_changed_task_dir_rebuilds_the_tables_whose_read_labels_use_it` (a changed `task.toml` or a task dir
+    that appears rebuilds only the table that uses it). All five tests fail on `f0f12e2`.
+    The same gap in `replay_episodes` (DEF-06's key) is entered as DEF-24 and not changed here, since fixing it
+    invalidates the 3.6 MB replay cache.
+  - Known deviations from the gate contract that the first closure only listed are now in the ledger: DEF-22 (S7
+    writes its rebuild to disk at L0) and DEF-23 (the sweep runs neither S3 nor S11).
+  - A real L1 run with Docker: see the impact note.
 
 ### DEF-16: probe-role surface builds were never oracle-gated
 - **Area:** task data. **Status:** open. **Found:** 2026-10-24, while closing DEF-01.
@@ -1076,3 +1113,46 @@ section 7 critique) and from re-checks against the code and the archive on that 
   assertion text was not captured. The test is unchanged by this lane.
 - **Fix (proposed):** make the forger's first write happen before grading starts (wait for `reward.json` to exist
   before `run_grade`), so the outcome does not depend on scheduling.
+
+### DEF-22: L0's S7 writes the rebuild to disk
+- **Area:** tooling / build. **Status:** open. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered
+  2026-10-25 on review.
+- **Evidence:** integrity-gate.md, "Running the gates efficiently": at L0 "the only disk write is pytest's temp dir";
+  S7: "Never write the build to disk to diff it". `gate.checks.s7_build_stability` calls `pool_build.build` and
+  `pool_build.build_decision`, which emit every variant into a `tempfile` directory, hash it, then delete it.
+  `python -m honest_agents.gate sweep --level 0 --only S7` (2026-10-25): PASS, 8.2 s, **18,793,272 bytes written**
+  (the reviewer measured the same). This runs on every L0 sweep, so on every `scripts/test.sh --fast`.
+  `tests/test_gate.py::test_the_l0_sweep_boots_nothing_writes_only_s7s_rebuild_and_fits_its_budget` exempts S7 by
+  name.
+- **Impact:** a contract deviation, not a wrong result. S7's verdict compares hashes of what was written, and the
+  directory is deleted. The writes cost disk I/O on every test run, and the L0 contract as written is false.
+- **Fix (proposed, build lane):** have `risk_surfaces` emission / `pool_build` produce `{relative path: bytes}` in
+  memory, or hash while emitting, so S7 compares hashes without writing. Then drop the S7 exemption from the L0 test.
+
+### DEF-23: the sweep does not run S3 or S11
+- **Area:** tooling. **Status:** open. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
+  on review.
+- **Evidence:** `gate.checks.L0_CHECKS` and the L1 list in `gate.sweep` contain S1, S2, S4-S10 and G1, not S3 or S11.
+  S3 (metric validity per branch) runs separately through `analysis.replay_episodes` / `read_audit`. S11
+  (infrastructure guards: egress preflight, masked-share stop, sanity run, `balance_floor`) is done by hand. Under
+  integrity-gate.md, a check done by hand is recorded in the sign-off, and "building the tool is itself a ledger
+  entry". This is that entry.
+- **Impact:** `gate sweep --level 1` printing PASS does not mean S3 and S11 were checked. Each sign-off has to run
+  them separately and say so.
+- **Fix (proposed):** add S3 to the L1 sweep through `replay_episodes`' cache and `read_audit` (cached outputs are
+  re-scored in memory), and add an S11 check that exercises each guard once against the fake sandbox. Only the egress
+  preflight needs a real container.
+
+### DEF-24: the replay cache key misses imported sources and library versions
+- **Area:** tooling. **Status:** open. **Found:** 2026-10-25, DEF-15 repair (the same gap the reviewer found in
+  `g1_surfaces` and `gate.index`, which are fixed there).
+- **Evidence:** `src/honest_agents/analysis/replay_episodes.py:74`: `SOURCE_FILES = (env.py, harness.py, grading.py)`.
+  `env.py` and `grading.py` import `bank`, `mutation`, `spec`, `report`, `reward` and `verifier/*`
+  (`gate.cache.import_closure` of `replay_episodes.py` lists them). The key (`replay_episodes.cache_key`) also leaves
+  out the Harbor and TRL versions that `HonestHarborEnv` is built on. If any of these changes, the cached history
+  entries stay valid when they should be invalidated.
+- **Impact:** latent. Rows are command outputs, which depend mostly on the bash wrapper in `env.py`/`harness.py`
+  (already keyed). No archived number is known to be affected. Fixing it changes every key, so the existing
+  `~/.cache/honest-agents/gate/replay_episodes.v1.jsonl` (3.6 MB) would be re-run on the next S3 replay.
+- **Fix (proposed, DEF-06 / replay owner):** `SOURCE_FILES = gate.cache.import_closure(Path(__file__))`, plus
+  `library_versions("harbor", "trl")` in the key. Accept the one-time cache refill.

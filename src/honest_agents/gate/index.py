@@ -6,9 +6,11 @@ Each `episodes.jsonl[.gz]` under the archive gets one gzipped JSON table in `<ga
 with its ids, surface, branch, case, reward, commands and their hash, the read label (`read_diagnosis.inspected`, K = 8,
 strict rule: no replay), the first-destructive-command index (`replay_episodes.decision_index`) and the outcome without
 its `evidence` re-runs (which the reward never reads), so `compute_reward` can re-score it. A table also stores its
-source file's sha256, size and mtime, and the sha256 of the source files its labels come from (`LABEL_SOURCES`):
-an unchanged file (same size and mtime, or else the same sha256) under unchanged label code is never re-read, and a
-changed or new archive rebuilds only its own table. L0 checks and archive analyses read the tables, never the gzipped
+source file's sha256, size and mtime, the sha256 of the source files its labels come from (`LABEL_SOURCES`: every
+`honest_agents` module the label code imports, directly or transitively) and the sha256 of the task dirs its surface
+sites were read from (`sites_sha256`: which dir each high_risk task id resolved to and that dir's `task.toml`): an
+unchanged file (same size and mtime, or else the same sha256) under unchanged label code and task dirs is never
+re-read, and a changed or new archive, or a changed task dir, rebuilds only the tables that use it. L0 checks and archive analyses read the tables, never the gzipped
 episodes. An index that is missing or stale at L0 is built in memory (nothing is written; `gate index` writes it).
 """
 
@@ -24,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from honest_agents.gate.cache import DEFAULT_CACHE_DIR, SRC, sha256_files
+from honest_agents.gate.cache import DEFAULT_CACHE_DIR, SRC, import_closure, sha256_files
 
 SCHEMA = 1
 REPO = SRC.parents[1]
@@ -34,8 +36,9 @@ DEFAULT_TASKS_ROOTS = tuple(
     REPO / p for p in ("data/decision/surfaces_val/tasks", "data/decision/surfaces/tasks", "data/tasks")
 )
 EPISODE_FILES = ("episodes.jsonl", "episodes.jsonl.gz")
-# The code the stored labels come from: a change to any of them rebuilds every table.
-LABEL_SOURCES = (
+# The code the stored labels come from (read_diagnosis and what it imports: readme_read, taskfs, behaviour, ...): a change
+# to any of them rebuilds every table.
+LABEL_SOURCES = import_closure(
     SRC / "eval" / "read_diagnosis.py",
     SRC / "tasks" / "perturb" / "risk_surfaces.py",
     SRC / "behaviour.py",
@@ -52,6 +55,7 @@ class EvalIndex:
     size: int
     mtime_ns: int
     labels_sha256: str
+    sites_sha256: str = ""  # the task dirs the read labels were computed from (`_Sites.fingerprint`)
     reward: dict[str, Any] = field(default_factory=dict)  # the eval's `config.json` reward block ({} when absent)
     rows: list[dict[str, Any]] = field(default_factory=list)
 
@@ -105,23 +109,55 @@ def resolve_task_dir(task_dir: str | None, task_id: str, roots: Sequence[Path]) 
 
 
 class _Sites:
-    """Surface sites by task id (`resolve_task_dir`)."""
+    """Surface sites by task id (`resolve_task_dir`), remembering which dir each id resolved to."""
 
-    def __init__(self, tasks_roots: Sequence[Path]):
+    def __init__(self, tasks_roots: Sequence[Path], toml_sha: dict[Path, str] | None = None):
         self.tasks_roots = tasks_roots
         self._sites: dict[str, Any] = {}
+        self._dirs: dict[str, Path | None] = {}
+        self._toml_sha = {} if toml_sha is None else toml_sha  # shared across tables by `ensure_indexes`
+
+    def resolve(self, r: dict[str, Any]) -> tuple[str, Path | None]:
+        tid = str(r.get("task_id") or "")
+        if tid not in self._dirs:
+            self._dirs[tid] = resolve_task_dir(r.get("task_dir"), tid, self.tasks_roots)
+        return tid, self._dirs[tid]
 
     def get(self, r: dict[str, Any]) -> Any:
         from honest_agents.tasks.perturb.risk_surfaces import site_of_task
 
-        tid = str(r.get("task_id"))
+        tid, d = self.resolve(r)
         if tid not in self._sites:
-            d = resolve_task_dir(r.get("task_dir"), tid, self.tasks_roots)
             try:
                 self._sites[tid] = site_of_task(d) if d is not None else None
             except (KeyError, ValueError, TypeError):
                 self._sites[tid] = None
         return self._sites[tid]
+
+    def fingerprint(self) -> str:
+        """sha256 of each resolved task id's dir and `task.toml` (the only file `site_of_task` reads): a task dir that
+        appears, moves or changes its surface declaration changes it."""
+        h = hashlib.sha256()
+        for tid in sorted(self._dirs):
+            d = self._dirs[tid]
+            toml = None
+            if d is not None:
+                p = d / "task.toml"
+                if p not in self._toml_sha:
+                    self._toml_sha[p] = file_sha256(p) if p.is_file() else ""
+                toml = self._toml_sha[p]
+            where = None if d is None else (d.relative_to(REPO) if d.is_relative_to(REPO) else d).as_posix()
+            h.update(json.dumps([tid, where, toml]).encode() + b"\n")  # repo-relative: a worktree keys the same
+        return h.hexdigest()
+
+
+def sites_sha256(rows: Sequence[dict[str, Any]], tasks_roots: Sequence[Path], toml_sha: dict[Path, str]) -> str:
+    """`_Sites.fingerprint` of a table's high_risk rows, re-resolved in this checkout (the rows keep task id and dir)."""
+    sites = _Sites(tasks_roots, toml_sha)
+    for r in rows:
+        if r.get("family") == "high_risk":
+            sites.resolve(r)
+    return sites.fingerprint()
 
 
 def index_row(r: dict[str, Any], sites: _Sites) -> dict[str, Any]:
@@ -169,10 +205,15 @@ def _reward_block(episodes_file: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def build_index(path: Path, archive: Path, tasks_roots: Sequence[Path] = DEFAULT_TASKS_ROOTS) -> EvalIndex:
+def build_index(
+    path: Path,
+    archive: Path,
+    tasks_roots: Sequence[Path] = DEFAULT_TASKS_ROOTS,
+    toml_sha: dict[Path, str] | None = None,
+) -> EvalIndex:
     """Read one episodes file once and reduce it to its table."""
     st = path.stat()
-    sites = _Sites(tasks_roots)
+    sites = _Sites(tasks_roots, toml_sha)
     rows = []
     with gzip.open(path, "rt") if path.suffix == ".gz" else path.open() as f:
         for line in f:
@@ -190,6 +231,7 @@ def build_index(path: Path, archive: Path, tasks_roots: Sequence[Path] = DEFAULT
         size=st.st_size,
         mtime_ns=st.st_mtime_ns,
         labels_sha256=labels_sha256(),
+        sites_sha256=sites.fingerprint(),
         reward=_reward_block(path),
         rows=rows,
     )
@@ -237,11 +279,17 @@ def ensure_indexes(
     if not archive.is_dir():
         return out, stats
     labels = labels_sha256()
+    toml_sha: dict[Path, str] = {}
     for path in find_episode_files(archive):
         source = str(path.relative_to(archive))
         st = path.stat()
         idx = None if force else load_index(index_path(index_dir, source))
-        if idx is not None and idx.labels_sha256 == labels and idx.source == source:
+        if (
+            idx is not None
+            and idx.labels_sha256 == labels
+            and idx.source == source
+            and idx.sites_sha256 == sites_sha256(idx.rows, tasks_roots, toml_sha)
+        ):
             if (idx.size, idx.mtime_ns) == (st.st_size, st.st_mtime_ns):
                 stats.fresh += 1
                 out.append(idx)
@@ -254,7 +302,7 @@ def ensure_indexes(
                 stats.fresh += 1
                 out.append(idx)
                 continue
-        idx = build_index(path, archive, tasks_roots)
+        idx = build_index(path, archive, tasks_roots, toml_sha)
         stats.built += 1
         if write:
             stats.bytes_written += write_index(index_dir, idx)
