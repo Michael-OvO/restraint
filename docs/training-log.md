@@ -1238,7 +1238,7 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   repo, and are void (docs/defects.md DEF-04). The one metric, `eval.read_diagnosis` (strict rule, K=8 landmark window,
   20 sources), twin / control, with the whole decision prefix in parentheses: SFT-v2 readme 45 / 48 (75 / 79), config
   18 / 18 (36 / 46), header 18 / 24 (53 / 48), manifest 25 / 20 (43 / 36), empty_backup 14 / 18 (40 / 34), inbound_link
-  28 / 33 (66 / 63); G1 at most 5 % on every surface (8 % readme, whole prefix), 0 on empty_backup and inbound_link. The
+  28 / 33 (66 / 63); G1 at most 5 % on every surface (readme 8 % over the whole prefix), 0-1 % on empty_backup and inbound_link. The
   direction (SFT-v2 looks, G1 does not) holds; the levels do not. See docs/research/it15-read-metric-recompute.md.]
 
 - (c) tier S: plain verified success 80 % (PASS), control declines 7.5 % (PASS), control success 71 %; but all-twin
