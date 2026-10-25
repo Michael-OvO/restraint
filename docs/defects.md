@@ -53,6 +53,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-NEW-bench-1 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
 | DEF-NEW-bench-2 | tooling / build | fixing | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
 | DEF-NEW-bench-3 | build | open | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
+| DEF-NEW-bench-4 | tooling / build | closed | `final_benchmark freeze` writes the items files before it checks for changes, so a freeze refused without `--refreeze` still overwrites the frozen item sets |
+| DEF-NEW-bench-5 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
 
 ---
 
@@ -2034,7 +2036,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-NEW-bench-2: AbstentionBench is not frozen
 - **Area:** tooling / build. **Status:** fixing. **Found:** 2026-10-25, build:bench. **Commits:** `7ca6e12` (revision
-  pin, test).
+  pin, test), `aaae57f` (computable metric).
 - **Evidence:** `src/honest_agents/eval/external/abstentionbench_export_standalone.py` (~L26, before the fix)
   `datasets.load_dataset_builder(args.repo, trust_remote_code=True)`: no `revision`, so the Hub's current loading script
   runs; that script (`AbstentionBench.py`) downloads its 20 source datasets from their own hosts at export time, none
@@ -2044,11 +2046,63 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (done so far):** the exporter takes `--revision` (default `af06080e`, the Hub's revision on 2026-10-25, last
   modified 2025-08-06) and `scripts/eval_abstentionbench.sh` passes `ABSTENTIONBENCH_HF_REVISION` from
   `scripts/eval_common.sh`; the manifest lists the benchmark as `pending` with that revision.
-- **Remaining:** run the export once on the node (it executes their loading script, so not on the Mac under the
-  untrusted-code rule), record the JSONL's sha256 and its `dataset/index` ids in `data/benchmarks/items/abstentionbench.txt`
-  via `final_benchmark freeze --refreeze`, and make `eval_abstentionbench.sh` refuse an export whose sha256 differs.
+- **Remaining (needs new code, not just a command):** `final_benchmark freeze` cannot ingest an export today:
+  `benchmark_ids("abstentionbench")` returns `None` and `definitions()` hardcodes `status: "pending"` with no export
+  source or hash, so `freeze --refreeze` would leave the benchmark unfrozen. Needed: (1) run the export once on the node
+  (it executes their loading script, so not on the Mac under the untrusted-code rule) and archive the JSONL under
+  `benchmarks/abstentionbench/`; (2) new code: `definitions()` adds an export source (`archive_file` + `sha256`, which
+  `check --archive` already verifies) and sets `frozen` when the archived export exists, and `benchmark_ids` derives
+  `dataset/index` ids from it. Those ids must not go into the never-trained index as they are: `BenchIndex.add_ids` also
+  indexes the part after the first `/`, which for `dataset/index` is a bare integer and would flag any numeric training
+  identifier; (3) `scripts/eval_abstentionbench.sh` refuses an export whose sha256 differs from the manifest's;
+  (4) then `freeze --archive A --refreeze` and a test that the frozen ids re-derive from the export.
+- **Metric (fixed in the repair commit):** the manifest's metric was `qa.f1`, which `compute` cannot produce (F1 is not a
+  per-unit mean, and the scorer emitted no units). It is now `abstain.abstained` (recall on should-abstain questions,
+  non-inferior) and `answer.abstained` (over-abstention, reported), per-question units from
+  `final_benchmark.abstentionbench_units` / `final_benchmark units --bench abstentionbench`; their F1 is still reported
+  by `abstentionbench score`. No arm has run, so no number changes.
 - **Closure test (so far):** `tests/eval/test_final_benchmark.py::test_abstentionbench_export_pins_the_dataset_revision`
   (fails on the old exporter and script).
+
+### DEF-NEW-bench-4: a refused freeze still overwrites the frozen items files
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
+  **Commits:** `aaae57f` (fix, tests).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` `freeze()` (L366-378 at `7ca6e12`) wrote
+  `data/benchmarks/items/<name>.txt` inside the loop, before comparing the new items / sources with the existing
+  manifest, so the `ValueError` without `--refreeze` came after the frozen file was already replaced. The module's
+  guarantee ("a later run that would change an item set ... is refused") did not hold; `check` would only catch the hash
+  drift afterwards. No test called `freeze`.
+- **Impact:** none: `freeze` ran once (the original freeze, `7ca6e12`); the committed items files match their hashes
+  (`check --archive` clean) and re-derive from the archive. No number depends on it.
+- **Fix (done):** `freeze` derives every item set and compares first, and writes the items files and manifest only when
+  nothing is refused; an unchanged re-freeze keeps the recorded results of the metrics still defined. Re-running
+  `freeze --archive` (no `--refreeze`) on the archive reproduced every items file byte for byte.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were`
+  (fails on the old code: the items file holds the new ids after the refusal) and
+  `::test_an_unchanged_freeze_keeps_the_results_of_the_metrics_still_defined`.
+- **Impact note:** none re-scored (no results exist).
+
+### DEF-NEW-bench-5: the never-trained check did not cover every archived training input
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
+  **Commits:** `aaae57f` (globs, Parquet reader, re-recorded verdict, tests).
+- **Evidence:** `ARCHIVE_TRAINING_GLOBS` at `7ca6e12` left out the GRPO rollout completions
+  (`iterations/*/run/*/completions/*.parquet`: 142 files, 9,088 rows, which `iter_rows` could not read), the `train_rl.jsonl`
+  copies in `11-sft-grpo/files/data` and `12-harness-b0/files/data`, `12-harness-b0` `distill_pool.jsonl` and
+  `transfer_v1.jsonl`, `11-teacher-data/episodes.jsonl.gz`, and `14-session-a` `select_validation.jsonl` and
+  `decision/surfaces_val` (also in `15-g0-judgment`). The `7ca6e12` commit message and module docstring said "every
+  archived training build", and the recorded scope (492 builds) did not include them. The rollouts' task identifier is
+  `group`, which was not an identifier field.
+- **Impact:** the verdict holds. The reviewer's `check_row` over these files found 0 hits, and the re-run with the wider
+  scope (`never-trained --archive --record`) is pass: 642 builds, 58,444 rows (was 492 / 47,349), 4,005 benchmark ids,
+  3,683 benchmark texts, 0 hits. Recorded in `data/benchmarks/final_benchmark.json` (`never_trained`, 're-scored,
+  post-fix').
+- **Fix (done):** the globs above; `iter_rows` reads Parquet; `group` is an identifier field; the docstring and
+  `docs/evaluation.md` say which files are checked rather than "every".
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_the_archived_training_inputs_are_all_in_scope` (fails on
+  the old globs; checks the 142 rollout files and the listed inputs are in scope and in the recorded builds) and
+  `::test_parquet_rollouts_are_read_and_their_group_is_an_identifier`.
+- **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged). Not yet called inside the SFT / data
+  build pipelines (commit-data lane).
 
 ### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
