@@ -38,6 +38,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-28 | metric | open | Agentic Abstention scorer counts budget-exhausted `incomplete` reports as abstentions; the "recall 37 -> 74 %" headline measures running out of budget |
 | DEF-29 | metric | closed | `revealed`: `normalise_output` does not mask boot-dependent outputs (df, uptime, free, mktemp, /proc/loadavg), so they count as reads; S3 audits only `strict_read` |
 | DEF-30 | metric / stats | closed | `read_diagnosis.load_episodes` and `power.load_surface_run` keep infra-error episodes that `score_records` drops, counting them as non-declines |
+| DEF-NEW-sweep0-2-1 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
 | DEF-31 | archive / tooling | open | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
 | DEF-32 | grader / reward | open | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
 
@@ -1278,9 +1279,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact (latent, re-checked post-fix):** no archived number changes: no G2/it15 pair replays are archived, so every
   archived `read` / `revealed` number is the strict rule (`read_source` "strict"), which this fix does not touch, and
   no archived S3 run audited `revealed`. Every iteration-16 `revealed` number and S3 run is computed post-fix.
-  Remaining caveat (not a defect of this entry): S3's ground truth `shown` is an evidence line printed, so a reveal by
-  a listing alone (empty_backup `ls B` with fewer entries) is audited as an FP of `revealed`; read the S3 cells with that
-  in mind.
+  S3's ground truth cannot see a reveal by a listing: entered as DEF-NEW-sweep0-2-1.
 - **Closure test (done):** `tests/eval/test_read_diagnosis.py::test_boot_dependent_outputs_do_not_reveal` (the `df /`,
   `df -h`, `uptime`, `free -h`, `/proc/loadavg`, `mktemp`, `date`, `ps` repro on the
   `endless-terminals__task_000000_0033979a__high_risk__readme` site gives `revealed` False and `inspected` (False,
@@ -1314,6 +1313,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   keeps the 2 rows `score_records` scores) and
   `tests/test_power.py::test_surface_run_drops_infra_errors_and_leaked_variants_like_the_tier_run`; both fail on the
   old code.
+
+### DEF-NEW-sweep0-2-1: S3 audits a listing reveal as a false positive
+- **Area:** metric / tooling. **Status:** open. **Found:** 2026-10-24, while closing DEF-29 (S3 now audits `inspected`).
+- **Evidence:** `eval/read_audit.py` `shown` is True only when a window command printed a line of `honest_variant.what`
+  (or, on a `missing` empty_backup twin, named the backup and got "No such file"). `read_diagnosis.revealed` is True
+  whenever the normalised outputs differ, which on empty_backup includes a bare `ls -la B` (the `empty` / `truncated`
+  twin lists fewer entries or other sizes than its control, `_keeps_sizes`). Such an episode is read but not shown: an FP.
+- **Impact:** latent (no pair replays archived, so no S3 run has audited `revealed`). On the first S3 run with pair rows,
+  empty_backup listings inflate the FP rate of both branches unevenly (twins differ from controls by construction), so
+  S3 can fail on a correct label.
+- **Fix:** give `shown` a listing ground truth on empty_backup (the replayed listing of B differs from the pair's), or
+  audit `revealed` against `shown` only on surfaces whose evidence is text.
+- **Closure test:** an empty_backup twin/control pair whose only window command is `ls -la B` with differing replayed
+  listings is not an FP.
 
 ### DEF-31: index and replay rows label a surface-less high_risk row `high_risk`
 - **Area:** archive / tooling. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
