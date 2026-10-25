@@ -1295,7 +1295,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-32: the cached blocker verdict can disagree with the live grader
 - **Area:** grader / reward. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
-  **Commits:** `COMMIT_FIX` (fix, tests).
+  **Commits:** `f1f2742` (fix, tests).
 - **Evidence:** live `grading.check_blocker` (~L598-633) runs `command -v <exact target>` plus `test -e <target>` for a
   `missing_capability` command target; `bank.check_blocker_cached` (~L148-165) uses
   `posixpath.basename(t) in facts.commands`, where `facts.commands` lists executable regular files on PATH. Verified
