@@ -422,7 +422,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Area:** stats. **Status:** fixing (tool done; the pre-registration that the closure test names does not exist yet).
   **Found:** it15 diagnosis (noise-and-power). Marked closed 2026-10-24, reopened 2026-10-25 on review.
   **Commits:** `8a83083` (tool, tests, `docs/research/it16-power.md`); `0b95777` (repair 2026-10-25: conjunctive bars, own-CI
-  rule, probe and guard metrics, simulated ni10); ledger `7db3f36`.
+  rule, probe and guard metrics, simulated ni10); ledger `7db3f36`; `91a64d5` (repair 2, 2026-10-25: the iteration-15
+  bars' own 95 % bootstrap lb and 80-twin denominator, the probe simulated at its planned design).
 - **Evidence:** soup bars S1/R2 were set at G2 seed 1's point estimate (+16.2). A simulated G2 clone passes R2 29-50% and
   S1 18-36% of the time. The held-out gap MDE is 18-20 at 20 sources.
 - **Impact:** the soup verdict, and the held-out-gap verdicts of G3 and G4, are uninterpretable.
@@ -433,19 +434,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
     the paired gap (all, trained, held-out); the guards blind decline, surface fabrication (inbound_link controls left
     out, pre-DEF-01 grading), control false blame and budget exhaustion; on tier S / F `false_claim_share`,
     `verified_success` (pooled), `verified_success_plain` (plain only: the "≥76 %" guard), tier control decline and
-    tier twin abstain_correct; on the decision probe P(destroy | warning) and P(destroy | benign). Every metric is a
+    tier twin abstain_correct (scored twins, 59 / 76 = 77.6 % for G2 tier S, as the archived metrics.json; and
+    `tier_twin_abstain_correct_all`, every twin with leak-masked ones by their unmasked case, 59 / 80 = 73.8 %, the
+    iteration-15 docs' figure); on the decision probe P(destroy | warning) and P(destroy | benign). Every metric is a
     mean of linearised per-unit values, so one estimator serves all of them;
   - variance components by method of moments: source, evidence pool pair, cell, unit and sampling. They are main effects
     on G2 s1 and interactions on G2 s2 − s1 (seed) and SFT-v2 − G2 s1 (model);
   - MDE at power 0.8 (90 % two-sided, t with K − 1 df) for paired designs at K sources and S samples, under sampling,
-    seed and model noise; the probe also at the planned n = 240 per arm (`--probe-items 120 --probe-samples 2`). At a new
+    seed and model noise; the probe also at the planned n = 240 per arm (`--probe-items 120 --probe-samples 2`), by
+    formula and simulated (`planned_guards`: random draws of the planned 12 pairs from the 72 archived, guard clone-pass
+    and simulated ni10). At a new
     K the pair term assumes a uniform draw over the test-split pairs, with new pairs varying as much as the old. It also
     gives `ni10`, the smallest non-inferiority margin a clone fails at most 10 % of the time (formula, and simulated
     where the normal approximation is off); a margin at the MDE fails a clone 20 % of the time;
   - clone-pass simulation (G2 s1 against itself; G2 s2 against s1) for bars that are one condition or a conjunction
     (`A & B & C`, as the iteration-15 bars and the iteration-16 multi-conjunct endpoints are written). One simulated
     eval draws each task's samples once and every condition reads them, so the joint pass rate carries the parts' real
-    correlation. Rules: `point_ge/le`, `ci_lb_gt/ci_ub_lt` (the candidate's own 90 % interval, "lb > 0"), `diff_ge/le`,
+    correlation. Rules: `point_ge/le`, `boot_lb_gt/boot_ub_lt` (the candidate's own value, iteration 15's interval:
+    `read_diagnosis.paired_gap`, 95 % percentile bootstrap over sources; "the paired lower bound > 0" as scored then),
+    `ci_lb_gt/ci_ub_lt` (the same from the estimator's 90 % cluster t interval), `diff_ge/le`,
     `lb_gt`, `ub_lt` (the paired difference). It flags a bar that a sampling clone fails more than 10 % (+ 2 MC SE);
   - the one estimator to pre-register (`paired_estimate`): per-unit paired differences, two-way (source × pair)
     cluster-robust 90 % CI, plus a sign-flip by source and a sign-flip by pair. A pass needs both p < 0.10.
@@ -454,7 +461,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   margin ≥ the sampling ni10 at the planned design (simulated where flagged), every multi-condition endpoint checked as
   one conjunction with a joint clone-pass ≥ 90 %, and the seed-clone rate reported per bar. The tool's own tests are
   the regression tests, not a replacement for that criterion.
-- **Regression tests:** `tests/test_power.py`, 20 tests on synthetic data with known variance (L0, in `--fast`).
+- **Regression tests:** `tests/test_power.py`, 23 tests on synthetic data with known variance (L0, in `--fast`).
   - Components recover the planted source / pair / unit / sampling variances, and the seed / model interactions on a
     difference.
   - The 90 % CI covers 90 % under the null, and power at the computed MDE is 0.80.
@@ -468,8 +475,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - Probe loader (P(destroy | arm), error rows skipped), tier plain-only success (controls excluded, the pooled metric
     not), blind decline from the rows, and both CLIs end to end on archive-format files (with the probe, the default
     S1 conjunction in the output, and the DEF-05 missing task dir error).
+  - Repair 2: `test_the_boot_rule_is_iteration_15s_paired_bootstrap_over_sources` (the bound equals
+    `read_diagnosis.bootstrap_mean` of the per-source means, per simulated eval, and is lower than the 90 % t bound);
+    `test_default_bars_are_the_iteration_15_bars_as_scored_there`; `test_planned_guards_...` (a clone at K of 40
+    sources passes the planned ni10 guard about 90 % and the MDE guard about 80 %, while the full build passes it
+    > 99 %); the tier test now has a leak-masked twin variant (out of the scored rate, in the all-twin one).
   - All fail on the old code: the module did not exist (8a83083's version has no conjunction, own-CI rule, probe or
-    guard metrics, so the four repair tests fail on it too).
+    guard metrics, so the four repair tests fail on it too; the repair-2 tests and the CLI test fail on 5b9327c).
 - **Impact note (re-scored, post-fix;** `docs/research/it16-power.md`**).**
   - MDE at S = 4, K = 20 vs K = 68, in points (sampling / seed / model noise):
     - read: 4.3 / 5.2 / 6.3 vs 2.3 / 2.9 / 3.3;
@@ -480,14 +492,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
     - blind decline 6.0 / 6.9 / 6.1 vs 3.2 / 3.6 / 3.3; surface fabrication 4.8 / 6.0 / 6.8 vs 2.5 / 3.2 / 3.8;
     - tier F verified success and false_claim_share, about 4.5 at K = 98; tier S plain verified success 9.0 (ni10 10.6
       formula, 10.9 simulated) at K = 40, S = 2;
-    - probe P(destroy | warning): 1.5 on the archived build (728 prompts, S = 8); **7.8 (ni10 9.2, model 9.3) at the
-      planned n = 240 per arm**, keeping the archived ~10 prompts per pair. The guard is powered only for margins of
-      about 9 points at that n; a smaller margin needs more prompts or more pairs (S0.11: n goes up).
+    - probe P(destroy | warning): 1.5 on the archived build (728 prompts, S = 8); **MDE 7.8 at the planned n = 240
+      per arm** (K = 12 pairs, S = 2), keeping the archived ~10 prompts per pair; ni10 9.2 by formula, **9.4
+      simulated**, and a sampling clone passes the guard 90 % at +9.2 and 81 % (flagged) at the MDE; 9.3 is the MDE
+      under model noise (not an ni10). P(destroy | benign): MDE 9.1, ni10 10.7 formula / 10.5 simulated, clone 91 % /
+      81 %. The guard is powered only for margins of about 9.4 points at that n; a smaller margin needs more prompts or
+      more pairs (S0.11: n goes up). The first repair gave only the formula values at the planned design.
   - The design SE matches the estimator's SE on the archived G2 s2 − s1 pair (read 2.0 / 2.0, gap 4.6 / 4.5).
-  - Iteration-15 bars scored as written (conjunctions; joint clone-pass, sampling / seed clone): soup **S1 32 % / 11 %**,
-    G4 **R2 49 % / 16 %**, both flagged; soup S2 / R4 (tier S plain, control decline, twin abstain) 93 %, not flagged.
-    S1 and R2 fall inside the ledger's original 18-36 % / 29-50 %, which this reconciles; the per-part rates first
-    reported (53 / 59 / 92 %) overstated them. The soup's S1/R2 **fail is void as a verdict**.
+  - Iteration-15 bars scored as written (conjunctions; joint clone-pass, sampling / seed clone; the lb part with
+    iteration 15's 95 % source bootstrap, the twin part on all 80 twins): soup **S1 31 % / 10 %**, G4 **R2 47 % / 15 %**,
+    both flagged; soup S2 / R4 (tier S plain ≥ 76, control decline ≤ 15, all-twin abstain ≥ 70) **82 %, flagged** (the
+    twin part passes 85 %: G2 is at 73.8 %, 3.8 points above the bar). S1 and R2 fall inside the ledger's original
+    18-36 % / 29-50 %, which this reconciles; the per-part rates first reported (53 / 59 / 92 %) overstated them.
+  - Correction to the first repair (review 2026-10-25): its "as written" 32 % / 11 % and 49 % / 16 % used the
+    estimator's 90 % cluster t lb (lb part 69 %), not iteration 15's 95 % bootstrap (lb part 60 %); a 95 % cluster t
+    gives 28 % / 42 % (review's check). Its S2 / R4 93 % (not flagged) used the scored-twin rate 77.6 % (twin part
+    97 %), not the 73.8 % the bar was written against. The 90 % t and scored-twin rates stay in the research note for
+    comparison. The S1/R2 verdicts do not change; S2 / R4 goes from "passes" to flagged. The soup's S1/R2 **fail is void
+    as a verdict**, and the soup's / G3-G4's S2 / R4 pass is a bar a G2 copy fails 18 % of the time (not powered).
   - Re-scored with the estimator, candidate − G2 s1:
     - soup held-out gap −3.1 [−16.0, +9.7]: no detectable change;
     - G3 c10 held-out gap −13.1 [−24.2, −2.1], sign-flip p .028 by source but .106 by pair: not a pass under the
@@ -502,7 +524,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Limits** (in the research note):
   - one pair of G2 seeds; no tier S or probe seed; SFT-v2 has one surface run (DEF-12);
   - moment components are noisy and are floored at 0 in the MDE, which makes it conservative;
-  - the seed clone uses G2 s2's archived rates as its truth; the own-CI rule's clone rate is conditional on the build;
+  - the seed clone uses G2 s2's archived rates as its truth; the own-value rules' clone rate is conditional on the
+    build; the planned probe design has no seed clone and assumes the archive's ~10 prompts per pair;
   - the K = 68 rows extrapolate from the 20 archived sources. Re-run the tool on surface-val-v2's first G2 eval.
 
 ### DEF-NEW-power-1: iteration-16 guards with no powered metric
