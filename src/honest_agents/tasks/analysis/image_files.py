@@ -36,6 +36,10 @@ class ImageFile:
     kind: str
     content: str | None = None  # text content when the Dockerfile spells it out
     nonempty: bool | None = None  # None = cannot be told statically
+    # For a generated file: the data the generating command was given when the Dockerfile spells it out (the heredoc
+    # body of `sqlite3 db <<SQL`, the SQL argument of `sqlite3 db "INSERT ..."`, a heredoc fed to another writer). Not
+    # the bytes, but every value the file holds comes from it, so the `remove_input` content checks read it (DEF-26).
+    generator: str | None = None
 
     @property
     def has_content(self) -> bool:
@@ -146,7 +150,15 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
     files: dict[str, ImageFile] = {}
     workdir: str | None = None
 
-    def put(path: str | None, kind: str, content: str | None = None, nonempty: bool | None = None, *, cwd=None) -> None:
+    def put(
+        path: str | None,
+        kind: str,
+        content: str | None = None,
+        nonempty: bool | None = None,
+        *,
+        cwd=None,
+        generator: str | None = None,
+    ) -> None:
         p = _resolve(expand(path or ""), "/root", cwd if cwd is not None else workdir)
         if not p:
             return
@@ -155,7 +167,7 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
             return  # `touch -d ...` on an existing file only changes its mtime
         if kind == FILE_TOUCHED:
             nonempty = False  # `touch` / `: >` leave an empty file
-        files[p] = ImageFile(p, kind, content, bool(content.strip()) if content is not None else nonempty)
+        files[p] = ImageFile(p, kind, content, bool(content.strip()) if content is not None else nonempty, generator)
 
     def run(body: str) -> None:
         cwd = workdir
@@ -199,7 +211,7 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
                 if src is not None:
                     dst = _resolve(expand(plain[1]), "/root", cwd)
                     if dst:
-                        files[dst] = ImageFile(dst, src.kind, src.content, src.nonempty)
+                        files[dst] = ImageFile(dst, src.kind, src.content, src.nonempty, src.generator)
                         if cmd == "mv":
                             files.pop(src.path, None)
             elif cmd in ("rm", "unlink"):
@@ -211,7 +223,8 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
                 if of:
                     put(of, FILE_GENERATED, nonempty=None if count is None else count not in ("0", ""), cwd=cwd)
             elif cmd == "sqlite3" and plain:
-                put(plain[0], FILE_GENERATED, nonempty=True if len(plain) > 1 else None, cwd=cwd)
+                sql = " ".join(plain[1:]) or None
+                put(plain[0], FILE_GENERATED, nonempty=True if len(plain) > 1 else None, cwd=cwd, generator=sql)
             elif cmd in _EMPTY_WRITERS:
                 for _op, target in writes:
                     put(target, FILE_TOUCHED, cwd=cwd)
@@ -231,9 +244,9 @@ def image_files(dockerfile: str, env_dir: Path | None = None) -> dict[str, Image
             elif cmd == "tee" and plain:
                 put(plain[0], FILE_HEREDOC, body)
             elif cmd == "sqlite3" and plain:
-                put(plain[0], FILE_GENERATED, nonempty=bool(body.strip()))
+                put(plain[0], FILE_GENERATED, nonempty=bool(body.strip()), generator=body)
             elif writes:
-                put(writes[0], FILE_GENERATED)
+                put(writes[0], FILE_GENERATED, generator=body)
 
     pending = 0
     for raw in stripped.replace("\\\n", " ").splitlines():
