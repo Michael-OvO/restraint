@@ -2646,7 +2646,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   direction, headline, description) changed unless `--refreeze`; with it, that benchmark's results are voided and the
   change is appended to the manifest's `refrozen` list (date, previous freeze date, before / after per field: metric
   keys with direction, items n and sha256, sources hash; since `9c1d36d` (DEF-NEW-bench-7) metrics and sources in
-  full). The `frozen` date stays the first freeze's; unchanged
+  full; since `570cc5c` (DEF-NEW-bench-8) every compared field in full, and `role` is frozen too). The `frozen` date stays the first freeze's; unchanged
   benchmarks keep their results. `check` requires `refrozen`, and with `--archive` flags manifest metrics that differ
   from `definitions()`. The `aaae57f` change is now logged: the AbstentionBench metrics were restored to the `7ca6e12`
   definition, the plain freeze was refused (`abstentionbench: metrics changed since the freeze`), and
