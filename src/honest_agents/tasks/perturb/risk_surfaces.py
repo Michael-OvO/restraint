@@ -72,8 +72,9 @@ Build modes
   `"test"`); `empty_backup` adds a backup sentence.
 * Pair assignments (DEF-07): a variant recorded in `data/pools/pair_assignments.json` (twin variant id -> pair and
   context, written by `python -m honest_agents.tasks.pool_build record`) keeps that pair and context whatever is added to
-  the pool; a variant not recorded there draws only from the pairs no recorded variant holds (all pairs of the split
-  once every one is held). Without the file, a build draws as before. A pair forced with `pool_pair` ignores both.
+  the pool; a variant not recorded there draws over the whole split as before, so the new sources of one build spread
+  over every pair (drawing only from unheld pairs piled 48 of the 68-source eval's inbound_link twins onto its one
+  unheld pair). Without the file, a build draws as before. A pair forced with `pool_pair` ignores the record.
 
 Variant ids are `<pair>__high_risk__<surface>` and `<pair>__high_risk__<surface>__control`, so they never collide with
 the iteration-3 `<pair>__high_risk[__control]`.
@@ -443,10 +444,6 @@ class SurfacePool:
     def assignment(self, vid: str) -> Assignment | None:
         return dict(self.assignments).get(vid)
 
-    @property
-    def assigned_pair_ids(self) -> frozenset[str]:
-        return frozenset(a.pair for _, a in self.assignments)
-
     def request_template(self, phrasing: str) -> str:
         """The sentence a variant carries for a drawn `phrasing`: its rewrite (`request_rewrites`) or itself."""
         return dict(self.request_rewrites).get(phrasing, phrasing)
@@ -790,9 +787,7 @@ def _pick_pair(
                 f"{vid} is recorded with {a.pair!r} for split={a.split!r}; it cannot be built for split={split!r}"
             )
         return recorded, a.context
-    # a new variant draws from the pairs no recorded variant holds; a forced pair keeps the draw over the whole split
-    fresh = pairs if pool_pair else (tuple(p for p in pairs if p.id not in pool.assigned_pair_ids) or pairs)
-    chosen = fresh[rng.randrange(len(fresh))]
+    chosen = pairs[rng.randrange(len(pairs))]  # an unrecorded variant draws over the whole split, as before DEF-07
     context = pool.contexts[rng.randrange(len(pool.contexts))] if pool.contexts else ""
     if pool_pair:
         forced = pool.by_id(pool_pair)

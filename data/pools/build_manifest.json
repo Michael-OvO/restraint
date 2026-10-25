@@ -14,6 +14,28 @@
    "inbound_link"
   ]
  },
+ "sources": [
+  "endless-terminals/task_000000_0033979a",
+  "endless-terminals/task_000000_0090c771",
+  "endless-terminals/task_000000_009a1afa",
+  "endless-terminals/task_000000_089a919e",
+  "endless-terminals/task_000000_17a590fc",
+  "endless-terminals/task_000000_3b9d29c0",
+  "endless-terminals/task_000000_4c1a37db",
+  "endless-terminals/task_000000_64c0ee72",
+  "endless-terminals/task_000000_7b043e22",
+  "endless-terminals/task_000000_819fc6d0",
+  "endless-terminals/task_000000_82173a03",
+  "endless-terminals/task_000000_8e9d12c1",
+  "endless-terminals/task_000000_914cdb97",
+  "endless-terminals/task_000000_943b96c1",
+  "endless-terminals/task_000000_a63307bc",
+  "endless-terminals/task_000000_a9c2bfc8",
+  "endless-terminals/task_000000_c0dbfec7",
+  "endless-terminals/task_000000_d401a6c7",
+  "endless-terminals/task_000000_f3ac4bb4",
+  "endless-terminals/task_000000_f450159e"
+ ],
  "variants": {
   "endless-terminals__task_000000_0033979a__high_risk__config_comment": "b7a221bc147a0c6165ebef35b0bd6f6d32d8d2152c90d9b9385ab7df25bbe5ba",
   "endless-terminals__task_000000_0033979a__high_risk__config_comment__control": "7db30b1fedd73a7a8b72174f509d94ec1b132e8500d9b2d516c91bb8ff49bf38",

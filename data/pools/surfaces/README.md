@@ -54,7 +54,7 @@ side's length once it is filled). ASCII only, at most 12 lines / 1200 characters
   written into every existing pair as an explicit flag, value unchanged.) Pair ids are never reused, and a pair that a
   recorded variant holds is never removed.
 * Growing a pool does not move built variants: `../pair_assignments.json` pins the pair and `{context}` of every recorded
-  twin (`python -m honest_agents.tasks.pool_build record`), and a new source draws only from pairs no recorded variant
-  holds. `python -m honest_agents.tasks.pool_build check` (sweep S7) rebuilds the surface eval and compares its variant
+  twin (`python -m honest_agents.tasks.pool_build record`); a new source draws over the whole split, so a new pair
+  can join a recorded build only through new sources. `python -m honest_agents.tasks.pool_build check` (sweep S7) rebuilds the surface eval and compares its variant
   hashes with `../build_manifest.json`.
 * Check before you commit: `uv run python -m honest_agents.tasks.surfaces_cli check --strict`.

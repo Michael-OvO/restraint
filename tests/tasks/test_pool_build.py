@@ -87,17 +87,23 @@ def test_without_the_record_growth_moves_variants(rich, pools, tmp_path):
     assert sum(after[v][0] != before[v][0] for v in before) > 0
 
 
-def test_a_new_variant_draws_only_an_unassigned_pair(rich, pools, tmp_path):
-    before = _build(rich, tmp_path / "a", pools)
-    _record(pools, before)
-    _grow(pools)
-    for s in SURFACES:
-        pool = load_pool(s, directory=pools)
-        for i in range(8):
-            twin, _ = build_varied(
-                rich, tmp_path / "n", pair_id=f"synthetic/new-{i}", surface=s, pool=pool, split="test"
-            )
-            assert twin.detail["pool_pair"] not in pool.assigned_pair_ids
+def test_a_new_variant_draws_as_if_nothing_were_recorded(rich, pools, tmp_path):
+    """An unrecorded variant draws over the whole split. Drawing only from unheld pairs piled the new sources of one
+    build onto the few pairs left (48 of the 68-source eval's inbound_link twins on one pair)."""
+    new = [f"synthetic/new-{i}" for i in range(8)]
+
+    def draws() -> list[tuple[str, str]]:
+        out = []
+        for s in SURFACES:
+            pool = load_pool(s, directory=pools)
+            for pid in new:
+                twin, _ = build_varied(rich, tmp_path / "n", pair_id=pid, surface=s, pool=pool, split="test")
+                out.append((twin.detail["pool_pair"], twin.detail["context"]))
+        return out
+
+    free = draws()
+    _record(pools, _build(rich, tmp_path / "a", pools))
+    assert draws() == free
 
 
 def test_an_assigned_pair_cannot_leave_the_pool_or_cross_the_split(rich, pools, tmp_path):
@@ -134,7 +140,17 @@ def test_compare_lists_changed_missing_and_new():
 
 
 @pytest.mark.skipif(not (REPO / pool_build.DEFAULT_BANK).is_dir(), reason="needs the local task bank (data/tasks)")
-def test_committed_manifest_matches_a_rebuild(monkeypatch):
-    """Sweep S7 at L0: the surface eval rebuilds byte-identical to `data/pools/build_manifest.json`."""
+def test_committed_manifest_matches_a_rebuild(monkeypatch, tmp_path):
+    """Sweep S7 at L0: the surface eval rebuilds byte-identical to `data/pools/build_manifest.json`. The manifest
+    carries its sources, so the (gitignored) ids file is not needed: the check runs with it pointed at a missing path."""
     monkeypatch.chdir(REPO)
     assert pool_build.main(["check"]) == 0
+    raw = json.loads(pool_build.manifest_path().read_text())
+    pools = tmp_path / "pools" / "surfaces"
+    shutil.copytree(pool_dir(), pools)
+    shutil.copy(REPO / "data" / "pools" / ASSIGNMENTS_FILE, pools.parent / ASSIGNMENTS_FILE)
+    no_ids = {**raw, "build": {**raw["build"], "ids_file": str(tmp_path / "absent.txt")}}
+    pool_build.manifest_path(pools).write_text(json.dumps(no_ids))
+    assert pool_build.main(["--pools", str(pools), "check"]) == 0
+    (tmp_path / "absent.txt").write_text("\n".join(raw["sources"][:-1]) + "\n")  # the ids file drifted
+    assert pool_build.main(["--pools", str(pools), "check"]) == 1

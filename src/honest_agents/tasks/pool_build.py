@@ -6,12 +6,13 @@
 
 `record` builds every source of `--ids-file` x surface (varied mode, as `surfaces_cli build --mode varied`) into a
 temporary directory, adds the pair and `{context}` of every twin not yet in `data/pools/pair_assignments.json` (recorded
-ones are honoured by the build and kept as they are), and writes `data/pools/build_manifest.json`: the build parameters
-and the `validate.task_hash` of every variant dir. Run it once after a build that is to stay fixed; a later pool growth
-then leaves those variants byte-identical, and new sources draw from the pairs no recorded variant holds.
+ones are honoured by the build and kept as they are), and writes `data/pools/build_manifest.json`: the build parameters,
+the source ids and the `validate.task_hash` of every variant dir. Run it once after a build that is to stay fixed; a
+later pool growth then leaves those variants byte-identical. Unrecorded sources draw over the whole split, as before.
 
-`check` (S7, L0) rebuilds the manifest's build the same way and exits 1 unless every variant's hash matches; it lists the
-variants that changed, are missing or are new. Nothing is kept on disk: the temporary build is deleted after hashing.
+`check` (S7, L0) rebuilds the manifest's sources the same way (the ids file is not needed) and exits 1 unless every
+variant's hash matches; it lists the variants that changed, are missing or are new, and fails when the ids file exists
+and no longer lists the recorded sources. Nothing is kept on disk: the temporary build is deleted after hashing.
 """
 
 from __future__ import annotations
@@ -81,14 +82,17 @@ def read_ids(path: Path) -> list[str]:
     return [ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
 
 
-def build(spec: BuildSpec, *, pools: Path | None = None, root: Path = Path()) -> BuildResult:
-    """Build `spec` into a temporary directory and hash every variant dir; the directory is deleted afterwards."""
+def build(
+    spec: BuildSpec, *, pools: Path | None = None, root: Path = Path(), sources: Sequence[str] | None = None
+) -> BuildResult:
+    """Build `spec` (its ids file, or `sources`) into a temporary directory and hash every variant dir; the directory
+    is deleted afterwards."""
     pools = pools or pool_dir()
     loaded = {s: load_pool(s, directory=pools) for s in spec.surfaces}
     out = BuildResult()
     bank = root / spec.bank
     with tempfile.TemporaryDirectory(prefix="pool_build_") as td:
-        for ident in read_ids(root / spec.ids_file):
+        for ident in read_ids(root / spec.ids_file) if sources is None else sources:
             src = bank / (bank_base(ident) + "__feasible")
             if not (src / "task.toml").is_file():
                 out.skipped.extend(f"{ident} {s}: no {src}" for s in spec.surfaces)
@@ -134,7 +138,8 @@ def _write_json(path: Path, obj: object) -> None:
 def cmd_record(args: argparse.Namespace) -> int:
     pools = args.pools or pool_dir()
     spec = BuildSpec(bank=args.bank, ids_file=args.ids_file, split=args.split, seed=args.seed)
-    result = build(spec, pools=pools)
+    sources = read_ids(Path(spec.ids_file))
+    result = build(spec, pools=pools, sources=sources)
     for s in result.skipped:
         print(f"skip {s}", file=sys.stderr)
     if result.skipped and not args.allow_skipped:
@@ -154,6 +159,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     manifest = {
         "version": 1,
         "build": {**asdict(spec), "surfaces": list(spec.surfaces)},
+        "sources": sources,  # the ids file's contents, so `check` needs only the bank
         "variants": {b.variant_id: b.task_hash for b in sorted(result.variants, key=lambda b: b.variant_id)},
     }
     _write_json(manifest_path(pools), manifest)
@@ -185,14 +191,19 @@ def cmd_check(args: argparse.Namespace) -> int:
         surfaces=tuple(b["surfaces"]),
         mode=b["mode"],
     )
-    result = build(spec, pools=pools)
+    sources = list(raw["sources"])
+    result = build(spec, pools=pools, sources=sources)
     changed, missing, new = compare(raw["variants"], result)
     for label, vids in (("CHANGED", changed), ("MISSING", missing), ("NEW", new)):
         for v in vids:
             print(f"{label} {v}")
     n = len(raw["variants"])
     print(f"S7: {n - len(changed) - len(missing)}/{n} variants byte-identical; {len(new)} not in the manifest")
-    return 1 if changed or missing or new else 0
+    ids_file = Path(spec.ids_file)
+    drifted = ids_file.is_file() and read_ids(ids_file) != sources
+    if drifted:
+        print(f"S7: {ids_file} no longer lists the {len(sources)} recorded sources; re-run `record`")
+    return 1 if changed or missing or new or drifted else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
