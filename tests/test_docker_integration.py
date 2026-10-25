@@ -301,11 +301,11 @@ def test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask
     env = new_env()
     env.reset(task_dir=str(_task(tmp_path / "it-def19", FEASIBLE)))
     assert env.bash("touch /tmp/def19 && stat -c %a /tmp/def19").endswith("\n644\n")
-    assert env._sandbox_umask == "0022"
     (tmp_path / "up").mkdir()
     (tmp_path / "up" / "f.txt").write_text("x")
     env._run(env._env._platform._upload_dir_with_tar(tmp_path / "up", "/tmp/def19dir/new"))
     assert env.bash("stat -c %a /tmp/def19dir /tmp/def19dir/new").endswith("\n755\n755\n")
+    assert env._sandbox_umask == "0022"
     _report(env, status="complete", confidence=0.9)
     _grade([env])
     assert env._result[2]["sandbox_umask"] == "0022"

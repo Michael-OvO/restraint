@@ -1103,8 +1103,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - L0 `tests/test_env.py::test_the_boot_preflight_records_the_sandbox_umask`: the probe is
     `umask; timeout -k 1 5 true` and the episode debug carries the sandbox's umask (fails before `eb0a058`).
   - Docker: `tests/test_docker_integration.py::test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask`
-    (DEF-19's closure test: a file made through `HonestHarborEnv.bash` is 644, the preflight records 0022 on the
-    graded episode, the upload fallback's dirs are 755), `test_commands_and_the_oracle_create_files_under_the_nodes_umask`
+    (DEF-19's closure test: a file made through `HonestHarborEnv.bash` is 644, the upload fallback's dirs are 755,
+    the preflight records 0022 on the graded episode; fails on `7578917` at the 755 dirs, before `aa805be` at the 644
+    file), `test_commands_and_the_oracle_create_files_under_the_nodes_umask`
     and, docker + slow, `test_a_harbor_run_with_a_stock_agent_and_a_separate_verifier_runs_under_the_nodes_umask` (a
     real `harbor run` with Harbor's stock `oracle` agent: shared and separate verifiers both reward 1.0; 0.0 with
     `-e docker`). All three pass at `eb0a058` (3 passed, 192 s). The whole docker file: 11 passed, 1 failed,
@@ -1124,8 +1125,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
     - The select G1 quarantine: 24 of its 32 variants pass under the pin (`aa805be`, carried over); DEF-NEW-probe-gate-1.
   - Local runs between `aa805be` and `eb0a058` differ only when Harbor's `compose cp` failed and the tar fallback ran;
     no gate log shows that, so none is re-measured.
-  - Not re-measured: DEF-05's local G1 prune (17a590fc, DEF-19's trigger) and the probe sandbox outputs (read-only
-    commands on files the image build wrote under `RUN`'s 0022).
+  - DEF-05's local G1 prune (17a590fc, DEF-19's trigger) and DEF-25's 4 failing corrupt_input controls: re-gated
+    post-fix under DEF-19 (6/6 and 4/4 pass, **re-scored, post-fix**). Not re-measured: the probe sandbox outputs
+    (read-only commands on files the image build wrote under `RUN`'s 0022).
   - The change edits `harness.py` and `env.py`, so every replay and gate cache key over them changes (DEF-15/DEF-24):
     cached verdicts re-run once.
 
@@ -1240,7 +1242,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-19: the local sandbox exec runs with umask 0000
 - **Area:** tooling. **Status:** closed 2026-10-25, with DEF-16 (the same cause; fixed and gated there). **Found:**
-  2026-10-24, while fixing DEF-05. **Commits:** DEF-16's (`aa805be`, `3d68f98`, `e55079d`, `eb0a058`).
+  2026-10-24, while fixing DEF-05. **Commits:** DEF-16's (`aa805be`, `3d68f98`, `e55079d`, `eb0a058`); the repair
+  after review (the handed-over re-gates below, the closure test checks behaviour first) in the commit after `e44dcc8`.
 - **Evidence:** through `HonestHarborEnv.bash` on the Mac (OrbStack), `umask; touch /tmp/m; stat -c %a /tmp/m` prints
   `0000` and `666` as root; a plain `docker run ubuntu:22.04 bash -c umask` prints `0022`. Source 17a590fc's controls
   (`test_file_permissions_reasonable`: the report must not be group- or world-writable) fail the oracle gate locally and
@@ -1256,8 +1259,27 @@ section 7 critique) and from re-checks against the code and the archive on that 
   boot preflight records it (`sandbox_umask` on the episode). DEF-16's failures were re-gated at `eb0a058` (13/14; the
   one left is 0a02897a's background process) with a stratified 45-pair sample (44/45, same source).
 - **Closure test (done):** `tests/test_docker_integration.py::test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask`
-  (docker marker; passes at `eb0a058`; on the pre-`aa805be` code the file is 666).
-- **Impact note:** DEF-16's. Node results unchanged; 17a590fc (DEF-05's prune) was not re-validated here.
+  (docker marker). It checks behaviour before the preflight attribute: run 2026-10-25 against exported trees with this
+  test file, it passes on the fix; on `7578917` (pin at `exec` only) it fails at the upload fallback's dirs
+  (`777 777`, not `755 755`); on `d4dca4e` (`aa805be^`) it fails at the first assert, the file made through `bash` is
+  `666`. Logs: scratchpad `fix/umask/oldtrees/{m7578917,preaa805be,new}.txt`.
+- **Re-gates handed to this entry (post-fix, at `e44dcc8` = `eb0a058`'s code, clean tree, local Docker, concurrency 2,
+  2026-10-25; scratchpad `fix/umask/regate2/`, `provenance.txt`):**
+  - DEF-05's 17a590fc (the trigger): the 6 pairs of `data/decision/surfaces_val` through the same G1-data gate that
+    failed them (`g1_surfaces --no-cache`, the 12 rows of `surface_variants.jsonl`): **6/6 pass** (control oracle,
+    twin destroy, twin `abstain_correct`, control `false_blame`, evidence visible; 305 s). The pre-fix
+    `surfaces_val/g1.jsonl` rows for 17a590fc ("control oracle fails tests", 6/6) are superseded: **re-scored,
+    post-fix**. The DEF-05 prune was already reverted there (dirs restored); this confirms the controls pass with no
+    `umask` added to `solve.sh`. Results: `g1_17a590fc.jsonl`, `g1.log`.
+  - DEF-25's 4 corrupt_input controls (0e5b95da, 1be74973, 55b2e866, 9fd868fd; the rebuilt dirs in scratchpad
+    `fix/sweep0-0/b_after/tasks`): `validate --only-file`, **4/4 "feasible: oracle passes" (3/3 oracle runs each)**,
+    every boot's `sandbox_umask` 0022. DEF-25's re-gate sample is therefore 20/20 twins and 20/20 controls; the 4
+    pre-fix failures (`fix/sweep0-0/regate/validation.jsonl`) are **re-scored, post-fix**. Results:
+    `ci_validation.jsonl`, `ci.log`.
+- **Impact note:** DEF-16's (node results unchanged), plus the two re-gates above: DEF-05's local 17a590fc G1 verdicts
+  and DEF-25's 4 control verdicts were umask artifacts and now pass, re-scored post-fix. No other local gate is known to
+  have been handed to this entry; DEF-NEW-probe-gate-1 (the select quarantine) is measured (24/32 pass under the pin)
+  but its rewrite waits for the owner.
 
 ### DEF-20: iteration-16 guards with no powered metric
 - **Area:** stats. **Status:** open. **Found:** 2026-10-25, DEF-10 review.
