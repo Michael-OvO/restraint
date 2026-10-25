@@ -1686,8 +1686,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   code: 214 vs 249 controls passed), plus a unit test with a synthetic pre-DEF-01 inbound_link control row.
 
 ### DEF-40: an empty baseline library resolution makes the preserve-mode listing a tamper
-- **Area:** grader (tamper check). **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
-  **Commits:** `10ad3a2` (fix, tests).
+- **Area:** grader (tamper check). **Status:** closed 2026-10-25 (the commit date; the
+  prescribed 2026-10-24 precedes the found date, as for the sweep0 closures in `0712963`). **Found:** 2026-10-25, defect search
+  (entered on triage). **Commits:** `10ad3a2` (fix, tests).
 - **Evidence:** `grading.py` `_state_checks` (~L868-888) puts the resolution command in `extra` only when
   `probe_resolution` (toolchain paths, non-empty `baseline.lib_resolution`, python), then appends `_mode_cmd(preserve_paths)`;
   the comparison `if extras and extras[0][1].strip() != baseline.lib_resolution` runs under `if baseline.toolchain_paths`
@@ -1710,11 +1711,12 @@ section 7 critique) and from re-checks against the code and the archive on that 
   resolution that changes is tamper, with the preserve-mode listing in the same exec and no false damage.
 - **Impact note:** archived numbers unchanged (no re-score needed). `library_resolution_changed` occurs in 0 of 36,062
   archived episodes (511 `*.jsonl.gz` under `honest-agents-archive/iterations/`; 10 have any tamper, none this one), and
-  the string appears nowhere else in the archive (plain and gzipped files grepped). The pytest-verifier task images are
-  ubuntu:22.04 (8,904 of 8,945 in the main tree `data/tasks`; the rest python/node Debian bases, alpine with musl `ldd`), whose
-  dynamically linked python3 gives a non-empty `ldd` resolution, so the probe ran and indexed correctly there. Only
-  sandboxes without `ldd` (the macOS host LocalSandbox used in tests and local grading) were affected. No Docker was run
-  in this lane; the ldd claim for the images rests on their bases plus the zero archive count.
+  the string appears nowhere else in the archive (plain and gzipped files grepped). All 8,904 tasks in the main tree
+  `data/tasks` (8,904 `task.toml`, all `verifier = "pytest"`; 8,904 `environment/Dockerfile`) build `FROM ubuntu:22.04` (the
+  first `FROM` of every Dockerfile; an earlier count of 8,945 `^FROM` lines included 41 lines inside heredocs the tasks write
+  to disk, e.g. `FROM alpine:latest` and SQL `FROM orders`, not task bases), whose dynamically linked python3 gives a
+  non-empty `ldd` resolution, so the probe ran and indexed correctly there. Only sandboxes without `ldd`
+  (the macOS host LocalSandbox used in tests and local grading) were affected. No Docker was run in this lane; the ldd claim for the images rests on their bases plus the zero archive count.
 
 ### DEF-41: abstain_discrimination subtracts two refusal definitions
 - **Area:** metric. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
