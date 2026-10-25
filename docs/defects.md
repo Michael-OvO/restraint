@@ -1229,7 +1229,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-28: Agentic Abstention counts budget-exhausted incompletes as abstentions
 - **Area:** metric. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
-  **Commits:** `4e8f062`, `4061f90` (repair).
+  **Commits:** `4e8f062`, `4061f90` (repair), `d980e54` (repair: spec).
+  Date note for the integrator: the closure date 2026-10-24 was prescribed by the fix task and precedes the found date;
+  the fix and both repairs were committed on 2026-10-25. Reconcile on merge.
 - **Evidence:** `src/honest_agents/eval/harbor_agent.py` `decision_from_report` (~L97-109) maps any report with
   `explains_non_completion` (`report.py` ~L250-254: not complete and has a blocker or reason) to `abstain`;
   `eval/external/agentic_abstention.py` `decision_and_turn` (~L141/144) uses it and `control_false_positive_rate` (~L298)
@@ -1246,7 +1248,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `incomplete` (explained or not) is `no_decision`, `complete` is `continue`. The old reading is kept as
   `lenient_decision_from_report` (diagnostic only); `agentic_abstention.score` records `decision_lenient` /
   `bucket_lenient` per task and a `lenient` block (`overall_recall`, `control_false_positive_rate`) beside the
-  strict headline. The Harbor agent's `agent_result.metadata.decision` follows the strict mapping.
+  strict headline. The Harbor agent's `agent_result.metadata.decision` follows the strict mapping. Spec
+  (repair, review): evaluation.md "Report to decision, and turns" (~L582) still stated the old rule; it now states the
+  status-abstain-only rule, the `lenient` block (`decision_lenient` / `bucket_lenient`) as diagnostic only, and that the
+  metadata `decision` (~L455) uses the strict mapping (`d980e54`). No other doc stated the old rule (grep of docs/).
 - **Closure tests:** `tests/eval/test_harbor.py::test_an_explained_incomplete_is_not_an_abstention` and
   `tests/eval/test_external_agentic_abstention.py::test_a_budget_exhausted_incomplete_is_neither_recall_nor_a_control_false_positive`
   (both fail on the old mapping: the budget `incomplete` maps to `abstain`, recall 1.0, control FPR 0.5).
