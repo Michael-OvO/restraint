@@ -1526,6 +1526,7 @@ dependencies = [
     { name = "harbor" },
     { name = "pydantic" },
     { name = "pyfakefs" },
+    { name = "toml" },
 ]
 
 [package.optional-dependencies]
@@ -1568,6 +1569,7 @@ requires-dist = [
     { name = "peft", marker = "extra == 'train'", specifier = "==0.21.2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyfakefs", specifier = ">=6.2.0" },
+    { name = "toml", specifier = "==0.10.2" },
     { name = "trl", marker = "extra == 'train'", specifier = "==1.14.1" },
     { name = "vllm", marker = "sys_platform == 'linux' and extra == 'train'", specifier = "==0.30.0" },
     { name = "wandb", marker = "extra == 'train'", specifier = "==0.30.0" },

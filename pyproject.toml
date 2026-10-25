@@ -11,6 +11,8 @@ dependencies = [
     "harbor==0.24.0",
     "pydantic>=2",
     "pyfakefs>=6.2.0",
+    # the one TOML writer for task.toml (taskfs.dumps_toml, DEF-45); also a Harbor dependency
+    "toml==0.10.2",
 ]
 
 [project.optional-dependencies]

@@ -137,26 +137,15 @@ def forbidden_context_files(env_dir: Path, dockerfile: str) -> list[str]:
 
 
 def dumps_toml(data: dict[str, Any]) -> str:
-    """Serialise TOML with whichever writer is installed.
+    """Serialise TOML with `toml` (0.10.2, pinned in pyproject) and nothing else.
 
-    `tomli_w` / `tomlkit` are preferred; `toml` (0.10, a Harbor dependency) is the guaranteed fallback.
+    The bytes of task.toml feed `task_hash`, `validate.is_current`, the G1 cache keys and the S7 manifests, so they must
+    not depend on which other TOML writers happen to be installed: `tomli_w` and `tomlkit` (pulled in by the openenv
+    extra) format lists and table order differently (DEF-45). The committed builds were made with `toml`.
     """
-    data = _drop_none(data)
-    try:
-        import tomli_w
-
-        return tomli_w.dumps(data)
-    except ImportError:
-        pass
-    try:
-        import tomlkit
-
-        return tomlkit.dumps(data)
-    except ImportError:
-        pass
     import toml
 
-    return toml.dumps(data)
+    return toml.dumps(_drop_none(data))
 
 
 def _drop_none(v: Any) -> Any:
