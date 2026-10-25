@@ -29,6 +29,7 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -54,13 +55,28 @@ PINNED_REVISIONS: dict[str, str] = {
 
 def pinned_revision(name: str, revision: str | None = None) -> str | None:
     """The revision to load `name` at: its pin for a pinned Hub id, else `revision` as given (a local directory, such
-    as a merged model, has none). A pinned id with a different explicit revision is refused: one pin per model."""
+    as a merged model, has none). A pinned id with a different explicit revision is refused: one pin per model.
+    Another model's pin is dropped first: `dataclasses.replace(section, name=...)` re-runs this with the old pin."""
+    if revision in PINNED_REVISIONS.values() and PINNED_REVISIONS.get(name) != revision:
+        revision = None
     pin = PINNED_REVISIONS.get(name)
     if pin is None:
         return revision
     if revision is not None and revision != pin:
         raise ValueError(f"model.revision {revision!r} for {name} differs from its pin {pin} (models.PINNED_REVISIONS)")
     return pin
+
+
+def colocated_model_path(name: str, revision: str | None, *, use_vllm: bool, vllm_mode: str) -> str:
+    """What `GRPOTrainer(model=...)` gets. TRL builds a colocated vLLM engine from the model's `name_or_path` with no
+    revision (trl 1.14.1 `generation/vllm_generation.py`), so in colocate mode a pinned Hub id goes in as its pinned
+    snapshot directory (DEF-51); the trainer itself loads at `revision` through `model_init_kwargs`. Server mode and a
+    local directory keep the name."""
+    if not (use_vllm and vllm_mode == "colocate" and revision) or Path(name).is_dir():
+        return name
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(name, revision=revision)
 
 
 _QWEN3_LORA_TARGETS = [

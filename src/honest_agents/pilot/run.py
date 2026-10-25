@@ -33,7 +33,7 @@ from typing import Any
 
 import yaml
 
-from honest_agents.models import pinned_revision
+from honest_agents.models import colocated_model_path, pinned_revision
 from honest_agents.pilot import analyze, dataset
 from honest_agents.pilot import rewards as rewards_mod
 from honest_agents.pilot.env import ReplayEnv
@@ -538,6 +538,12 @@ def plan_summary(
     }
 
 
+def trainer_model(cfg: PilotConfig, args: Any) -> str:
+    """What the pilot's `GRPOTrainer(model=...)` gets, from the arm's built `GRPOConfig`: the pinned snapshot directory
+    in colocate mode (`models.colocated_model_path`, DEF-51), else the name."""
+    return colocated_model_path(cfg.model.name, cfg.model.revision, use_vllm=args.use_vllm, vllm_mode=args.vllm_mode)
+
+
 def run_arm(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], resume: bool = False) -> Path:
     """Train one arm and write its records. Needs a GPU, a vLLM server and the model."""
     from transformers import set_seed
@@ -583,7 +589,7 @@ def run_arm(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], resume: bool
     trainer = None
     try:
         trainer = GRPOTrainer(
-            model=cfg.model.name,
+            model=trainer_model(cfg, args),
             reward_funcs=[reward_func],
             args=args,
             train_dataset=dataset.to_hf_dataset(rows),

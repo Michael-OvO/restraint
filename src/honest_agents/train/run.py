@@ -13,6 +13,7 @@ from honest_agents.models import (
     check_end_of_turn_token,
     check_tool_flow_template,
     check_training_template,
+    colocated_model_path,
     family_spec,
     flash_linear_attention_available,
 )
@@ -175,16 +176,15 @@ def probe_safe_trainer_class() -> type:
 
 
 def trainer_model(cfg: Any) -> str:
-    """What `GRPOTrainer(model=...)` gets. TRL builds a colocated vLLM engine from the model's `name_or_path` with no
-    revision (trl 1.14.1 `generation/vllm_generation.py`), so a pinned Hub id goes in as its pinned snapshot directory
-    there (DEF-51); the trainer itself loads at `model.revision` through `model_init_kwargs`."""
+    """What `GRPOTrainer(model=...)` gets: the pinned snapshot directory in colocate mode (`models.colocated_model_path`,
+    DEF-51), else the name."""
     g = cfg.grpo
-    colocate = g.get("use_vllm") and g.get("vllm_mode", "colocate") == "colocate"
-    if not (colocate and cfg.model.revision) or Path(cfg.model.name).is_dir():
-        return cfg.model.name
-    from huggingface_hub import snapshot_download
-
-    return snapshot_download(cfg.model.name, revision=cfg.model.revision)
+    return colocated_model_path(
+        cfg.model.name,
+        cfg.model.revision,
+        use_vllm=bool(g.get("use_vllm")),
+        vllm_mode=g.get("vllm_mode", "colocate"),
+    )
 
 
 def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:

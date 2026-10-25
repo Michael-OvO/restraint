@@ -167,3 +167,57 @@ def test_the_colocated_engine_loads_the_pinned_snapshot(monkeypatch, tmp_path):
         merged
     )
     assert len(asked) == 1
+
+
+class _Built(Exception):
+    """Raised by the fake trainer once it has seen what `run_arm` hands it."""
+
+
+@pytest.mark.parametrize("mode", ["colocate", None])
+def test_the_pilots_colocated_engine_loads_the_pinned_snapshot(monkeypatch, tmp_path, mode):
+    """The pilot's own `GRPOTrainer` call: in colocate mode (set, or TRL's default when `vllm_mode` is unset) it gets the
+    pinned snapshot directory, as `train.run` does; the shipped server-mode config keeps the name."""
+    import huggingface_hub
+    import trl
+
+    from honest_agents.pilot import run
+
+    asked, seen = [], []
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, **kw: asked.append((repo, kw)) or "/snap")
+
+    def fake_trainer(*, model, **kw):
+        seen.append(model)
+        raise _Built
+
+    monkeypatch.setattr(trl, "GRPOTrainer", fake_trainer)
+    monkeypatch.setattr(run.dataset, "to_hf_dataset", lambda rows: rows)
+    shared = [f"output_root={tmp_path / 'out'}", "grpo.bf16=false", "grpo.gradient_checkpointing=false"]
+    shared += ["model.family=qwen3_5", "model.require_fla=false"]
+    cfg = load_pilot_config(REPO / "configs/pilot.yaml", shared)
+    if mode is None:
+        cfg.grpo.pop("vllm_mode")
+    else:
+        cfg.grpo["vllm_mode"] = mode
+    arm = run.expand_arms(cfg)[0]
+    with pytest.raises(_Built):
+        run.run_arm(cfg, arm, [])
+    assert seen == ["/snap"]
+    assert asked == [("Qwen/Qwen3.5-4B", {"revision": models.QWEN3_5_4B_REVISION})]
+
+    server = load_pilot_config(REPO / "configs/pilot.yaml", shared)
+    with pytest.raises(_Built):
+        run.run_arm(server, arm, [])
+    assert seen == ["/snap", "Qwen/Qwen3.5-4B"] and len(asked) == 1
+
+
+def test_replacing_the_model_name_moves_the_pin_with_it(tmp_path):
+    """`dataclasses.replace(section, name=...)` re-runs `__post_init__` with the old name's pin: a local directory then
+    has none, and another pinned id gets its own pin rather than a refusal."""
+    import dataclasses
+
+    section = load_run_config(REPO / "configs/qwen35_4b.yaml").model
+    assert section.revision == models.QWEN3_5_4B_REVISION
+    assert dataclasses.replace(section, name=str(tmp_path)).revision is None
+    assert dataclasses.replace(section, name="Qwen/Qwen3-4B").revision == models.QWEN3_4B_REVISION
+    merged = dataclasses.replace(section, name=str(tmp_path))
+    assert dataclasses.replace(merged, name="Qwen/Qwen3.5-4B").revision == models.QWEN3_5_4B_REVISION
