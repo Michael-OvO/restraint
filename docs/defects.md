@@ -15,8 +15,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-05 | task data | open | source 17a590fc has no task dir; 48 of 960 episodes per model are silently skipped |
 | DEF-06 | recording | closed | rollout records store only `{command, rc}`, not tool outputs |
 | DEF-07 | build | closed | `_pick_pair` reassigns every existing variant when a pool grows |
-| DEF-08 | tooling | open | checkpoint selection uses `task_success`, which ignores honesty |
-| DEF-09 | tooling | open | decision probe hard-codes `harness.SYSTEM_PROMPT` |
+| DEF-08 | tooling | closed | checkpoint selection uses `task_success`, which ignores honesty |
+| DEF-09 | tooling | closed | decision probe hard-codes `harness.SYSTEM_PROMPT` |
 | DEF-10 | stats | open | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | open (investigate) | G2's read rate differs by branch (twins 37 vs controls 24, held-out); cause unknown |
 | DEF-12 | archive | open | the two archived SFT-v2 surface4 evals are the same episodes under two names |
@@ -304,17 +304,71 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `decision_surfaces.assign_pool_pairs`, which has the same flaw (DEF-18).
 
 ### DEF-08: checkpoint selection ignores honesty
-- **Area:** tooling. **Status:** open. **Found:** training-log method notes (known limitation); it15 diagnosis section 7
-  (G3 c10 was chosen on `task_success`).
-- **Fix:** select on the pre-registered endpoint, or fix the checkpoint in advance in the pre-registration.
-- **Closure test:** sweep S10; a config check that refuses `task_success` as the selector for restraint runs.
+- **Area:** tooling. **Status:** closed 2026-10-24 (the config check; the endpoint itself is S10 / DEF-10's
+  pre-registration). **Found:** training-log method notes (known limitation); it15 diagnosis section 7
+  (G3 c10 was chosen on `task_success`). **Commits:** `c6457b9` (fix, tests).
+- **Evidence:** `configs/base.yaml` `probe.selection_metric: eval_honest/task_success`, inherited by every GRPO config;
+  `callbacks.ValidationProbe` wrote `best_checkpoint.json` from it with no check. `eval.select_checkpoint` (the SFT epoch
+  rule: capability gate, then lowest `claim_rate_infeasible`) was already honesty-based and is unchanged.
+- **Fix (done):** `train.grpo.check_selection`, run at plan build and again when the probe callback is added.
+  - New top-level `restraint_run` (default true; base.yaml says so). Only `smoke.yaml` and `phase0_zero_lr.yaml`
+    (plumbing, lr 0) say false.
+  - A restraint run refuses a capability selector: any metric containing `task_success`, `verified_success`,
+    `claim_rate_feasible` or `reward/outcome` (so per-family and per-cell variants are caught too).
+  - It selects either at `probe.fixed_checkpoint_step` (a saved step of the run; the probes are still logged but never
+    move the pointer, which is written when that checkpoint is saved), or on a `probe.selection_metric` that the
+    `probe.preregistration` file names. The file must exist and name the metric; its sha256 is recorded.
+    `probe.greater_is_better` sets the direction.
+  - Opt-out: `probe.legacy_capability_selection=true` re-runs a pre-DEF-08 config as it was. No config file sets it, so a
+    new config inheriting an old one does not inherit the opt-out. The rule used (`fixed_step`, `preregistered_metric`,
+    `legacy`, or not a restraint run) is written into `best_checkpoint.json` (`selection`) and the `--dry-run` plan
+    summary (`probe.selection`).
+- **Closure test:** `test_a_restraint_run_refuses_a_capability_selector`,
+  `test_a_restraint_run_selects_on_a_preregistered_endpoint_or_a_fixed_step`, `test_main_dry_run` (fixed step in the
+  summary), `test_validation_probe_with_a_fixed_step_never_moves_the_pointer`,
+  `test_validation_probe_minimises_and_records_its_rule`, and
+  `test_a_restraint_config_selecting_on_task_success_needs_the_legacy_flag` (base.yaml and grpo_it15_g3.yaml dry runs
+  fail without the flag). All of them fail on the old code. The other shipped configs dry-run with the flag. Sweep S10
+  still needs the pre-registration to name the endpoint (DEF-10 / it16 S0.14).
+- **Impact (re-scored, post-fix, from the archived `validation_probe.jsonl` of every GRPO run).** The pointer each run
+  wrote vs the step a minimised `eval_honest/claim_rate_infeasible` would have picked (claims on impossible tasks, the
+  honesty half of `eval.select_checkpoint`; for illustration only, since it has no capability gate):
+
+  | run | chosen on task_success | claim_rate_infeasible pick |
+  |---|---|---|
+  | 07 grpo-run1 | 0 (only probe) | 0 |
+  | 09 grpo-run2 | 50 (0.604) | 20 (0.568) |
+  | 11 sft-grpo | 20 | 20 |
+  | 12 harness-b0 | 10 (0.538) | 0 (0.538, tie, earlier) |
+  | 13 grpo-and-evals (D-RL) | 10 (0.105) | 15 (0.051) |
+  | 15 g3-grpo | 10 (0.053) | 10 |
+
+  For G3, the run that prompted this entry, the selection does not change: c10 is also the most honest probe step. Its
+  reported eval was c15 anyway (it15 diagnosis section 7). Iteration 13's D-RL pointer would have moved to step 15, and
+  run 2's to step 20. No archived eval number changes: each archived eval names the checkpoint it evaluated, and those
+  numbers stay valid for that checkpoint. What is void is any statement that an archived GRPO checkpoint was "the
+  validation-best" in an honesty sense.
 
 ### DEF-09: decision probe hard-codes the system prompt
-- **Area:** tooling. **Status:** open. **Found:** it16 design.
+- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** it16 design. **Commits:** `ba65748` (fix, test).
 - **Evidence:** `src/honest_agents/tasks/decision_probe.py:838` builds messages with `harness.SYSTEM_PROMPT`.
 - **Impact:** the probe cannot measure judgment under any other prompt, such as the it16 procedure prompt.
-- **Fix:** `--system-prompt-file`, with its own manifest per generated probe file.
-- **Closure test:** a unit test that the generated probe carries the given prompt and that the default file is unchanged.
+- **Fix (done):** `--system-prompt-file` on `tasks.decision_probe prompts` and on `tasks.decision_surfaces prompts` (the
+  six-surface probe).
+  - The file's text becomes the system message of every zero-prefix prompt. On own-prefix prompts it replaces the bank
+    episode's system message. Nothing else in a prompt changes (tested field by field).
+  - The run needs its own `--out` (writing over the default probe file is refused) and writes
+    `manifest["system_prompt"] = {file, sha256, chars}` beside it. An empty file is refused.
+  - Without the flag, the probe file and its manifest are unchanged: byte-identical to HEAD's code on a 3-pair fixture,
+    26,878 and 3,207 bytes (scratch check `fix/sel-probe/byte_check.py`).
+- **Closure test:** `test_system_prompt_file_builds_its_own_probe_and_the_default_is_unchanged`, through the CLI. It
+  checks that the default zero-prefix rows carry `harness.SYSTEM_PROMPT`, that the default manifest has no
+  `system_prompt` key, and that a file holding `harness.SYSTEM_PROMPT` gives the same zero-prefix bytes. It also checks
+  that a custom prompt reaches every prompt with the sha256 in the manifest, that the default `--out` is refused, and
+  that an empty file is refused. The test fails on the old code (no such flag).
+- **Impact:** none on archived numbers: the default output is unchanged, and no probe was built with another prompt.
+  `data/probe_v1_procedure.jsonl` (it16 S0.10) can now be generated. It is not generated here, because the procedure
+  prompt (S0.5) is not frozen yet.
 
 ### DEF-10: bars at a point estimate, no power check
 - **Area:** stats. **Status:** open. **Found:** it15 diagnosis (noise-and-power).
