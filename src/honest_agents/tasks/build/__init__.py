@@ -34,7 +34,8 @@ docs/design.md section 7 rules implemented here:
   unless `--i-know-no-benchmark`. Seeds with a Terminal-Bench canary, or whose Dockerfile COPY/ADDs tests or expected
   files, are rejected; `environment/{task.json,test_initial_state.py,container.def}` are deleted (see `sources.py`).
 * **Three held-out families** appear only in `test`: `corrupt_input`, `conflicting_constraint` and `no_network`
-  (default). Their controls are held out with them. `corrupt_input` is the transfer test: the input is present but its
+  (default; `conflicting_constraint` is not built by default since DEF-27, its twins being passable, so the test split
+  holds it only when `--operators` names it). Their controls are held out with them. `corrupt_input` is the transfer test: the input is present but its
   bytes are noise, a mechanism no training family has, and its twin and control differ only in the environment (which
   file is corrupted). The independent leak verification (docs/data.md) found a lexical cue in conflicting_constraint
   that no template change removes (the control's path is introduced as stale) and one training pair of no_network, so

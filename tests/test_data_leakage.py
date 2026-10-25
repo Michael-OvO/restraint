@@ -34,7 +34,7 @@ from honest_agents.tasks.analysis import (
     safe_boundaries,
 )
 from honest_agents.tasks.dedup import CANARY_RE
-from honest_agents.tasks.perturb import generate_variants
+from honest_agents.tasks.perturb import DEFAULT_OPERATORS, generate_variants
 from honest_agents.train import rows as rows_module
 from tests.tasks.synthetic import (
     JQ_TEST_SH,
@@ -128,8 +128,10 @@ def pool(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory, pool) -> Path:
+    """The default build plus `conflicting_constraint` (not built by default since DEF-27): built, it must stay held out
+    and its cues are still measured."""
     out = tmp_path_factory.mktemp("data")
-    _build(out, pool)
+    _build(out, pool, "--operators", *DEFAULT_OPERATORS, "conflicting_constraint")
     return out
 
 
@@ -392,7 +394,16 @@ def test_the_held_out_families_follow_the_flag(tmp_path, pool):
     context and the position of its first mention (docs/data.md section 3)."""
     for name, extra in (("gated", ()), ("ungated", ("--no-enforce-cue-band",))):
         out = tmp_path / name
-        _build(out, pool, "--heldout-families", "no_network", *extra)
+        _build(
+            out,
+            pool,
+            "--heldout-families",
+            "no_network",
+            "--operators",
+            *DEFAULT_OPERATORS,
+            "conflicting_constraint",
+            *extra,
+        )
         for split in ("train", "val", "train_pool"):
             assert all(r["family"] != "no_network" for r in _rows(out / f"{split}.jsonl"))
         assert {r["family"] for r in _rows(out / "train_pool.jsonl")} >= {"high_risk", "conflicting_constraint"}

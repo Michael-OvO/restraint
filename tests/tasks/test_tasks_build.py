@@ -116,7 +116,10 @@ def test_build_end_to_end(tmp_path, seeds):
     allowed = {"feasible", *OPERATORS} - set(DEFAULT_HELDOUT_FAMILIES)
     assert {"feasible"} < train_families <= allowed  # the mixture samples families; held-out ones never appear
     test_families = {r["family"] for r in rows["test"]}
-    assert set(DEFAULT_HELDOUT_FAMILIES) <= test_families  # one environment mechanism + high_risk
+    # conflicting_constraint is held out but not built by default (DEF-27)
+    built_heldout = set(DEFAULT_HELDOUT_FAMILIES) & set(DEFAULT_OPERATORS)
+    assert built_heldout and built_heldout <= test_families  # one environment mechanism + high_risk
+    assert "conflicting_constraint" not in test_families
     assert manifest["n_skipped_no_solution"] == 1
     assert manifest["seed_splits"]["test"] == 5 and manifest["seed_splits"]["val"] == 3  # absolute counts
     assert len({r["pair_id"] for r in rows["test"]}) == 5
@@ -403,7 +406,7 @@ def test_leaks_are_dropped_and_quarantined(tmp_path, seeds):
     flags = _one_build_args(out, seeds)
     build(parse_args(flags))
     rows = _all_variant_rows(out)
-    leaky = next(r for r in rows if r["kind"] == "infeasible" and r["perturbation"] == "conflicting_constraint")
+    leaky = next(r for r in rows if r["kind"] == "infeasible" and r["perturbation"] == "no_network")
     vpath, qfile = tmp_path / "validation.jsonl", tmp_path / "quarantine.jsonl"
     _write_results(
         vpath,
@@ -421,7 +424,7 @@ def test_leaks_are_dropped_and_quarantined(tmp_path, seeds):
     build(parse_args([*flags, "--validation-jsonl", str(vpath), "--quarantine-file", str(qfile)]))
     assert len(read_quarantine(qfile)) == 1
     after = _all_variant_rows(out)
-    assert not any(r["pair_id"] == leaky["pair_id"] and r["perturbation"] == "conflicting_constraint" for r in after)
+    assert not any(r["pair_id"] == leaky["pair_id"] and r["perturbation"] == "no_network" for r in after)
 
 
 @pytest.mark.slow
@@ -630,7 +633,9 @@ def test_enforce_pairing_drops_orphans():
 def test_remove_tool_is_registered_but_not_built_by_default():
     """Behaviour change (full-pool build): remove_tool yields 1 variant in 2,482 Endless Terminals seeds (structural), so
     it is out of the default operator list; it stays registered and selectable with --operators."""
-    assert NOT_BUILT_BY_DEFAULT == ("remove_tool", "shortcut_trap") and "remove_tool" in OPERATORS  # + the trap family
+    # + the trap family, and conflicting_constraint since DEF-27 (passable twins)
+    assert NOT_BUILT_BY_DEFAULT == ("remove_tool", "shortcut_trap", "conflicting_constraint")
+    assert "remove_tool" in OPERATORS
     assert "remove_tool" not in DEFAULT_OPERATORS and set(DEFAULT_OPERATORS) | set(NOT_BUILT_BY_DEFAULT) == set(
         OPERATORS
     )
@@ -1076,16 +1081,16 @@ def test_the_manifest_reports_the_yield_per_family_and_the_independent_source_ta
     assert train["seeds"] == m["seed_splits"]["train"] and train["source_tasks"] <= train["seeds"]
     fams = train["families"]
     assert set(fams) == set(DEFAULT_OPERATORS)  # remove_tool is not built by default
-    assert fams["high_risk"]["role"] == "train" and fams["conflicting_constraint"]["role"] == "held-out (test only)"
+    assert fams["high_risk"]["role"] == "train" and fams["corrupt_input"]["role"] == "held-out (test only)"
     pool = [json.loads(x) for x in (out / "train_pool.jsonl").read_text().splitlines()]
     for fam in ("high_risk", "revoke_permission"):
         inf = [r for r in pool if r["family"] == fam and r["kind"] == "infeasible"]
         assert fams[fam]["pool_infeasible"] == len(inf) > 0
         assert fams[fam]["pool_source_tasks"] == len({r["pair_id"] for r in inf})
         assert fams[fam]["pool_yield_per_150_seeds"] == round(150 * len(inf) / train["seeds"], 1)
-    held = fams["conflicting_constraint"]  # built for the train seeds too, but never emitted to a train file
-    assert held["emitted_pairs"] == 0 and not any(r["family"] == "conflicting_constraint" for r in pool)
-    assert y["test"]["families"]["conflicting_constraint"]["pool_infeasible"] > 0
+    held = fams["corrupt_input"]  # built for the train seeds too, but never emitted to a train file
+    assert held["emitted_pairs"] == 0 and not any(r["family"] == "corrupt_input" for r in pool)
+    assert y["test"]["families"]["corrupt_input"]["pool_infeasible"] > 0
     main(_args(tmp_path / "again", seeds))
     printed = capsys.readouterr().out
     assert "independent source tasks" in printed and "training pairs per family" in printed
