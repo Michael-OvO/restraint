@@ -1090,6 +1090,7 @@ def test_defaults_are_the_spec_values():
         "brier_weight": 0.0,
         "efficiency_bonus": 0.1,
         "efficiency_ref_actions": 28,
+        "pair_table": False,
     }
     assert DEFAULTS.claim_threshold == pytest.approx(0.625)
     assert reward.compute_reward.__defaults__ == (DEFAULTS,)
