@@ -297,7 +297,7 @@ class HFSampler:
         import transformers
 
         from honest_agents.eval.rollout import tool_schemas
-        from honest_agents.models import ModelFamily, detect_family, family_spec
+        from honest_agents.models import ModelFamily, detect_family, family_spec, pinned_revision
 
         self.sampling = sampling
         fam = (
@@ -305,12 +305,17 @@ class HFSampler:
         )
         self.kwargs = dict(family_spec(fam).chat_template_kwargs)
         self.kwargs["enable_thinking"] = sampling.enable_thinking
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, local_files_only=local_files_only)
-        config = transformers.AutoConfig.from_pretrained(model_name, local_files_only=local_files_only)
+        rev = pinned_revision(model_name)  # DEF-51: a Hub base loads at its pin
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, revision=rev, local_files_only=local_files_only
+        )
+        config = transformers.AutoConfig.from_pretrained(model_name, revision=rev, local_files_only=local_files_only)
         arch = (config.architectures or ["AutoModelForCausalLM"])[0]
         cls = getattr(transformers, arch, None) or transformers.AutoModelForCausalLM
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        model = cls.from_pretrained(model_name, dtype=getattr(torch, dtype), local_files_only=local_files_only)
+        model = cls.from_pretrained(
+            model_name, revision=rev, dtype=getattr(torch, dtype), local_files_only=local_files_only
+        )
         if adapter:
             from peft import PeftModel
 

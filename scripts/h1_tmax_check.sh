@@ -5,7 +5,8 @@
 # spending a training run.
 #   scripts/h1_tmax_check.sh SPLIT [OUT_DIR=runs/h1_tmax] [extra run_eval args...]
 # Env: N_SAMPLES (4), CONCURRENCY (16), BASE_MODEL (Qwen/Qwen3.5-4B), TMAX_MODEL (allenai/tmax-4b),
-#      BASE_REVISION / TMAX_REVISION (pin commit SHAs; tmax's default branch is master), VLLM_GPUS (0), VLLM_PORT
+#      BASE_REVISION / TMAX_REVISION (pin commit SHAs; BASE defaults to the model's pin in honest_agents.models,
+#      tmax's default branch is master), VLLM_GPUS (0), VLLM_PORT
 #      (8000), VLLM_MAX_MODEL_LEN (20480 = 16384 budget + prompt + one 4096 turn), VLLM_GPU_MEM (0.9),
 #      BASE_URL is set from VLLM_PORT. SKIP_SERVE=1 assumes the two endpoints are already up (BASE_ENDPOINT,
 #      TMAX_ENDPOINT, served names `base` and `tmax`).
@@ -30,7 +31,7 @@ serve() {  # serve <hf model> <revision or ""> <tool parser> <served name> <log>
     sleep 2
   done
   CUDA_VISIBLE_DEVICES="${VLLM_GPUS:-0}" VLLM_WORKER_MULTIPROC_METHOD=spawn setsid "${UV_RUN[@]}" vllm serve "$model" \
-    ${rev:+--revision "$rev"} --served-model-name "$name" --host 127.0.0.1 --port "$PORT" \
+    ${rev:+--revision "$rev" --tokenizer-revision "$rev"} --served-model-name "$name" --host 127.0.0.1 --port "$PORT" \
     --gpu-memory-utilization "${VLLM_GPU_MEM:-0.9}" --max-model-len "${VLLM_MAX_MODEL_LEN:-20480}" --dtype bfloat16 \
     --enable-prefix-caching --language-model-only --generation-config vllm \
     --enable-auto-tool-choice --tool-call-parser "$parser" --reasoning-parser qwen3 \
@@ -56,7 +57,7 @@ if [[ "${SKIP_SERVE:-0}" == 1 ]]; then
   run_one base base "${BASE_ENDPOINT:?set BASE_ENDPOINT}" ${EXTRA[@]+"${EXTRA[@]}"}
   run_one tmax tmax "${TMAX_ENDPOINT:?set TMAX_ENDPOINT}" ${EXTRA[@]+"${EXTRA[@]}"}
 else
-  serve "$BASE_MODEL" "${BASE_REVISION:-}" qwen3_coder base "$OUT/vllm_base.log"
+  serve "$BASE_MODEL" "${BASE_REVISION:-$(pinned_revision "$BASE_MODEL")}" qwen3_coder base "$OUT/vllm_base.log"
   run_one base base "http://127.0.0.1:$PORT/v1" ${EXTRA[@]+"${EXTRA[@]}"}
   stop_vllm
   serve "$TMAX_MODEL" "${TMAX_REVISION:-}" qwen3_xml tmax "$OUT/vllm_tmax.log"

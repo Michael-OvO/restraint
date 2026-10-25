@@ -50,7 +50,8 @@ fi
 
 # Pre-download model weights so vLLM and the trainer don't race on the hub.
 for m in Qwen/Qwen3-4B Qwen/Qwen3.5-4B; do
-  uv run --frozen --extra train hf download "$m" >/dev/null && echo "cached $m"
+  rev="$(pinned_revision "$m")"  # the pinned snapshot (DEF-51)
+  uv run --frozen --extra train hf download "$m" ${rev:+--revision "$rev"} >/dev/null && echo "cached $m@${rev:-main}"
 done
 
 # Pre-pull the exact (digest-pinned) images Harbor uses: the egress-sidecar base and the kernel probe image. Harbor's

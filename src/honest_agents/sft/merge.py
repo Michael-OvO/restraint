@@ -18,16 +18,19 @@ import json
 import shutil
 from pathlib import Path
 
+from honest_agents.models import pinned_revision
+
 
 def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16", scale: float = 1.0) -> dict:
     import torch
     import transformers
     from peft import PeftModel
 
-    config = transformers.AutoConfig.from_pretrained(base)
+    revision = pinned_revision(base)  # DEF-51: a Hub base loads at its pin; a local merged directory has none
+    config = transformers.AutoConfig.from_pretrained(base, revision=revision)
     arch = (config.architectures or ["AutoModelForCausalLM"])[0]
     cls = getattr(transformers, arch, None) or transformers.AutoModelForCausalLM
-    model = cls.from_pretrained(base, dtype=getattr(torch, dtype))
+    model = cls.from_pretrained(base, revision=revision, dtype=getattr(torch, dtype))
     peft_model = PeftModel.from_pretrained(model, adapter)
     lora_a = [n for n, _ in peft_model.named_parameters() if "lora_A" in n]
     if not lora_a:
@@ -54,14 +57,17 @@ def merge(base: str, adapter: str, out: str, dtype: str = "bfloat16", scale: flo
     # Tokenizer, chat template and (for Qwen3.5) the processor files travel with the weights, so vLLM and the trainer
     # render prompts exactly as they would for the original checkpoint.
     try:
-        transformers.AutoProcessor.from_pretrained(base).save_pretrained(out_dir)
+        transformers.AutoProcessor.from_pretrained(base, revision=revision).save_pretrained(out_dir)
     except Exception:  # noqa: BLE001 - text-only models have no processor
-        transformers.AutoTokenizer.from_pretrained(base).save_pretrained(out_dir)
+        transformers.AutoTokenizer.from_pretrained(base, revision=revision).save_pretrained(out_dir)
     for extra in ("generation_config.json", "preprocessor_config.json", "video_preprocessor_config.json"):
-        src = Path(transformers.utils.cached_file(base, extra, _raise_exceptions_for_missing_entries=False) or "")
+        src = Path(
+            transformers.utils.cached_file(base, extra, revision=revision, _raise_exceptions_for_missing_entries=False)
+            or ""
+        )
         if src.is_file() and not (out_dir / extra).exists():
             shutil.copy(src, out_dir / extra)
-    info = {"base": base, "adapter": adapter, "architecture": arch, "lora_modules": len(lora_a),
+    info = {"base": base, "revision": revision, "adapter": adapter, "architecture": arch, "lora_modules": len(lora_a),
             "probe_param": probe_name, "probe_changed": bool(moved), "scale": scale, **restored}  # fmt: skip
     (out_dir / "merge_info.json").write_text(json.dumps(info, indent=2))
     if not moved:
@@ -84,7 +90,7 @@ def restore_base_tensors(base: str, out_dir: Path, dtype: str) -> dict:
     from safetensors import safe_open
     from safetensors.torch import save_file
 
-    src = Path(base) if Path(base).is_dir() else Path(snapshot_download(base))
+    src = Path(base) if Path(base).is_dir() else Path(snapshot_download(base, revision=pinned_revision(base)))
     merged: dict[str, torch.Tensor] = {}
     for f in sorted(out_dir.glob("*.safetensors")):
         with safe_open(str(f), "pt") as h:

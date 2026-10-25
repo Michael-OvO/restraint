@@ -9,7 +9,9 @@ UV_RUN=(env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval)
 # `honest_agents.train` run config (`python -m honest_agents.pilot.run` reads it).
 is_pilot_config() { grep -qE '^sweep:' "$1"; }
 
-# model_from_config <config.yaml> [overrides...] -> prints "<model name> <family>" (resolves `base:` inheritance, offline).
+# model_from_config <config.yaml> [overrides...] -> prints "<model name> <family> [<revision>]" (resolves `base:`
+# inheritance, offline). The revision is the pin of a pinned Hub id (honest_agents.models.PINNED_REVISIONS, DEF-51);
+# a local directory (a merged model) has none.
 model_from_config() {
   if is_pilot_config "$1"; then
     "${UV_RUN[@]}" python -m honest_agents.pilot.run --config "$@" --print-model
@@ -19,9 +21,12 @@ model_from_config() {
 import sys
 from honest_agents.train import load_run_config, resolve_family
 cfg = load_run_config(sys.argv[1], sys.argv[2:])
-print(cfg.model.name, resolve_family(cfg))
+print(cfg.model.name, resolve_family(cfg), cfg.model.revision or "")
 PY
 }
+
+# pinned_revision <model> -> the pinned Hub revision of a model id, or an empty line (honest_agents.models).
+pinned_revision() { "${UV_RUN[@]}" python -m honest_agents.models revision "$1"; }
 
 # limits_json <config.yaml> [overrides...] -> JSON with max_model_len, the three limits and the server url/group port.
 # The vLLM window comes from the same numbers the trainer and the environment use (honest_agents.train.build_limits).

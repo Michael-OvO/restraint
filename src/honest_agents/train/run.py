@@ -13,6 +13,7 @@ from honest_agents.models import (
     check_end_of_turn_token,
     check_tool_flow_template,
     check_training_template,
+    colocated_model_path,
     family_spec,
     flash_linear_attention_available,
 )
@@ -174,6 +175,18 @@ def probe_safe_trainer_class() -> type:
     return ProbeSafeGRPOTrainer
 
 
+def trainer_model(cfg: Any) -> str:
+    """What `GRPOTrainer(model=...)` gets: the pinned snapshot directory in colocate mode (`models.colocated_model_path`,
+    DEF-51), else the name."""
+    g = cfg.grpo
+    return colocated_model_path(
+        cfg.model.name,
+        cfg.model.revision,
+        use_vllm=bool(g.get("use_vllm")),
+        vllm_mode=g.get("vllm_mode", "colocate"),
+    )
+
+
 def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     """Everything `train()` does before the first step: guards, bank and quarantine paths, the trainer, the template and
     prompt-budget checks, the callbacks. `sync_check` builds the same trainer so it tests the code path that trains."""
@@ -192,7 +205,7 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
 
     trainer_class = probe_safe_trainer_class()  # lazy: --dry-run works without the trainer
     trainer = trainer_class(
-        model=plan.cfg.model.name,
+        model=trainer_model(plan.cfg),
         reward_funcs=plan.reward_funcs,
         args=plan.grpo_config,
         train_dataset=plan.train_dataset,

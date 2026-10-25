@@ -58,7 +58,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-48 | metric / tooling | closed | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
 | DEF-49 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
 | DEF-50 | tooling / build | fixing | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
-| DEF-51 | build | open | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
+| DEF-51 | build | closed | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
 | DEF-52 | tooling / build | closed | `final_benchmark freeze` writes the items files before it checks for changes, so a freeze refused without `--refreeze` still overwrites the frozen item sets |
 | DEF-53 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
 | DEF-54 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
@@ -2800,16 +2800,89 @@ section 7 critique) and from re-checks against the code and the archive on that 
   (fails on the old exporter and script).
 
 ### DEF-51: the base model's Hub revision is pinned nowhere
-- **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
+- **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
+  **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests),
+  `e8c8344` (review repair: the pilot's colocate path, `replace()` of a pinned section), `6fd0e9c`
+  (`pinned_revision` drops another model's pin only for a local directory; a Hub id keeps the refusal), `24a64e1`
+  (third review: the two judgment tokenizer callers of `replace(..., name=...)` named, test).
 - **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
   `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
   `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
-- **Impact:** none measured: the Hub's last commit of `Qwen/Qwen3.5-4B` is `851bf6e` (2026-03-02), before every archived
-  run, so all runs saw one revision. A future Hub update would silently change the base arm and every training start.
-- **Fix (proposed, other lanes' files):** set `model.revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` in
-  `configs/qwen35_4b.yaml` (inherited by the run configs) and pass `--revision` in `scripts/serve_vllm.sh`; the final
-  benchmark manifest already pins the base arm to it.
-- **Closure test (proposed):** every run config resolves `model.revision` to a 40-hex commit.
+- **Which revision the archived runs used:** `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`. Local evidence: the only Hub
+  snapshot path for the model anywhere in the archive is `2026-10-06-node1/node-logs/hf_qwen35.log` (the node-1
+  download, `.../models--Qwen--Qwen3.5-4B/snapshots/851bf6e8...`), the training log's header names snapshot `851bf6e8`,
+  and the Mac's cache (`refs/main`, 2026-10-05) holds the same commit. The archived vLLM log
+  (`2026-10-06-node1/node-logs/vllm_load.log`) shows `revision=main, tokenizer_revision=main`, so servers took whatever
+  `main` was. All 30 archived `run_config.json` / `sft_run.json` / `dpo_run.json` files name `Qwen/Qwen3.5-4B` (21) or a merged
+  directory built on it (9), all with `revision: null`; none used `Qwen/Qwen3-4B`. Certainty: direct for node 1 (iterations
+  1-10); for the later nodes (iterations 11-15) inferred from the Hub history the bench lane read (last commit of
+  `Qwen/Qwen3.5-4B` = `851bf6e`, 2026-03-02, before every run), not re-checked here (no network in this lane).
+- **Impact:** none measured: every archived run loaded `851bf6e`, the revision now pinned. A future Hub update would
+  have silently changed the base arm and every training start.
+- **Fix (done):** one constant, `honest_agents.models.PINNED_REVISIONS` (`Qwen/Qwen3.5-4B` -> `851bf6e...`; also
+  `Qwen/Qwen3-4B` -> `1cfa9a72...`, the bring-up default of `base.yaml`, from the Mac's cached `refs/main` of
+  2026-10-05: no archived run used it, so this pin has no run to match). `pinned_revision(name, revision)` gives a
+  pinned Hub id its pin, leaves a local directory (a merged model) without one, and refuses a different explicit
+  revision. It is applied in the `model:` sections of the train, SFT/DPO and pilot configs (`__post_init__`), so every
+  config and override resolves through it (and `run_config.json` / `sft_run.json` now record it); in `sft.merge`
+  (config, weights, processor, extra files, `restore_base_tensors` download; `merge_info.json` records it);
+  `models.detect_family`, `eval.decision_probe` and `teacher.TokenCounter`. Serving: `scripts/_common.sh`
+  `model_from_config` (and the pilot's `--print-model`) print the revision after the family, `serve_vllm.sh` passes
+  `--revision` and `--tokenizer-revision` (every training, smoke, sync-check and eval server goes through it);
+  `h1_tmax_check.sh` defaults `BASE_REVISION` to the pin and `setup_node.sh` downloads at it, both through
+  `python -m honest_agents.models revision NAME`. TRL's colocated vLLM engine takes the model's `name_or_path` with no
+  revision (trl 1.14.1 `generation/vllm_generation.py` L347-348; `GRPOConfig.vllm_mode` defaults to `colocate`), so in
+  colocate mode both trainer builds, `train.run.trainer_model` and the pilot's `pilot.run.trainer_model` (read from the
+  arm's built `GRPOConfig`), hand `GRPOTrainer` the pinned snapshot directory through one helper,
+  `models.colocated_model_path`. `d187316` covered only `train.run`: the pilot still passed `cfg.model.name`, so a pilot
+  config with `grpo.use_vllm: true` and no `vllm_mode` (or `grpo.vllm_mode=colocate`) would have loaded its vLLM engine
+  from Hub `main` while its trainer weights sat at the pin; `configs/pilot.yaml` uses server mode and the archive holds
+  no pilot run, so no run was affected (review finding, repaired in `e8c8344`). `dataclasses.replace(section,
+  name=...)` re-runs `__post_init__` with the old name's pin. For a local directory `pinned_revision` drops a base
+  model's pin (before, the directory kept it: harmless, transformers ignores a revision for a local path). A Hub id
+  keeps the strict rule: `Qwen/Qwen3-4B` given the Qwen3.5 pin is refused (the error names it as another model's pin;
+  `replace(..., revision=None)` takes the new pin), and an unpinned id keeps an explicit revision. `e8c8344` had
+  dropped another model's pin for every name, so an explicit `model.revision=<Qwen3.5 pin>` with
+  `model.name=Qwen/Qwen3-4B` was silently re-pinned to `1cfa9a72` instead of refused, and an unpinned Hub id given
+  that revision loaded Hub `main` with no warning (second review finding, repaired in `6fd0e9c`; no config sets
+  `model.revision`, so nothing ran with it). Two src callers do change a section's name, both tokenizer loads in a
+  data check: `sft/judgment_splice.py` L891 (`replace(cfg.model, name=name, local_files_only=True)` for `name` in
+  `(cfg.model.name, "Qwen/Qwen3.5-4B")`) and `sft/judgment.py` L1020 (the same with `name="Qwen/Qwen3.5-4B"`, the
+  fallback when the config's own tokenizer is missing). Every config they read (`configs/sft_judgment*_qwen35.yaml`)
+  names the merged directory `outputs/it14/sft_v2_e3_merged` with revision None, so the replace gives None for the
+  directory and `851bf6e` for `Qwen/Qwen3.5-4B` under `d187316`, `e8c8344` and `6fd0e9c` alike (checked by loading the
+  three configs through `train_sft.load_config`). The one case that differs is a `Qwen/Qwen3-4B` section whose
+  tokenizer is not cached: its Qwen3.5 fallback carries the `1cfa9a72` pin and is refused, the callers' `except`
+  catches the `ValueError`, and the check reports "no tokenizer available" rather than using the Qwen3.5 tokenizer
+  (under `e8c8344` it was re-pinned to `851bf6e` and used). No config reaches it. CLI overrides (`model.name=...`)
+  are applied to the dict before the section is built (`train/config.py` / `pilot/run.py` `apply_overrides`), so
+  they do not go through `replace`. The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
+  literal (bench lane's file); a test asserts it equals the pin.
+- **Closure test:** `tests/test_model_revision.py` (fails on the old code: no pin, every revision null):
+  `::test_every_config_resolves_its_hub_model_to_the_pin` (each `configs/*.yaml` through its own loader: a Hub id must be
+  in `PINNED_REVISIONS` and resolve to it, a merged directory to none), `::test_a_merged_model_has_no_revision_and_a_conflicting_revision_is_refused`,
+  `::test_the_pins_are_commits_and_the_benchmark_base_arm_uses_the_same_one`, `::test_the_serve_script_reads_the_revision_with_the_model`,
+  `::test_the_vllm_server_serves_a_hub_base_at_its_pin_and_a_merged_model_without_one` (slow: runs `serve_vllm.sh`
+  with a fake `uv`), `::test_the_merge_downloads_a_hub_base_at_its_pin`, `::test_the_colocated_engine_loads_the_pinned_snapshot`,
+  `::test_the_pilots_colocated_engine_loads_the_pinned_snapshot` (runs `pilot.run.run_arm` with a fake `GRPOTrainer`,
+  `vllm_mode` colocate and unset; fails at `d187316`: the trainer got `Qwen/Qwen3.5-4B`),
+  `::test_replacing_the_name_with_a_local_directory_drops_the_pin_and_a_hub_id_keeps_the_refusal` (fails at `d187316`:
+  the directory keeps the pin; and at `e8c8344`: `Qwen/Qwen3-4B` with the Qwen3.5 pin is re-pinned, not refused),
+  `::test_the_judgment_tokenizer_fallbacks_keep_the_revisions_they_had` (each `configs/sft_judgment*.yaml`: the two
+  callers' replaces give None and `851bf6e`; a `Qwen/Qwen3-4B` section's Qwen3.5 fallback is refused; fails at
+  `e8c8344`, which re-pinned it). All L0, no network.
+- **Impact note:** none re-scored: no archived number changes, because the pin is the revision every archived run
+  loaded. Not verified on a GPU node: that vLLM 0.30 accepts `--tokenizer-revision` (its engine log prints the
+  `tokenizer_revision` field) and the colocate snapshot path (train and pilot); both fail loudly at the next start,
+  not silently. The pilot repair changes no number: the archive holds no pilot run. Its colocate `run_config.json`
+  files (`grpo.use_vllm` true, `vllm_mode` colocate or unset) number 8 under `iterations/`: 01, 06, 07, 08, 09, 12 and
+  two for 15-g3 (`15-g3-failed-boot/run_config.json`, `15-g3-grpo/run/it15-g3-grpo/run_config.json`); 11 archive-wide
+  with the 3 node-1 copies under `2026-10-06-node1/repo-files/outputs/` (grpo_main, grpo_v2, smoke_phase0). All are
+  `train.run` GRPO runs. The 9 that name `Qwen/Qwen3.5-4B` loaded `851bf6e`, the pinned revision. The 2 for 15-g3 name
+  the local directory `outputs/it15/g2_merged` (a merged model built on `851bf6e`), so the colocate pin path never
+  applied to them. The `pinned_revision` repairs change only sections whose name changes after they are built (the
+  two judgment tokenizer checks above, which give the same result for every judgment config, and no training run) or
+  that set `model.revision` explicitly (none did: every archived revision is null).
 
 ### DEF-52: a refused freeze still overwrites the frozen items files
 - **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.

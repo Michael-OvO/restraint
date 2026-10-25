@@ -24,7 +24,7 @@ slot_env
 MODEL_OVERRIDES=()
 if [[ -n "$CONFIG_FOR_MODEL" && "$CONFIG_FOR_MODEL" != configs/smoke.yaml ]]; then
   # Use the model of CONFIG with smoke-sized everything else.
-  read -r MODEL FAMILY < <(model_from_config "$CONFIG_FOR_MODEL")
+  read -r MODEL FAMILY _ < <(model_from_config "$CONFIG_FOR_MODEL")  # the revision follows the name (DEF-51)
   MODEL_OVERRIDES=("model.name=$MODEL" "model.family=$FAMILY")
 fi
 

@@ -13,6 +13,7 @@ import yaml
 from honest_agents import trl_rewards
 from honest_agents.callbacks import SAFE_ALPHA_MARGIN
 from honest_agents.models import (
+    pinned_revision,
     vllm_max_model_len,
 )
 
@@ -58,6 +59,9 @@ class ModelSection:
     # Compute the LM head in float32 (ScaleRL recipe; Tmax found it "especially crucial" on Qwen3.5). TRL only
     # supports it for untied embeddings; `train()` checks the model's config before loading weights.
     cast_lm_head_to_fp32: bool = False
+
+    def __post_init__(self) -> None:
+        self.revision = pinned_revision(self.name, self.revision)  # DEF-51: a pinned Hub id loads at its pin
 
 
 @dataclass

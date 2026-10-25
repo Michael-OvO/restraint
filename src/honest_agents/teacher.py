@@ -188,7 +188,9 @@ class TokenCounter:
     def __init__(self, model_id: str = DEFAULT_MODEL_ID):
         from transformers import AutoTokenizer
 
-        tok = AutoTokenizer.from_pretrained(model_id)
+        from honest_agents.models import pinned_revision
+
+        tok = AutoTokenizer.from_pretrained(model_id, revision=pinned_revision(model_id))  # DEF-51
         self.tokenizer = getattr(tok, "tokenizer", tok)
 
     def count(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], generation_prompt: bool) -> int:

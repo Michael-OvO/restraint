@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 
+from honest_agents.models import colocated_model_path, pinned_revision
 from honest_agents.pilot import analyze, dataset
 from honest_agents.pilot import rewards as rewards_mod
 from honest_agents.pilot.env import ReplayEnv
@@ -119,6 +120,9 @@ class ModelSection:
     attn_implementation: str | None = None
     strict_template: bool = True
     require_fla: bool = True
+
+    def __post_init__(self) -> None:
+        self.revision = pinned_revision(self.name, self.revision)  # DEF-51: a pinned Hub id loads at its pin
 
 
 @dataclass
@@ -534,6 +538,12 @@ def plan_summary(
     }
 
 
+def trainer_model(cfg: PilotConfig, args: Any) -> str:
+    """What the pilot's `GRPOTrainer(model=...)` gets, from the arm's built `GRPOConfig`: the pinned snapshot directory
+    in colocate mode (`models.colocated_model_path`, DEF-51), else the name."""
+    return colocated_model_path(cfg.model.name, cfg.model.revision, use_vllm=args.use_vllm, vllm_mode=args.vllm_mode)
+
+
 def run_arm(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], resume: bool = False) -> Path:
     """Train one arm and write its records. Needs a GPU, a vLLM server and the model."""
     from transformers import set_seed
@@ -579,7 +589,7 @@ def run_arm(cfg: PilotConfig, arm: Arm, rows: list[dict[str, Any]], resume: bool
     trainer = None
     try:
         trainer = GRPOTrainer(
-            model=cfg.model.name,
+            model=trainer_model(cfg, args),
             reward_funcs=[reward_func],
             args=args,
             train_dataset=dataset.to_hf_dataset(rows),
@@ -675,7 +685,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--print-model",
         action="store_true",
-        help="print `<model name> <family>` (for serve_vllm.sh) and exit",
+        help="print `<model name> <family> [<revision>]` (for serve_vllm.sh) and exit",
     )
     ap.add_argument(
         "--list-arms",
@@ -745,7 +755,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_pilot_config(args.config, args.overrides)
     if args.print_model:
-        print(cfg.model.name, resolve_family(cfg))
+        print(cfg.model.name, resolve_family(cfg), cfg.model.revision or "")
         return 0
     if args.list_arms:
         print("\n".join(a.name for a in select_arms(expand_arms(cfg), args.arm, args.shard)))

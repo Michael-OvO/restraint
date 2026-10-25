@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from honest_agents import models
 from honest_agents.pilot import run
 from honest_agents.pilot.run import (
     Arm,
@@ -219,7 +220,7 @@ def test_dry_run_plans_every_arm_and_trains_nothing(tmp_path, capsys, monkeypatc
 
 def test_print_model_for_the_vllm_script(capsys):
     assert run.main(["--config", str(CONFIG), "--print-model"]) == 0
-    assert capsys.readouterr().out.split() == ["Qwen/Qwen3.5-4B", "qwen3_5"]
+    assert capsys.readouterr().out.split() == ["Qwen/Qwen3.5-4B", "qwen3_5", models.QWEN3_5_4B_REVISION]  # DEF-51
 
 
 def test_the_sweep_skips_completed_arms_and_reports_the_verdict(tmp_path, capsys, monkeypatch):

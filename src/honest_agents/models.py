@@ -29,6 +29,7 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,53 @@ logger = logging.getLogger(__name__)
 class ModelFamily(StrEnum):
     QWEN3 = "qwen3"
     QWEN3_5 = "qwen3_5"
+
+
+# Hub revisions of the base models (DEF-51): the one place a Hub model id is pinned. Every config section that names one
+# of these ids resolves `model.revision` to its pin (`pinned_revision`); the serve scripts, `sft.merge` and
+# `setup_node.sh` read it from here (`python -m honest_agents.models revision NAME`). Qwen3.5-4B: the snapshot the node
+# log `2026-10-06-node1/node-logs/hf_qwen35.log` downloaded (archive); the Hub's last commit (2026-03-02) predates
+# every archived run. Qwen3-4B (bring-up only, no archived run): the Mac's cached `refs/main` of 2026-10-05.
+QWEN3_5_4B_REVISION = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+QWEN3_4B_REVISION = "1cfa9a7208912126459214e8b04321603b3df60c"
+PINNED_REVISIONS: dict[str, str] = {
+    "Qwen/Qwen3.5-4B": QWEN3_5_4B_REVISION,
+    "Qwen/Qwen3-4B": QWEN3_4B_REVISION,
+}
+
+
+def pinned_revision(name: str, revision: str | None = None) -> str | None:
+    """The revision to load `name` at: its pin for a pinned Hub id, else `revision` as given (a local directory, such
+    as a merged model, has none). A pinned id with a different explicit revision is refused: one pin per model.
+    A local directory drops a base model's pin (`dataclasses.replace(section, name=<merged dir>)` re-runs this with the
+    old one, and a local load ignores it); a Hub id keeps whatever revision it was given, so the refusal stays."""
+    if revision in PINNED_REVISIONS.values() and name not in PINNED_REVISIONS and Path(name).is_dir():
+        return None
+    pin = PINNED_REVISIONS.get(name)
+    if pin is None:
+        return revision
+    if revision is not None and revision != pin:
+        hint = (
+            " (another model's pin: pass revision=None to take this one's)"
+            if revision in PINNED_REVISIONS.values()
+            else ""
+        )
+        raise ValueError(
+            f"model.revision {revision!r} for {name} differs from its pin {pin} (models.PINNED_REVISIONS){hint}"
+        )
+    return pin
+
+
+def colocated_model_path(name: str, revision: str | None, *, use_vllm: bool, vllm_mode: str) -> str:
+    """What `GRPOTrainer(model=...)` gets. TRL builds a colocated vLLM engine from the model's `name_or_path` with no
+    revision (trl 1.14.1 `generation/vllm_generation.py`), so in colocate mode a pinned Hub id goes in as its pinned
+    snapshot directory (DEF-51); the trainer itself loads at `revision` through `model_init_kwargs`. Server mode and a
+    local directory keep the name."""
+    if not (use_vllm and vllm_mode == "colocate" and revision) or Path(name).is_dir():
+        return name
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(name, revision=revision)
 
 
 _QWEN3_LORA_TARGETS = [
@@ -181,7 +229,9 @@ def detect_family(model: str, config: Any = None, *, allow_download: bool = Fals
         try:
             from transformers import AutoConfig
 
-            config = AutoConfig.from_pretrained(model, local_files_only=not allow_download)
+            config = AutoConfig.from_pretrained(
+                model, revision=pinned_revision(model), local_files_only=not allow_download
+            )
         except Exception:  # noqa: BLE001 — not cached / offline: fall back to the name
             config = None
     if config is not None:
@@ -595,3 +645,20 @@ def check_end_of_turn_token(trainer: Any, *, strict: bool = True) -> list[str]:
     else:
         logger.info("the chat template ends every assistant turn with the tokenizer's eos token")
     return failures
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """`python -m honest_agents.models revision NAME`: print NAME's pinned Hub revision (empty line if none)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m honest_agents.models")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    rev = sub.add_parser("revision", help="print the pinned Hub revision of a model id (empty for a local directory)")
+    rev.add_argument("name")
+    args = parser.parse_args(argv)
+    print(pinned_revision(args.name) or "")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
