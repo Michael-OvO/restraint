@@ -13,13 +13,26 @@ What is kept (docs/training-log.md "Saving an iteration"):
 * an evaluation directory: `summary.md`, `metrics.json`, `config.json`, `episodes.jsonl` (not the transcripts; the
   trajectory bank only with `--keep-bank`);
 * `--file`: single files relative to the source root (dataset splits, configs); `--log`: absolute log paths.
-Text files over 1 MB are gzipped. `ITERATION.md` records what was saved from where (and the source's git commit when the
-source is the node), `MANIFEST.sha256` the checksums.
+Text files over 1 MB are gzipped (with a fixed header, so the same file always gzips to the same bytes). `ITERATION.md`
+records what was saved from where (and the source's git commit when the source is the node) and, per eval, the content
+hashes of its episodes; `MANIFEST.sha256` the checksums. Saving an eval whose episodes are already archived under
+another name prints a warning and notes it in `ITERATION.md` (DEF-12).
+
+Check the whole archive for duplicate episode sets (sweep S8; a cached hash per file, re-hashed only when its size or
+mtime changes):
+
+    python -m honest_agents.archive check [--dest DIR]
+
+A duplicate is two episode files with the same raw bytes, the same unpacked content, or the same sorted episode ids
+(ids carry a random suffix per rollout, so two runs never share them). One that is a known copy is declared in the
+copy's `ITERATION.md` with a line holding `` `eval/<name>` is a copy of `<folder>/eval/<name>` ``; the check exits 1
+only on undeclared duplicates.
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import gzip
 import hashlib
 import json
@@ -27,10 +40,11 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 DEFAULT_DEST = Path.home() / "Documents" / "honest-agents-archive" / "iterations"
@@ -39,6 +53,11 @@ EVAL_FILES = ("summary.md", "metrics.json", "config.json", "episodes.jsonl")
 GZIP_SUFFIXES = (".jsonl", ".json", ".log", ".md", ".txt", ".csv")
 GZIP_MIN_BYTES = 1_000_000
 _CHECKPOINT = re.compile(r"^checkpoint-(\d+)$")
+EPISODE_FILES = ("episodes.jsonl", "episodes.jsonl.gz")
+HASH_CACHE = Path.home() / ".cache" / "honest-agents" / "archive-index" / "episode_hashes.jsonl"
+HASH_SCHEMA = 1
+_EPISODE_ID = re.compile(r'^\{"episode_id": "([^"\\]*)"')
+_DECLARED_COPY = re.compile(r"`(eval/[^`]+)` is a copy of `([^`]+)`")
 
 
 # ── selection (pure, unit-tested) ────────────────────────────────────────────
@@ -170,7 +189,12 @@ def gzip_large_text(folder: Path, min_bytes: int = GZIP_MIN_BYTES) -> list[Path]
     done = []
     for p in sorted(folder.rglob("*")):
         if p.is_file() and p.suffix in GZIP_SUFFIXES and p.stat().st_size >= min_bytes:
-            with p.open("rb") as src, gzip.open(p.with_name(p.name + ".gz"), "wb") as dst:
+            # mtime 0 and no name in the header: the same content gzips to the same bytes, so a copy hashes the same
+            with (
+                p.open("rb") as src,
+                p.with_name(p.name + ".gz").open("wb") as raw,
+                gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as dst,
+            ):
                 shutil.copyfileobj(src, dst)
             p.unlink()
             done.append(p)
@@ -190,6 +214,156 @@ def folder_bytes(folder: Path) -> int:
     return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
 
 
+# ── content hashes and duplicates (DEF-12, sweep S8) ─────────────────────────
+
+
+@dataclass(frozen=True)
+class EpisodeHashes:
+    """Content hashes of one episodes file: its raw bytes, its unpacked bytes, and its sorted episode ids."""
+
+    path: str  # relative to the archive root
+    size: int
+    mtime_ns: int
+    file_sha256: str
+    content_sha256: str
+    ids_sha256: str
+    n_episodes: int
+
+
+def _episode_id(line: bytes) -> str:
+    m = _EPISODE_ID.match(line.decode("utf-8", "replace"))
+    if m:
+        return m.group(1)
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        row = None
+    if isinstance(row, dict) and (eid := row.get("episode_id") or row.get("trial_name")):
+        return str(eid)
+    return "sha256:" + hashlib.sha256(line).hexdigest()  # no id: the line itself stands for the episode
+
+
+def hash_episodes(path: Path, root: Path) -> EpisodeHashes:
+    st = path.stat()
+    raw = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            raw.update(block)
+    content = hashlib.sha256()
+    ids = []
+    with gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as f:
+        for line in f:
+            content.update(line)
+            if line.strip():
+                ids.append(_episode_id(line.strip()))
+    ids_hash = hashlib.sha256("\n".join(sorted(ids)).encode()).hexdigest()
+    return EpisodeHashes(str(path.relative_to(root)), st.st_size, st.st_mtime_ns, raw.hexdigest(), content.hexdigest(),
+                         ids_hash, len(ids))  # fmt: skip
+
+
+def find_episode_files(root: Path) -> list[Path]:
+    return sorted(p for name in EPISODE_FILES for p in root.rglob(name) if p.is_file())
+
+
+def _load_hash_cache(cache: Path | None) -> dict[str, EpisodeHashes]:
+    out: dict[str, EpisodeHashes] = {}
+    if cache is None or not cache.is_file():
+        return out
+    for line in cache.read_text().splitlines():
+        try:
+            row = json.loads(line)
+            if row.pop("schema") != HASH_SCHEMA:
+                continue
+            root = row.pop("root")
+            h = EpisodeHashes(**row)
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            continue  # a corrupt or old-schema row is ignored, never trusted
+        out[f"{root}\0{h.path}"] = h  # a later row for the same file wins
+    return out
+
+
+def hash_archive(root: Path, cache: Path | None = HASH_CACHE, jobs: int = 4) -> list[EpisodeHashes]:
+    """Hashes of every episodes file under `root`; files whose size and mtime match the cache are not re-read."""
+    root = root.resolve()
+    cached = _load_hash_cache(cache)
+    found, todo = [], []
+    for p in find_episode_files(root):
+        st = p.stat()
+        h = cached.get(f"{root}\0{p.relative_to(root)}")
+        if h and h.size == st.st_size and h.mtime_ns == st.st_mtime_ns:
+            found.append(h)
+        else:
+            todo.append(p)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:  # hashlib and zlib release the GIL
+        fresh = list(pool.map(lambda p: hash_episodes(p, root), todo))
+    if cache is not None and fresh:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        with cache.open("a") as f:
+            for h in fresh:
+                f.write(json.dumps({"schema": HASH_SCHEMA, "root": str(root), **asdict(h)}) + "\n")
+    return sorted(found + fresh, key=lambda h: h.path)
+
+
+def duplicate_groups(hashes: Iterable[EpisodeHashes]) -> list[list[EpisodeHashes]]:
+    """Groups of episode files that share their raw bytes, unpacked content or sorted episode ids (transitively)."""
+    hashes = list(hashes)
+    parent = list(range(len(hashes)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for key in ("file_sha256", "content_sha256", "ids_sha256"):
+        first: dict[str, int] = {}
+        for i, h in enumerate(hashes):
+            if h.n_episodes == 0 and key == "ids_sha256":
+                continue  # empty files are not duplicates of each other
+            j = first.setdefault(getattr(h, key), i)
+            parent[find(i)] = find(j)
+    groups: dict[int, list[EpisodeHashes]] = {}
+    for i, h in enumerate(hashes):
+        groups.setdefault(find(i), []).append(h)
+    return [g for g in groups.values() if len(g) > 1]
+
+
+def declared_copies(root: Path) -> set[tuple[str, str]]:
+    """(copy eval dir, original eval dir) pairs declared in the iterations' `ITERATION.md` files, relative to `root`."""
+    out = set()
+    for doc in sorted(root.glob("*/ITERATION.md")):
+        for copy, original in _DECLARED_COPY.findall(doc.read_text()):
+            out.add((f"{doc.parent.name}/{copy}", original.rstrip("/")))
+    return out
+
+
+def undeclared(group: Sequence[EpisodeHashes], declared: set[tuple[str, str]]) -> list[str]:
+    """Eval dirs of a duplicate group beyond one original that are not declared copies of another member."""
+    dirs = sorted({str(Path(h.path).parent) for h in group})
+    copies = {c for c, o in declared if c in dirs and o in dirs and c != o}
+    rest = [d for d in dirs if d not in copies]
+    return rest[1:]  # one undeclared member is the original
+
+
+def check(root: Path, cache: Path | None = HASH_CACHE, jobs: int = 4) -> int:
+    """Print the archive's duplicate episode sets; return the number of undeclared ones (sweep S8)."""
+    hashes = hash_archive(root, cache, jobs)
+    declared = declared_copies(root)
+    bad = 0
+    for group in duplicate_groups(hashes):
+        extra = undeclared(group, declared)
+        bad += len(extra)
+        print(
+            ("DUPLICATE (undeclared)" if extra else "duplicate (declared copy)") + f": {group[0].n_episodes} episodes"
+        )
+        for h in group:
+            same = [k for k in ("file_sha256", "content_sha256", "ids_sha256")
+                    if all(getattr(o, k) == getattr(h, k) for o in group)]  # fmt: skip
+            print(f"  {h.path}  ({', '.join(same) or 'linked through another member'} equal)")
+    print(f"{len(hashes)} episode file(s) under {root}; {bad} undeclared duplicate(s)")
+    return bad
+
+
 # ── save ─────────────────────────────────────────────────────────────────────
 
 
@@ -205,7 +379,9 @@ def save(
     weights: bool = True,
     keep_bank: bool = False,
     note: str = "",
+    hash_cache: Path | None = HASH_CACHE,
 ) -> Path:
+    dest_root = dest_root.resolve()
     folder = dest_root / f"{iteration:02d}-{name}"
     folder.mkdir(parents=True, exist_ok=True)
     record: dict[str, object] = {"runs": {}, "evals": {}, "files": [], "logs": []}
@@ -228,6 +404,22 @@ def save(
         source.copy_absolute(path, folder / "logs")
         record["logs"].append(path)  # type: ignore[union-attr]
     zipped = gzip_large_text(folder)
+    duplicates = []
+    new: dict[str, EpisodeHashes] = {}
+    for rel in evals:
+        d = folder / "eval" / Path(rel).name
+        if ep := next((d / n for n in EPISODE_FILES if (d / n).is_file()), None):
+            new[rel] = h = hash_episodes(ep, dest_root)
+            record["evals"][rel].update(  # type: ignore[index]
+                {"episodes_sha256": h.content_sha256, "episode_ids_sha256": h.ids_sha256, "n_episodes": h.n_episodes}
+            )
+    if new:  # compare with everything already archived (cached hashes) and with each other
+        others = [h for h in hash_archive(dest_root, cache=hash_cache) if not h.path.startswith(folder.name + "/")]
+        for group in duplicate_groups([*new.values(), *others]):
+            for h in (h for h in group if h in new.values()):
+                dup = ", ".join(f"`{Path(o.path).parent}`" for o in group if o is not h)
+                duplicates.append(f"- duplicate: `{Path(h.path).parent}` has the same episodes as {dup} (DEF-12)")
+                print(f"WARNING: {Path(h.path).parent} has the same episodes as {dup}", file=sys.stderr)
     commit = source.git_commit()
     size = folder_bytes(folder)
     lines = [
@@ -240,13 +432,29 @@ def save(
     ]
     if note:
         lines += ["", note]
+    if duplicates:
+        lines += ["", *duplicates]
     lines += ["", "```json", json.dumps(record, indent=2), "```", ""]
     (folder / "ITERATION.md").write_text("\n".join(lines))
     write_manifest(folder)
     return folder
 
 
+def main_check(argv: Sequence[str]) -> int:
+    ap = argparse.ArgumentParser(prog="python -m honest_agents.archive check",
+                                 description="List duplicate episode sets in the archive (sweep S8, DEF-12).")  # fmt: skip
+    ap.add_argument("--dest", type=Path, default=DEFAULT_DEST, help="archive root (the iterations folder)")
+    ap.add_argument("--cache", type=Path, default=HASH_CACHE, help="hash cache (JSONL), outside the archive")
+    ap.add_argument("--no-cache", action="store_true", help="re-hash every file and write no cache")
+    ap.add_argument("--jobs", type=int, default=4, help="files hashed in parallel")
+    a = ap.parse_args(argv)
+    return 1 if check(a.dest.expanduser(), None if a.no_cache else a.cache.expanduser(), a.jobs) else 0
+
+
 def main(argv: Sequence[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["check"]:
+        raise SystemExit(main_check(argv[1:]))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--iteration", type=int, required=True)
     ap.add_argument("--name", required=True, help="short slug, e.g. grpo-run2")
