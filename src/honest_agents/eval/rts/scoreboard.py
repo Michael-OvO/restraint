@@ -7,7 +7,7 @@
   python -m honest_agents.eval.rts.scoreboard plot --out runs/rts/scoreboard.html [--wandb]
 
 Each row keeps its units (`--units-dir`, default `runs/rts/units/`), so `delta` pairs two models without re-reading
-their episodes. Episodes are scored with the default reward config, as `run_eval` does.
+their episodes. Episodes are scored with the run's stored reward config (config.json), as `run_eval` does.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from honest_agents.eval.rts.manifest import load_manifest, sha256_of
 from honest_agents.eval.rts.protocol import RtsProtocol
 from honest_agents.eval.rts.score import DEFAULT_PROTOCOL, endpoint, render_endpoint, score_model
 from honest_agents.eval.rts.units import build_units, coverage
+from honest_agents.eval.run_eval import reward_config_of_run
 
 DEFAULT_BOARD = Path("runs/rts/scoreboard.json")
 DEFAULT_UNITS = Path("runs/rts/units")
@@ -68,9 +69,12 @@ def add_row(
     if ep is None:
         raise ValueError(f"{run_dir}: no episodes.jsonl(.gz)")
     items = load_manifest(manifest)
-    eps = score_records(read_records(ep))
+    eps = score_records(read_records(ep), reward_config_of_run(Path(run_dir)))
     units = build_units(eps, items)
     units_path = Path(units_dir) / f"{_slug(label)}.json"
+    for r in board["rows"]:
+        if r["label"] != label and r["units"] == str(units_path):
+            raise ValueError(f"label {label!r} and row {r['label']!r} share the units file {units_path}; rename one")
     units_path.parent.mkdir(parents=True, exist_ok=True)
     units_path.write_text(json.dumps(units))
     row = {
@@ -194,9 +198,18 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "show":
         print(render_table(board))
     elif args.cmd == "delta":
-        arms = [json.loads(Path(_row(board, label)["units"]).read_text()) for label in (args.base, args.trained)]
+        if board["protocol"] is None:
+            raise SystemExit(f"{args.board}: the board is empty (no protocol); add rows first")
+        arms = []
+        for label in (args.base, args.trained):
+            units_file = Path(_row(board, label)["units"])
+            try:
+                arms.append(json.loads(units_file.read_text()))
+            except (OSError, json.JSONDecodeError) as e:
+                raise SystemExit(f"{units_file}: cannot read the units of {label!r} ({e}); re-run `add`") from e
         rep = endpoint(arms[0], arms[1], RtsProtocol.from_json(board["protocol"]))
         if args.out:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
             Path(args.out).write_text(json.dumps(rep, indent=2))
         print(render_endpoint(rep))
     else:

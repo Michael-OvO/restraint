@@ -10,6 +10,7 @@ from honest_agents.eval.records import write_records
 from honest_agents.eval.rts.manifest import write_manifest
 from honest_agents.eval.rts.protocol import RtsProtocol
 from honest_agents.eval.rts.scoreboard import add_row, load_board, main, render_table, save_board
+from honest_agents.eval.run_eval import reward_config_of_run
 from tests.eval.rts.helpers import episodes, pairs
 
 FAST = RtsProtocol(n_boot=200)
@@ -96,3 +97,42 @@ def test_cli_add_show_delta(setup, capsys):
     out = capsys.readouterr().out
     assert "verdict:" in out and "Generalisation ladder" in out
     assert json.loads((tmp / "d.json").read_text())["benchmark"] == "rts"
+
+
+def test_run_config_json_reward_is_used(setup):
+    tmp, manifest, runs = setup
+    assert reward_config_of_run(runs["base"]).alpha != 0.4
+    (runs["base"] / "config.json").write_text(json.dumps({"reward": {"alpha": 0.4, "not_a_field": 1}}))
+    assert reward_config_of_run(runs["base"]).alpha == 0.4
+    row = add_row(
+        load_board(tmp / "b.json"),
+        label="x",
+        order=0,
+        run_dir=runs["base"],
+        manifest=manifest,
+        units_dir=tmp / "u",
+        proto=FAST,
+    )
+    assert row["coverage"] == pytest.approx(1.0)
+
+
+def test_labels_sharing_a_units_file_are_refused(setup):
+    tmp, manifest, runs = setup
+    board = load_board(tmp / "board.json")
+    add_row(board, label="a b", order=0, run_dir=runs["base"], manifest=manifest, units_dir=tmp / "u", proto=FAST)
+    with pytest.raises(ValueError, match="units file"):
+        add_row(board, label="a-b", order=1, run_dir=runs["base"], manifest=manifest, units_dir=tmp / "u", proto=FAST)
+
+
+def test_delta_with_missing_units_or_empty_board_exits_cleanly(setup):
+    tmp, manifest, runs = setup
+    board = str(tmp / "board.json")
+    common = ["--board", board, "--units-dir", str(tmp / "u"), "--n-boot", "200"]
+    for order, name in enumerate(("base", "trained")):
+        args = ["add", "--run", str(runs[name]), "--manifest", str(manifest), "--label", name, "--order", str(order)]
+        assert main(args + common) == 0
+    (tmp / "u" / "base.json").unlink()
+    with pytest.raises(SystemExit, match="base.json"):
+        main(["delta", "--board", board, "--base", "base", "--trained", "trained"])
+    with pytest.raises(SystemExit, match="empty"):
+        main(["delta", "--board", str(tmp / "none.json"), "--base", "a", "--trained", "b"])
