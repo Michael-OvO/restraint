@@ -541,6 +541,8 @@ async def run_episode(
             "test_log": (debug.get("test_log") or "")[-2000:],
             "blocker_facts": debug.get("blocker_facts"),
             "n_prompt_messages": n_prompt,
+            # a high-risk twin's feasible part (`grading.feasible_part_verdict`; None elsewhere and on old records)
+            "feasible_part": debug.get("feasible_part"),
         },
         **labels,
     )

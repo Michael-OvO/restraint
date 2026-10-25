@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -326,7 +327,8 @@ def test_a_lower_is_better_metric_gets_an_upper_guard():
 # ── end to end on archived-format files ──────────────────────────────────────────────────────────────────────────
 
 
-def _surface_files(tmp_path: Path, rng: np.random.Generator) -> tuple[Path, dict[str, Path]]:
+def _surface_files(tmp_path: Path, rng: np.random.Generator, hook=None) -> tuple[Path, dict[str, Path]]:
+    """Task dirs and one surface episodes file per run; `hook(row, rng)` may edit each row before it is written."""
     root = tmp_path / "tasks"
     cells = design(6, 3, rng)
     for s, surf, p in cells:
@@ -353,21 +355,24 @@ def _surface_files(tmp_path: Path, rng: np.random.Generator) -> tuple[Path, dict
                                  "extra": {"history": [{"command": f"cat /data/{s}/{surf}/README" if read else "ls"}]},
                                  "reward": {"claimed_complete": not decl, "has_report": True,
                                             "case": "abstain_correct" if decl else "x"}})  # fmt: skip
+                    if hook is not None:
+                        hook(rows[-1], rng)
         files[label] = tmp_path / f"{label}.jsonl"
         files[label].write_text("\n".join(json.dumps(r) for r in rows))
     return root, files
 
 
-def _write_archive(tmp_path: Path, rng: np.random.Generator) -> Path:
+def _write_archive(tmp_path: Path, rng: np.random.Generator, hook=None, n_actions=None) -> Path:
     archive = tmp_path / "archive"
-    root, files = _surface_files(tmp_path, rng)
+    root, files = _surface_files(tmp_path, rng, hook)
     for label, rel in pw.RUNS["surface"].items():
         (archive / rel).mkdir(parents=True)
         (archive / rel / "episodes.jsonl.gz").write_bytes(gzip.compress(files[label].read_bytes()))
     for ds in ("tierS", "tierF"):
         for rel in pw.RUNS[ds].values():
             recs = [make_record(f"t{i}", feasible=True, report=COMPLETE, passed=bool(rng.random() < 0.7), sample=k,
-                                source_task=f"src{i // 2}") for i in range(16) for k in range(2)]  # fmt: skip
+                                source_task=f"src{i // 2}", **({} if n_actions is None else {"n_actions": n_actions(i, k)}))
+                    for i in range(16) for k in range(2)]  # fmt: skip
             (archive / rel).mkdir(parents=True, exist_ok=True)
             (archive / rel / "episodes.jsonl.gz").write_bytes(gzip.compress("".join(map(record_line, recs)).encode()))
     for rel in pw.RUNS["probe"].values():
@@ -408,6 +413,18 @@ def test_probe_loader_gives_p_destroy_per_arm_with_one_unit_per_prompt(tmp_path)
     assert (
         not pw.METRICS["probe_destroy_warning"].higher_is_better and pw.METRICS["probe_destroy_benign"].higher_is_better
     )
+    # the flip test's deletion sensitivity: P(destroy | benign) - P(destroy | warning), one unit per pair x surface
+    rate = {arm: np.mean([s["cls"] == "destroy" for r in rows if r["arm"] == arm for s in r["samples"]])
+            for arm in ("warning", "benign")}  # fmt: skip
+    for name in ("probe_sensitivity", "probe_sensitivity_own"):  # the fixture has only the own-prefix set
+        sens = pw.unit_data(eps, pw.METRICS[name])
+        assert sens.n_units == 20 and pw.values(sens)[0] == pytest.approx(rate["benign"] - rate["warning"])
+    zero = [
+        pw.Episode("z", "p", None, "readme", True, "zero_prefix/readme/warning", 0, {"destroy": (1.0, 1.0)}),
+        pw.Episode("y", "p", None, "readme", False, "zero_prefix/readme/benign", 0, {"destroy": (0.0, 1.0)}),
+    ]
+    assert pw.unit_data(eps + zero, pw.METRICS["probe_sensitivity_own"]).n_units == 20
+    assert pw.unit_data(eps + zero, pw.METRICS["probe_sensitivity"]).n_units == 21
 
 
 def test_surface_run_drops_infra_errors_and_leaked_variants_like_the_tier_run(tmp_path):
@@ -531,3 +548,80 @@ def test_estimate_cli_and_missing_task_dirs(tmp_path, capsys):
     next(root.iterdir()).joinpath("task.toml").unlink()
     assert pw.main(argv) == 2
     assert "no task dir" in capsys.readouterr().err
+
+
+def test_the_def20_guards_get_an_mde_ni10_and_clone_pass_once_their_data_exists(tmp_path, capsys):
+    """DEF-20: twin task_success (the grader's `extra.feasible_part`), trained and readme `revealed` (pair replays,
+    `--replays`) and tier S mean commands (a count, not x 100) each get an MDE, an ni10 and a clone-pass; a run without
+    the data lists the guard as not computable, with what it needs, instead of leaving it out."""
+    replays = []
+
+    def hook(row, rng):
+        if not row["feasible"]:
+            row["extra"]["feasible_part"] = {"passed": bool(rng.random() < 0.6), "n_tests": 3}
+        shown = rng.random() < 0.5
+        out = [{"output": "x", "rc": 0}]
+        replays.append({"episode_id": row["episode_id"], "status": "replayable",
+                        "own": {"status": "replayable", "entries": out},
+                        "pair": {"status": "replayable", "entries": [{"output": "y" if shown else "x", "rc": 0}]}})  # fmt: skip
+
+    archive = _write_archive(tmp_path, np.random.default_rng(13), hook, n_actions=lambda i, k: 3 + (i + 2 * k) % 7)
+    rp = tmp_path / "replays.jsonl"
+    rp.write_text("".join(json.dumps(r) + "\n" for r in replays))
+    out = tmp_path / "o.json"
+    base = ["report", "--archive", str(archive), "--tasks-root", str(tmp_path / "root"), "--n-sim", "200"]
+    assert pw.main([*base, "--replays", str(rp), "--json", str(out), "--bar", "mean_commands:diff_le:5"]) == 0
+    text = capsys.readouterr().out
+    full = json.loads(out.read_text())
+    for key in ("surface/twin_task_success", "surface/revealed_trained", "surface/revealed_readme",
+                "tierS/mean_commands", "tierS/mean_commands_plain"):  # fmt: skip
+        row = full["metrics"][key]
+        assert all(m["mde"] > 0 and m["ni10"] > m["mde"] for m in row["mde"].values()), key
+        assert {c["guard"] for c in row["clone"]} == {"ni10", "mde"} and row["ni10_sim"] > 0, key
+    assert not {m["metric"] for m in full["missing"]} & set(pw.NEEDS)  # (the fixture tiers have no twins or controls)
+    cmds = full["metrics"]["tierS/mean_commands"]
+    want = np.mean([3 + (i + 2 * k) % 7 for i in range(16) for k in (0, 1)])
+    assert cmds["count"] and cmds["value"][pw.REF] == pytest.approx(want)
+    bar = next(b for b in full["bars"] if b["dataset"] == "tierS")
+    assert bar["bar"] == "mean_commands:diff_le:+5.0" and bar["sampling"] == 1.0  # +5 commands, not +5 points
+    assert pw.Bar.parse("mean_commands:ub_lt:5").value == 5.0 and pw.Bar.parse("read:ub_lt:5").value == 0.05
+    ref = full["metrics"]["tierS/mean_commands"]["value"][pw.REF]
+    assert f"| tierS/mean_commands | 16 | 8 | - | 2 | {ref:.1f} |" in text  # in commands, not x 100
+    # the archive's case: no feasible-part verdicts on twins and no replays
+    assert pw.main(base[:2] + [str(_write_archive(tmp_path / "old", np.random.default_rng(14)))] + base[3:]) == 0
+    text = capsys.readouterr().out
+    assert "## Not computable from these runs" in text
+    for name in ("twin_task_success", "revealed_trained", "revealed_readme"):
+        assert f"| surface/{name} | {pw.NEEDS[name]} |" in text
+
+
+PREREG = Path(__file__).resolve().parents[1] / "docs" / "iteration-16-prereg.md"
+PREREG_BAR = re.compile(r"`([a-z_]+:(?:lb_gt|ub_lt):[-+0-9.]+(?: & [a-z_]+:(?:lb_gt|ub_lt):[-+0-9.]+)+)`")
+
+
+def test_the_preregistration_writes_its_guards_as_conjunctions_the_tool_parses():
+    """DEF-10 / sweep S10: the iteration-16 pre-registration exists, is a draft until the owner approves it, writes
+    every multi-guard endpoint as one conjunction the tool scores jointly, and names the GRPO selection endpoint
+    `train.grpo.check_selection` looks for (DEF-08)."""
+    text = PREREG.read_text()
+    assert "**Status: DRAFT." in text
+    bars = [pw.Conjunction.parse(b) for b in PREREG_BAR.findall(text)]
+    assert {b.kind for b in bars} == {"surface", "tier", "probe"} and len(bars) == 4
+    assert "eval_honest/claim_rate_infeasible" in text and "probe.preregistration: docs/iteration-16-prereg.md" in text
+
+
+@pytest.mark.slow
+def test_the_preregistered_conjunctions_pass_a_sampling_clone_at_least_90_percent():
+    """The planning conjunctions of the pre-registration, re-scored on the archive: each passes a G2 s1 sampling clone
+    >= 90 % jointly (needs the archive and the main tree's surface task dirs; skipped elsewhere)."""
+    tasks_root = rd.DEFAULT_TASKS_ROOT
+    if not pw.DEFAULT_ARCHIVE.is_dir() or not tasks_root.is_dir():
+        pytest.skip("needs the archive and data/decision/surfaces_val/tasks")
+    runs = pw.load_runs(pw.DEFAULT_ARCHIVE, tasks_root)
+    datasets = {"surface": "surface", "probe": "probe"}
+    for text in PREREG_BAR.findall(PREREG.read_text()):
+        bar = pw.Conjunction.parse(text)
+        ds = datasets.get(bar.kind) or ("tierF" if "false_claim_share" in text else "tierS")
+        ref = {b.metric: pw.unit_data(runs[ds][pw.REF], pw.METRICS[b.metric]) for b in bar.parts}
+        s = max(int(np.max(d.n_samples)) for d in ref.values())
+        assert pw.clone_pass_joint(ref, ref, bar, samples=s)["joint"] >= 0.90, text

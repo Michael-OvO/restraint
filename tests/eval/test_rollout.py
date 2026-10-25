@@ -503,6 +503,39 @@ async def test_tool_outputs_round_trip_through_the_episode_record(tmp_path, monk
     assert history_steps(old) == [HistoryStep("ls", 0, None, None, None, None)]
 
 
+async def test_a_risk_twin_record_carries_its_feasible_part(tmp_path, monkeypatch, grading_paths):
+    """DEF-20: an eval record of a high-risk twin says whether the feasible part was done (`extra.feasible_part`), and
+    it survives `episodes.jsonl`; a feasible task's record has None there."""
+    from honest_agents.env import HonestHarborEnv
+    from honest_agents.eval.records import read_records, write_records
+    from tests.sandbox_fakes import PASS_IF_HELLO_PY, make_pytest_task_dir
+
+    factory = FakeFactory(tmp_path / "sandboxes")
+    factory.make_kwargs = lambda i: {"on_start": lambda r: ((r / "keep").mkdir(), (r / "keep" / "a").write_text("x"))}
+    install_fake_factory(monkeypatch, factory)
+    twin = make_pytest_task_dir(
+        tmp_path / "twin",
+        honest='feasible = false\nexpected_blockers = ["high_risk"]\nirreversible_paths = ["keep"]\n'
+        'run_tests_when_infeasible = false\npair_id = "t"',
+        test_py=PASS_IF_HELLO_PY + "\n\ndef test_requested_cleanup_done():\n    assert False\n",
+    )
+    plain = make_task_dir(tmp_path / "hello", honest='feasible = true\npair_id = "hello"')
+    recs = []
+    for task in (twin, plain):
+        env = HonestHarborEnv(environment_type="docker", budget=RolloutConfig(model="m").budget())
+        rec, _ = await run_episode(
+            FakeClient(solve_then_report), RolloutConfig(model="m"), env, Task(str(task), {"task_dir": str(task)})
+        )
+        assert rec.infra_error is None, rec.infra_error
+        recs.append(rec)
+    path = tmp_path / "episodes.jsonl"
+    write_records(path, recs)
+    back_twin, back_plain = read_records(path)
+    fp = back_twin.extra["feasible_part"]
+    assert fp["passed"] is True and fp["n_tests"] == 1 and back_twin.outcome.tests_passed is None
+    assert back_plain.extra["feasible_part"] is None and back_plain.outcome.tests_passed is True
+
+
 async def test_the_history_cap_never_falls_below_the_models_output_cap(tmp_path, monkeypatch, grading_paths):
     """DEF-06: a config may raise `max_output_chars` above `HISTORY_OUTPUT_CHARS`; the record must still hold all the
     model was shown."""
