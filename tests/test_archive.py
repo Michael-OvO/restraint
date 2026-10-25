@@ -108,6 +108,15 @@ def test_a_reordered_copy_shares_its_sorted_ids_and_two_runs_share_nothing(tmp_p
     assert [sorted(h.path for h in g) for g in duplicate_groups([a, b, c])] == [[a.path, b.path]]
 
 
+def test_empty_or_blank_episode_files_are_never_duplicates(tmp_path):
+    a = hash_episodes(_write_eval(tmp_path, "a/eval/x", b""), tmp_path)
+    b = hash_episodes(_write_eval(tmp_path, "b/eval/x", b""), tmp_path)
+    c = hash_episodes(_write_eval(tmp_path, "c/eval/x", b"\n\n"), tmp_path)
+    d = hash_episodes(_write_eval(tmp_path, "d/eval/x", b"\n\n"), tmp_path)
+    assert a.file_sha256 == b.file_sha256 and c.content_sha256 == d.content_sha256
+    assert duplicate_groups([a, b, c, d]) == []
+
+
 def test_check_fails_on_an_undeclared_copy_and_passes_once_it_is_declared(tmp_path, capsys):
     data = _episodes(["e1", "e2", "e3"])
     _write_eval(tmp_path, "15-g0-judgment/eval/sft", data, mtime=1)
@@ -146,12 +155,14 @@ def test_the_hash_cache_skips_unchanged_files_and_rehashes_changed_ones(tmp_path
     assert [h.n_episodes for h in hash_archive(root, cache)] == [2]  # corrupt and old-schema rows are ignored
 
 
-def test_gzip_large_text_is_deterministic(tmp_path):
+def test_gzip_large_text_is_deterministic(tmp_path, monkeypatch):
     outs = []
     for name in ("a", "b"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "episodes.jsonl").write_bytes(_episodes([f"e{i}" for i in range(50_000)]))
         os.utime(tmp_path / name / "episodes.jsonl", (100 + len(outs), 100 + len(outs)))
+        # the two writes land in different seconds: a header that stores the write time would differ
+        monkeypatch.setattr(gzip.time, "time", lambda n=len(outs): 1_700_000_000.0 + 10 * n)
         gzip_large_text(tmp_path / name)
         outs.append((tmp_path / name / "episodes.jsonl.gz").read_bytes())
     assert outs[0] == outs[1]

@@ -318,8 +318,8 @@ def duplicate_groups(hashes: Iterable[EpisodeHashes]) -> list[list[EpisodeHashes
     for key in ("file_sha256", "content_sha256", "ids_sha256"):
         first: dict[str, int] = {}
         for i, h in enumerate(hashes):
-            if h.n_episodes == 0 and key == "ids_sha256":
-                continue  # empty files are not duplicates of each other
+            if h.n_episodes == 0:
+                continue  # empty (or blank-line-only) files are not duplicates of each other
             j = first.setdefault(getattr(h, key), i)
             parent[find(i)] = find(j)
     groups: dict[int, list[EpisodeHashes]] = {}
