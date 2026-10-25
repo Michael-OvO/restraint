@@ -23,10 +23,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-13 | reward | fixing | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | closed | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | closed | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval); repaired 2026-10-25 (report-episode infra errors cached, keys missed imports; gaps entered as DEF-22/23/24) |
-| DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
+| DEF-16 | task data / grader | closed | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests (cause: local `docker exec` umask 0000) |
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
-| DEF-19 | tooling | open | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only |
+| DEF-19 | tooling | closed | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only (closed with DEF-16, same cause) |
 | DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
 | DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 | DEF-22 | tooling / build | open | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
@@ -50,6 +50,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
+| DEF-NEW-probe-gate-1 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
+| DEF-NEW-probe-gate-2 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 
 ---
 
@@ -1013,14 +1015,139 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - A real L1 run with Docker: see the impact note.
 
 ### DEF-16: probe-role surface builds were never oracle-gated
-- **Area:** task data. **Status:** open. **Found:** 2026-10-24, while closing DEF-01.
+- **Area:** task data / grader (local sandboxes). **Status:** closed 2026-10-25 (with DEF-19, the same cause; the
+  lane's prescribed 2026-10-24 precedes the commits). **Found:** 2026-10-24, while closing DEF-01.
+  **Commits:** `aa805be` (first pin, at `exec`, in `start_sandbox`), `3d68f98` (pin in `HonestPolicyAgent.setup`),
+  `e55079d` (`UmaskDockerEnvironment` in the eval scripts), `eb0a058` (the pin moved to `_run_docker_compose_command`,
+  where every local docker exec passes; the umask recorded in the boot preflight; DEF-19's closure test), ledger
+  commits `e9751e1`, `83ff3a1`, `6e324fd`, `05003ff`, `bf22d91`, `d2ec433` (on `fix/probe-gate`), the merge `7578917`
+  and the ledger commits `d95fd08` (close) and the one naming it. Reviews failed the earlier closure (`e9751e1`) three times on
+  coverage: stock harnesses, separate verifiers, start-time execs, then the raw execs; `eb0a058` closes the last gap.
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
   14 controls fail "oracle fails tests" on the source's own tests (mostly file-mode asserts such as 0o666 vs 0o644, and
   one HTTP server test). The pre-DEF-01 build fails identically, so the cause predates DEF-01. The other surfaces of this root
   were not gated.
-- **Impact:** none on graded evals (the probe never runs the tests). Any future use of these dirs as sandbox-graded tasks
-  would inherit failing controls.
-- **Fix:** gate the whole root and prune or repair (umask in the build?) before any graded use.
+- **Cause (two, neither in the build).**
+  - **Umask, 13 of 14.** `docker exec` processes take the Docker daemon's umask, not the image's. Under the Mac's
+    OrbStack Docker 29.8.2, `docker exec <c> sh -c umask` prints `0000` (`docker run` prints `0022`). So every file an
+    oracle or agent command creates locally is 0o666 and source tests asserting 0o644 fail. The bank sources fail the same
+    way locally (`00e67104__feasible`: "are 0o666, but should be 0o644"). On the node the same tests pass with no `chmod`
+    in the commands (archive `03-passk-bank` passk and `15-g4-read-rft` episodes of 00e67104: 6/6 passed, no chmod), so
+    the nodes run under 0022. The surface build, the source tests and the solve scripts are not at fault.
+  - **Background process, 1 of 14 (0a02897a) plus bf24b7fb.** The oracle starts a detached server/deploy process and the
+    source tests need it alive; grading kills background processes before the tests on Docker
+    (`grading.py` ~L215, `kill_background`), so these controls fail on every host. Both sources were already in
+    `data/select_quarantine.txt` for this reason. Static scan of all 127 sources' `solve.sh` for `nohup`/`disown`/`setsid`/`&`:
+    only these two keep a process past the oracle.
+- **Fix (done, at the cause, `eb0a058`):** the pin sits in Harbor's `DockerEnvironment._run_docker_compose_command`,
+  the one call every local `docker compose exec` of a Docker sandbox goes through (`harness.umask_compose_command`,
+  `SANDBOX_UMASK = "022"`). A main-service `exec ... main bash -c CMD` (Harbor's `exec` / `service_exec`: the agent's
+  commands under any harness, the oracle, the shared or separate verifier, the readiness probe `true`, `ensure_dirs`)
+  becomes `bash -c 'umask 022; CMD'`. A raw exec that bypasses `exec` (UnixOps' upload fallback `mkdir -p` and
+  `tar -xf -`, `test -d`) runs as `bash -c 'umask 022; exec "$@"' bash ARGV...` (option values such as `-w main` are
+  skipped when finding the service). Untouched: other compose subcommands (`up`, `cp`, `down`), sidecar execs (the
+  egress sidecar's `network-policy`; they create no task files) and Windows containers. On the nodes it is a no-op.
+  - **Where it is installed:** `harness.pin_docker_umask` wraps the instance's `_run_docker_compose_command` (once; a
+    pinned env is left alone). `harness.start_sandbox` calls it before `env.start()`, for every environment it starts
+    (`env.py`, `openenv_env/session.py`, `tasks/decision_probe.py`), so Harbor's start-time execs are covered.
+    Harbor-trial evals (`scripts/eval_harness.sh`, `eval_tb.sh`, `eval_agentic_abstention.sh`, terminus-2 and
+    mini-swe-agent included) pass `-e honest_agents.eval.harbor_env:UmaskDockerEnvironment` (`e55079d`), a
+    `DockerEnvironment` with the same override at class level; Harbor builds the agent's and a separate verifier's
+    container from that config (`trial.py` L1331, L977-984), so both are pinned from their first exec.
+    `HonestPolicyAgent.setup` keeps `pin_docker_umask` as the fallback for a hand-typed `-e docker`.
+  - **History of the gaps:** `aa805be` prefixed the command string in `exec` from `start_sandbox` only; `3d68f98` added
+    `HonestPolicyAgent.setup` (missed stock harnesses, a separate verifier and the start-time execs, which run before
+    `setup`); `e55079d` added the environment class (still at `exec`, so UnixOps' raw execs kept 0000: under the old
+    pin the upload fallback's directories came out 777, now 755, checked in a real sandbox with
+    scratchpad `fix/umask/old_raw_exec.py`).
+  - **Preflight record:** `HonestHarborEnv`'s boot probe is now `umask; timeout -k 1 5 true` (still one exec, as the
+    agent user). The umask is kept as `_sandbox_umask` and lands in the episode debug (`sandbox_umask`), the eval
+    record's `extra.sandbox_umask` and `validate`'s result debug; a Docker sandbox not at 0022 logs a warning.
+  - **Not covered:** a hand-typed `harbor run -e docker` with a stock agent (no code of ours loads), and with any agent
+    its separate verifier and the execs before `setup`. `docs/evaluation.md` gives the pinned spec.
+  - **No rebuild:** no build code or task file changed, so every dir of the root is byte-identical (diff empty).
+  - **No prune:** 0a02897a (probe role: `inbound_link`, `empty_backup`) and bf24b7fb (4 dirs per training surface, not in
+    `surface_pairs.jsonl`, an older build's leftovers) stay. They cannot be sandbox-graded, but the probe is a
+    single-step decision prompt that never runs the tests, and neither graded consumer can draw them: `rl_pool_v3` takes RL-pool
+    sources only and `read_rft_tasks` refuses select sources; both are select sources. Deleting the probe pair would change the
+    probe set and its cached outputs for no gain. Recorded reason: background process killed before grading.
+- **Gate (post-fix, at `eb0a058`, clean tree, local Docker, `g1_surfaces --concurrency 2 --no-cache`, 2026-10-25):**
+  full checks (control oracle, twin destroy, twin report, control report, evidence visible).
+  - Job A, DEF-16's 14 failing inbound_link pairs: **13/14 pass** (17 min). The failure is 0a02897a (control oracle
+    fails tests: the background-process cause, not the umask).
+  - Job B, a fresh stratified sample of pairs no earlier gate ran: 8 per surface by sha256 order of the twin name, 4
+    whose source tests check file modes (`st_mode`, `stat -c`, `0o6xx`, `permission`...) and 4 others (empty_backup
+    has only 6 ungated pairs: 5 taken). **44/45 pass** (48 min): readme, file_header, config_comment, manifest and
+    inbound_link 8/8 each, empty_backup 4/5; the mode-checking stratum 24/24. The failure is again 0a02897a
+    (`empty_backup`, control oracle). No boot logged a umask other than 0022, and no upload fell back to the tar path.
+  - Results: scratchpad `fix/umask/gate/jobA.jsonl`, `jobB.jsonl`, logs, `provenance.txt`, `make_sample.py`.
+  - **Carried over, not re-run at `eb0a058`:** the `fix/probe-gate` gate of 134 pairs (job1a/job1b, 132/134, run on the
+    uncommitted tree equal to `aa805be`) and its re-check of the 14 at `e9751e1` (13/14). Their code differs from
+    `eb0a058` only at the raw execs, and their debug logs show no tar fallback, so their verdicts stand.
+  - Coverage: 179 of the root's 524 pairs gated under a pin (134 + 45), 59 of them at `eb0a058`. The other 345 were
+    not gated; their control oracle differs from a gated pair of the same source only by the surface's cleanup line.
+- **Closure tests:**
+  - L0 `tests/test_env.py::test_a_docker_sandbox_runs_every_command_under_the_nodes_umask`: Harbor's real `exec` and
+    upload code on a `DockerEnvironment` with no compose project (`tests.sandbox_fakes.bare_docker_env`), after
+    `start_sandbox` twice: the agent's exec, the upload fallback's `mkdir -p` / `tar` are pinned once; `cp`, the
+    sidecar exec and a non-Docker env are not. It fails on the pre-`eb0a058` code at the raw `mkdir -p`
+    (`['exec', '-T', '-u', 'root', 'main', 'mkdir', ...]`), and on `main` before `aa805be` at every exec.
+  - L0 `tests/eval/test_harbor.py::test_the_eval_scripts_harbor_environment_runs_every_harness_under_the_nodes_umask`:
+    the scripts' spec resolves to `UmaskDockerEnvironment`; the readiness probe, the verifier exec and the
+    `upload_file` fallback (`test -d`, `mkdir -p`, `tar`) carry the pin once, also after `pin_docker_umask` / `setup`;
+    a Windows container is left alone. Fails on the pre-`eb0a058` code at `test -d`.
+  - L0 `tests/eval/test_harbor.py::test_a_harbor_trial_docker_sandbox_runs_under_the_nodes_umask`: `setup` pins a
+    stock `-e docker` env, so its shared verifier's exec is pinned (fails on `83ff3a1`).
+  - L0 `tests/eval/test_scripts.py::test_harbor_eval_scripts_run_in_the_umask_pinned_docker_environment` (fails on
+    `bf22d91`).
+  - L0 `tests/test_env.py::test_the_boot_preflight_records_the_sandbox_umask`: the probe is
+    `umask; timeout -k 1 5 true` and the episode debug carries the sandbox's umask (fails before `eb0a058`).
+  - Docker: `tests/test_docker_integration.py::test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask`
+    (DEF-19's closure test: a file made through `HonestHarborEnv.bash` is 644, the upload fallback's dirs are 755,
+    the preflight records 0022 on the graded episode; fails on `7578917` at the 755 dirs, before `aa805be` at the 644
+    file), `test_commands_and_the_oracle_create_files_under_the_nodes_umask`
+    and, docker + slow, `test_a_harbor_run_with_a_stock_agent_and_a_separate_verifier_runs_under_the_nodes_umask` (a
+    real `harbor run` with Harbor's stock `oracle` agent: shared and separate verifiers both reward 1.0; 0.0 with
+    `-e docker`). All three pass at `eb0a058` (3 passed, 192 s). The whole docker file: 11 passed, 1 failed,
+    `test_pids_limit_override_is_accepted_by_harbor_and_applies`, which reads the host's `/sys/fs/cgroup` and cannot
+    pass on the Mac (no `/sys`), unrelated to this change.
+- **Impact note.**
+  - Node results (all graded evals, G3 GRPO, G4 sampling) and harbor-trial evals (TB Lite / TB 2.0 / Agentic
+    Abstention / harness evals, terminus-2 baselines): **unchanged**. They ran on the nodes, which run under 0022, so
+    every pin is a no-op there. Nothing archived is re-scored or voided on this account.
+  - Local Docker results before `aa805be` ran under 0000:
+    - DEF-01's probe oracle gate, inbound_link, 58/72 before. Re-run post-fix: the 14 failures at `eb0a058` (13 pass,
+      **re-scored, post-fix**), 8 earlier passes in job1a/job1b (8/8, carried over) and 8 more in job B (8/8,
+      **re-scored, post-fix**). The 72-pair figure is **71/72**: 13 of the 14 re-run, plus 58 pre-fix passes, 16 of which
+      were re-run post-fix and 42 carried over unrun.
+    - DEF-01's replay regrade: the 24 at-risk episodes re-replayed under `aa805be`'s pin: 24/24 unchanged (carried over,
+      not re-run at `eb0a058`).
+    - The select G1 quarantine: 24 of its 32 variants pass under the pin (`aa805be`, carried over); DEF-NEW-probe-gate-1.
+  - Local runs between `aa805be` and `eb0a058` differ only when Harbor's `compose cp` failed and the tar fallback ran;
+    no gate log shows that, so none is re-measured.
+  - DEF-05's local G1 prune (17a590fc, DEF-19's trigger) and DEF-25's 4 failing corrupt_input controls: re-gated
+    post-fix under DEF-19 (6/6 and 4/4 pass, **re-scored, post-fix**). Not re-measured: the probe sandbox outputs
+    (read-only commands on files the image build wrote under `RUN`'s 0022).
+  - The change edits `harness.py` and `env.py`, so every replay and gate cache key over them changes (DEF-15/DEF-24):
+    cached verdicts re-run once.
+
+### DEF-NEW-probe-gate-2: a Harbor separate-verifier container is not umask-pinned
+- **Area:** grader (harbor-trial evals, local Docker). **Status:** closed 2026-10-25. **Found:** 2026-10-25, while
+  repairing DEF-16. **Commits:** `e55079d` (fix and tests, shared with DEF-16).
+- **Evidence:** DEF-16's pin reaches a harbor trial through `HonestPolicyAgent.setup`, which gets only the agent
+  environment. When a task's `task.toml` declares `[verifier] environment` or `environment_mode = "separate"`
+  (`harbor/models/task/verifier_mode.py` `_resolve_mode`), `harbor/trial/trial.py` (~L920-950) grades in a second
+  container it creates itself, and that container's `docker exec` keeps the daemon's umask (0000 under OrbStack).
+- **Impact:** none archived. Harbor-trial evals ran only on the nodes (0022). None of the repo's task dirs declare a
+  separate verifier (grep of `task.toml` under `data/` and the archive). The registry datasets of `eval_tb.sh` and
+  `eval_agentic_abstention.sh` are not cached locally and were not checked.
+- **Fix (done, `e55079d`):** the eval scripts pass `-e honest_agents.eval.harbor_env:UmaskDockerEnvironment`. The trial
+  builds the separate verifier's container from a copy of the same environment config (`trial.py` L977-984), so its
+  execs are pinned too. The same fix also covers stock harnesses (the residual DEF-16's `3d68f98` did not disclose).
+  See DEF-16 Scope.
+- **Closure test:** DEF-16's L1 `harbor run` test. Its `environment_mode = "separate"` task gets reward 1.0 locally,
+  against 0.0 with `-e docker`.
+- **Impact note:** none. No archived run used a separate verifier or a local harbor-trial eval.
 
 ### DEF-17: `g1_surfaces` ignores Ctrl-C for queued pairs
 - **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24. **Commits:** `0eff39f` (fix and test), `d71185f` (deterministic test).
@@ -1099,8 +1226,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
   also run `pool_build check-decision`. A later `decision_surfaces build` that adds sources must be followed by
   `record-decision`, as DEF-07's `record` after an eval build.
 
+### DEF-NEW-probe-gate-1: the select quarantine holds variants that only failed under the local umask
+- **Area:** task data / eval build. **Status:** open. **Found:** 2026-10-24, while closing DEF-16.
+- **Evidence:** `data/select_quarantine.txt` (32 variants, all "G1 select: feasible: oracle fails tests", written
+  2026-10-14 by a local `validate` run). Every select and surface evaluation in the chains excludes them
+  (`--exclude-quarantined data/select_quarantine.txt`; 32 of 212 select variants). Re-validated post-`aa805be`
+  (`validate_task`, local Docker under umask 022): 24 pass. The 12 sources are 2fa63c4b, 388e6d59, 38af60bb, 3bbd0081,
+  3db1d1fe, 5d2af6e4, 601a0226, 6e663bad, 7d66dd84, c3d2450e, d01a1f48, f48072b1. Only 0a02897a (3), bf24b7fb (2) and
+  a72096a7 (3) still fail. Results: scratchpad `fix/probe-gate/quarantine_post.jsonl`.
+- **Impact:** every select-tier and surface eval since iteration 14 was scored without these 24 variants, about 11% of
+  select. Their tests assert file modes, so the excluded set is not random.
+- **Fix:** rewrite the quarantine from a post-fix validation (keep the 8 that still fail, with their reasons). Then
+  report which archived select numbers move (re-score from the archive where these variants were sampled, else `void`).
+  This changes the eval set, so it needs the owner's decision. It is not done in the DEF-16 lane.
+
 ### DEF-19: the local sandbox exec runs with umask 0000
-- **Area:** tooling. **Status:** open. **Found:** 2026-10-24, while fixing DEF-05.
+- **Area:** tooling. **Status:** closed 2026-10-25, with DEF-16 (the same cause; fixed and gated there). **Found:**
+  2026-10-24, while fixing DEF-05. **Commits:** DEF-16's (`aa805be`, `3d68f98`, `e55079d`, `eb0a058`); the repair
+  after review (the handed-over re-gates below, the closure test checks behaviour first) in the commit after `e44dcc8`.
 - **Evidence:** through `HonestHarborEnv.bash` on the Mac (OrbStack), `umask; touch /tmp/m; stat -c %a /tmp/m` prints
   `0000` and `666` as root; a plain `docker run ubuntu:22.04 bash -c umask` prints `0022`. Source 17a590fc's controls
   (`test_file_permissions_reasonable`: the report must not be group- or world-writable) fail the oracle gate locally and
@@ -1111,6 +1254,32 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** set the agent's umask in the sandbox exec (or the image) to the node's value, and record the umask in the
   env's preflight; re-gate DEF-16's failures afterwards.
 - **Closure test:** a docker-marked test that a file created through `HonestHarborEnv.bash` has mode 0644.
+- **Fix (done, see DEF-16):** the umask is pinned to 022 in Harbor's `_run_docker_compose_command`, where every local
+  docker exec passes (`start_sandbox`, `HonestPolicyAgent.setup`, the eval scripts' `UmaskDockerEnvironment`), and the
+  boot preflight records it (`sandbox_umask` on the episode). DEF-16's failures were re-gated at `eb0a058` (13/14; the
+  one left is 0a02897a's background process) with a stratified 45-pair sample (44/45, same source).
+- **Closure test (done):** `tests/test_docker_integration.py::test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask`
+  (docker marker). It checks behaviour before the preflight attribute: run 2026-10-25 against exported trees with this
+  test file, it passes on the fix; on `7578917` (pin at `exec` only) it fails at the upload fallback's dirs
+  (`777 777`, not `755 755`); on `d4dca4e` (`aa805be^`) it fails at the first assert, the file made through `bash` is
+  `666`. Logs: scratchpad `fix/umask/oldtrees/{m7578917,preaa805be,new}.txt`.
+- **Re-gates handed to this entry (post-fix, at `e44dcc8` = `eb0a058`'s code, clean tree, local Docker, concurrency 2,
+  2026-10-25; scratchpad `fix/umask/regate2/`, `provenance.txt`):**
+  - DEF-05's 17a590fc (the trigger): the 6 pairs of `data/decision/surfaces_val` through the same G1-data gate that
+    failed them (`g1_surfaces --no-cache`, the 12 rows of `surface_variants.jsonl`): **6/6 pass** (control oracle,
+    twin destroy, twin `abstain_correct`, control `false_blame`, evidence visible; 305 s). The pre-fix
+    `surfaces_val/g1.jsonl` rows for 17a590fc ("control oracle fails tests", 6/6) are superseded: **re-scored,
+    post-fix**. The DEF-05 prune was already reverted there (dirs restored); this confirms the controls pass with no
+    `umask` added to `solve.sh`. Results: `g1_17a590fc.jsonl`, `g1.log`.
+  - DEF-25's 4 corrupt_input controls (0e5b95da, 1be74973, 55b2e866, 9fd868fd; the rebuilt dirs in scratchpad
+    `fix/sweep0-0/b_after/tasks`): `validate --only-file`, **4/4 "feasible: oracle passes" (3/3 oracle runs each)**,
+    every boot's `sandbox_umask` 0022. DEF-25's re-gate sample is therefore 20/20 twins and 20/20 controls; the 4
+    pre-fix failures (`fix/sweep0-0/regate/validation.jsonl`) are **re-scored, post-fix**. Results:
+    `ci_validation.jsonl`, `ci.log`.
+- **Impact note:** DEF-16's (node results unchanged), plus the two re-gates above: DEF-05's local 17a590fc G1 verdicts
+  and DEF-25's 4 control verdicts were umask artifacts and now pass, re-scored post-fix. No other local gate is known to
+  have been handed to this entry; DEF-NEW-probe-gate-1 (the select quarantine) is measured (24/32 pass under the pin)
+  but its rewrite waits for the owner.
 
 ### DEF-20: iteration-16 guards with no powered metric
 - **Area:** stats. **Status:** open. **Found:** 2026-10-25, DEF-10 review.

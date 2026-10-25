@@ -1,6 +1,6 @@
 """Harbor agent running our policy with the training tool surface, for TB Lite / TB 2.0 / Agentic Abstention.
 
-    harbor run -d openthoughts-tblite@2.0 -e docker -n 8 \\
+    harbor run -d openthoughts-tblite@2.0 -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -n 8 \\
         -a honest_agents.eval.harbor_agent:HonestPolicyAgent -m policy \\
         --ak api_base=http://localhost:8000/v1 --ak enable_thinking=false
 
@@ -186,7 +186,10 @@ class HonestPolicyAgent(BaseAgent):
             return None
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        return None
+        # A Harbor trial never goes through `harness.start_sandbox`. The eval scripts' `UmaskDockerEnvironment` is pinned
+        # already (a no-op here); a hand-typed `-e docker` gets the DEF-16 pin from here on, and its shared verifier,
+        # which runs on this same object, with it. Harbor's start-time execs and a separate verifier are not reached.
+        harness.pin_docker_umask(environment)
 
     # ── config ───────────────────────────────────────────────────────────
 

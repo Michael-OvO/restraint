@@ -535,6 +535,7 @@ def _record(res: ValidationResult, ep: _Episode) -> None:
     res.debug["tamper_details"] = o.tamper_details[:20]
     res.debug["violations"] = o.violation_details[:20]
     res.debug["verifier_network"] = ep.facts.get("verifier_network")
+    res.debug["sandbox_umask"] = ep.debug.get("sandbox_umask")  # DEF-19: the boot preflight's umask
 
 
 async def _validate(

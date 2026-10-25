@@ -541,6 +541,7 @@ async def run_episode(
             "test_log": (debug.get("test_log") or "")[-2000:],
             "blocker_facts": debug.get("blocker_facts"),
             "n_prompt_messages": n_prompt,
+            "sandbox_umask": debug.get("sandbox_umask"),  # DEF-19: the boot preflight's umask
         },
         **labels,
     )

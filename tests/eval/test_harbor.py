@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +21,7 @@ from honest_agents.eval.harbor_results import load_harbor_job
 from honest_agents.eval.rollout import tool_schemas
 from honest_agents.report import parse_report
 from tests.eval.scripted_policy import ABSTAIN_ARGS, SUBMIT_ARGS, FakeClient, response, tool_call
-from tests.sandbox_fakes import LocalSandbox, make_task_dir
+from tests.sandbox_fakes import LocalSandbox, bare_docker_env, make_task_dir
 
 SUBMIT = {**SUBMIT_ARGS, "evidence_commands": ["test -f hello.txt"], "confidence": 0.8}
 ABSTAIN = ABSTAIN_ARGS
@@ -432,3 +433,76 @@ def test_agent_samples_like_training_and_honours_a_system_prompt_file(tmp_path):
         logs_dir=tmp_path, model_name="policy", api_base="http://x/v1", server_sampling_defaults="true"
     )
     assert plain.rollout_config().top_p is None and plain.rollout_config().top_k is None
+
+
+def test_a_harbor_trial_docker_sandbox_runs_under_the_nodes_umask(tmp_path):
+    """DEF-16 on the harbor-trial path with a stock `-e docker` (no `UmaskDockerEnvironment`): the trial starts its own
+    environment (never `harness.start_sandbox`), so `setup` pins the Docker env's umask to 022, and the trial's shared
+    verifier, which execs on the same object, gets it too. Other environments are left as they are."""
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    sent: list[list[str]] = []
+
+    class _Docker(DockerEnvironment):
+        async def _run_docker_compose_command(self, command, *args, **kwargs):
+            sent.append(list(command))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    class _Other:
+        async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+            sent.append([command])
+
+    agent = HonestPolicyAgent(logs_dir=tmp_path, model_name="hosted_vllm/policy", api_base="http://x/v1")
+    docker, other = bare_docker_env(_Docker), _Other()
+    asyncio.run(agent.setup(docker))
+    asyncio.run(agent.setup(other))
+    asyncio.run(docker.exec("bash /tests/test.sh", user="root"))  # what the verifier sends after the agent's turn
+    asyncio.run(other.exec("bash /tests/test.sh"))
+    assert sent == [
+        ["exec", "-u", "root", "main", "bash", "-c", "umask 022; bash /tests/test.sh"],
+        ["bash /tests/test.sh"],
+    ]
+
+
+def test_the_eval_scripts_harbor_environment_runs_every_harness_under_the_nodes_umask(monkeypatch, tmp_path):
+    """DEF-16 for stock harnesses (terminus-2, mini-swe-agent: no `HonestPolicyAgent.setup`) and a separate verifier:
+    the pin lives in the environment class the eval scripts pass to `harbor run -e`, which Harbor builds every
+    environment of a trial from, at `_run_docker_compose_command`, so every main-container docker exec (Harbor's
+    readiness probe, the verifier, the upload fallback's raw `mkdir -p` / `tar`) carries `umask 022` exactly once."""
+    from harbor.cli.utils import resolve_environment_spec
+    from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.utils.import_path import import_class
+
+    from honest_agents.eval.harbor_env import UmaskDockerEnvironment
+
+    sent: list[list[str]] = []
+
+    async def run(self, command, check=True, timeout_sec=None, stdin_data=None, on_output=None):
+        sent.append(list(command))
+        if command[0] == "cp":
+            raise RuntimeError("compose cp unsupported")
+        return SimpleNamespace(return_code=1 if "test" in command else 0, stdout="", stderr="")  # no such dir
+
+    monkeypatch.setattr(DockerEnvironment, "_run_docker_compose_command", run)
+    spec = "honest_agents.eval.harbor_env:UmaskDockerEnvironment"
+    assert resolve_environment_spec(spec) == (None, spec)
+    assert import_class(spec, label="environment") is UmaskDockerEnvironment
+    env = bare_docker_env(UmaskDockerEnvironment)
+    harness.pin_docker_umask(env)  # `start_sandbox` / `HonestPolicyAgent.setup` on it: no second wrapper
+    asyncio.run(HonestPolicyAgent(logs_dir=Path("."), model_name="policy", api_base="http://x/v1").setup(env))
+    asyncio.run(env._wait_until_compose_exec_ready(timeout_sec=1))  # Harbor's readiness probe
+    asyncio.run(env.exec("bash /tests/test.sh", user="root"))
+    (tmp_path / "f.txt").write_text("x")
+    asyncio.run(env.upload_file(tmp_path / "f.txt", "/srv/f.txt"))
+    env._is_windows_container = True
+    asyncio.run(env._run_docker_compose_command(["exec", "main", "cmd", "/c", "dir"]))
+    pin = 'umask 022; exec "$@"'
+    assert sent == [
+        ["exec", "main", "bash", "-c", "umask 022; true"],
+        ["exec", "-u", "root", "main", "bash", "-c", "umask 022; bash /tests/test.sh"],
+        ["cp", str(tmp_path / "f.txt"), "main:/srv/f.txt"],
+        ["exec", "-T", "-u", "root", "main", "bash", "-c", pin, "bash", "test", "-d", "/srv/f.txt"],
+        ["exec", "-T", "-u", "root", "main", "bash", "-c", pin, "bash", "mkdir", "-p", "/srv"],
+        ["exec", "-T", "-u", "root", "main", "bash", "-c", pin, "bash", "tar", "-xf", "-", "-C", "/srv"],
+        ["exec", "main", "cmd", "/c", "dir"],
+    ]

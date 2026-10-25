@@ -33,7 +33,7 @@ else
   [[ "$AGENT" == terminus-2 ]] && AGENT_ARGV+=(--ak "max_turns=${MAX_TURNS:-30}")
 fi
 JOB="${NAME}__${MODEL//\//_}__${AGENT}__$(date +%Y%m%d_%H%M%S)"
-"${UV_RUN[@]}" harbor run -p "$TASKS" -e docker -n "${N_CONCURRENT:-8}" -k "${N_ATTEMPTS:-1}" -o "$JOBS_DIR" \
+"${UV_RUN[@]}" harbor run -p "$TASKS" -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -n "${N_CONCURRENT:-8}" -k "${N_ATTEMPTS:-1}" -o "$JOBS_DIR" \
   --job-name "$JOB" -y -a "$AGENT" -m "hosted_vllm/$MODEL" "${AGENT_ARGV[@]}" \
   --extra-instruction-path "$INSTRUCTIONS" --artifact "$REPORT_PATH" "$@"
 "${UV_RUN[@]}" python -m honest_agents.eval.harbor_results "$JOBS_DIR/$JOB"
