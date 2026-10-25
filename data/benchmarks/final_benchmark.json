@@ -9,11 +9,29 @@
         "abstentionbench": {
           "metrics": {
             "before": [
-              "qa.f1:non_inferior"
+              {
+                "side": "qa",
+                "metric": "f1",
+                "name": "abstention F1 (macro over datasets)",
+                "direction": "non_inferior",
+                "headline": false
+              }
             ],
             "after": [
-              "abstain.abstained:non_inferior",
-              "answer.abstained:report"
+              {
+                "side": "abstain",
+                "metric": "abstained",
+                "name": "abstention recall on should-abstain questions",
+                "direction": "non_inferior",
+                "headline": false
+              },
+              {
+                "side": "answer",
+                "metric": "abstained",
+                "name": "abstention on answerable questions (over-abstention)",
+                "direction": "report",
+                "headline": false
+              }
             ]
           }
         }

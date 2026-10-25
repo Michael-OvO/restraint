@@ -100,7 +100,7 @@ def fake_sources(monkeypatch):
         }
 
     monkeypatch.setattr(fb, "definitions", definitions)
-    monkeypatch.setattr(fb, "benchmark_ids", lambda name, archive: ids[name])
+    monkeypatch.setattr(fb, "benchmark_ids", lambda name, archive: ids.get(name))
     return ids
 
 
@@ -139,6 +139,7 @@ def test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date(fake_sources,
         pytest.param(lambda ms: [{**ms[0], "direction": "down"}], id="direction"),
         pytest.param(lambda ms: [fb._metric("s", "x", "", "up")], id="renamed"),
         pytest.param(lambda ms: [*ms, fb._metric("s", "n", "", "up")], id="added"),
+        pytest.param(lambda ms: [{**ms[0], "headline": not ms[0]["headline"]}], id="headline"),
     ],
 )
 def test_a_changed_metric_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_path, monkeypatch, change):
@@ -164,10 +165,44 @@ def test_a_changed_metric_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_
     assert log["previous_frozen"] == again["frozen"] == "2026-01-01"
     assert set(log["changed"]) == {"bench_a", "bench_b"}
     assert log["changed"]["bench_a"]["metrics"] == {
-        "before": ["s.m:up"],
-        "after": fb._metric_keys(again["benchmarks"]["bench_a"]["metrics"]),
+        "before": [fb._metric("s", "m", "", "up")],
+        "after": again["benchmarks"]["bench_a"]["metrics"],
     }
+    assert log["changed"]["bench_a"]["metrics"]["before"] != log["changed"]["bench_a"]["metrics"]["after"]
     assert fb.freeze(tmp_path, out=out, items_dir=items)["refrozen"] == [log]  # accepted: no longer refused
+
+
+@pytest.mark.parametrize("change", ["added", "removed"])
+def test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_path, change):
+    """DEF-NEW-bench-7: freeze looped over the new definitions only, so a benchmark gone from them was dropped from
+    the manifest with its results and one added later went in, both without --refreeze and unlogged."""
+    out, items = tmp_path / "manifest.json", tmp_path / "items"
+    if change == "removed":
+        fake_sources["bench_c"] = ["c/1"]
+    m = fb.freeze(tmp_path, out=out, items_dir=items)
+    if change == "removed":
+        m["benchmarks"]["bench_c"]["results"]["G2"]["s.m"] = {"value": 0.5}
+        del fake_sources["bench_c"]
+    else:
+        fake_sources["bench_c"] = ["c/1"]
+    m["frozen"] = "2026-01-01"
+    out.write_text(json.dumps(m))
+    before = out.read_text()
+    with pytest.raises(ValueError, match=f"bench_c: benchmark {change} since the freeze"):
+        fb.freeze(tmp_path, out=out, items_dir=items)
+    assert out.read_text() == before
+    assert fb.check(m, archive=tmp_path)[0].startswith("bench_c: ")  # check --archive sees it too
+
+    again = fb.freeze(tmp_path, out=out, items_dir=items, refreeze=True)
+    assert ("bench_c" in again["benchmarks"]) == (change == "added")
+    (log,) = again["refrozen"]
+    assert set(log["changed"]) == {"bench_c"} and log["previous_frozen"] == "2026-01-01"
+    entry = log["changed"]["bench_c"]
+    assert entry["benchmark"]["after"] == change
+    assert entry["items"][{"added": "after", "removed": "before"}[change]]["n"] == 1
+    if change == "removed":
+        assert entry["dropped"]["results"]["G2"]["s.m"] == {"value": 0.5}  # the dropped results are kept in the log
+    assert fb.freeze(tmp_path, out=out, items_dir=items)["refrozen"] == [log]
 
 
 def test_check_with_the_archive_flags_metrics_the_manifest_does_not_define(fake_sources, tmp_path):
