@@ -1335,6 +1335,34 @@ dir; bars at a point estimate). From now on no experiment starts while any defec
 and each iteration begins with the integrity sweep and a written sign-off ([integrity-gate.md](integrity-gate.md)).
 Numbers above that a defect affected keep their original value here; their re-scored values go in the defect entry.
 
+## Iteration 16 preparation - integrity fix round, new data pipeline, frozen benchmark (2026-10-23/25)
+
+No GPU, no training, $0. Everything ran on the Mac (pure Python and local Docker).
+- **Defects.** The ledger ([defects.md](defects.md)) has 57 entries: 49 closed, 8 not (DEF-48, DEF-51 open; DEF-10,
+  DEF-20, DEF-43, DEF-46, DEF-50, DEF-57 fixing). Archived numbers each defect moved are in its entry, labelled
+  `re-scored, post-fix` or `void`.
+- **Gate.** First full L1 sweep on `77f7f33` (+ DEF-47's `510d8e6`): S1-S11 pass and the oracle gate 120/120 over the
+  eval build. On `1b490a5` L0 passes (S1, S2, S4-S10; 33 s). The cached L1 re-run could not boot a sandbox (the
+  Docker engine stopped answering). Its cache also missed, because `taskfs.py` (DEF-45) and `validate.py` (DEF-43)
+  changed after `77f7f33`, so G1 and S3 need a full re-boot. `scripts/test.sh --fast` is green (4603 passed,
+  36 skipped, with Docker unreachable). **Not signed off**: [iteration-16-signoff.md](iteration-16-signoff.md).
+- **New pipeline (commit-data).** Instruction-only requirement checklists per task (`data/commit_checks`), checked in
+  Docker against the hidden tests (`sft.checklist_validation`, `sft.checklist_agreement`), feed the claim-point build
+  (`sft.commit_checks build`, `commit_points.coverage`). 84 requirements that fail on a passing oracle were dropped.
+- **Checklist agreement** ([research/it16-checklist-agreement.md](research/it16-checklist-agreement.md); 430 oracle
+  states plus a stratified 750 of 1,600 it15_g4_sample episodes): controls 0.944 [0.916, 0.971] (0.957 reweighted to
+  the eval's mix), false pass upper bound 0.082, false fail 0.005. Pre-registration 3.3 bars pass. The build has
+  0 claim examples so far: the archive kept no transcripts for that eval.
+- **Benchmarks.** `data/benchmarks/final_benchmark.json`: TB2 (pinned registry), ImpossibleBench LCB and MASK frozen,
+  Agentic Abstention frozen (reported only), ImpossibleBench SWE items frozen with its adapter pending, AbstentionBench
+  and the internal held-out set pending. The never-trained check passes over 62,559 training rows (main tree, DEF-57
+  open).
+- **Pre-registration.** [iteration-16-prereg.md](iteration-16-prereg.md) is a DRAFT (`844b379`, `f1c39be`): arms,
+  frozen data, one estimator, bars with computed MDE and clone-pass (`analysis.power`), checkpoint selection, stopping
+  rules and a decision table.
+- **Needs owner approval:** the pre-registration, the GPU spend (sanity runs, DEF-46's six models, the iteration-16
+  arms), and DEF-43's release of the 24 select variants.
+
 ## Infrastructure incidents (and the guard each one left behind)
 
 | incident | guard |
