@@ -402,7 +402,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** gate the whole root and prune or repair (umask in the build?) before any graded use.
 
 ### DEF-17: `g1_surfaces` ignores Ctrl-C for queued pairs
-- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24. **Commits:** `0eff39f` (fix and test).
+- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24. **Commits:** `0eff39f` (fix and test), `d71185f` (deterministic test).
 - **Evidence:** `src/honest_agents/tasks/g1_surfaces.py` `main`: the `ThreadPoolExecutor` context waits on shutdown for
   every queued future, so one SIGINT keeps the job running. Stopping it took two SIGINTs. `replay_episodes.replay_all`
   cancels pending futures on KeyboardInterrupt.
