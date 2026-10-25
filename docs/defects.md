@@ -27,8 +27,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-19 | tooling | open | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only |
-| DEF-NEW-power-1 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
-| DEF-NEW-build-pins-1 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
+| DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
+| DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 
 ---
 
@@ -575,28 +575,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - Every iteration-15 held-out-gap verdict made against a point bar is void; the re-scored intervals replace them.
 - **Remaining (why `fixing`):**
   - the pre-registration (S0.14) must be written with margins from this tool, as in the closure test above;
-  - DEF-NEW-power-1: three iteration-16 guards have no metric in the tool, so S10 cannot be signed off for them.
+  - DEF-20: three iteration-16 guards have no metric in the tool, so S10 cannot be signed off for them.
 - **Limits** (in the research note):
   - one pair of G2 seeds; no tier S or probe seed; SFT-v2 has one surface run (DEF-12);
   - moment components are noisy and are floored at 0 in the MDE, which makes it conservative;
   - the seed clone uses G2 s2's archived rates as its truth; the own-value rules' clone rate is conditional on the
     build; the planned probe design has no seed clone and assumes the archive's ~10 prompts per pair;
   - the K = 68 rows extrapolate from the 20 archived sources. Re-run the tool on surface-val-v2's first G2 eval.
-
-### DEF-NEW-power-1: iteration-16 guards with no powered metric
-- **Area:** stats. **Status:** open. **Found:** 2026-10-25, DEF-10 review.
-- **Evidence:** iteration-16-direction S3 guards ("cannot be demoted") and S0.12 behaviours at risk list guards that
-  `analysis.power` cannot compute from the archive, so their MDE and clone-pass are unknown:
-  - twin task_success (feasible part done): the archived twin rewards have `tests_passed: None` (G2 it15 surface4, all
-    480 twin episodes), so no per-episode feasible-part result exists to power;
-  - trained-surface and readme `revealed`: needs pair replays; the archive has none for G2, so `read` is the strict
-    fallback (`read_diagnosis.inspected`);
-  - tier S mean commands (up by ≤ +5): a count, while the tool reports rates in points.
-- **Impact:** S10 cannot be signed off for these guards; a pre-registration that gates on them would use unpowered
-  margins.
-- **Fix:** record the feasible-part result on twins (or re-grade it from the test log), compute `revealed` from the S0
-  replays when they exist, and add a count metric (no ×100) to `analysis.power`; then add each to `METRICS`.
-- **Closure test:** the power report lists an MDE, ni10 and clone-pass for each of the three.
 
 ### DEF-11: branch-dependent read rate (investigate)
 - **Area:** metric (suspected); found to be behaviour. **Status:** closed 2026-10-24, no classifier defect. **Found:** it15
@@ -1000,7 +985,22 @@ section 7 critique) and from re-checks against the code and the archive on that 
   env's preflight; re-gate DEF-16's failures afterwards.
 - **Closure test:** a docker-marked test that a file created through `HonestHarborEnv.bash` has mode 0644.
 
-### DEF-NEW-build-pins-1: a timing-dependent grading test can fail the `--fast` gate
+### DEF-20: iteration-16 guards with no powered metric
+- **Area:** stats. **Status:** open. **Found:** 2026-10-25, DEF-10 review.
+- **Evidence:** iteration-16-direction S3 guards ("cannot be demoted") and S0.12 behaviours at risk list guards that
+  `analysis.power` cannot compute from the archive, so their MDE and clone-pass are unknown:
+  - twin task_success (feasible part done): the archived twin rewards have `tests_passed: None` (G2 it15 surface4, all
+    480 twin episodes), so no per-episode feasible-part result exists to power;
+  - trained-surface and readme `revealed`: needs pair replays; the archive has none for G2, so `read` is the strict
+    fallback (`read_diagnosis.inspected`);
+  - tier S mean commands (up by ≤ +5): a count, while the tool reports rates in points.
+- **Impact:** S10 cannot be signed off for these guards; a pre-registration that gates on them would use unpowered
+  margins.
+- **Fix:** record the feasible-part result on twins (or re-grade it from the test log), compute `revealed` from the S0
+  replays when they exist, and add a count metric (no ×100) to `analysis.power`; then add each to `METRICS`.
+- **Closure test:** the power report lists an MDE, ni10 and clone-pass for each of the three.
+
+### DEF-21: a timing-dependent grading test can fail the `--fast` gate
 - **Area:** tooling / tests. **Status:** open. **Found:** 2026-10-24, while repairing DEF-17's test.
 - **Evidence:** `tests/test_grading.py::test_background_agent_process_cannot_forge_reward` (~L413) races a background
   loop (`sleep 0.02` between writes of a forged `reward.json`) against the verifier (`sleep 0.5`) and asserts

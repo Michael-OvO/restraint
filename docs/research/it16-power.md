@@ -219,7 +219,7 @@ Rules for the pre-registration (S10):
 
 - One pair of G2 seeds, and SFT-v2 has a single surface run (DEF-12). Seed and model interaction components therefore
   have very few degrees of freedom. Tier S and the probe have no second seed.
-- Guards still not covered (DEF-NEW-power-1): twin task_success (the archived twin rewards carry no feasible-part test
+- Guards still not covered (DEF-20): twin task_success (the archived twin rewards carry no feasible-part test
   result), trained-surface and readme `revealed` (no G2 pair replays in the archive; `read` is the strict fallback), and
   tier S mean commands (a count; the tool reports rates in points).
 - Clone simulations keep the archived build's sources fixed: no source resampling, so source main effects cancel. They
