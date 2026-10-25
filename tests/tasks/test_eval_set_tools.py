@@ -1,10 +1,14 @@
-"""Mac-side evaluation-set helpers: `surfaces_cli ids`, `g1_surfaces.prune_failed`, `validate.write_quarantine_list`."""
+"""Mac-side evaluation-set helpers: `surfaces_cli ids` / `complete`, `g1_surfaces.prune_failed`,
+`validate.write_quarantine_list`."""
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from honest_agents.bank import read_quarantine
 from honest_agents.tasks import g1_surfaces, surfaces_cli, validate
@@ -22,6 +26,38 @@ def test_ids_command(tmp_path: Path) -> None:
     out = tmp_path / "ids.txt"
     assert surfaces_cli.main(["ids", "--split-file", str(split), "--out", str(out), "--family", "high_risk", "--twins-only"]) == 0
     assert out.read_text().split() == ["a/1", "a/3"]
+
+
+def test_complete_command(tmp_path: Path, capsys) -> None:
+    """DEF-05 (sweep S5): every source has both dirs of every surface, and every high_risk episode resolves to one."""
+    tasks = tmp_path / "tasks"
+    for v in ("org__a__high_risk__readme", "org__a__high_risk__readme__control", "org__b__high_risk__readme"):
+        (tasks / v).mkdir(parents=True)
+        (tasks / v / "task.toml").write_text("")
+    eps = tmp_path / "episodes.jsonl.gz"
+    rows = [{"family": "high_risk", "task_id": "org__a__high_risk__readme"}, {"family": "feasible", "task_id": "x"}]
+    eps.write_bytes(gzip.compress("".join(json.dumps(r) + "\n" for r in rows).encode()))
+    base = ["complete", "--tasks", str(tasks), "--surface", "readme"]
+    assert surfaces_cli.main([*base, "--ids", "org/a", "--episodes", str(eps)]) == 0
+    assert surfaces_cli.main([*base, "--ids", "org/a", "org/b"]) == 1
+    assert "MISSING dir org__b__high_risk__readme__control" in capsys.readouterr().out
+    rows.append({"family": "high_risk", "task_id": "org__c__high_risk__readme"})
+    eps.write_bytes(gzip.compress("".join(json.dumps(r) + "\n" for r in rows).encode()))
+    assert surfaces_cli.main([*base, "--ids", "org/a", "--episodes", str(eps)]) == 1
+    assert "MISSING episode task org__c__high_risk__readme" in capsys.readouterr().out
+
+
+VAL_TASKS = Path(__file__).resolve().parents[2] / "data" / "decision" / "surfaces_val" / "tasks"
+VAL_IDS = VAL_TASKS.parent.parent / "val_high_risk_sources.txt"
+
+
+@pytest.mark.skipif(
+    not VAL_TASKS.is_dir() or not VAL_IDS.is_file(), reason="no local surfaces_val build (data/ is untracked)"
+)
+def test_the_local_surfaces_val_build_has_every_source() -> None:
+    """DEF-05: 17a590fc, one of the 20 val sources the it14/it15 surface evals ran on, had no task dirs (228 of 240)."""
+    assert surfaces_cli.missing_dirs(VAL_TASKS, surfaces_cli._ids(SimpleNamespace(ids=None, ids_file=VAL_IDS)),
+                                     surfaces_cli._surfaces(None)) == []  # fmt: skip
 
 
 def test_prune_failed(tmp_path: Path) -> None:

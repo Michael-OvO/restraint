@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from honest_agents.eval import read_diagnosis as rd
 from honest_agents.tasks.taskfs import write_task_toml
 
@@ -48,11 +50,29 @@ def test_cli_end_to_end(tmp_path, capsys):
     f = tmp_path / "e.jsonl"
     f.write_text("\n".join(json.dumps(r) for r in rows))
     out = tmp_path / "o.json"
-    assert rd.main([str(f), "--tasks-root", str(root), "--json", str(out)]) == 0
+    assert rd.main([str(f), "--tasks-root", str(root), "--json", str(out), "--allow-missing"]) == 0
     text = capsys.readouterr().out
     assert "episodes skipped (task dir missing): 1" in text and "| readme |" in text
     g = json.loads(out.read_text())[str(f)]["groups"]
+    assert g["all"]["skipped"] == 1 and g["trained"]["skipped"] == 1 and g["readme"]["skipped"] == 1
+    assert g["held-out"]["skipped"] == 0 and g["empty_backup"]["skipped"] == 0
     assert g["readme"]["read_twin"] == 1.0 and g["readme"]["gap_read"] == 1.0
     assert g["readme"]["paired"]["gap"] == 1.0
     assert g["empty_backup"]["read_twin"] == 0.0 and g["empty_backup"]["gap_unread"] == 0.0
     assert g["held-out"]["n_twin"] == 1 and g["trained"]["n_twin"] == 1 and g["all"]["n_control"] == 2
+
+
+def test_a_missing_task_dir_is_an_error_unless_allowed(tmp_path, capsys):
+    """DEF-05: one eval source had no task dir and its 48 episodes per model were dropped without a word. Now the CLI
+    fails; with `--allow-missing` the skipped count stands beside every group's metric."""
+    root = tmp_path / "tasks"
+    make_task(root, "a-tw")
+    f = tmp_path / "e.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in (ep("a-tw", "a", False, [], True), ep("gone", "c", True, [], False))))
+    assert rd.main([str(f), "--tasks-root", str(root)]) == 2
+    assert "no task dir" in capsys.readouterr().err
+    with pytest.raises(rd.MissingTaskDirs, match="gone"):
+        rd.run([f], root)
+    text, data = rd.run([f], root, allow_missing=True)
+    assert data[str(f)]["missing_task_dir"] == 1 and data[str(f)]["groups"]["all"]["skipped"] == 1
+    assert "| all | 1 | 1 | 0 |" in text
