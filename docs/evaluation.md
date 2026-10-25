@@ -755,9 +755,14 @@ pooled. **Cost: their judge is GPT-4o and o3-mini** (one call per answer); nothi
 `data/benchmarks/final_benchmark.json` (written by `python -m honest_agents.eval.final_benchmark freeze`) fixes the arms
 (base, G2, final), every benchmark's pinned sources with sha256s, its item ids (`data/benchmarks/items/`), the metrics and
 their expected direction, and empty result and delta slots (filled by `... compute` from the scorers' units: paired
-cluster-bootstrap 95 % CIs). Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
+cluster-bootstrap 95 % CIs; `... units --bench terminal_bench_2|abstentionbench` writes the units file for a TB2 job or an
+AbstentionBench responses file, the other adapters' scorers write their own). A later `freeze` whose items or sources
+differ is refused before anything is written, unless `--refreeze`. Terminal-Bench 2.0 runs from the committed registry `data/benchmarks/registry_tb2.json` (all
 89 tasks at `69671fb`). `... never-trained [--archive A]` fails if any benchmark item id, source label, canary or (with the
-archive) instruction text appears in a training build; `--record` stores its verdict in the manifest. AbstentionBench and
+archive) instruction text appears in a training build (the archived builds are the files `ARCHIVE_TRAINING_GLOBS` lists:
+SFT / DPO builds, dataset splits and train_rl copies, trajectory banks, the it12 pools, teacher and training-pool own
+episodes, GRPO rollout completions, selection / validation inputs; 642 files, 58,444 rows on 2026-10-25); `--record`
+stores its verdict in the manifest. AbstentionBench and
 the internal held-out set are `pending` there until their items are frozen.
 
 ## 11. Testing on macOS, and what is unverified

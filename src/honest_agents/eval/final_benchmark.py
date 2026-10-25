@@ -14,8 +14,11 @@ Commands (all offline; `--archive` = the honest-agents archive root):
 * `never-trained [--archive A] [--record]`: **fails** (exit 1) if any benchmark item id, benchmark source label or
   benchmark canary appears in any training build, or (with `--archive`) if a training text contains half or more of a
   benchmark item's word 8-grams. Training builds: the committed task/judgment data in this repo and, with `--archive`,
-  every SFT build, dataset split, trajectory bank and training-pool own-episode file in the archive. `--record` writes
-  the verdict and the hashes of the builds checked into the manifest.
+  the archived files that `ARCHIVE_TRAINING_GLOBS` lists (SFT / DPO builds, dataset splits and train_rl copies,
+  trajectory banks, the distillation pool, teacher and training-pool own episodes, GRPO rollout completions, and the
+  selection / validation inputs). `--record` writes the verdict and the hashes of the builds checked into the manifest.
+* `units --bench B INPUT... --out FILE`: the units file of a TB2 run (Harbor job dirs) or an AbstentionBench run
+  (responses.jsonl); the other adapters' scorers write their own.
 * `compute --units ARM=BENCH:FILE ...`: fill the arms' results and the deltas vs base from scorer outputs (`units`).
 """
 
@@ -56,7 +59,13 @@ REPO_TRAINING_GLOBS = (
 )
 ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/run/*/examples.jsonl*",  # every SFT / DPO build
-    "iterations/00-dataset/files/data/train*.jsonl*",  # dataset splits (train, train_pool, train_rl)
+    "iterations/*/files/data/train*.jsonl*",  # dataset splits (train, train_pool) and the train_rl copies
+    "iterations/*/files/data/distill_pool.jsonl",  # it12 distillation pool
+    "iterations/*/files/data/transfer_v1.jsonl",
+    "iterations/*/files/data/select_validation.jsonl",  # checkpoint-selection inputs
+    "iterations/*/files/data/decision/*/*.jsonl",  # decision surfaces (surfaces_val)
+    "iterations/11-teacher-data/episodes.jsonl.gz",  # teacher episodes (SFT source)
+    "iterations/*/run/*/completions/*.parquet",  # GRPO rollouts (prompt, completion, group)
     "iterations/*/bank/*.jsonl*",  # trajectory banks (SFT sources)
     "iterations/03-passk-bank/eval/passk/bank/*.jsonl*",
     "iterations/15-g4-read-rft/eval/it15_g4_sample/episodes.jsonl.gz",  # training-pool own episodes (it16 source)
@@ -104,6 +113,7 @@ ID_KEYS = frozenset(
         "parent",
         "seed",
         "name",
+        "group",  # GRPO rollout group (task variant)
     }
 )
 TEXT_MIN_WORDS = 20  # benchmark texts shorter than this are too generic for the 8-gram containment test
@@ -307,7 +317,12 @@ def definitions(archive: Path) -> dict[str, dict[str, Any]]:
                 _github("facebookresearch/AbstentionBench", "e29184174c69bc95139b8c33dcca09aacab9442a"),
             ],
             "adapter": "scripts/eval_abstentionbench.sh + honest_agents.eval.external.abstentionbench",
-            "metrics": [_metric("qa", "f1", "abstention F1 (macro over datasets)", "non_inferior")],
+            # per-question means (`abstentionbench_units`), so `compute` can give them CIs; their F1 (not a per-unit
+            # mean) is reported by `honest_agents.eval.external.abstentionbench score` alongside
+            "metrics": [
+                _metric("abstain", "abstained", "abstention recall on should-abstain questions", "non_inferior"),
+                _metric("answer", "abstained", "abstention on answerable questions (over-abstention)", "report"),
+            ],
         },
         "mask": {
             "role": "secondary",
@@ -356,16 +371,18 @@ def _empty_results(metrics: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], d
 def freeze(
     archive: Path, *, out: Path = MANIFEST, items_dir: Path = ITEMS_DIR, refreeze: bool = False
 ) -> dict[str, Any]:
+    """Derive every item set and compare with the existing manifest before anything is written, so a refused freeze
+    leaves the items files and the manifest as they were."""
     old = json.loads(out.read_text()) if out.is_file() else None
     benches = definitions(archive)
+    item_ids: dict[str, list[str]] = {}
     for name, b in benches.items():
         ids = benchmark_ids(name, archive)
         if ids is None:
             b["items"] = None
         else:
-            items_dir.mkdir(parents=True, exist_ok=True)
             path = items_dir / f"{name}.txt"
-            path.write_text("".join(f"{i}\n" for i in sorted(ids)))
+            item_ids[name] = sorted(ids)
             b["items"] = {
                 "file": path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else str(path),
                 "n": len(ids),
@@ -376,7 +393,14 @@ def freeze(
             prev = old["benchmarks"][name]
             if prev.get("items") != b["items"] or prev.get("sources") != b["sources"]:
                 raise ValueError(f"{name}: items or sources changed since the freeze (pass --refreeze to accept)")
-            b["results"], b["deltas_vs_base"] = prev["results"], prev["deltas_vs_base"]
+            # keep the recorded results of the metrics that are still defined
+            for slot in ("results", "deltas_vs_base"):
+                for arm, vals in b[slot].items():
+                    for key in vals:
+                        vals[key] = prev.get(slot, {}).get(arm, {}).get(key)
+    items_dir.mkdir(parents=True, exist_ok=True)
+    for name, ids in item_ids.items():
+        (items_dir / f"{name}.txt").write_text("".join(f"{i}\n" for i in ids))
     manifest = {
         "schema": SCHEMA,
         "frozen": (old or {}).get("frozen") if old and not refreeze else _today(),
@@ -509,7 +533,12 @@ def benchmark_texts(archive: Path) -> Iterator[tuple[str, str, str]]:
 
 
 def iter_rows(path: Path) -> Iterator[Any]:
-    """Rows of a JSONL (optionally gzipped), or the one object / list of a JSON file."""
+    """Rows of a JSONL (optionally gzipped) or Parquet file, or the one object / list of a JSON file."""
+    if path.suffix == ".parquet":
+        import pyarrow.parquet as pq
+
+        yield from pq.read_table(path).to_pylist()
+        return
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt") as f:  # type: ignore[operator]
         if path.name.endswith((".jsonl", ".jsonl.gz")):
@@ -686,6 +715,36 @@ def tb2_units(records: Sequence[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def abstentionbench_units(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """AbstentionBench judged responses (`abstentionbench run` responses.jsonl) as units, one per question: side
+    `abstain` (should abstain) or `answer`, `abstained` = the judge's verdict. Unjudged responses leave."""
+    return [
+        {
+            "cluster": f"{r['dataset']}/{r['index']}",
+            "stratum": r["dataset"],
+            "side": "abstain" if r["should_abstain"] else "answer",
+            "abstained": int(bool(r["is_abstention"])),
+        }
+        for r in results
+        if r.get("is_abstention") is not None
+    ]
+
+
+def write_units(bench: str, inputs: Sequence[Path], out: Path) -> list[dict[str, Any]]:
+    """The `{"units": [...]}` file `compute --units ARM=BENCH:FILE` reads, from Harbor job dirs (terminal_bench_2) or
+    responses.jsonl files (abstentionbench)."""
+    if bench == "terminal_bench_2":
+        from honest_agents.eval.harbor_results import load_harbor_job
+
+        units = tb2_units([r for job in inputs for r in load_harbor_job(job)])
+    elif bench == "abstentionbench":
+        units = abstentionbench_units([row for f in inputs for row in iter_rows(f)])
+    else:
+        raise ValueError(f"no units writer for {bench!r} (its adapter's scorer writes the units)")
+    out.write_text(json.dumps({"benchmark": bench, "inputs": [str(p) for p in inputs], "units": units}, indent=2))
+    return units
+
+
 def compute(manifest: dict[str, Any], units: dict[str, dict[str, list[dict[str, Any]]]]) -> dict[str, Any]:
     """Fill results (point estimate + CI per arm) and deltas vs base from `units[arm][benchmark]`."""
     from honest_agents.eval.external.transfer import cluster_bootstrap_ci, cluster_bootstrap_delta
@@ -724,6 +783,10 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--archive", help="also check the archived training builds and the benchmark texts")
     n.add_argument("--record", action="store_true", help="write the verdict and the build hashes into the manifest")
     n.add_argument("--out", help="full report JSON")
+    u = sub.add_parser("units", help="write the units file `compute` reads from TB2 jobs or AbstentionBench responses")
+    u.add_argument("--bench", required=True, choices=("terminal_bench_2", "abstentionbench"))
+    u.add_argument("inputs", nargs="+", help="Harbor job dirs (terminal_bench_2) or responses.jsonl (abstentionbench)")
+    u.add_argument("--out", required=True)
     k = sub.add_parser("compute", help="fill results and deltas vs base from scorer units")
     k.add_argument("--units", action="append", default=[], metavar="ARM=BENCH:FILE", help="JSON with a `units` list")
     k.add_argument("--out", help="output manifest (default: print)")
@@ -733,6 +796,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "freeze":
         m = freeze(Path(args.archive).expanduser(), out=path, refreeze=args.refreeze)
         print(json.dumps({k: v.get("items") for k, v in m["benchmarks"].items()}, indent=2))
+        return 0
+    if args.cmd == "units":
+        units = write_units(args.bench, [Path(x) for x in args.inputs], Path(args.out))
+        print(json.dumps({"benchmark": args.bench, "n_units": len(units)}))
         return 0
     manifest = json.loads(path.read_text())
     archive = Path(args.archive).expanduser() if getattr(args, "archive", None) else None
