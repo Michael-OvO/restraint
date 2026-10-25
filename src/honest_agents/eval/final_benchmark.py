@@ -17,7 +17,8 @@ Commands (all offline; `--archive` = the honest-agents archive root):
   benchmark item's word 8-grams. Training builds: the committed task/judgment data in this repo and, with `--archive`,
   the archived files that `ARCHIVE_TRAINING_GLOBS` lists (SFT / DPO builds, dataset splits and train_rl copies,
   trajectory banks, the distillation pool, teacher and training-pool own episodes, GRPO rollout completions, and the
-  selection / validation inputs). `--record` writes the verdict and the hashes of the builds checked into the manifest.
+  selection / validation inputs). `--record` writes the verdict and the hashes of the builds checked into the manifest,
+  and refuses (exit 2) when a known untracked input (`UNTRACKED_TRAINING_INPUTS`) is neither in the tree nor archived.
 * `units --bench B INPUT... --out FILE`: the units file of a TB2 run (Harbor job dirs) or an AbstentionBench run
   (responses.jsonl); the other adapters' scorers write their own.
 * `compute --units ARM=BENCH:FILE ...`: fill the arms' results and the deltas vs base from scorer outputs (`units`).
@@ -65,6 +66,8 @@ ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/files/data/transfer_v1.jsonl",
     "iterations/*/files/data/select_validation.jsonl",  # checkpoint-selection inputs
     "iterations/*/files/data/decision/*/*.jsonl",  # decision surfaces (surfaces_val)
+    "iterations/*/files/data/decision/*.jsonl",  # the archived untracked decision / DPO inputs (DEF-57)
+    "iterations/*/files/data/decision/*.jsonl.gz",
     "iterations/11-teacher-data/episodes.jsonl.gz",  # teacher episodes (SFT source)
     "iterations/*/run/*/completions/*.parquet",  # GRPO rollouts (prompt, completion, group)
     "iterations/*/bank/*.jsonl*",  # trajectory banks (SFT sources)
@@ -75,6 +78,19 @@ ARCHIVE_TRAINING_GLOBS = (
     "2026-10-06-node1/repo-files/runs/passk/bank/*.jsonl*",
     "staging/root/staging/*/run/*/examples.jsonl*",
 )
+# Training inputs that `REPO_TRAINING_GLOBS` matches but git does not track (`data/` is gitignored), with their
+# archived copy (DEF-57). Each must be in scope, from this tree or from the archive, or `--record` refuses; with
+# `--archive`, a repo copy identical to its archived copy is not read twice, so the scope is the same in every tree.
+UNTRACKED_TRAINING_INPUTS = {
+    f"data/decision/{name}": f"iterations/14-decision-inputs/files/data/decision/{name}{gz}"
+    for name, gz in (
+        ("probe_prompts.jsonl", ".gz"),
+        ("probe_prompts_surfaces.jsonl", ".gz"),
+        ("sandbox_outputs.jsonl", ""),
+        ("sandbox_outputs_surfaces.jsonl", ".gz"),
+        ("surface_pairs.jsonl", ""),
+    )
+}
 # Source labels that name a benchmark: none may be the source of a training row (any identifier component).
 BENCHMARK_SOURCES = frozenset(
     {
@@ -706,6 +722,7 @@ def training_builds(*, root: Path = REPO, archive: Path | None = None) -> list[t
     """(label, path): `repo:<rel>` for committed data, `archive:<rel>` for archived builds."""
     out = [(f"repo:{p.relative_to(root).as_posix()}", p) for g in REPO_TRAINING_GLOBS for p in sorted(root.glob(g))]
     if archive is not None:
+        out = [(label, p) for label, p in out if not _archived_copy(label.removeprefix("repo:"), p, archive)]
         seen = set()
         for g in ARCHIVE_TRAINING_GLOBS:
             for p in sorted(archive.glob(g)):
@@ -713,6 +730,28 @@ def training_builds(*, root: Path = REPO, archive: Path | None = None) -> list[t
                     seen.add(p)
                     out.append((f"archive:{p.relative_to(archive).as_posix()}", p))
     return out
+
+
+def _archived_copy(rel: str, path: Path, archive: Path) -> bool:
+    """True if `rel` is an untracked training input whose archived copy holds the same bytes (gunzipped)."""
+    copy = archive / UNTRACKED_TRAINING_INPUTS[rel] if rel in UNTRACKED_TRAINING_INPUTS else None
+    if copy is None or not copy.is_file():
+        return False
+    h = hashlib.sha256()
+    with gzip.open(copy, "rb") if copy.suffix == ".gz" else open(copy, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest() == sha256_file(path)
+
+
+def missing_training_inputs(builds: Sequence[tuple[str, Path]]) -> list[str]:
+    """The untracked training inputs that `builds` reads neither from the repo nor from the archive (DEF-57)."""
+    labels = {label for label, _ in builds}
+    return [
+        rel
+        for rel, copy in UNTRACKED_TRAINING_INPUTS.items()
+        if f"repo:{rel}" not in labels and f"archive:{copy}" not in labels
+    ]
 
 
 def never_trained(builds: Sequence[tuple[str, Path]], idx: BenchIndex, *, max_hits: int = 50) -> dict[str, Any]:
@@ -858,8 +897,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": not bad, "problems": bad}, indent=2))
         return 1 if bad else 0
     if args.cmd == "never-trained":
+        builds = training_builds(archive=archive)
+        if missing := missing_training_inputs(builds):
+            print(f"known training inputs not in scope (neither in this tree nor archived): {', '.join(missing)}")
+            if args.record:
+                print("refusing --record: the recorded scope would miss them (DEF-57)")
+                return 2
         idx = load_index(archive=archive, manifest=manifest)
-        report = never_trained(training_builds(archive=archive), idx)
+        report = never_trained(builds, idx)
         if args.out:
             Path(args.out).write_text(json.dumps(report, indent=2))
         print(json.dumps({k: v for k, v in report.items() if k != "builds"}, indent=2))

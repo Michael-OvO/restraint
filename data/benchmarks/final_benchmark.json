@@ -548,39 +548,9 @@
     "containment_threshold": 0.5,
     "builds": [
       {
-        "build": "repo:data/decision/probe_prompts.jsonl",
-        "sha256": "f68f6c2f010a1a9bc7c3f3718f43dfaf1a64a53692f70b39668396af1cb913f7",
-        "n_rows": 474,
-        "n_hits": 0
-      },
-      {
-        "build": "repo:data/decision/probe_prompts_surfaces.jsonl",
-        "sha256": "e22048e5557e8b6b96c3ccf08cb4cb094637d23ba463f07fdb763dbe8358a82f",
-        "n_rows": 1456,
-        "n_hits": 0
-      },
-      {
         "build": "repo:data/decision/read_rft_tasks.jsonl",
         "sha256": "46a23d84a957b38bdb5f0dc6ffd83c1096a0e77dc385b40152dca9797bdb3e6a",
         "n_rows": 400,
-        "n_hits": 0
-      },
-      {
-        "build": "repo:data/decision/sandbox_outputs.jsonl",
-        "sha256": "d8e7291cedd652d921607574a69914999e92d99a89094b514ef97e977985367f",
-        "n_rows": 383,
-        "n_hits": 0
-      },
-      {
-        "build": "repo:data/decision/sandbox_outputs_surfaces.jsonl",
-        "sha256": "787d6289cca628df0b0ea2597b85400884256b19f22f121384895305f5787d7d",
-        "n_rows": 1318,
-        "n_hits": 0
-      },
-      {
-        "build": "repo:data/decision/surface_pairs.jsonl",
-        "sha256": "6e8e2ac2453d6ad784dfe38959cf86b5b5e6b2895f94289318dec151e1e4e840",
-        "n_rows": 484,
         "n_hits": 0
       },
       {
@@ -863,6 +833,36 @@
         "build": "archive:iterations/15-g0-judgment/files/data/decision/surfaces_val/g1.jsonl",
         "sha256": "5b443d98f7ddc728628f09a7ec6469749ec44fbe53568e933843a0e3475adfa4",
         "n_rows": 120,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-decision-inputs/files/data/decision/sandbox_outputs.jsonl",
+        "sha256": "d8e7291cedd652d921607574a69914999e92d99a89094b514ef97e977985367f",
+        "n_rows": 383,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-decision-inputs/files/data/decision/surface_pairs.jsonl",
+        "sha256": "6e8e2ac2453d6ad784dfe38959cf86b5b5e6b2895f94289318dec151e1e4e840",
+        "n_rows": 484,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-decision-inputs/files/data/decision/probe_prompts.jsonl.gz",
+        "sha256": "b52e994a5c3da4777ebc227fcef58e070b5e74c743d7ddf3d6e2be0ca54df5c1",
+        "n_rows": 474,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-decision-inputs/files/data/decision/probe_prompts_surfaces.jsonl.gz",
+        "sha256": "f22ee2794e271e16b3c8eec95fc933999163d7fcd033b806fd0fec3da0b8eff0",
+        "n_rows": 1456,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-decision-inputs/files/data/decision/sandbox_outputs_surfaces.jsonl.gz",
+        "sha256": "25095df42a572644bd441bdd436b6dc5a366b6e2f888ca15b58f3039397eb015",
+        "n_rows": 1318,
         "n_hits": 0
       },
       {
