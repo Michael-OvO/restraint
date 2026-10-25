@@ -1589,7 +1589,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   listings is not an FP.
 
 ### DEF-35: the content-dependence filter matches bound tokens anywhere in the test source
-- **Area:** task data / build (also corrupt_input). **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search
+- **Area:** task data / build (also corrupt_input). **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search
   (entered on triage). **Commits:** `af921af` (fix with DEF-36, unit tests, docs/data.md section 5).
 - **Evidence:** `tasks/analysis/filters.py` `content_bound_tokens` (~L171-187) keeps a token when
   `tok in tests_text and tok not in visible`: a substring test over the full test file text, which
@@ -1658,7 +1658,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   the instruction prints does not; the second half fails on the old code, where `UTF-8` in a comment bound it).
 
 ### DEF-36: the hidden-value check counts syntax, schema keywords and closed vocabularies as unguessable
-- **Area:** task data / build. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** task data / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `af921af` (with DEF-35).
 - **Evidence:** current `input_candidates` on the reconstructed sources (same method as DEF-35) gives: 3aa91448
   `initial_rules.v4` ['COMMIT', 'filter'] (iptables-save boilerplate; the test asserts the first line is `*filter` and
@@ -1761,7 +1761,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   read-only), so their numbers for the eight runs above are pre-fix.
 
 ### DEF-38: the K=8 landmark window misses evidence reads that follow the main task
-- **Area:** metric. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage; DEF-03's
+- **Area:** metric. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage; DEF-03's
   impact note saw the halving and treated it as expected, so no entry was opened). **Commits:** `92f5fcf` (fix, tests,
   iteration-15/16 doc notes; branch `fix/sweep1-2`).
 - **Evidence:** `eval/read_diagnosis.py` `K_PRIMARY = 8` (~L79) and `landmark_end` (~L282-297) count the first 8
@@ -1853,7 +1853,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
     iteration-15 landmark decomposition (already void under DEF-03).
 
 ### DEF-39: L0 S9 audits the void pre-DEF-01 inbound_link grading
-- **Area:** tooling / reward audit (gate S9). **Status:** closed (2026-10-24, `85e4481`, branch `fix/sweep1-3`). **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** tooling / reward audit (gate S9). **Status:** closed (2026-10-25, `85e4481`, branch `fix/sweep1-3`). **Found:** 2026-10-25, defect search (entered on triage).
 - **Evidence:** `gate/checks.py` `dataset_of` (~L546-565) builds S9's dataset with `outcome_from_dict(r["outcome"])` and
   never applies `reward_gate.inbound_link_postfix`; `reward_gate.load_eval` applies it only with `def01_postfix=True`
   (~L372-403). The parity test `tests/test_gate.py::test_s9_from_the_index_equals_reward_gate_on_the_episodes`
@@ -1974,7 +1974,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   iteration docs were not re-derived here (each shifts by at most its runs' change above).
 
 ### DEF-42: `budget_exhausted` leaves out truncated stops
-- **Area:** metric / stats. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** metric / stats. **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search (entered on triage).
   **Commits:** `9a83d9a` (fix, tests).
 - **Evidence:** `analysis/power.py` (~L199) `budget_exhausted = stop_reason in (STOP_CALL_BUDGET, STOP_CHAR_BUDGET)`, and
   `callbacks.py` (~L801) matches it. The eval's definition is `_BUDGET_STOPS = {call_budget, char_budget, truncated}`
