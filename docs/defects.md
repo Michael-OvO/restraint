@@ -24,7 +24,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-14 | metric | open | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
-| DEF-17 | tooling | open | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
+| DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | open | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 
 ---
@@ -401,11 +401,16 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** gate the whole root and prune or repair (umask in the build?) before any graded use.
 
 ### DEF-17: `g1_surfaces` ignores Ctrl-C for queued pairs
-- **Area:** tooling. **Status:** open. **Found:** 2026-10-24.
+- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24. **Commits:** `0eff39f` (fix and test).
 - **Evidence:** `src/honest_agents/tasks/g1_surfaces.py` `main`: the `ThreadPoolExecutor` context waits on shutdown for
   every queued future, so one SIGINT keeps the job running. Stopping it took two SIGINTs. `replay_episodes.replay_all`
   cancels pending futures on KeyboardInterrupt.
-- **Fix:** cancel pending futures on KeyboardInterrupt, as `replay_all` does.
+- **Fix (done):** `main` cancels the pending futures on KeyboardInterrupt and re-raises, as `replay_all` does; pairs
+  already running finish and tear their sandboxes down.
+- **Impact:** none on archived numbers (tooling only: it changes how a run stops, not what a finished run reports).
+- **Closure test:** `tests/tasks/test_eval_set_tools.py::test_ctrl_c_cancels_queued_pairs` (fake `check_pair`, one
+  worker, 12 pairs, the first raises KeyboardInterrupt): at most 2 pairs start. On the old code all 12 run, and the test
+  fails.
 
 ### DEF-18: probe and SFT surface builds move when a pool grows
 - **Area:** build. **Status:** open. **Found:** 2026-10-24, while fixing DEF-07.
