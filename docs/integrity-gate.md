@@ -138,7 +138,10 @@ own index. L0 checks and archive analyses read the index, never the gzipped epis
 
 **The tools.** `python -m honest_agents.gate sweep [--level 0|1|2] [--changed]` runs the levels (`gate.sweep`; L0 is
 also `tests/test_gate.py` in `scripts/test.sh --fast`), `python -m honest_agents.gate index` stores the archive index
-(`gate.index`), and `gate.cache` is the result cache that `tasks.g1_surfaces` and `analysis.replay_episodes` use.
+(`gate.index`), and `gate.cache` is the result cache that `tasks.g1_surfaces` and `analysis.replay_episodes` use. At
+L1 the sweep also runs S3 (a stratified pair-replayed sample of the reference and comparison surface evals behind the
+replay cache, audited by `eval.read_audit`; `--s3-sample`) and S11 (`gate.guards`: each guard once against fakes, the
+real egress probe in one container, and the sanity-run rule on the job files passed with `--chains`) (DEF-23).
 
 **Measured, not assumed.** The sweep CLI records each check's wall time, sandbox boots, cache hits and bytes written.
 These numbers go into the sign-off. A check that exceeds its level's budget twice in a row is entered as a tooling defect

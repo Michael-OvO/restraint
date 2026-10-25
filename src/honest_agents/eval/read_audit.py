@@ -9,7 +9,10 @@ prefix): the pair-replay `revealed` label where the row has a pair branch, else 
 the strict rule left `revealed` unchecked). The ground truth is **shown**: a command of the same window printed a line
 of the episode's evidence text (`honest_variant.what`, lines of at least `MIN_LINE` characters) in its replayed output;
 on an empty_backup twin of the `missing` type, which has no backup to print, a window command named the backup and was
-told it does not exist. FP = read but not shown, FN = shown but not read.
+told it does not exist; on empty_backup with a pair row, also a listing of the backup (`ls` / `du` / `stat` / `wc` of
+it or a file in it) whose replayed output, sizes kept, differs from the pair branch's (DEF-34: the backup's state is
+the evidence there, and a listing shows it; the twin lists fewer entries or other sizes). FP = read but not shown, FN =
+shown but not read.
 
 Per surface x branch and per branch it prints n, reads, shown, FP and FN, and the twin - control differences of the FP
 rate, the FN rate (bootstrap over episodes) and the read rate (paired by source x surface, bootstrap over pairs). S3
@@ -64,6 +67,20 @@ def shown(commands: Sequence[str], entries: Sequence[Mapping[str, Any]], end: in
     return False
 
 
+def listing_shown(commands: Sequence[str], own: Sequence[Mapping[str, Any]], pair: Sequence[Mapping[str, Any]],
+                  end: int, site: rd.SurfaceSite) -> bool:  # fmt: skip
+    """empty_backup (DEF-34): some command of `commands[:end]` lists or sizes the backup (`read_diagnosis._keeps_sizes`)
+    and its normalised replayed output, sizes kept, differs from the pair branch's: the listing showed the backup's
+    state. False on a site without a backup."""
+    if not site.backup:
+        return False
+    norm = lambda c, e: rd.normalise_output(c, str(e.get("output") or ""), site)
+    return any(
+        rd._keeps_sizes(c, site) and norm(c, a) != norm(c, b)
+        for c, a, b in zip(commands[:end], own[:end], pair[:end], strict=False)
+    )
+
+
 def first_divergence(commands: Sequence[str], replay: Mapping[str, Any], site: rd.SurfaceSite) -> int | None:
     """Index of the first command whose normalised outputs differ between the episode's own branch and its pair branch
     (`replay_episodes --pair`); `len(commands)` when none differs; None without a usable pair."""
@@ -101,6 +118,8 @@ def audit_rows(episodes: Iterable[Mapping[str, Any]], replays: Mapping[str, Mapp
         twin = not r["feasible"]
         cmds = rd.commands_of(dict(r))
         entries = (replay.get("own") or {}).get("entries") or []
+        pair = replay.get("pair") or {}
+        pair_entries = (pair.get("entries") or []) if pair.get("status") == REPLAYABLE else None
         fill = rd.backup_fill(task_dir) if site.backup else None
         lines = evidence_lines(task_dir)
         row: dict[str, Any] = {
@@ -110,7 +129,9 @@ def audit_rows(episodes: Iterable[Mapping[str, Any]], replays: Mapping[str, Mapp
         for tag, k in WINDOWS:
             end = min(rd.landmark_end(cmds, site, k), len(entries))
             row[f"read_{tag}"], row[f"read_source_{tag}"] = rd.inspected(cmds, site, replay, k)
-            row[f"shown_{tag}"] = shown(cmds, entries, end, lines, site.backup if twin and fill == "missing" else None)
+            text = shown(cmds, entries, end, lines, site.backup if twin and fill == "missing" else None)
+            listing = pair_entries is not None and listing_shown(cmds, entries, pair_entries, end, site)
+            row[f"shown_{tag}"], row[f"shown_by_listing_{tag}"] = text or listing, listing and not text
         prefix_end = rd.landmark_end(cmds, site, None)
         row["first_hit"] = _first_hit(cmds, site, prefix_end)
         row["divergence"] = first_divergence(cmds[:prefix_end], replay, site) if replay.get("pair") else None
@@ -126,12 +147,15 @@ def _boot_diff(a: Sequence[bool], b: Sequence[bool], seed: int = 0) -> tuple[flo
     return rate(a) - rate(b), bs[int(0.025 * N_BOOT)], bs[int(0.975 * N_BOOT) - 1]
 
 
-def _paired_diff(rows: Sequence[Mapping[str, Any]], key: str, seed: int = 0) -> tuple[float, float, float]:
-    """Twin minus control rate of `key`, paired by source x surface, 95 % bootstrap over the pairs."""
+def _paired_diff(rows: Sequence[Mapping[str, Any]], key: str, seed: int = 0) -> tuple[float, float, float] | None:
+    """Twin minus control rate of `key`, paired by source x surface, 95 % bootstrap over the pairs; None when no
+    source x surface has both branches (a small stratified sample, as the L1 sweep's S3 draws)."""
     by: dict[tuple[Any, str], tuple[list[bool], list[bool]]] = {}
     for r in rows:
         by.setdefault((r["source"], r["surface"]), ([], []))[0 if r["twin"] else 1].append(bool(r[key]))
     diffs = [sum(t) / len(t) - sum(c) / len(c) for t, c in by.values() if t and c]
+    if not diffs:
+        return None
     rnd = random.Random(seed)
     bs = sorted(sum(rnd.choice(diffs) for _ in diffs) / len(diffs) for _ in range(N_BOOT))
     return sum(diffs) / len(diffs), bs[int(0.025 * N_BOOT)], bs[int(0.975 * N_BOOT) - 1]
@@ -192,7 +216,9 @@ def _pct(x: float | None) -> str:
     return "-" if x is None else f"{100 * x:.1f}"
 
 
-def _ci(t: tuple[float, float, float]) -> str:
+def _ci(t: tuple[float, float, float] | None) -> str:
+    if t is None:
+        return "- (no source with both branches)"
     return f"{100 * t[0]:+.1f} [{100 * t[1]:+.1f}, {100 * t[2]:+.1f}]"
 
 

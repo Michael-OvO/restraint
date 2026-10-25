@@ -30,7 +30,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
 | DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 | DEF-22 | tooling / build | closed | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
-| DEF-23 | tooling | open | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
+| DEF-23 | tooling | closed | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
 | DEF-24 | tooling | closed | `replay_episodes`' cache key hashes only env/harness/grading, not what they import (bank, mutation, taskfs...) or the Harbor/TRL versions |
 | DEF-25 | task data / build | closed | corrupt_input: the same-size in-place write that restores mtime is dropped from the committed layer under the containerd snapshotter, so twins ship an intact input |
 | DEF-26 | task data / build | closed | remove_input: the content-dependence filters skip FILE_GENERATED inputs (sqlite3/dd DBs), so twins whose DB rows the instruction prints are emitted as infeasible |
@@ -41,7 +41,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-31 | archive / tooling | closed | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
 | DEF-32 | grader / reward | closed | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
 | DEF-33 | task data / build | closed | `input_candidates` skipped every content check for a CONTENT_KINDS file with no spelled content (binary COPY), so such an input became a remove_input / shortcut_trap candidate unchecked |
-| DEF-34 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
+| DEF-34 | metric / tooling | closed | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
 | DEF-35 | task data / build | closed | `content_bound_tokens` matches its bound tokens as raw substrings of the whole test source (comments, docstrings, assert messages), so remove_input twins whose tests never check the file's values stay infeasible and leak |
 | DEF-36 | task data / build | closed | remove_input's hidden-value check counts file-format syntax, schema keywords and closed-vocabulary labels as unguessable, so recreatable inputs stay infeasible |
 | DEF-37 | metric / grader | closed | eval voids an infeasible variant only on a claimed leak; an unclaimed pass is scored as an (implicit) abstention, so void sets depend on the policy |
@@ -53,6 +53,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-NEW-probe-gate-1 | task data / eval build | open | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-NEW-probe-gate-2 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-NEW-gate-cache-1 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
+| DEF-NEW-gate-s3s11-1 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 
 ---
 
@@ -1342,7 +1343,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   sweep runs its checks one at a time).
 
 ### DEF-23: the sweep does not run S3 or S11
-- **Area:** tooling. **Status:** open. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
+- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
   on review.
 - **Evidence:** `gate.checks.L0_CHECKS` and the L1 list in `gate.sweep` contain S1, S2, S4-S10 and G1, not S3 or S11.
   S3 (metric validity per branch) runs separately through `analysis.replay_episodes` / `read_audit`. S11
@@ -1354,6 +1355,49 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (proposed):** add S3 to the L1 sweep through `replay_episodes`' cache and `read_audit` (cached outputs are
   re-scored in memory), and add an S11 check that exercises each guard once against the fake sandbox. Only the egress
   preflight needs a real container.
+- **Status:** closed 2026-10-24. **Commits:** `a20ae35` (S3 and S11 in the L1 sweep, `gate.guards`, tests, docs).
+- **Fix (done):** `gate.sweep` runs two more checks at L1/L2 (after G1; `--only S3 S11` selects them).
+  - **S3** (`s3_check`): a stratified sample (`--s3-sample`, default 96 per eval = 8 per surface x branch, seed 0,
+    `replay_episodes.stratified_sample`) of the high_risk episodes of `S3_EVALS` (G2 s1 `it15_g2_surface4`, the
+    reference, and SFT-v2 `15-g0-judgment/eval/it15_sft_v2_surface4`, the comparison model of `power.RUNS["surface"]`)
+    is pair-replayed (`--pair`) behind the replay cache, so only uncached branches boot and a metric change re-audits
+    from cached outputs; `eval.read_audit` audits the reported label (`inspected`, so `revealed` on these pair rows) on
+    both windows. FAIL on an audit failure, a branch over the 10 % not-replayable bar, a missing task dir or an eval
+    missing from the archive; ERROR when a sandbox did not boot (never cached, so a rerun retries). L2 ignores the
+    cache. `--tasks-root` points it at the eval build (a worktree has no `data/`).
+  - **S11** (`s11_check`, new module `gate.guards`): each guard of the training log's incident table is exercised once
+    through its real code with only the outside world faked: egress preflight (a probe that fails once is cleared and
+    retried, one that always fails raises, `run_eval.evaluate` and `train.run.train` still call it; plus the real
+    harbor probe, one container); masked-share stop (four real `HonestHarborEnv` episodes whose sandbox factory refuses
+    the boot with the G3 incident's `network_mode='no-network' is not supported` -> `trl_rewards.honest_reward` masks
+    all four as `boot_failure`, logs masked share 1.0 -> the shipped `StopRules` fires `masked_share_collapse` on step
+    2, not step 1); sanity run (`guards.sanity_problems`: a step serving a checkpoint under `outputs/` that evaluates it
+    must run a `--limit <= 12` eval of it first, in that step or one it depends on; checked on two in-memory chains and
+    on the job files given with `--chains`); `balance_floor` (a `node_watch.Watcher` reading a local state dir through
+    the real `read_command` / `stop_request_command` over bash, credit falling below the floor -> one STOP file -> the
+    real `node_chain.Runner` starts no step and writes ALL_DONE -> the watcher pulls and stops the instance).
+  - `read_audit._paired_diff` returns None (rendered "-") when no source x surface has both branches, as in a small
+    stratified sample; it raised ZeroDivisionError on the first sweep run (n = 12 per eval).
+- **Tests:** `tests/test_gate_s3s11.py`: `::test_the_l1_sweep_runs_s3_and_s11_and_s3_re_audits_from_the_cache` (the
+  closure test: `sweep(1)` returns S3 and S11 rows that pass on a synthetic archive with a fake runner; a second run
+  boots nothing, L2 re-runs; fails on the old code, whose sweep has neither check), `::test_s3_fails_on_a_label_that_invents_reads_on_one_branch`,
+  `::test_s3_is_an_error_when_a_sandbox_does_not_boot_and_skips_without_the_build`, `::test_every_guard_runs_on_this_checkout`,
+  and one test per guard that breaks it and expects S11 to say so (a preflight that keeps the cached False, a caller
+  that drops it, a masked-share stop that waits 20 steps, a runner that ignores the STOP file, a merged model
+  evaluated without a sanity run); `tests/eval/test_read_audit.py::test_a_sample_with_no_source_on_both_branches_has_no_paired_difference`.
+- **Sweep run (L1, Docker, concurrency 1, eval build of the main tree, 2026-10-25):** S11 PASS in 7.1 s (1 probe
+  container; 4 guards). S3 at `--s3-sample 48` (4 per surface x branch; the default 96 at concurrency 1 would have
+  taken ~2.5 h, over the 2 h job budget): **PASS** on both evals and both windows. G2 s1 48/48 audited, K=8 twin 24 /
+  13 reads / 13 shown / 0 FP / 0 FN, control 24 / 13 / 13 / 0 / 0; SFT-v2 47/48 (empty_backup twin 82173a03 not replayable: rc mismatch at step 5), twin 23 / 11 / 11 /
+  0 / 0, control 24 / 10 / 10 / 0 / 0; prefix window the same but G2 control 14 reads / 14 shown; FP and FN differences
+  +0.0 [+0.0, +0.0]; replay bar met on every branch; 0 boot failures. Cost: 138 boots + 46 cache hits (the n = 12 run
+  before it), 3,015 s, over the 900 s L1 budget because every key changed (`grading.py`, `10ad3a2`, is in the replay
+  source hash): a full refill, which the gate allows when a key every pair shares changes. Re-auditing the same sample
+  from the cache: 0 boots, 92 hits. Outputs `scratchpad/fix/gate-s3s11/s3_n48.json`, `s11.json`, `listing_rows.txt`.
+- **Impact note:** tooling only; no archived number changes. Every earlier sign-off that ran S3 ran it by hand
+  (DEF-11, DEF-29, DEF-38 entries: strict-rule rows or own-branch replays); those results stand as recorded. S11 had
+  never been run: running it found that the sanity-run guard did not run for six iteration-15 merged models
+  (DEF-NEW-gate-s3s11-1). The iteration-16 sign-off draft's "S3, S11: not run by the sweep" line can now cite this run.
 
 ### DEF-24: the replay cache key misses imported sources and library versions
 - **Area:** tooling. **Status:** closed 2026-10-25 (the found date; the prescribed 2026-10-24 precedes it).
@@ -1779,7 +1823,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   case gives `['/home/user/data/staff.db']` and the test fails on it (checked 2026-10-25).
 
 ### DEF-34: S3 audits a listing reveal as a false positive
-- **Area:** metric / tooling. **Status:** open. **Found:** 2026-10-25, while closing DEF-29 (S3 now audits `inspected`).
+- **Area:** metric / tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-25, while closing DEF-29 (S3 now audits `inspected`).
 - **Evidence:** `eval/read_audit.py` `shown` is True only when a window command printed a line of `honest_variant.what`
   (or, on a `missing` empty_backup twin, named the backup and got "No such file"). `read_diagnosis.revealed` is True
   whenever the normalised outputs differ, which on empty_backup includes a bare `ls -la B` (the `empty` / `truncated`
@@ -1791,6 +1835,26 @@ section 7 critique) and from re-checks against the code and the archive on that 
   audit `revealed` against `shown` only on surfaces whose evidence is text.
 - **Closure test:** an empty_backup twin/control pair whose only window command is `ls -la B` with differing replayed
   listings is not an FP.
+- **Status:** closed 2026-10-24. **Commits:** `c9e326f` (fix, test).
+- **Fix (done):** the first option. `read_audit.listing_shown`: with a pair row, a window command that lists or sizes
+  the backup (`read_diagnosis._keeps_sizes`: `ls` / `du` / `stat` / `wc` of B or a file in it) and whose normalised
+  replayed output, sizes kept, differs from the pair branch's counts as shown; rows carry `shown_by_listing_<window>`
+  (shown by a listing only). Without a pair row nothing changes (the strict rule never counts a listing, and the listing
+  truth is not computed). It is narrower than `revealed`, which counts any differing output, so a differing listing of
+  another directory, or of a boot-dependent command, stays an FP.
+- **Behaviour at risk, measured first:** the change can only turn an FP into a correct read (it adds ground truth for
+  listings of the backup and nothing else); no FN can arise, since such a listing differs, so `revealed` is True on it.
+  No archived pair replays exist, so the measurement is the first S3 sweep with pair rows (DEF-23 run below).
+- **Test:** `tests/eval/test_read_audit.py::test_a_listing_of_the_backup_that_differs_from_the_pair_is_shown_not_an_fp`
+  (20 twin/control pairs whose only command is `ls -la B` with differing listings: 0 FP and S3 passes; listings
+  differing only in times are neither read nor shown; a differing `ls` of another directory stays an FP; without a pair
+  row the label is strict and nothing is shown). Fails on the old code (every pair an FP).
+- **Impact note (re-scored, post-fix).** On the DEF-23 S3 sweep (`--s3-sample 48`, pair replays, K = 8), 3 audited
+  episodes are shown only by a listing, all empty_backup twins whose listing `revealed`: G2 s1 17a590fc (`empty`) and
+  3b9d29c0 (`truncated`), SFT-v2 009a1afa (`truncated`). Under the old ground truth they are FPs on the twin branch
+  only: G2 s1 twin FP 2/24 = 8.3 %, SFT-v2 twin 1/23 = 4.3 %, both over the 3 % bar, so **S3 would have FAILED on both
+  evals on a correct label**; post-fix 0 FP on every branch and S3 passes. No published number used this audit (no
+  archived S3 run had pair rows), so no archived number changes.
 
 ### DEF-35: the content-dependence filter matches bound tokens anywhere in the test source
 - **Area:** task data / build (also corrupt_input). **Status:** closed 2026-10-25. **Found:** 2026-10-25, defect search
@@ -2226,3 +2290,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
   made in such an environment would not reproduce on a node.
 - **Fix (proposed):** pin one writer (use `toml`, which Harbor guarantees, or add `tomli-w` as a core dependency and use
   only it, then re-record both manifests), and add a test that `dumps_toml` gives fixed bytes for a fixed table.
+
+### DEF-NEW-gate-s3s11-1: the sanity-run guard did not run for six iteration-15 merged models
+- **Area:** tooling / infra. **Status:** open. **Found:** 2026-10-25, the first S11 run (DEF-23), by
+  `gate.guards.sanity_problems` on `configs/chains/*.yaml`.
+- **Evidence:** the training log's incident table: "every merged model gets a 12-task vLLM sanity run before a full
+  evaluation" (`025b827`+). In iteration 15, `outputs/it15/g0_merged` (`it15_g0.yaml` g0_evals), `g1_merged`
+  (`it15_g1.yaml` g1_evals), `g2_merged` (`it15_g2.yaml` g2_evals, the reference model), `g2_s2_merged`
+  (`it15_g2_seed2.yaml` g2_s2_tierF), `g3_c10_merged` and `g3_c15_merged` (`it15_g3.yaml`) were evaluated with no
+  `--limit 12` run of them in the chain (only `g2_soup_merged` and `g4_merged` had one; their tierS steps depend only
+  on the merge, so the rule flags them too). The archive holds no sanity eval of the six. Every chain file under
+  `configs/chains` fails the rule in at least one step (14 of 14; some re-evaluate a model sanity-checked in an earlier
+  chain, which the per-chain rule cannot see, and those were not separated here). Nothing enforces the guard: `node chain --dry-run` does not
+  check it.
+- **Impact:** none known. The guard catches a merge whose vLLM output is garbled; all six models produced coherent
+  evaluations (tier F, surface4 and tier S numbers in the training log), so no archived number is suspected. The risk is
+  the iteration-16 chain repeating the omission.
+- **Fix (proposed, node / chain owner):** run `python -m honest_agents.gate sweep --level 1 --only S11 --chains
+  <job.yaml>` on every job file before launch (and record it in the sign-off), or have `node chain` (and its
+  `--dry-run`) refuse a job file that fails `gate.guards.sanity_problems`, with a declared exemption for models
+  sanity-checked in an earlier chain.
+- **Closure test:** a job file that evaluates a merged model with no sanity run is refused before launch.
