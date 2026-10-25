@@ -292,3 +292,58 @@ def test_commands_and_the_oracle_create_files_under_the_nodes_umask(tmp_path):
     (task / "solution" / "solve.sh").write_text("#!/bin/bash\necho hi > hello.txt\n")
     r = asyncio.run(validate_task(task, oracle_timeout_sec=120, oracle_runs=1))
     assert r.ok and r.reason == "feasible: oracle passes", (r.reason, r.debug.get("test_log", "")[-500:])
+
+
+@pytest.mark.slow
+def test_a_harbor_run_with_a_stock_agent_and_a_separate_verifier_runs_under_the_nodes_umask(tmp_path):
+    """DEF-16 on the harbor-trial path the eval scripts use: a real `harbor run` with Harbor's stock `oracle` agent (no
+    `HonestPolicyAgent.setup`) in `UmaskDockerEnvironment`. The shared verifier checks the mode of the file the agent
+    wrote, and a separate verifier (its own container, built by the trial) the mode of one it writes itself: both 644."""
+    import json
+    import sys
+
+    v = 'V="${HA_VERIFIER_DIR:-/logs/verifier}"\n'
+    shared = _task(
+        tmp_path / "tasks" / "umask-shared",
+        FEASIBLE,
+        test_sh=f'#!/bin/bash\n{v}[ "$(stat -c %a /app/hello.txt)" = 644 ] && echo 1 > "$V/reward.txt" '
+        '|| echo 0 > "$V/reward.txt"\n',
+    )
+    separate = _task(
+        tmp_path / "tasks" / "umask-separate",
+        FEASIBLE,
+        test_sh=f'#!/bin/bash\n{v}touch /tmp/v.txt; [ "$(stat -c %a /tmp/v.txt)" = 644 ] && echo 1 > "$V/reward.txt" '
+        '|| echo 0 > "$V/reward.txt"\n',
+    )
+    toml = separate / "task.toml"
+    toml.write_text(toml.read_text().replace("[verifier]\n", '[verifier]\nenvironment_mode = "separate"\n'))
+    for task in (shared, separate):
+        (task / "solution").mkdir()
+        (task / "solution" / "solve.sh").write_text("#!/bin/bash\necho hi > /app/hello.txt\n")
+    cmd = [
+        sys.executable,
+        "-c",
+        "from harbor.cli.main import app; app()",
+        "run",
+        "-p",
+        str(tmp_path / "tasks"),
+        "-e",
+        "honest_agents.eval.harbor_env:UmaskDockerEnvironment",
+        "-n",
+        "2",
+        "-o",
+        str(tmp_path / "jobs"),
+        "--job-name",
+        "umask",
+        "-y",
+        "-a",
+        "oracle",
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, check=False)
+    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+    rewards = {}
+    for p in (tmp_path / "jobs" / "umask").glob("*/result.json"):
+        res = json.loads(p.read_text())
+        reward = ((res.get("verifier_result") or {}).get("rewards") or {}).get("reward")
+        rewards[res["task_name"].split("/")[-1]] = reward
+    assert rewards == {"umask-shared": 1.0, "umask-separate": 1.0}, (rewards, r.stdout[-2000:])

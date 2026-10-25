@@ -439,3 +439,32 @@ def test_a_harbor_trial_docker_sandbox_runs_under_the_nodes_umask(tmp_path):
     asyncio.run(docker.exec("bash /tests/test.sh", user="root"))  # what the verifier sends after the agent's turn
     asyncio.run(other.exec("bash /tests/test.sh"))
     assert sent == ["umask 022; bash /tests/test.sh", "bash /tests/test.sh"]
+
+
+def test_the_eval_scripts_harbor_environment_runs_every_harness_under_the_nodes_umask(monkeypatch):
+    """DEF-16 for stock harnesses (terminus-2, mini-swe-agent: no `HonestPolicyAgent.setup`) and a separate verifier:
+    the pin lives in the environment class the eval scripts pass to `harbor run -e`, which Harbor builds every
+    environment of a trial from, so each main-container exec carries `umask 022;` exactly once."""
+    from harbor.cli.utils import resolve_environment_spec
+    from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.utils.import_path import import_class
+
+    from honest_agents.eval.harbor_env import UmaskDockerEnvironment
+
+    sent: list[str] = []
+
+    async def exec_(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+        sent.append(command)
+
+    monkeypatch.setattr(DockerEnvironment, "exec", exec_)
+    spec = "honest_agents.eval.harbor_env:UmaskDockerEnvironment"
+    assert resolve_environment_spec(spec) == (None, spec)
+    assert import_class(spec, label="environment") is UmaskDockerEnvironment
+    env = object.__new__(UmaskDockerEnvironment)  # no compose project: only `exec` is exercised
+    harness.pin_docker_umask(env)  # `start_sandbox` / `HonestPolicyAgent.setup` on it: no second prefix
+    asyncio.run(HonestPolicyAgent(logs_dir=Path("."), model_name="policy", api_base="http://x/v1").setup(env))
+    asyncio.run(env.exec("true", timeout_sec=5))  # Harbor's readiness probe
+    asyncio.run(env.exec("bash /tests/test.sh", user="root"))
+    env._is_windows_container = True
+    asyncio.run(env.exec("dir"))
+    assert sent == ["umask 022; true", "umask 022; bash /tests/test.sh", "dir"]

@@ -33,6 +33,6 @@ if [[ "${REPORT_FILE:-0}" == 1 ]]; then
   REPORT_ARGS=(--extra-instruction-path "$JOBS_DIR/_report_file_instructions.md"
                --artifact "$("${UV_RUN[@]}" python -m honest_agents.eval.report_file path)")
 fi
-"${UV_RUN[@]}" harbor run "${SRC[@]}" -e docker -n "${N_CONCURRENT:-8}" -o "$JOBS_DIR" --job-name "$JOB" -y \
+"${UV_RUN[@]}" harbor run "${SRC[@]}" -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -n "${N_CONCURRENT:-8}" -o "$JOBS_DIR" --job-name "$JOB" -y \
   "${AGENT_ARGS[@]}" ${REPORT_ARGS[@]+"${REPORT_ARGS[@]}"} "$@"
 "${UV_RUN[@]}" python -m honest_agents.eval.harbor_results "$JOBS_DIR/$JOB"

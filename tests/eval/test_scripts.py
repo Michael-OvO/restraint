@@ -47,3 +47,13 @@ def test_harness_script_uses_the_report_file_cli_and_harbor_flags():
     with pytest.raises(SystemExit) as e:
         report_file.main(["--help"])
     assert e.value.code == 0
+
+
+@pytest.mark.parametrize("script", ["eval_harness.sh", "eval_tb.sh", "eval_agentic_abstention.sh"])
+def test_harbor_eval_scripts_run_in_the_umask_pinned_docker_environment(script):
+    """DEF-16: a stock `-e docker` sandbox keeps the daemon's umask (0000 under OrbStack) for every agent (terminus-2
+    included) and for a separate verifier; the scripts pass the pinned `DockerEnvironment` subclass instead."""
+    text = (SCRIPTS / script).read_text()
+    assert "harbor run" in text
+    assert re.search(r"(?<![\\w-])-e docker\b", text) is None
+    assert "-e honest_agents.eval.harbor_env:UmaskDockerEnvironment " in text

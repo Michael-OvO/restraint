@@ -1,6 +1,6 @@
 """Harbor agent running our policy with the training tool surface, for TB Lite / TB 2.0 / Agentic Abstention.
 
-    harbor run -d openthoughts-tblite@2.0 -e docker -n 8 \\
+    harbor run -d openthoughts-tblite@2.0 -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -n 8 \\
         -a honest_agents.eval.harbor_agent:HonestPolicyAgent -m policy \\
         --ak api_base=http://localhost:8000/v1 --ak enable_thinking=false
 
