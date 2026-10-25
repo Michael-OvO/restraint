@@ -428,7 +428,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-11: branch-dependent read rate (investigate)
 - **Area:** metric (suspected); found to be behaviour. **Status:** closed 2026-10-24, no classifier defect. **Found:** it15
-  diagnosis section 7. **Commits:** `958aa88` (`eval.read_audit`, the per-branch S3 audit tool, and its tests).
+  diagnosis section 7. **Commits:** `958aa88` (`eval.read_audit`, the per-branch S3 audit tool, and its tests);
+  ledger wording corrected after review (CI count, citation of the whole-prefix figures, per-cell gaps), docs only.
 - **Evidence:** G2 held-out read rate: twins 36.8% vs controls 24.3% (empty_backup 34.2 vs 23.7, inbound_link 39.5 vs
   25.0). SFT-v2 shows no split (53.9 vs 50.7).
 - **Possible causes:** reading follows the decision (a behaviour finding), or the classifier sees different text per
@@ -466,10 +467,12 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - **Seeds and runs** (L0, the canonical metric on the archive, twin - control held-out read rate paired by
     source x surface, 95 % bootstrap): G2 s1 +7.5 [+1.2, +14.4] at K=8, +11.2 [+2.5, +20.6] whole prefix; G2 s2 (same
     recipe, seed 2) **-6.9** [-14.4, +0.6] and -4.4 [-12.5, +3.8]; soup -1.9 / +1.2; G3 c10 +3.8 / +3.1; G3 c15 +1.2 /
-    +1.2; G4 -1.2 / -5.0; G0 +3.8 / +1.9; SFT-v2 it15 -4.4 / +5.0; SFT-v2 it14 0.0 / +5.3. G2 s1 is the only CI of 18
-    that excludes 0, and the identical classifier gives the opposite sign on its seed-2 twin. The split is spread over
-    17 source x surface cells, none above 2 episodes of difference except inbound_link c0dbfec7 (4 vs 1) and a9c2bfc8
-    (4 vs 2).
+    +1.2; G4 -1.2 / -5.0; G0 +3.8 / +1.9; SFT-v2 it15 -4.4 / +5.0; SFT-v2 it14 0.0 / +5.3. Of the 18 run x window CIs,
+    two exclude 0 and both are G2 s1 (K=8 and whole prefix): G2 s1 is the only run of 9 whose interval excludes 0, and
+    the identical classifier gives the opposite sign on its seed-2 twin. The split is spread thin: at K=8, 17 of the 40
+    source x surface cells differ (net +12 twin reads), and only inbound_link c0dbfec7 (4 vs 1) differs by more than 2
+    episodes; over the whole prefix 24 of 40 differ (net +18), the largest gaps empty_backup c0dbfec7 (4 vs 0) and
+    inbound_link c0dbfec7 (4 vs 1).
 - **Decision:** behaviour, not a classifier defect. inbound_link: chance (a branch-blind choice, one seed). empty_backup:
   partly cue-driven reading (the listing differs before the read), not replicated across seeds. No metric change.
 - **Fix (done):** none to the metric. Reporting stays per branch: `read_diagnosis` already prints every read rate per
@@ -486,8 +489,11 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `::test_evidence_lines_ignore_short_lines`, `::test_cli_end_to_end`. All 7 fail on `0133f19` (the module did not
   exist; the S3 audit was a scratch script). Sweep S3 on the full held-out sets of G2 s1 and SFT-v2: pass (above).
 - **Impact note (re-scored, post-fix: no number changes).** The canonical held-out read rates stand as published in
-  [docs/research/it15-read-metric-recompute.md](research/it15-read-metric-recompute.md) (G2 s1 held-out K=8 19.4 / 11.9,
-  whole prefix 35.0 / 23.8; full replay subsets above). What is void is the interpretation: "G2 reads twins more than
+  [docs/research/it15-read-metric-recompute.md](research/it15-read-metric-recompute.md) (G2 s1 held-out K=8 19.4 / 11.9
+  in its table; the table's other held-out column is the pre-fix rule, 36.9 / 24.4). The strict whole-prefix held-out
+  figures 35.0 / 23.8 are not a column there (only its DEF-11 bullet quotes them); their source is the L0 recompute
+  above (`read_diagnosis.load_episodes`, `read_prefix`, on the archived `it15_g2_surface4` episodes). Full replay
+  subsets above. What is void is the interpretation: "G2 reads twins more than
   controls on held-out surfaces" is not a property of G2 (seed 2 reverses it). Cue-driven reading on empty_backup is a
   real behaviour, and every empty_backup "read" comparison should be read per variant type. The earlier 300-episode S3
   sample (DEF-02) is superseded on the held-out surfaces by the full 320-episode audit; the trained surfaces keep the
