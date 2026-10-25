@@ -2770,7 +2770,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
   **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests),
   `e8c8344` (review repair: the pilot's colocate path, `replace()` of a pinned section), `6fd0e9c`
-  (`pinned_revision` drops another model's pin only for a local directory; a Hub id keeps the refusal).
+  (`pinned_revision` drops another model's pin only for a local directory; a Hub id keeps the refusal), `24a64e1`
+  (third review: the two judgment tokenizer callers of `replace(..., name=...)` named, test).
 - **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
   `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
   `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
@@ -2833,8 +2834,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `::test_the_pilots_colocated_engine_loads_the_pinned_snapshot` (runs `pilot.run.run_arm` with a fake `GRPOTrainer`,
   `vllm_mode` colocate and unset; fails at `d187316`: the trainer got `Qwen/Qwen3.5-4B`),
   `::test_replacing_the_name_with_a_local_directory_drops_the_pin_and_a_hub_id_keeps_the_refusal` (fails at `d187316`:
-  the directory keeps the pin; and at `e8c8344`: `Qwen/Qwen3-4B` with the Qwen3.5 pin is re-pinned, not refused). All
-  L0, no network.
+  the directory keeps the pin; and at `e8c8344`: `Qwen/Qwen3-4B` with the Qwen3.5 pin is re-pinned, not refused),
+  `::test_the_judgment_tokenizer_fallbacks_keep_the_revisions_they_had` (each `configs/sft_judgment*.yaml`: the two
+  callers' replaces give None and `851bf6e`; a `Qwen/Qwen3-4B` section's Qwen3.5 fallback is refused; fails at
+  `e8c8344`, which re-pinned it). All L0, no network.
 - **Impact note:** none re-scored: no archived number changes, because the pin is the revision every archived run
   loaded. Not verified on a GPU node: that vLLM 0.30 accepts `--tokenizer-revision` (its engine log prints the
   `tokenizer_revision` field) and the colocate snapshot path (train and pilot); both fail loudly at the next start,
