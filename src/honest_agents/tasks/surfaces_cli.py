@@ -3,18 +3,24 @@
     uv run python -m honest_agents.tasks.surfaces_cli check [--surface S ...] [--strict]
     uv run python -m honest_agents.tasks.surfaces_cli auc [--surface S ...] [--json out.json]
     uv run python -m honest_agents.tasks.surfaces_cli schema
+    uv run python -m honest_agents.tasks.surfaces_cli complete --tasks data/decision/surfaces_val/tasks \\
+        --ids-file data/decision/val_high_risk_sources.txt [--episodes EPISODES.jsonl ...]
     uv run python -m honest_agents.tasks.surfaces_cli build --bank data/tasks --out out/surfaces \\
         --surface file_header manifest --mode same_site --ids-file ids.txt
 
 `check` validates every pool (schema, shape match, LABEL_RE scan, placeholders) and exits 1 when anything is dropped with
 `--strict`. `auc` prints, per surface, the held-out AUC of bag-of-words and style classifiers over the evidence text, the
 single-token rules and the pairs a non-semantic token separates (rewrite candidates). `build` writes twin/control task
-dirs under `--out/tasks` and one row per variant to `--out/surface_variants.jsonl`.
+dirs under `--out/tasks` and one row per variant to `--out/surface_variants.jsonl`. `complete` exits 1 unless every
+source of `--ids-file` has a twin and a control dir with a `task.toml` for every surface, and every high_risk episode of
+`--episodes` resolves to a dir (DEF-05: pruning one source's pairs after a local G1 left 48 eval episodes per
+model without task dirs).
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 from collections.abc import Sequence
@@ -166,6 +172,41 @@ def cmd_ids(args: argparse.Namespace) -> int:
     return 0
 
 
+def missing_dirs(tasks: Path, ids: Sequence[str], surfaces: Sequence[str]) -> list[str]:
+    """The twin and control variant ids of `ids` x `surfaces` with no `task.toml` under `tasks`."""
+    names = [f"{bank_base(i)}__high_risk__{s}{c}" for i in ids for s in surfaces for c in ("", "__control")]
+    return [n for n in names if not (tasks / n / "task.toml").is_file()]
+
+
+def unresolved_episodes(tasks: Path, episode_files: Sequence[Path]) -> list[str]:
+    """The task ids of high_risk episodes (`episodes.jsonl`, plain or `.gz`) with no `task.toml` under `tasks`."""
+    out: set[str] = set()
+    for path in episode_files:
+        text = gzip.decompress(path.read_bytes()).decode() if path.suffix == ".gz" else path.read_text()
+        for ln in text.splitlines():
+            if not ln.strip() or (r := json.loads(ln)).get("family") != "high_risk":
+                continue
+            if not (tasks / str(r.get("task_id")) / "task.toml").is_file():
+                out.add(str(r.get("task_id")))
+    return sorted(out)
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    ids = _ids(args) if (args.ids or args.ids_file) else []
+    missing = missing_dirs(args.tasks, ids, _surfaces(args.surface))
+    unresolved = unresolved_episodes(args.tasks, args.episodes or [])
+    for n in missing:
+        print(f"MISSING dir {n}")
+    for n in unresolved:
+        print(f"MISSING episode task {n}")
+    n_dirs = len(ids) * len(_surfaces(args.surface)) * 2
+    print(
+        f"{n_dirs - len(missing)}/{n_dirs} expected dirs present; "
+        f"{len(unresolved)} episode task id(s) unresolved under {args.tasks}"
+    )
+    return 1 if missing or unresolved else 0
+
+
 def _row(v: Variant, bank_id: str) -> dict[str, object]:
     d = v.detail
     return {
@@ -218,13 +259,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--pool-pair", help="force one pool pair id (default: drawn from the source id)")
     b.set_defaults(fn=cmd_build)
 
-    i = sub.add_parser("ids", help="write ids from a split jsonl (e.g. the val high_risk sources, the select variant ids)")
+    i = sub.add_parser(
+        "ids", help="write ids from a split jsonl (e.g. the val high_risk sources, the select variant ids)"
+    )
     i.add_argument("--split-file", type=Path, required=True)
     i.add_argument("--out", type=Path, required=True)
     i.add_argument("--field", default="pair_id", help="row field to list (pair_id, variant_id)")
     i.add_argument("--family", help="keep only rows of this family")
     i.add_argument("--twins-only", action="store_true", help="drop control rows")
     i.set_defaults(fn=cmd_ids)
+
+    k = sub.add_parser("complete", help="every source x surface has both task dirs; every episode resolves to one")
+    k.add_argument("--tasks", type=Path, required=True, help="the build's task dir root (<out>/tasks)")
+    k.add_argument("--surface", nargs="+", choices=SURFACES)
+    k.add_argument("--ids", nargs="+", help="source ids or slugs the build was made from")
+    k.add_argument("--ids-file", type=Path)
+    k.add_argument("--episodes", nargs="+", type=Path, help="run_eval episodes.jsonl[.gz] that must all resolve")
+    k.set_defaults(fn=cmd_complete)
 
     args = ap.parse_args(argv)
     return int(args.fn(args))

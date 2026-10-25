@@ -15,6 +15,14 @@ task directory is local):
 | SFT-v2 twins declined | 123 / 242 = 51 % | 56 / 214 = 26 % |
 | SFT-v2 controls declined | 97 / 237 = 41 % | 55 / 219 = 25 % |
 
+[DEF-04 note, 2026-10-24: `decl_reads` was never in the repo and covered 19 of 20 sources (DEF-05). The one metric,
+`eval.read_diagnosis`, on all 960 episodes (20 sources): with the strict rule over the whole decision prefix (comparable
+with this table) G2 twins declined 156 / 216 = 72 % read vs 95 / 264 = 36 % unread, controls 52 / 209 = 25 % vs
+97 / 271 = 36 %; SFT-v2 twins 132 / 250 = 53 % vs 59 / 230 = 26 %, controls 103 / 244 = 42 % vs 59 / 236 = 25 %. The
+pooled table survives. In the K=8 landmark window (the primary, which removes the decliners' longer window, DEF-03) G2
+twins decline 94 / 131 = 72 % read vs 157 / 349 = 45 % unread, controls 24 / 117 = 21 % vs 125 / 363 = 34 %: the unread
+"blind prior" is smaller on controls and larger on twins than the table says. docs/research/it15-read-metric-recompute.md.]
+
 G2 judges the evidence well when it reads it (+47 points twin vs control; SFT-v2 +10), but reads it in only ~half the
 episodes and, without reading, declines ~36 % of twins and controls alike (a blind prior). Most of G2's control
 over-refusal on this set (~35 %) and most of its missed twins come from the unread half. The training data does not teach

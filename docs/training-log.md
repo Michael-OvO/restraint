@@ -18,8 +18,10 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   for seeds 1 / 2), claims on impossible 54 -> 20 %, verified success +5.1 [+0.9, +9.2] / +4.2 [+0.2, +8.3]; control
   declines +3.1 (seed 1: all six G4 checks pass, the first time) / +6.6 (seed 2 fails that one check). Two-seed
   capability +4.6 [-0.5, +9.4]: no loss visible (formal verdict withheld: single base run).
-- Transfer: on held-out evidence formats abstention 0 -> 39.5 %, and Agentic Abstention (Terminal-Bench rewrites)
-  recall 37 -> 74 %; but on unfamiliar formats no model discriminates (impossible vs safe twins declined at similar
+- Transfer: on held-out evidence formats abstention 0 -> 39.5 %; Agentic Abstention (Terminal-Bench rewrites) shows
+  no transfer: recall 1/19 -> 0/19 (base -> SFT-v2; GRPO ckpt-10 0/19), control false positives 0 everywhere
+  (re-scored, post-fix, DEF-28; the earlier "37 -> 74 %" counted budget-exhausted `incomplete` reports as
+  abstentions, void as an abstention claim); but on unfamiliar formats no model discriminates (impossible vs safe twins declined at similar
   rates; probe 0.20): SFT, RL and DPO move a caution level, not judgment.
 - Iteration-13 GRPO checkpoint 10: strongest on the familiar set (abstain +51.0, capability +7.2 [+3.0, +11.1]),
   control declines +6.2; no better on new formats. DPO: control declines +0.3 but abstention and transfer drop.
@@ -1133,9 +1135,13 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   (base) has a single run and `ni_allow_single_seed` is false: as pre-registered, no non-inferiority is declared, but no
   capability loss is visible across two seeds. Over-refusal on controls is the borderline, seed-sensitive endpoint.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
-  out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
-  6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
-  none of these tasks, so declines are mostly honest failures; timely recall 0 everywhere). Underpowered (19 units).
+  out-of-distribution): abstain recall base 1/19 -> SFT-v2 e3 0/19 -> GRPO ckpt-10 0/19 and control abstain rate
+  (`control_false_positive_rate`) 0 % everywhere (re-scored, post-fix, DEF-28: only report status `abstain` abstains;
+  the earlier 37 -> 74 -> 68 % recall counted `incomplete` reports filed at model call 8-11 of an 11-call budget, void
+  as an abstention claim); false completion rate 9.3 -> 6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89;
+  feasible declines of any non-claim status 53 -> 73 -> 63 % (48/89, 65/89, 56/89, all `incomplete`; unchanged by
+  DEF-28: the 4B solves almost none of these tasks, so declines are mostly honest failures); timely recall 0
+  everywhere. Underpowered (19 units).
 
 ### Observations
 - On the familiar evaluation set the recipe works and replicates across two seeds: abstention +42-43, claims -34,
@@ -1234,6 +1240,12 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   SFT-v2 looks but does not judge; G1 judges but does not look. G1's training masked the injected reads and replayed only
   anchors (not SFT-v2's read-then-decide examples), so two epochs of decisions taken on evidence the model never fetched
   overwrote the inspection habit.
+  [DEF-04 note, 2026-10-24: the per-surface percentages above come from the one-off `decl_reads`, whose code was never in the
+  repo, and are void (docs/defects.md DEF-04). The one metric, `eval.read_diagnosis` (strict rule, K=8 landmark window,
+  20 sources), twin / control, with the whole decision prefix in parentheses: SFT-v2 readme 45 / 48 (75 / 79), config
+  18 / 18 (36 / 46), header 18 / 24 (53 / 48), manifest 25 / 20 (43 / 36), empty_backup 14 / 18 (40 / 34), inbound_link
+  28 / 33 (66 / 63); G1 at most 5 % on every surface (readme 8 % over the whole prefix), 0-1 % on empty_backup and inbound_link. The
+  direction (SFT-v2 looks, G1 does not) holds; the levels do not. See docs/research/it15-read-metric-recompute.md.]
 
 - (c) tier S: plain verified success 80 % (PASS), control declines 7.5 % (PASS), control success 71 %; but all-twin
   `abstain_correct` 47.5 % (SFT-v2 74 %) with 35 / 80 `infeasible_claimed` (SFT-v2 13): consistent with the lost
@@ -1243,6 +1255,9 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   39-41, manifest 69-75, empty_backup 75-81, inbound_link 72-75): G0 kept the habit (its replay held SFT-v2's decision
   examples) but judged weakly in long contexts (probe 0.34). SFT-v2 / G0 look but judge weakly; G1 judges but does not
   look; G2 tests whether both can be had at once.
+  [DEF-04 note, 2026-10-24: `decl_reads` numbers, void. Canonical, K=8 twin / control (whole prefix): G0 readme 42 / 54 (72 / 84),
+  config 34 / 24 (55 / 44), header 25 / 22 (42 / 44), manifest 31 / 31 (46 / 48), empty_backup 21 / 10 (36 / 25),
+  inbound_link 14 / 18 (32 / 40).]
 
 ### Decision (autonomous)
 The pre-registered follow-up for a (b) failure was "G1 tier F for the record, archive, stop, write the next design". With
@@ -1269,6 +1284,11 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   +4.1 / -2.5, G0 +8.8 / +2.5, G1 -0.6 / -1.2). Twins declined correctly 49 / 54 %, controls declined 27.5 / 38 %.
 - Evidence inspected before deciding: readme 81-84 %, config 51-60, header 34-41, manifest 69-78, empty_backup 76,
   inbound_link 75-84 (SFT-v2 46-88): the habit is back (within 15 points of SFT-v2 on every trained surface).
+  [DEF-04 note, 2026-10-24: `decl_reads` numbers, void. Canonical, K=8 twin / control (whole prefix): G2 readme 51 / 52 (81 / 84),
+  config 20 / 18 (34 / 42), header 21 / 26 (34 / 42), manifest 32 / 26 (51 / 45), empty_backup 18 / 10 (34 / 24),
+  inbound_link 21 / 14 (36 / 24). Against SFT-v2 (it15 run) the pre-registered "within 15 points on every trained
+  surface" holds at K=8 (G2 is 0-8 points higher everywhere) but not over the whole prefix (header twins 34 vs 53). On the
+  held-out surfaces G2 reads less: inbound_link 21 / 14 vs 28 / 33 (whole prefix 36 / 24 vs 66 / 63).]
 - (c) tier S: plain verified success 80 % (PASS), control declines 6.2 % (PASS), control success 74 %; all-twin
   `abstain_correct` **73.8 %** (SFT-v2 74, G0 56, G1 47.5): familiar-set honesty kept.
 - Scorecard: (a) PASS, (b) PASS, (c) PASS, (d) FAIL. By the pre-registered follow-up (b, c pass; inspection within 15
@@ -1290,6 +1310,8 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   +13.7). Decision x evidence read (`decl_reads`, 912 episodes with local task dirs): read -> twins declined 79 %, controls
   33 % (+46; seed 1 +47); not read -> 38 % vs 40 % (seed 1 36 / 37 %). Read rate ~44 % (seed 1 ~46 %). Both seeds judge
   well when they read and guess when they do not: the G3 diagnosis (`docs/iteration-15-g3-rl-read.md`) holds on two seeds.
+  [DEF-04 note, 2026-10-24: `decl_reads`, void; it also covered 19 of 20 sources (DEF-05). The canonical decision x read split
+  is in docs/research/it15-read-metric-recompute.md.]
 - Measurement caveat: the `inbound_link` control's test also requires the real directory emptied, which its instruction
   does not ask; every model (base 0/38, SFT-v2 0/80, G2 0/80) fails it. Decline-based gaps are unaffected; control success
   on inbound_link is not meaningful. Held-out set left frozen.

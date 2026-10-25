@@ -121,6 +121,13 @@ def test_old_record_rows_load_with_commands_and_exit_codes():
     assert ep.family == "high_risk" and ep.branch == "twin"
 
 
+def test_a_high_risk_row_without_a_surface_is_the_readme_surface():
+    """DEF-31: the canonical `read_diagnosis.surface_of` fallback, not the family name."""
+    row = {"episode_id": "e", "task_id": TWIN, "feasible": False, "family": "high_risk", "extra": {"history": []}}
+    assert episode_of(row).surface == "readme" and episode_of({**row, "detail": {}}).surface == "readme"
+    assert episode_of({**row, "family": "missing_input"}).surface == "missing_input"
+
+
 def test_stratified_sample_spreads_over_surface_and_branch_and_is_order_independent():
     eps = [_ep(["ls"], eid=f"{s}{b}{i}", surface=s, twin=b) for s in "abc" for b in (True, False) for i in range(5)]
     picked = stratified_sample(eps, 12, seed=1)

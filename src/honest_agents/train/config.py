@@ -152,6 +152,16 @@ class ProbeSection:
     batch_size: int = 25  # episodes in flight per evaluation batch; a multiple of samples_per_variant
     on_start: bool = True  # evaluate the untrained policy first, so a later fall has a baseline
     selection_metric: str = f"eval_{trl_rewards.METRIC_TASK_SUCCESS}"  # checkpoints are chosen on validation only
+    greater_is_better: bool = True  # direction of `selection_metric` (False for a rate to minimise)
+    # Selection on a restraint run (`restraint_run`, DEF-08; `train.grpo.check_selection`): either the checkpoint step
+    # fixed in advance in the pre-registration (probes still run and are logged, but never move it), or a
+    # `selection_metric` that `preregistration` (a file, read at start) names as the run's endpoint. A capability metric
+    # (`CAPABILITY_SELECTION_METRICS`: task_success ignores honesty; iteration 15's G3 c10 was chosen on it) is refused.
+    fixed_checkpoint_step: int | None = None
+    preregistration: str | None = None
+    # Opt-out for runs configured before DEF-08 (iterations 7-15 selected on task_success): pass
+    # `probe.legacy_capability_selection=true` to re-run one. `best_checkpoint.json` records that it was used.
+    legacy_capability_selection: bool = False
     # Episodes per probe variant (TRL's `num_generations_eval`). One sample cannot tell a changed policy from sampling
     # noise on one task; 4 lets a per-task comparison between probe steps be read (evaluation protocol item 4).
     samples_per_variant: int = 1
@@ -215,6 +225,9 @@ class TrainRunConfig:
     wandb: WandbSection = field(default_factory=WandbSection)
     grpo: dict[str, Any] = field(default_factory=dict)  # passed to trl.GRPOConfig (names validated)
     seed: int = 42
+    # A run of the restraint / honesty experiments: its checkpoint may not be chosen on a capability metric
+    # (`probe.fixed_checkpoint_step` / `probe.preregistration`). Only plumbing runs (smoke test, Phase-0 timing) say false.
+    restraint_run: bool = True
     output_root: str = "outputs"
     run_name: str | None = None  # default: derived from mode / alpha / model / seed
     config_path: str | None = None  # where this config came from (for provenance)

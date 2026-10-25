@@ -58,7 +58,7 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
     """Stop rules, the run log, the validation probe's checkpoint selection and, with W&B on, what the dashboard
     needs beyond TRL's own logs (`train.dashboard`; it reads the run log and the probe, so it comes after both)."""
     from honest_agents.callbacks import JsonlLogger, ProbeSchedule, StopRules, ValidationProbe
-    from honest_agents.train.grpo import probe_steps
+    from honest_agents.train.grpo import check_selection, probe_steps
 
     out = plan.grpo_config.output_dir
     listed = probe_steps(plan.cfg) if plan.eval_dataset is not None else None
@@ -69,7 +69,10 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
     trainer.add_callback(run_log)
     probe = None
     if plan.eval_dataset is not None:
-        probe = ValidationProbe(out, plan.cfg.probe.selection_metric)
+        p = plan.cfg.probe
+        probe = ValidationProbe(
+            out, p.selection_metric, p.greater_is_better, fixed_step=p.fixed_checkpoint_step, selection=check_selection(plan.cfg)
+        )
         trainer.add_callback(probe)
     if wandb_enabled(plan.grpo_config.report_to):
         health_config = HealthConfig(execute_pending_report=plan.cfg.trainer.execute_pending_report)

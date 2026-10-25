@@ -79,6 +79,7 @@ def _cfg(config: Path, data: SimpleNamespace, *overrides: str) -> train.TrainRun
     extra = [f"data.eval_file={data.val}"] if plain.data.eval_file else []
     if plain.data.probe_file:  # a shipped probe list lives on the node; the fixture's validation rows stand in
         extra.append("data.probe_file=null")
+    extra.append("probe.legacy_capability_selection=true")  # the shipped configs predate DEF-08 (task_success)
     return train.load_run_config(
         config, [f"data.train_file={data.train}", f"output_root={data.root / 'out'}", *extra, *overrides]
     )
@@ -319,19 +320,66 @@ def test_accelerate_configs_are_single_process():
 def test_main_dry_run(data: SimpleNamespace, capsys):
     rc = train.main(
         ["--config", str(BASE), "--dry-run", f"data.train_file={data.train}", f"data.eval_file={data.val}",
-         f"output_root={data.root}", "reward.config.alpha=0.4"]
+         f"output_root={data.root}", "reward.config.alpha=0.4", "probe.fixed_checkpoint_step=50"]
     )  # fmt: skip
     assert rc == 0
     summary = json.loads(capsys.readouterr().out)
+    assert summary["probe"]["selection"] == {
+        "metric": "eval_honest/task_success", "greater_is_better": True, "rule": "fixed_step", "fixed_step": 50
+    }  # fmt: skip
     assert summary["run_name"] == "honest-a0.4-qwen3-4b-s42"
     assert summary["reward_config"]["alpha"] == 0.4
     assert summary["reward_config"]["efficiency_ref_actions"] == 28
 
 
+# ── checkpoint selection (DEF-08) ───────────────────────────────────────────
+
+
+def _selection(*overrides: str) -> dict:
+    from honest_agents.train.grpo import check_selection
+
+    return check_selection(train.load_run_config(REPO / "configs" / "grpo_it15_g3.yaml", list(overrides)))
+
+
+def test_a_restraint_run_refuses_a_capability_selector():
+    """G3 c10 was chosen on task_success, which ignores honesty: a restraint run may not select on it or its kin."""
+    assert train.load_run_config(REPO / "configs" / "grpo_it15_g3.yaml").restraint_run is True  # the default
+    for metric in ("eval_honest/task_success", "eval_probe/family/feasible/task_success_feasible",
+                   "eval_honest/control/verified_success_rate", "eval_honest/claim_rate_feasible"):  # fmt: skip
+        with pytest.raises(ValueError, match="capability metric"):
+            _selection(f"probe.selection_metric={metric}")
+    # the explicit opt-out re-runs a pre-DEF-08 config as it was, and says so
+    assert _selection("probe.legacy_capability_selection=true")["rule"].startswith("legacy")
+    assert _selection("restraint_run=false")["rule"] == "metric (not a restraint run)"
+
+
+def test_a_restraint_run_selects_on_a_preregistered_endpoint_or_a_fixed_step(tmp_path: Path):
+    metric = "eval_honest/claim_rate_infeasible"
+    with pytest.raises(ValueError, match="needs probe.preregistration"):
+        _selection(f"probe.selection_metric={metric}")
+    prereg = tmp_path / "prereg.md"
+    prereg.write_text("Endpoint: honest/abstain_correct on twins.\n")
+    with pytest.raises(ValueError, match="does not name"):
+        _selection(f"probe.selection_metric={metric}", f"probe.preregistration={prereg}")
+    with pytest.raises(ValueError, match="is not a file"):
+        _selection(f"probe.selection_metric={metric}", f"probe.preregistration={tmp_path / 'missing.md'}")
+    prereg.write_text("Selection endpoint: honest/claim_rate_infeasible (lower is better).\n")
+    rule = _selection(f"probe.selection_metric={metric}", f"probe.preregistration={prereg}", "probe.greater_is_better=false")
+    assert rule == {
+        "metric": metric, "greater_is_better": False, "rule": "preregistered_metric",
+        "preregistration": {"file": str(prereg), "sha256": hashlib.sha256(prereg.read_bytes()).hexdigest()},
+    }  # fmt: skip
+    # a step fixed in advance needs no endpoint; it must be a saved checkpoint of this run (save_steps 5, 15 steps)
+    assert _selection("probe.fixed_checkpoint_step=15")["fixed_step"] == 15
+    for bad in (0, 7, 20, "true"):
+        with pytest.raises(ValueError, match="fixed_checkpoint_step"):
+            _selection(f"probe.fixed_checkpoint_step={bad}")
+
+
 def test_main_flags_after_overrides(data: SimpleNamespace, capsys):
     rc = train.main(
         ["--config", str(BASE), f"data.train_file={data.train}", f"data.eval_file={data.val}",
-         f"output_root={data.root}", "--dry-run", "--resume", "seed=7"]
+         f"output_root={data.root}", "--dry-run", "--resume", "seed=7", "probe.legacy_capability_selection=true"]
     )  # fmt: skip
     assert rc == 0
     assert json.loads(capsys.readouterr().out)["seed"] == 7
@@ -1393,7 +1441,7 @@ def test_a_run_stopped_by_a_rule_exits_with_its_own_status(stub_trainer, data: S
     monkeypatch.setattr(_StubTrainer, "train", stop_midway)
     assert train.train(_plan(BASE, data, "seed=8")) is True
     assert train.main(["--config", str(BASE), f"data.train_file={data.train}", f"data.eval_file={data.val}",
-                       f"output_root={data.root / 'out2'}"]) == train.EXIT_STOPPED_BY_RULE  # fmt: skip
+                       f"output_root={data.root / 'out2'}", "probe.legacy_capability_selection=true"]) == train.EXIT_STOPPED_BY_RULE  # fmt: skip
 
 
 def test_the_exit_status_reaches_the_launcher_through_the_status_file(tmp_path, monkeypatch):

@@ -3,6 +3,7 @@
 # ratio (gate: mean within ~1% of 1), and writes the trajectory bank the report-only pilot trains on. The policy does
 # not change, so every number is the base model under the training sampler. Stop rules only warn.
 base: base.yaml
+restraint_run: false   # plumbing, not an experiment: its probe may select on task_success (DEF-08)
 output_root: outputs/phase0
 seed: 42
 data:

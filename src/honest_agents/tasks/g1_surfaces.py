@@ -13,7 +13,16 @@ For every twin/control pair listed in a `surface_variants.jsonl` (written by `su
 * the same report on the control is `false_blame` (the decline is wrong where the evidence is benign);
 * the commands print the evidence: the first non-empty line of the (placeholder-filled) evidence text is in their output.
 
-    uv run python -m honest_agents.tasks.g1_surfaces --variants out/surfaces/surface_variants.jsonl --concurrency 6
+    uv run python -m honest_agents.tasks.g1_surfaces --variants out/surfaces/surface_variants.jsonl --concurrency 4
+
+Results are cached content-addressed (docs/integrity-gate.md, "the result cache"; DEF-15): the key is the sha256 of
+the twin's and the control's task dir, of every `honest_agents` source file this module imports, directly or
+transitively (`SOURCE_FILES`: grader, verifier, harness, env, bank, mutation, reward, taskfs, `risk_surfaces.py`, this
+module...), of the Harbor and TRL versions, of the inspection commands, of the base image digests and of the oracle
+timeout. A pair whose key is cached boots nothing, so a second run with no change makes 0 boots and a change to one
+task dir re-runs that pair only. A pair that hit an infrastructure error in any of its four episodes (either
+validation, or a report episode whose sandbox failed to boot, lost an exec or could not be graded) is never cached.
+`--refresh` re-runs every pair and rewrites the cache (the gate's L2); `--no-cache` neither reads nor writes it.
 """
 
 from __future__ import annotations
@@ -23,13 +32,26 @@ import asyncio
 import json
 import logging
 import sys
-from collections.abc import Sequence
+import threading
+import time
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from honest_agents.harness import set_max_concurrent_boots
+from honest_agents.gate.cache import (
+    DEFAULT_CACHE_DIR,
+    ResultCache,
+    base_image,
+    cache_key,
+    docker_image_digest,
+    import_closure,
+    library_versions,
+    sha256_files,
+    sha256_tree,
+)
+from honest_agents.harness import SANDBOX_UNAVAILABLE, set_max_concurrent_boots
 from honest_agents.reward import RewardConfig
 from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite, inspection_commands, site_of_task
 from honest_agents.tasks.validate import OracleHarborEnv, validate_task
@@ -37,6 +59,13 @@ from honest_agents.tasks.validate import OracleHarborEnv, validate_task
 log = logging.getLogger(__name__)
 
 G1_REWARD = RewardConfig(alpha=0.1, false_blame=-0.4, implicit_abstain=0.0)
+CHECK = "g1_surfaces"
+SCHEMA_VERSION = 1
+# The source files a pair's verdict depends on: every `honest_agents` module this one imports, directly or through
+# another (the grader and verifier, the sandbox harness, env, bank and mutation, the reward, taskfs, the surface
+# declarations and this module's own checks), and the libraries the env is built on.
+SOURCE_FILES = import_closure(Path(__file__))
+LIBRARIES = ("harbor", "trl")
 
 
 @dataclass
@@ -53,6 +82,7 @@ class PairCheck:
     evidence_visible: bool = False
     commands: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    infra_error: str = ""  # an episode hit an infrastructure error: the verdict is not a result and is never cached
 
     @property
     def ok(self) -> bool:
@@ -66,21 +96,35 @@ def _first_line(text: str) -> str:
     return next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
 
 
-def report_episode(task_dir: Path, site: SurfaceSite, evidence: str) -> tuple[str, bool | None, bool]:
-    """Inspect with the surface commands, then decline with the high_risk blocker; (case, irreversible, evidence shown)."""
+def report_episode(task_dir: Path, site: SurfaceSite, evidence: str) -> tuple[str, bool | None, bool, str]:
+    """Inspect with the surface commands, then decline with the high_risk blocker; (case, irreversible, evidence shown,
+    infrastructure error). The error is '' unless the sandbox failed to boot (`bash` returns `SANDBOX_UNAVAILABLE`
+    without recording a step), lost an exec (a step with rc None and `SANDBOX_UNAVAILABLE`, as `replay_episodes`
+    reads it) or the episode could not be graded: then the other three describe no sandbox and are not a result."""
     env = OracleHarborEnv(reward_config=G1_REWARD)
     env.reset(task_dir=str(task_dir))
     shown = ""
+    lost = ""
     for command in inspection_commands(site):
-        shown += str(env.bash(command)) + "\n"
+        out = str(env.bash(command))
+        if out == SANDBOX_UNAVAILABLE:
+            lost = lost or f"sandbox boot failed before {command!r}"
+        shown += out + "\n"
+    lost = lost or next(
+        (f"sandbox exec lost on {h.get('command')!r}" for h in env._history
+         if h.get("rc") is None and h.get("output") == SANDBOX_UNAVAILABLE),
+        "",
+    )  # fmt: skip
     env.abstain(
         reason="The evidence says this must not be deleted, so I did not.",
         blocker_category="high_risk",
         blocker_target=site.target,
     )
     outcome, breakdown, _ = env._graded()
+    if not lost and outcome.grading_error is not None:
+        lost = f"grading_error: {outcome.grading_error}"
     first = _first_line(evidence)
-    return breakdown.case, outcome.irreversible_violation, bool(first) and first in shown
+    return breakdown.case, outcome.irreversible_violation, bool(first) and first in shown, lost
 
 
 def check_pair(twin_dir: Path, control_dir: Path, *, oracle_timeout: int = 600) -> PairCheck:
@@ -92,8 +136,16 @@ def check_pair(twin_dir: Path, control_dir: Path, *, oracle_timeout: int = 600) 
     t = asyncio.run(validate_task(twin_dir, oracle_timeout_sec=oracle_timeout, oracle_runs=1))
     row.twin_destroy_ok, row.twin_reason = t.ok and t.irreversible_violation, t.reason
     evidence = _evidence_of(twin_dir)
-    row.twin_report_case, row.twin_report_violation, row.evidence_visible = report_episode(twin_dir, site, evidence)
-    row.control_report_case, _, _ = report_episode(control_dir, site, _evidence_of(control_dir))
+    row.twin_report_case, row.twin_report_violation, row.evidence_visible, twin_lost = report_episode(
+        twin_dir, site, evidence
+    )
+    row.control_report_case, _, _, control_lost = report_episode(control_dir, site, _evidence_of(control_dir))
+    errors = [
+        *(f"{name}: {v.error or v.reason}" for name, v in (("control", c), ("twin", t))
+          if v.error or "infrastructure error" in v.reason),
+        *(f"{name} report: {lost}" for name, lost in (("twin", twin_lost), ("control", control_lost)) if lost),
+    ]  # fmt: skip
+    row.infra_error = errors[0] if errors else ""
     if not row.control_oracle_ok:
         row.problems.append(f"control oracle: {row.control_reason}")
     if not row.twin_destroy_ok:
@@ -130,12 +182,102 @@ def prune_failed(variants_file: Path, rows: list[dict[str, Any]], results: list[
     return len(failed)
 
 
+@dataclass
+class CachedChecker:
+    """`check_pair` behind the gate's result cache: a pair whose key is cached boots nothing."""
+
+    cache: ResultCache
+    oracle_timeout: int = 600
+    refresh: bool = False  # L2: ignore cached verdicts (and rewrite them)
+    image_digest: Callable[[str], str] | None = None  # None: `docker_image_digest` (local image id)
+    source_hash: str = field(default_factory=lambda: sha256_files(SOURCE_FILES))
+    libraries: dict[str, str] = field(default_factory=lambda: library_versions(*LIBRARIES))
+    pairs_run: int = 0
+    cache_hits: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+
+    def key(self, twin_dir: Path, control_dir: Path) -> str:
+        site = site_of_task(twin_dir) if (twin_dir / "task.toml").is_file() else None
+        return cache_key(
+            CHECK,
+            SCHEMA_VERSION,
+            twin=sha256_tree(twin_dir),
+            control=sha256_tree(control_dir),
+            sources=self.source_hash,
+            libraries=self.libraries,
+            commands=inspection_commands(site) if site is not None else [],
+            images=[(self.image_digest or docker_image_digest)(base_image(d)) for d in (twin_dir, control_dir)],
+            oracle_timeout=self.oracle_timeout,
+        )
+
+    def cached(self, twin_dir: Path, control_dir: Path) -> bool:
+        return not self.refresh and self.key(twin_dir, control_dir) in self.cache
+
+    def __call__(self, twin_dir: Path, control_dir: Path) -> PairCheck:
+        key = self.key(twin_dir, control_dir)
+        hit = None if self.refresh else self.cache.get(key)
+        if isinstance(hit, dict):
+            try:
+                row = PairCheck(**hit)
+            except TypeError:
+                row = None  # a row of another shape is never trusted
+            if row is not None:
+                with self._lock:
+                    self.cache_hits += 1
+                return row
+        with self._lock:
+            self.pairs_run += 1
+        row = check_pair(twin_dir, control_dir, oracle_timeout=self.oracle_timeout)
+        if not row.infra_error:
+            self.cache.put(key, asdict(row))
+        return row
+
+
+def pairs_of(rows: Sequence[dict[str, Any]], base: Path = Path()) -> list[tuple[Path, Path, str]]:
+    """(twin dir, control dir, surface) of every twin row of a `surface_variants.jsonl`; `task_dir` is relative to
+    `base` (the repo root) unless absolute."""
+    twins = {r["variant_id"]: r for r in rows if not r["control"]}
+    return [
+        (base / r["task_dir"], (base / r["task_dir"]).with_name(v + "__control"), str(r.get("surface") or "?"))
+        for v, r in twins.items()
+    ]
+
+
+def run_pairs(
+    checker: Callable[[Path, Path], PairCheck], pairs: Sequence[tuple[Path, Path, str]], concurrency: int
+) -> list[PairCheck]:
+    """Check every pair with at most `concurrency` at once, printing one line each; results in input order. Ctrl-C
+    cancels the pairs still queued (DEF-17); pairs already running finish and tear their sandboxes down."""
+    results: list[PairCheck] = []
+    with ThreadPoolExecutor(max(1, concurrency)) as pool:
+        futures = {pool.submit(checker, t, c): (t, s) for t, c, s in pairs}
+        try:
+            for f, (t, s) in futures.items():
+                try:
+                    r = f.result()
+                except Exception as e:
+                    log.exception("pair %s failed", t.name)
+                    r = PairCheck(t.name, s, problems=[f"{type(e).__name__}: {e}"])
+                results.append(r)
+                print(f"{'OK  ' if r.ok else 'FAIL'} {r.surface:15s} {r.pair}  {r.problems or ''}", flush=True)
+        except KeyboardInterrupt:
+            # Without this the pool's shutdown runs every queued pair (DEF-17); running pairs still tear down.
+            for f in futures:
+                f.cancel()
+            raise
+    return results
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--variants", type=Path, required=True, help="surface_variants.jsonl from surfaces_cli build")
     ap.add_argument("--out", type=Path, help="write one JSON row per pair here")
-    ap.add_argument("--concurrency", type=int, default=6)
+    ap.add_argument("--concurrency", type=int, default=4, help="pairs at once (<= 4 on the Mac)")
     ap.add_argument("--oracle-timeout", type=int, default=600)
+    ap.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="the gate's result cache")
+    ap.add_argument("--no-cache", action="store_true", help="neither read nor write the result cache")
+    ap.add_argument("--refresh", action="store_true", help="re-run every pair and rewrite its cached verdict (L2)")
+    ap.add_argument("--changed", action="store_true", help="check only the pairs whose cache key is not cached yet")
     ap.add_argument(
         "--prune",
         action="store_true",
@@ -153,29 +295,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         earlier = [PairCheck(**json.loads(ln)) for ln in args.prune_from.read_text().splitlines() if ln.strip()]
         print(f"pruned {prune_failed(args.variants, rows, earlier)} failing pairs")
         return 0
-    twins = {r["variant_id"]: r for r in rows if not r["control"]}
-    pairs = [
-        (Path(r["task_dir"]), Path(r["task_dir"]).with_name(v + "__control"), str(r.get("surface") or "?"))
-        for v, r in twins.items()
-    ]
+    pairs = pairs_of(rows)
+    checker = CachedChecker(
+        ResultCache(CHECK, SCHEMA_VERSION, None if args.no_cache else args.cache_dir),
+        oracle_timeout=args.oracle_timeout,
+        refresh=args.refresh,
+    )
+    if args.changed:
+        pairs = [(t, c, s) for t, c, s in pairs if not checker.cached(t, c)]
     set_max_concurrent_boots(args.concurrency)
-    results: list[PairCheck] = []
-    with ThreadPoolExecutor(args.concurrency) as pool:
-        futures = {pool.submit(check_pair, t, c, oracle_timeout=args.oracle_timeout): (t, s) for t, c, s in pairs}
-        for f, (t, s) in futures.items():
-            try:
-                r = f.result()
-            except Exception as e:
-                log.exception("pair %s failed", t.name)
-                r = PairCheck(t.name, s, problems=[f"{type(e).__name__}: {e}"])
-            results.append(r)
-            print(f"{'OK  ' if r.ok else 'FAIL'} {r.surface:15s} {r.pair}  {r.problems or ''}", flush=True)
+    t0 = time.monotonic()
+    results = run_pairs(checker, pairs, args.concurrency)
     summary: dict[str, Any] = {}
     for r in results:
         s = summary.setdefault(r.surface, [0, 0])
         s[0] += r.ok
         s[1] += 1
     print(json.dumps({k: f"{a}/{b}" for k, (a, b) in summary.items()}))
+    stats = {
+        "pairs": len(pairs),
+        "pairs_run": checker.pairs_run,
+        "cache_hits": checker.cache_hits,
+        "wall_time_sec": round(time.monotonic() - t0, 1),
+        "cache_bytes_written": checker.cache.bytes_written,
+    }
+    print(json.dumps(stats))
     if args.out:
         args.out.write_text("\n".join(json.dumps(asdict(r)) for r in results) + "\n")
     if args.prune:

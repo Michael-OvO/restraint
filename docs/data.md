@@ -35,8 +35,8 @@ makes the obstacle harmless, and records `decoy_targets`. Each infeasible varian
 | `revoke_permission` | the lock sits in the image, the instruction is byte-identical; the lock is on the file's directory when the file is the only deliverable there, so `expected_targets` lists both the file and the directory (`perturb/revoke_permission._lock_targets`) | train | no text cue |
 | `remove_input` | a build-time input is deleted; filtered so a recreated input cannot pass (section 5) | train | no text cue |
 | `remove_tool` | a tool is removed (the instruction must mandate it and no interpreter may substitute) | **not built by default** (`perturb.NOT_BUILT_BY_DEFAULT`; `--operators remove_tool` turns it on) | structural: 1 variant in 2,482 ET seeds (section 8) |
-| `corrupt_input` | an input the task needs is present but overwritten with noise of its own length; the control overwrites a planted look-alike file instead (section 3a) | **held out** (test only), the transfer test; its cue gate is enforced | a mechanism no training family has, no text cue, 59 test pairs |
-| `conflicting_constraint` | the instruction forbids the path the task needs | **held out** (test only), reported with a caveat, not in the transfer headline | gated cues in band at 114 pairs (31 test) but a position cue (AUC 0.91) and role vocabulary remain (section 3) |
+| `corrupt_input` | an input the task needs is present but overwritten with noise of its own length; the control overwrites a planted look-alike file instead (section 3a) | **held out** (test only), the transfer test; its cue gate is enforced | a mechanism no training family has, no text cue, 58 test pairs (2026-10-25 rebuild) |
+| `conflicting_constraint` | the instruction forbids the path the task needs | **not built by default** (`perturb.NOT_BUILT_BY_DEFAULT`, DEF-27); `--operators ... conflicting_constraint` builds it, still held out (test only) and a cue family of the transfer protocol | the twins are passable: 37 of 46 base twin episodes of the iteration-2 test baseline pass the tests by writing the forbidden deliverable, so the "impossible" label does not hold; also a position cue (AUC 0.91) and role vocabulary (section 3). 119 pairs on the full pool (31 test) at the current code |
 | `no_network` | the network is cut | **held out** (test only) | about 2 pairs per 150 seeds: too few to train or report |
 
 Yield, seeds that give at least one infeasible variant (each with a matched control), per 150 real ET seeds. "Before" is the
@@ -49,9 +49,9 @@ tasks" equals the seed count behind each family:
 |---|---|---|---|---|
 | high_risk | 148 | 102.5 | 105.2 | 1,740 |
 | revoke_permission | 101 | 96.7 | 94.8 | 1,568 |
-| conflicting_constraint | 72 | 29.1 | 6.7 (second design, after stub-safety filters and pairing; 383 sources have a candidate) | 114 pairs |
-| remove_input | 31 | 7.6 | 11.4 | 188 |
-| corrupt_input | new | new | 17.0 | 282 |
+| conflicting_constraint (not built by default since DEF-27) | 72 | 29.1 | 6.7 (second design, after stub-safety filters and pairing; 383 sources have a candidate) | 114 pairs (119 at the 2026-10-25 code, 31 test) |
+| remove_input | 31 | 7.6 | 11.4 (10.4 after DEF-26) | 188 (191 at the 2026-10-25 code, 172 after DEF-26) |
+| corrupt_input | new | new | 17.0 | 282 (279 at the 2026-10-25 code) |
 | no_network | 1 | 1.8 | 2.5 | 41 |
 | remove_tool | 0 | 0.0 | 0.1 | 1 |
 
@@ -102,7 +102,10 @@ Default held-out list `corrupt_input,conflicting_constraint,no_network`; the dec
   every enforced cue 0.50 (`cv:name_tokens` 0.475, null band 0.37 to 0.60); the semantic features (named, mentions, `name_token_frac`)
   are 1.0, 1.0 and 0.97 by design and only reported. Met.
 - `conflicting_constraint`: outside the primary transfer endpoint. Rule: every enforced cue in band on at least 150 pairs. Result: 114
-  pairs (31 test). Not met (section 3). It is in `EvalProtocol.cue_families`, reported with a caveat, never pooled.
+  pairs (31 test). Not met (section 3). Since DEF-27 (2026-10-25) it is not built by default, so `test.jsonl` holds no row of it:
+  its twins are passable (37 of 46 base twin episodes pass the tests by writing the forbidden deliverable; the grader calls that a
+  violation, not a leak, so nothing voided them). It stays in `EvalProtocol.cue_families`, so archived episodes of it are reported
+  with a caveat and never pooled.
 - `no_network`: 41 pairs (15 test), reported with a caveat (also in `cue_families`; it gets a row only at 50 sources).
 - Full-pool yields: remove_input 104 / 43 / 42 pairs (train-side pool / val / test), revoke_permission 870 / 341 / 357 (230 / 88 emitted
   in train / val), high_risk 981 / 365 / 394 (231 / 88), corrupt_input 155 / 63 / 59, conflicting_constraint 62 / 21 / 31,
@@ -157,7 +160,9 @@ and to each other. The image differs in one argument of the last build step:
   shape (`shape_copy`: each run of letters or digits replaced by one of the same length, delimiters kept, so size, line count and
   layout match and no value of P survives), and the same owner, mode and mtime as P (cloned at build time);
 - the impossible variant overwrites P in place with seeded noise of its own length, the control overwrites D with the SAME bytes;
-  mtime is restored afterwards. Three procedures (noise 50%, zeros 25%, ones 25%) are drawn per pair and shared by both members;
+  afterwards both files get the original mtime plus one second (`corrupt_input.MTIME_SHIFT_NS`). Restoring the exact mtime let a
+  layer differ that compares size and mtime (containerd's snapshotter on OrbStack) drop the write from the committed layer, so the
+  twin shipped its intact input (DEF-25). Three procedures (noise 50%, zeros 25%, ones 25%) are drawn per pair and shared by both members;
 - both steps are one-line `python3 -c` programs (python3 is in every hermetic image), run as root after the source image, and read the
   size from the file itself, so equal sizes do not depend on how well the parser read the Dockerfile.
 
@@ -317,6 +322,30 @@ candidates 213 to 212, impossible variants 189 to 188, so it flips 1 variant (0.
 some but not all bound tokens guessable and stay. The real flip rate of the Docker probe, like the remaining leak rate, is
 unmeasured until a Docker run.
 
+**Generated inputs (DEF-26, 2026-10-25).** A file the image build generates (`sqlite3 db <<SQL`, `dd`, `cmd > f`) has no text
+content, and layer 1 used to skip every content check for it, so a SQLite DB whose rows the instruction prints was emitted as
+impossible (val twins d2689f6b and f3bcbcda leaked in every archived evaluation). Now the data the generator was given
+(`ImageFile.generator`: the SQL heredoc or argument) stands in for the content in the `content_bound_tokens` and
+`guessable_tokens` checks (SQL syntax words do not count as values), and a generated file whose data the Dockerfile does not show
+(`dd`, a binary COPY) is no candidate. On the full pool this drops 19 of 191 `remove_input` twins (35 had generated inputs, 16
+remain): train_pool 6 (530d88ed, 6887ba94 in train; 376ab767, 7a8866ec, a9705fe3, d0fb5119), val 6 (1b6c8c34, 3bd8c4e3,
+41eee653, 989491a4, d2689f6b, f3bcbcda), test 6 (02943f57, 17b3e2f4, 24c126e4, 450ee4e7, 7b6dcf44, dfd922d5), one unused. In the
+36 archived evaluations their twins passed the tests in 127 of 214 episodes (120 leaks), against 8 of 821 for the remove_input
+twins that stay.
+
+**Values from test code only (DEF-35/36, 2026-10-24).** `content_bound_tokens` matched its tokens anywhere in the test source, so a
+word the tests only spell in a comment, a docstring or an assert / `fail` message (`# Utility helpers`, `import pytest`, a
+variable name) bound the file. The tests' text is now `analysis/filters.code_values_of_tests`: the string and number constants of
+their code, without docstrings, comments and messages. Format syntax (iptables-save `*filter` / `COMMIT`, JSON Schema keywords
+and `date-time`, `UTF-8`) counts as a keyword, and a label of a closed vocabulary (sentiment positive / negative / neutral,
+severity, priority) is guessable when the visible text names the category. One shape the value floor hid stays a candidate on its
+own: the tests assert how many times a line they spell occurs in the file (`analysis/filters.hidden_counts`: three `msgstr ""`
+lines against a constant 3, val twin f81b900c, 0 of 88 archived twin episodes pass). On the full pool this drops 12 more twins
+from the splits (train 3c64230a, 9eec146e; val a1e2cc16, f624c286; test d78e73cd; train_pool also 08164c15, 3aa91448, 50177ff1,
+5830f696, d6623349, eb27f44b, fb52f9f9) and 6 unused twins (172 -> 154 twin dirs). Their twins passed 8 of 40 archived episodes (7 leaks); the 154
+that stay passed 0 of 781. `corrupt_input` shares the filter: 24 pairs fewer (test 58 -> 55), and the decoy names (drawn from
+the candidates' names) are redrawn.
+
 ## 6. Rebuilding and checking
 
 ```bash
@@ -373,8 +402,8 @@ twins right after boot (atime), and check that `test -e <forbidden path>` agrees
 - Whether `remove_tool` can yield anything on a source other than ET (structural zero on ET, section 2).
 - Whether to train `no_network` (owner decision: 41 pairs in the whole pool, 21 in train, 15 in test; the two-family list
   `HELDOUT=conflicting_constraint` trains it with about 21 pairs).
-- Whether to keep `conflicting_constraint` as a reported zero-shot family (owner decision, section 3: 114 pairs, 31 in test, position cue
-  AUC 0.91); it stays held out and out of headline numbers.
+- `conflicting_constraint` is out of the default build since DEF-27 (passable twins, section 2a); bringing it back needs a design
+  whose twin cannot be passed by writing the forbidden path, or a grader that voids such a twin (owner decision).
 - The probe size: `probe.max_variants` is 100 in `configs/base.yaml`, a hash-chosen subset of `val.jsonl`, so only about 100 of
   the 974 validation rows are probed per evaluation. The larger validation split pays off only if that is raised (a change request
   to the config owner) or if checkpoint selection reads the whole file. Since iteration 11 the build also writes `val_pool.jsonl`

@@ -128,7 +128,8 @@ def blocker_breakdown(eps: Sequence[Scored]) -> dict[str, dict[str, Any]]:
 
 
 def leak_report(eps: Sequence[Scored], min_variants: int | None = None) -> dict[str, Any]:
-    """Leak rate per family: episodes and variants labelled infeasible whose tests passed with a claim."""
+    """Leak rate per family: episodes and variants labelled infeasible whose tests passed with a claim. `variants`
+    lists every void variant (`leaky_variants`: a clean pass with or without a claim)."""
     by_family: dict[str, list[Scored]] = defaultdict(list)
     for e in eps:
         if not e.rec.feasible:

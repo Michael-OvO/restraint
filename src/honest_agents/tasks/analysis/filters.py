@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import posixpath
 import re
+import warnings
+from collections import Counter
 from collections.abc import Mapping, Sequence
 
 from honest_agents.tasks.analysis.boot import _brace_expand, boot_dirs, paths_overlap
@@ -164,27 +167,130 @@ _COMMON_WORDS = frozenset(
         "server",
         "client",
         "config",
+        # Format syntax that any file of the format holds (DEF-36): iptables-save tables, chains and `COMMIT`, JSON
+        # Schema keywords and `format` values, the charset name of a .po / HTML header.
+        "filter",
+        "mangle",
+        "commit",
+        "prerouting",
+        "postrouting",
+        "additionalproperties",
+        "additionalitems",
+        "patternproperties",
+        "propertynames",
+        "definitions",
+        "minimum",
+        "maximum",
+        "exclusiveminimum",
+        "exclusivemaximum",
+        "multipleof",
+        "minlength",
+        "maxlength",
+        "minitems",
+        "maxitems",
+        "uniqueitems",
+        "minproperties",
+        "maxproperties",
+        "dependencies",
+        "dependentrequired",
+        "dependentschemas",
+        "unevaluatedproperties",
+        "unevaluateditems",
+        "contains",
+        "examples",
+        "readonly",
+        "writeonly",
+        "boolean",
+        "date-time",
+        "uri-reference",
+        "ipv4",
+        "ipv6",
+        "utf-8",
     ]
 )
+# Closed vocabularies, keyed by the word that names them: when the visible text names the category, a recreation uses
+# the same labels, so a test that checks (or counts) them holds no value of the file (DEF-36: a sentiment CSV whose
+# tests count positive / negative / neutral rows; the per-label counts are single digits, below the value floor).
+_CLOSED_LABELS: Mapping[str, frozenset[str]] = {
+    "sentiment": frozenset({"positive", "negative", "neutral", "mixed"}),
+    "severity": frozenset({"low", "medium", "high", "critical"}),
+    "priority": frozenset({"low", "medium", "high", "critical", "urgent"}),
+}
+_MESSAGE_CALLS = frozenset({"fail", "AssertionError"})  # pytest.fail(msg), self.fail(msg), raise AssertionError(msg)
+
+
+def code_values_of_tests(source: str) -> str:
+    """The string and number constants of a test file's code, one per line: what the tests can actually compare a file
+    against. Docstrings and other bare string statements, comments, assert messages and `fail(...)` /
+    `AssertionError(...)` arguments are left out (DEF-35: a content word that the test source only spells in a comment
+    such as `# Utility helpers`, a docstring or a failure message kept twins whose tests never check the file).
+    Numbers come both as Python prints them and as the source spells them (`1450.50`). A file that does not parse is
+    returned whole (the old, stricter reading)."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)  # invalid escapes in the seeds' tests
+            tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    out: list[str] = []
+    stack: list[ast.AST] = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue  # a docstring or a bare string: a comment
+        if isinstance(node, ast.Assert):
+            stack.append(node.test)  # not the message
+            continue
+        if isinstance(node, ast.Call):
+            f = node.func
+            if (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)) in _MESSAGE_CALLS:
+                continue
+        if isinstance(node, ast.Constant):
+            v = node.value
+            if isinstance(v, bytes):
+                out.append(v.decode(errors="replace"))
+            elif isinstance(v, str):
+                out.append(v)
+            elif isinstance(v, (int, float, complex)) and not isinstance(v, bool):
+                out.append(str(v))
+                out.append(ast.get_source_segment(source, node) or "")
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return "\n".join(out)
 
 
 def content_bound_tokens(content: str, tests_text: str, visible: str) -> list[str]:
     """Tokens of a file's content that the tests spell out but the agent cannot see anywhere else.
 
     A removed input is only irrecoverable when the tests depend on what the file held: a distinctive value of it (a
-    number with 3+ characters, or a word of 6+ characters that is not a language or schema keyword) appears in the test
-    source and neither in the instruction nor in another file of the image (`visible`). A test that reads the file at
-    run time and recomputes its expectation holds no such token: any plausible recreation passes (the audit-2 leaks:
+    number with 3+ characters, or a word of 6+ characters, neither a language or schema keyword nor format syntax)
+    appears in the tests (`tests_text`: their `code_values_of_tests`, the values their code compares, DEF-35) and
+    neither in the instruction nor in another file of the image (`visible`). A test that reads the file at run time
+    and recomputes its expectation holds no such token: any plausible recreation passes (the audit-2 leaks:
     a C file whose output the instruction prints, a key the test only compares with itself, a log the test re-parses).
     """
     out = set()
     for tok in _BOUND_TOKEN.findall(content):
         tok = tok.strip(".:,-/")
         strong = len(tok) >= 3 and any(c.isdigit() for c in tok)
-        word = len(tok) >= 6 and tok.lower() not in _COMMON_WORDS
-        if (strong or word) and tok in tests_text and tok not in visible:
+        word = len(tok) >= 6
+        if (strong or word) and tok.lower() not in _COMMON_WORDS and tok in tests_text and tok not in visible:
             out.add(tok)
     return sorted(out)
+
+
+def hidden_counts(content: str, tests_text: str, visible: str) -> list[str]:
+    """Counts of the file's lines that the tests assert and the agent cannot see: a line of the file (4+ characters,
+    stripped) that the tests' code spells whole, held N >= 2 times, with N a value of the tests (`code_values_of_tests`)
+    and not a number of `visible`. The value floor of `content_bound_tokens` (3+ characters) misses such a count, so a
+    test that compares the file's three `msgstr ""` lines with a constant 3 looked recreatable (val twin f81b900c: 0 of 88
+    archived twin episodes pass). Returned as `"<N>x <line>"`."""
+    values = set(tests_text.splitlines())
+    shown = set(re.findall(r"(?<![\d.])\d+(?![\d.])", visible))
+    lines = Counter(ln.strip() for ln in content.splitlines() if len(ln.strip()) >= 4)
+    return sorted(
+        f"{n}x {ln}" for ln, n in lines.items() if n >= 2 and ln in values and str(n) in values and str(n) not in shown
+    )
 
 
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
@@ -221,10 +327,15 @@ def _stem(word: str) -> str:
 def guessable_tokens(bound: Sequence[str], visible: str) -> list[str]:
     """The bound tokens (`content_bound_tokens`) an agent could still produce from `visible` text: the token under another
     case, plural or tense, or with separators in a number (`4521` for `4,521`). `content_bound_tokens` only drops an exact
-    spelling; this is the looser reading that a plausible recreation would pass on."""
+    spelling; this is the looser reading that a plausible recreation would pass on. A label of a closed vocabulary
+    (`_CLOSED_LABELS`) is guessable when the visible text names its category."""
     visible = re.sub(r"(?<=\d),(?=\d)", "", visible)  # 4,521 reads as 4521
     stems = {_stem(w) for w in _BOUND_TOKEN.findall(visible)} | {_stem(w) for w in re.findall(r"[A-Za-z0-9]+", visible)}
-    return [t for t in bound if _stem(t) in stems or _stem(re.sub(r"[^A-Za-z0-9]", "", t)) in stems]
+    words = {w.lower() for w in re.findall(r"[A-Za-z]+", visible)}
+    labels = set().union(*(v for k, v in _CLOSED_LABELS.items() if k in words))
+    return [
+        t for t in bound if _stem(t) in stems or _stem(re.sub(r"[^A-Za-z0-9]", "", t)) in stems or t.lower() in labels
+    ]
 
 
 def content_shape(content: str) -> tuple[int, int]:

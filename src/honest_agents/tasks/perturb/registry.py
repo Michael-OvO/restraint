@@ -43,7 +43,12 @@ OPERATORS: dict[str, Operator] = {
 # turn it on with `--operators`.
 # `shortcut_trap` is registered and tested the same way: its cells are validated on a Linux VM (the shortcut must trip the
 # manifest, the oracle must not) and the staged smoke of docs/design.md section 4 sizes its mixture before it is built.
-NOT_BUILT_BY_DEFAULT = ("remove_tool", "shortcut_trap")
+# `conflicting_constraint` is not built by default since DEF-27: its twins are passable (37 of 46 base twin episodes of the
+# iteration-2 test baseline pass the tests by writing the forbidden deliverable), so the "impossible" label does not hold
+# and the family left the transfer headline in iteration 13; built by default it still put 23 pairs into test.jsonl.
+# `--operators ... conflicting_constraint` builds it, still held out (`build.DEFAULT_HELDOUT_FAMILIES`) and still a cue
+# family of the transfer protocol (`eval.protocol.CUE_FAMILIES`: never pooled into the headline).
+NOT_BUILT_BY_DEFAULT = ("remove_tool", "shortcut_trap", "conflicting_constraint")
 CONTROL_OPERATORS: dict[str, ControlOperator] = {
     "remove_tool": remove_tool_control,
     "remove_input": remove_input_control,

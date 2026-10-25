@@ -4,6 +4,7 @@ validation path on the fake sandbox (no Docker)."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import os
 import posixpath
@@ -185,15 +186,18 @@ def _stat(f: Path):
 
 
 @pytest.mark.parametrize("mode", ["noise", "zeros", "ones"])
-def test_the_step_overwrites_in_place_and_keeps_size_owner_mode_and_mtime(tmp_path, mode):
+def test_the_step_overwrites_in_place_and_keeps_size_owner_mode_and_shifts_mtime_by_one_second(tmp_path, mode):
+    """DEF-25: the mtime moves by `MTIME_SHIFT_NS` on both files (a write with the exact mtime restored is dropped from
+    the committed layer), and the input and the decoy keep one mtime, so the pair still has one set of attributes."""
     p, dec, plan = _world(tmp_path)
     plan["mode"] = mode
     original, before = p.read_bytes(), _stat(p)
     _run_step(plan, p)
-    assert _stat(p) == before  # nothing `ls -l` or `stat` shows has changed
+    shifted = (*before[:2], before[2] + ci.MTIME_SHIFT_NS, *before[3:])
+    assert ci.MTIME_SHIFT_NS == 1_000_000_000 and _stat(p) == shifted  # size, mode and owner kept; mtime one second on
     assert p.read_bytes() == ci.garbage(12345, mode, len(original)) != original
     assert (
-        dec.read_bytes() == plan["decoy_body"].encode() and _stat(dec) == before
+        dec.read_bytes() == plan["decoy_body"].encode() and _stat(dec) == shifted
     )  # planted with the input's attributes
 
 
@@ -783,3 +787,71 @@ def test_a_relabelled_variant_takes_the_place_of_the_operators_own_member_in_the
 
 def test_the_entropy_of_uniform_bytes_is_eight_bits():
     assert ci.garbage_signature(bytes(range(256)) * 4)["garbage_entropy"] == pytest.approx(math.log2(256))
+
+
+# ── docker: the corruption survives the layer commit (DEF-25) ────────────────────────────────────────────────────────
+
+_PROBE = (
+    "import hashlib,os,sys\n"
+    "for f in sys.argv[1:]:\n"
+    "    s=os.stat(f);print(f,hashlib.sha256(open(f,'rb').read()).hexdigest(),s.st_size,oct(s.st_mode),s.st_uid,s.st_gid,"
+    "s.st_mtime_ns//10**9)\n"
+)
+_LEAN_APT = "apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*"
+
+
+def _docker_ok() -> bool:
+    return shutil.which("docker") is not None and (
+        subprocess.run(["docker", "info"], capture_output=True, check=False).returncode == 0
+    )
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_ok(), reason="needs a Docker daemon")
+def test_the_built_image_holds_the_garbage_in_the_twin_and_the_intact_input_in_the_control(rich, tmp_path):
+    """DEF-25: build the twin and the control with the real Docker builder and read the files back from the committed
+    image. Under the containerd snapshotter (OrbStack) a same-size in-place write whose mtime is restored exactly is
+    dropped from the layer, so the old step shipped the intact input in the twin; the target must equal
+    `garbage(key, mode, n)` on every snapshotter, and P and D must show one set of attributes in both members."""
+    df = rich / "environment" / "Dockerfile"  # python3 only (the build step needs it), not ffmpeg: a fast image
+    df.write_text(
+        re.sub(
+            r"apt-get install -y --no-install-recommends ffmpeg.*?/var/lib/apt/lists/\*",
+            _LEAN_APT,
+            df.read_text(),
+            flags=re.DOTALL,
+        )
+    )
+    twin, ctrl = _pair(rich, tmp_path)
+    p, d, n = twin.detail["path"], twin.detail["decoy"], twin.detail["size"]
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    noise = sha(ci.garbage(twin.detail["key"], twin.detail["mode"], n))
+    intact = sha(TaskFacts.load(rich).image_files[p].content.encode())
+    decoy = sha(twin.detail["decoy_body"].encode()[:n].ljust(n, b" "))
+    seen = {}
+    for v in (twin, ctrl):
+        tag = f"ha-test-corrupt-input-{v.kind}-{os.getpid()}"
+        try:
+            subprocess.run(
+                ["docker", "build", "-q", "-t", tag, str(v.task_dir / "environment")],
+                check=True,
+                capture_output=True,
+                timeout=900,
+            )
+            r = subprocess.run(
+                ["docker", "run", "--rm", tag, "python3", "-c", _PROBE, p, d],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        finally:
+            subprocess.run(["docker", "rmi", "-f", tag], capture_output=True, check=False)
+        seen[v.kind] = {f: rest for f, *rest in (ln.split() for ln in r.stdout.splitlines())}
+    t, c = seen["infeasible"], seen["control"]
+    assert t[p][0] == noise and c[d][0] == noise  # the noise reached the committed image, on the target only
+    assert c[p][0] == intact != noise and t[d][0] == decoy  # the control's input is intact, the twin's decoy too
+    assert int(t[p][1]) == n
+    assert (
+        t[p][1:] == t[d][1:] == c[p][1:] == c[d][1:]
+    )  # size, mode, owner and mtime: one set for both files and members

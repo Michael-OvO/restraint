@@ -286,6 +286,35 @@ def test_validation_probe_survives_a_resume(tmp_path: Path):
     assert again.record(100, {VAL: 0.6}) is None  # worse than the best of the first life
 
 
+def test_validation_probe_with_a_fixed_step_never_moves_the_pointer(tmp_path: Path):
+    """DEF-08: a checkpoint fixed in the pre-registration is the pointer, whatever the probes say; they are only logged."""
+    rule = {"rule": "fixed_step", "fixed_step": 10}
+    probe = ValidationProbe(tmp_path, VAL, fixed_step=10, selection=rule)
+    assert probe.record(5, {VAL: 0.9}) is None and not (tmp_path / callbacks.BEST_CHECKPOINT_FILE).exists()
+    for step in (5, 10, 15):
+        probe.on_save(*_handler_inputs(step))
+    assert probe.record(15, {VAL: 0.95}) is None
+    best = json.loads((tmp_path / callbacks.BEST_CHECKPOINT_FILE).read_text())
+    assert (
+        best["step"] == 10
+        and best["checkpoint"].endswith("checkpoint-10")
+        and best["selected_on"] == "pre-registration"
+    )
+    assert best["selection"] == rule
+    assert len((tmp_path / callbacks.VALIDATION_FILE).read_text().splitlines()) == 2  # the probes are still recorded
+
+
+def test_validation_probe_minimises_and_records_its_rule(tmp_path: Path):
+    metric = "eval_honest/claim_rate_infeasible"
+    rule = {"rule": "preregistered_metric", "metric": metric, "preregistration": {"file": "p.md", "sha256": "ab"}}
+    probe = ValidationProbe(tmp_path, metric, greater_is_better=False, selection=rule)
+    probe.record(0, {metric: 0.13})
+    probe.record(10, {metric: 0.05})
+    assert probe.record(15, {metric: 0.10}) is None
+    best = json.loads((tmp_path / callbacks.BEST_CHECKPOINT_FILE).read_text())
+    assert best["step"] == 10 and best["greater_is_better"] is False and best["selection"] == rule
+
+
 def _train_steps(stop: StopRules, first: int, last: int, reward_at) -> None:
     for step in range(first, last + 1):
         stop.observe(step, healthy(reward=reward_at(step)))
@@ -564,6 +593,17 @@ def test_pool_stats_reports_which_alphas_are_safe():
     # break-even (1 + alpha) / 2 must not exceed the pool's pass rate: only alpha = 0 is safe at 0.5
     assert s["safe_alphas"] == {"0": True, "0.1": False, "0.25": False, "0.4": False}
     assert s["masked_share"] == pytest.approx(1 / 41)
+
+
+def test_pool_stats_budget_exhaustion_counts_a_truncated_stop_like_the_eval():
+    """DEF-42: the exhaustion rate counted only call and char budget stops; the eval's budget stops also count
+    `truncated`."""
+    from honest_agents.bank import BankRow
+    from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET, STOP_TRUNCATED
+
+    stops = (STOP_TRUNCATED, STOP_CALL_BUDGET, STOP_CHAR_BUDGET, "done")
+    rows = [BankRow(group="g", outcome={}, reward={"feasible": True, "passed": False, "stop_reason": s}) for s in stops]
+    assert pool_stats(rows)["budget_exhaustion_rate_feasible"] == pytest.approx(3 / 4)
 
 
 @pytest.mark.parametrize(

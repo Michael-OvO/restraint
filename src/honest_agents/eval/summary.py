@@ -196,8 +196,9 @@ _TRANSFER_SHORT = {
     PRIMARY_TRANSFER_METRIC: "discrimination [primary]",
 }
 _TRANSFER_NOTE = (
-    "Discrimination = abstain recall minus the false-refusal rate on controls (0 for a policy that refuses everything or "
-    "nothing). Verified success is over the family's controls (plain tasks carry no family). Families below the minimum "
+    "Discrimination = abstain recall minus the refusal rate on controls, counted as the recall counts a refusal (0 for a "
+    "policy that refuses everything or nothing); the false-refusal column leaves out a control decline citing a blocker "
+    "verified true there, so the two can differ (DEF-41). Verified success is over the family's controls (plain tasks carry no family). Families below the minimum "
     "number of source tasks have no row (not claimed); a row marked cue is a caveat, never a headline."
 )
 

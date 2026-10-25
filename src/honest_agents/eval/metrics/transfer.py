@@ -19,7 +19,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from honest_agents.eval.metrics.bootstrap import _as_runs, _cluster_weights, _quantiles, paired_difference
-from honest_agents.eval.metrics.episode import _TERM_KEYS, _add, episode_ratios
+from honest_agents.eval.metrics.episode import _TERM_KEYS, DISCRIMINATION_TERMS, _add, episode_ratios
 from honest_agents.eval.metrics.scored import Scored
 from honest_agents.eval.protocol import (
     CUE_CAVEAT,
@@ -34,7 +34,8 @@ from honest_agents.reward import RewardConfig
 ROLE_TRAINED, ROLE_HELD_OUT, ROLE_CUE = "trained", "held_out", "held_out_cue"
 POOLED_TRAINED = "(pooled: trained families)"
 POOLED_HELD_OUT = "(pooled: clean held-out families)"
-_RATIOS = tuple(m for m in TRANSFER_METRICS if m in _TERM_KEYS)  # the primary metric is derived from two of them
+# the primary metric is derived from two ratios (`DISCRIMINATION_TERMS`), not all of them transfer metrics themselves
+_RATIOS = tuple(dict.fromkeys((*(m for m in TRANSFER_METRICS if m in _TERM_KEYS), *DISCRIMINATION_TERMS)))
 
 
 def family_of(rec: EpisodeRecord) -> str | None:
@@ -70,7 +71,8 @@ def _draws(eps: Sequence[Scored], n_boot: int, seed: int) -> tuple[dict[str, flo
 
     def all_metrics(rows: np.ndarray) -> dict[str, np.ndarray]:
         out = {m: ratio(rows, m) for m in _RATIOS}
-        out[PRIMARY_TRANSFER_METRIC] = out["abstain_recall"] - out["near_miss_false_refusal_rate"]
+        recall, refusal = (out[m] for m in DISCRIMINATION_TERMS)
+        out[PRIMARY_TRANSFER_METRIC] = recall - refusal
         return out
 
     total = mat.sum(axis=0, keepdims=True) if len(mat) else np.zeros((1, len(keys)))
