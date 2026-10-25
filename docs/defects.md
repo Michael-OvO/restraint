@@ -28,7 +28,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-19 | tooling | closed | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only (closed with DEF-16, same cause) |
 | DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
-| DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
+| DEF-21 | tooling / tests | closed | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 | DEF-22 | tooling / build | closed | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
 | DEF-23 | tooling | closed | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
 | DEF-24 | tooling | closed | `replay_episodes`' cache key hashes only env/harness/grading, not what they import (bank, mutation, taskfs...) or the Harbor/TRL versions |
@@ -1299,7 +1299,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** the power report lists an MDE, ni10 and clone-pass for each of the three.
 
 ### DEF-21: a timing-dependent grading test can fail the `--fast` gate
-- **Area:** tooling / tests. **Status:** open. **Found:** 2026-10-24, while repairing DEF-17's test.
+- **Area:** tooling / tests. **Status:** closed 2026-10-25. **Found:** 2026-10-24, while repairing DEF-17's test.
+  **Commits:** `79e6d0e` (fix, test).
 - **Evidence:** `tests/test_grading.py::test_background_agent_process_cannot_forge_reward` (~L413) races a background
   loop (`sleep 0.02` between writes of a forged `reward.json`) against the verifier (`sleep 0.5`) and asserts
   `reward_files_disagree`. One `scripts/test.sh --fast` run on `fix/build-pins` (machine loaded by parallel lanes) failed
@@ -1307,6 +1308,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
   assertion text was not captured. The test is unchanged by this lane.
 - **Fix (proposed):** make the forger's first write happen before grading starts (wait for `reward.json` to exist
   before `run_grade`), so the outcome does not depend on scheduling.
+- **Fix (done):** the proposed fix would not have worked: a `reward.json` written before grading is wiped by the
+  verifier's prep (and is `reward_file_before_tests` tamper), so the loop would still have to win a race. Instead the
+  forger and the test script hand off through files. The forger waits until `test-stdout.txt` exists (the verifier has
+  wiped its directory and started the script), then writes `reward.json` once, by rename, so a read never sees a
+  truncated file. The script waits up to about 10 s for that file, then writes `reward.txt` = 0. The test now also
+  asserts no `reward_file_before_tests`. A new `forger-descheduled` case keeps the forger `SIGSTOP`ped until 1 s into
+  the script, to model a loaded machine. One `SIGSTOP` was sometimes undone (the forger was seen running in 1 of 6
+  traced trials), so the hold re-sends it every 10 ms.
+- **Closure test:** `forger-descheduled`, run against the old forger and script (sleep 0.5, 20 ms loop) in a scratch
+  copy, fails 10/10 serially and 30/30 under load. The fixed test passes 10/10 serially and 30/30 under load, both cases
+  each time. Load: 30 separate pytest runs, 8 at a time, under `nice -n 19`, with 36 CPU spinners on 18 cores, while
+  other lanes' suites ran. Two plain loaded runs of the unchanged old test (no `nice`, then `nice`, 30 each) passed
+  30/30, so the original failure did not reproduce without the injected stall.
+  `scripts/test.sh --fast` is green (4399 passed, 37 skipped). The single-`pytest -n 8` form of the run was not used
+  because xdist collects a repeated node id once and pytest-repeat is not installed. The test takes about 1 s longer.
+- **Impact:** none on archived numbers. This is a test fixture only; no grader, metric or data code changed. The
+  grader behaviour it checks is unchanged: `reward.txt` wins and a disagreeing `reward.json` is
+  `reward_files_disagree`.
 
 ### DEF-22: L0's S7 writes the rebuild to disk
 - **Area:** tooling / build. **Status:** closed 2026-10-25 (the day of the fix; the prescribed 2026-10-24 precedes the
