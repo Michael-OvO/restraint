@@ -14,7 +14,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-04 | metric / tooling | open | three conflicting "inspected" metrics; `decl_reads` is computed outside the repo |
 | DEF-05 | task data | open | source 17a590fc has no task dir; 48 of 960 episodes per model are silently skipped |
 | DEF-06 | recording | closed | rollout records store only `{command, rc}`, not tool outputs |
-| DEF-07 | build | open | `_pick_pair` reassigns every existing variant when a pool grows |
+| DEF-07 | build | closed | `_pick_pair` reassigns every existing variant when a pool grows |
 | DEF-08 | tooling | open | checkpoint selection uses `task_success`, which ignores honesty |
 | DEF-09 | tooling | open | decision probe hard-codes `harness.SYSTEM_PROMPT` |
 | DEF-10 | stats | open | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
@@ -25,6 +25,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
 | DEF-17 | tooling | open | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
+| DEF-18 | build | open | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 
 ---
 
@@ -235,14 +236,49 @@ section 7 critique) and from re-checks against the code and the archive on that 
   cap at least `max_output_chars`, replay never caches a lost sandbox, locks, tests).
 
 ### DEF-07: growing a pool reassigns existing variants
-- **Area:** build. **Status:** open. **Found:** it16 design, re-checked 2026-10-23.
-- **Evidence:** `risk_surfaces.py:677` `chosen = pairs[rng.randrange(len(pairs))]`. Appending a pair changes which pair
-  every existing variant draws.
-- **Impact:** none yet. It blocks enlarging the eval (needed for power) without invalidating every comparison with the
-  archive.
-- **Fix:** `data/pools/pair_assignments.json` (variant → pair), honoured by `_pick_pair`. New pairs carry an explicit
-  `heldout` flag.
-- **Closure test:** sweep S7. The 228 existing variants rebuild byte-identical apart from the intended DEF-01 test changes.
+- **Area:** build. **Status:** closed 2026-10-24. **Found:** it16 design, re-checked 2026-10-23.
+  **Commits:** `8f7d412` (fix, assignments, manifest, tests).
+- **Evidence:** `risk_surfaces.py` `_pick_pair` (was L724) `chosen = pairs[rng.randrange(len(pairs))]`, and the
+  `{context}` draw after it on the same stream. Appending a pair changes which pair and context existing variants draw.
+  Measured on the surface eval build (20 val sources x 6 surfaces, varied, split test; 240 variants): appending 3
+  held-out pairs to every pool moves **100 of 240** variants with the old code (empty_backup 38, inbound_link 36,
+  file_header 10, readme 6, config_comment 6, manifest 4); **0 of 240** with the fix.
+- **Impact:** none on archived numbers: no pool has grown since the it15 eval build. Before the change, a rebuild in a
+  temporary directory gives the live `data/decision/surfaces_val/tasks` dirs byte-identical (228/228 by
+  `validate.task_hash`), and the recorded build reproduces the same 240 hashes, so no archived eval is re-scored.
+  It no longer blocks enlarging the eval.
+- **Fix (done):**
+  - `data/pools/pair_assignments.json`: twin variant id → `{surface, pair, context, split, seed}` for the 120 twins of
+    the eval build (controls share their twin's plan). The `{context}` is recorded too: it is drawn after the pair from the
+    same stream, so it moves when the pool grows even if the pair is pinned. `load_pool` loads it from the pool dir's parent
+    (a test pool in a temporary dir has none, so it draws as before) and refuses a pool that has lost an assigned pair.
+  - `_pick_pair`: a recorded variant (same seed) gets its pair and context. A split mismatch, or a recorded pair whose
+    `heldout` flag was flipped, raises `PoolError`. An unrecorded variant draws only from pairs no recorded variant holds;
+    once all are held, it draws from the whole split. A forced `pool_pair` (decision probe and SFT, `assign_pool_pairs`)
+    keeps the old draw. The training split has no recorded pairs, so training builds draw exactly as before.
+  - Explicit `heldout`: the hash-of-id split was written into all 98 pairs that lacked a flag, with the value unchanged
+    (checked per pair: 109/527 held out, the same as before). `load_pool(strict=True)` (`surfaces_cli check --strict`) now
+    fails on a pair without the flag, so new pairs must choose their split. The non-strict loader keeps the hash fallback
+    for test fixtures. Rules are in `data/pools/surfaces/README.md`.
+  - `python -m honest_agents.tasks.pool_build record | check` (`src/honest_agents/tasks/pool_build.py`). `record` builds
+    the eval (bank `data/tasks`, `data/decision/val_high_risk_sources.txt`) in a temporary directory, adds new twins to the
+    assignments, and writes `data/pools/build_manifest.json` (build parameters and 240 variant hashes). `check` is sweep
+    S7 at L0: it rebuilds, hashes, deletes the temporary build and exits 1 on any changed, missing or new variant (about
+    2 s). The builder writes task dirs, so the build is not literally in memory. Nothing stays on disk, and no tree is
+    diffed.
+  - The manifest includes the 12 variants of source 17a590fc (DEF-05), whose live dirs are missing. Their pairs are the
+    current deterministic draw (readme-04, header-99, config-26, manifest-90, backup-07, link-29). The archived episodes
+    do not record `pool_pair`, so it is not verified that the it15 eval used these pairs; DEF-05 should compare the
+    restored dirs with the archived episodes' Dockerfile and instruction.
+- **Closure test:** `tests/tasks/test_pool_build.py`.
+  - Building 10 sources x 6 surfaces, recording, appending 3 held-out pairs per pool, then rebuilding gives identical
+    hashes, pairs and contexts. A sensitivity twin shows that the same growth without the record moves variants (the
+    old behaviour).
+  - Also covered: new variants draw only unassigned pairs; a removed assigned pair or a crossed split is an error; strict
+    loading requires `heldout`; a test that the committed manifest matches a rebuild (S7; skipped without the local
+    bank).
+- **Not covered:** the probe and SFT builds (`data/decision/surfaces/tasks`) force their pairs through
+  `decision_surfaces.assign_pool_pairs`, which has the same flaw (DEF-18).
 
 ### DEF-08: checkpoint selection ignores honesty
 - **Area:** tooling. **Status:** open. **Found:** training-log method notes (known limitation); it15 diagnosis section 7
@@ -348,3 +384,16 @@ section 7 critique) and from re-checks against the code and the archive on that 
   cancels pending futures on KeyboardInterrupt.
 - **Fix:** cancel pending futures on KeyboardInterrupt, as `replay_all` does.
 
+### DEF-18: probe and SFT surface builds move when a pool grows
+- **Area:** build. **Status:** open. **Found:** 2026-10-24, while fixing DEF-07.
+- **Evidence:** `src/honest_agents/tasks/decision_surfaces.py` `assign_pool_pairs` (L170-178) sorts the split's pairs by
+  hash and deals them round robin (`pairs[i % len(pairs)]`), so an appended pair reassigns sources. The probe rows of
+  held-out pairs take the first pair by `_rank` over the test pairs (~L340), so a new pair can take the first place.
+  `_pick_pair` keeps the old `{context}` draw for a forced pair, which follows `randrange(len(pairs_for(split)))` on
+  the same stream, so the context also moves with pool size. DEF-07 left the forced path unchanged on purpose: changing
+  it would move the 1,048 probe/SFT dirs.
+- **Impact:** none yet (no pool has grown). A rebuild of `data/decision/surfaces/tasks` after a pool edit would change
+  probe prompts and void the cached sandbox outputs keyed by `task_signature`.
+- **Fix:** record the probe/SFT builds in `pair_assignments.json` (pair and context, keyed by twin variant id and role)
+  and honour them on the forced path too; extend `build_manifest.json` (or add a second manifest) for those roots.
+- **Closure test:** grow every pool in a copy, rebuild the probe set in memory and compare hashes with the manifest.
