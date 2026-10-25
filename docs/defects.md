@@ -64,6 +64,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-54 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
 | DEF-55 | tooling / build | closed | `final_benchmark freeze` (after the DEF-54 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
 | DEF-56 | tooling / build | closed | `final_benchmark freeze` (after the DEF-55 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
+| DEF-57 | tooling / build | fixing | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
 
 ---
 
@@ -2817,7 +2818,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   the old globs; checks the 142 rollout files and the listed inputs are in scope and in the recorded builds) and
   `::test_parquet_rollouts_are_read_and_their_group_is_an_identifier`.
 - **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged). Not yet called inside the SFT / data
-  build pipelines (commit-data lane).
+  build pipelines (commit-data lane). The recorded scope missed 5 gitignored repo inputs of the main tree; see DEF-57.
 
 ### DEF-54: freeze accepts a changed metric without --refreeze and leaves no trace
 - **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in `1d1cdc0`). **Found:** 2026-10-25, review of build:bench (the
@@ -2918,3 +2919,22 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define`, whose expected message changed from
   `metrics differ from` to `metrics changed from` (wording only; the behaviour it tests is unchanged).
 - **Impact note:** none re-scored (no results exist); nothing void.
+
+### DEF-57: the never-trained repo scope depends on the tree it runs in
+- **Area:** tooling / build. **Status:** fixing (verdict re-recorded over the main tree; the scope is still whatever
+  gitignored files are on disk). **Found:** 2026-10-25, integrator round2b: after merging fix/bench into main,
+  `scripts/test.sh --fast` failed `tests/eval/test_final_benchmark.py::test_the_archived_training_inputs_are_all_in_scope`
+  (`labels <= recorded`). **Commits:** the integrator commit that re-records `data/benchmarks/final_benchmark.json`.
+- **Evidence:** `REPO_TRAINING_GLOBS` (`src/honest_agents/eval/final_benchmark.py:55`) globs `data/decision/*.jsonl`, but
+  `data/` is gitignored (`.gitignore:8`); only `data/decision/read_rft_tasks.jsonl` is tracked. The DEF-53 re-record ran in
+  the `restraint-wt/bench` worktree, which has no copy of the main tree's untracked `data/decision/probe_prompts.jsonl`,
+  `probe_prompts_surfaces.jsonl`, `sandbox_outputs.jsonl`, `sandbox_outputs_surfaces.jsonl` and `surface_pairs.jsonl`
+  (the it14 decision / DPO inputs, 4,115 rows). None of the 5 is in the archive (no file of those names under
+  `honest-agents-archive`), so `--archive` does not cover them either.
+- **Impact:** the verdict holds. `never-trained` over the 5 files: 0 hits; the full `never-trained --archive --record` in
+  the main tree is pass: 62,559 rows (was 58,444; the 5 files added, every other build's hash and count unchanged),
+  4,005 benchmark ids, 3,683 texts, 0 hits; `check --archive` ok.
+- **Remaining:** the scope must not depend on local untracked files: archive the 5 inputs (and glob them from the
+  archive) or make `--record` refuse when a known training input is missing; plus a regression test for that. The
+  recorded verdict is valid only for the main tree's current files.
+- **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged); nothing void.
