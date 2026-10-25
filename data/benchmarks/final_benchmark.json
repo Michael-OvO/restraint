@@ -1,0 +1,4404 @@
+{
+  "schema": 1,
+  "frozen": "2026-10-25",
+  "refrozen": [
+    {
+      "date": "2026-10-25",
+      "previous_frozen": "2026-10-25",
+      "changed": {
+        "abstentionbench": {
+          "metrics": {
+            "before": [
+              {
+                "side": "qa",
+                "metric": "f1",
+                "name": "abstention F1 (macro over datasets)",
+                "direction": "non_inferior",
+                "headline": false
+              }
+            ],
+            "after": [
+              {
+                "side": "abstain",
+                "metric": "abstained",
+                "name": "abstention recall on should-abstain questions",
+                "direction": "non_inferior",
+                "headline": false
+              },
+              {
+                "side": "answer",
+                "metric": "abstained",
+                "name": "abstention on answerable questions (over-abstention)",
+                "direction": "report",
+                "headline": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "description": "iteration-16 final benchmark: arms base / G2 / final, deltas vs base with cluster-bootstrap 95% CIs; every benchmark is never trained on (`never_trained`)",
+  "ci": {
+    "method": "paired cluster bootstrap (transfer.cluster_bootstrap_delta)",
+    "n_boot": 2000,
+    "alpha": 0.05,
+    "seed": 0
+  },
+  "arms": {
+    "base": {
+      "model": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    },
+    "G2": {
+      "model": "Qwen/Qwen3.5-4B + SFT-v2 epoch 3 (outputs/it14/sft_v2_e3_merged) + G2 LoRA",
+      "archive": "iterations/15-g2-splice-replay/run/it15-g2-splice-replay/final",
+      "adapter_sha256": "f0018a1296d836a0622568a19868e45d5ce6b402d9b5a4e76f739ab32be6c7d6"
+    },
+    "final": {
+      "model": null,
+      "status": "not trained (iteration 16, pending the owner's spend approval)"
+    }
+  },
+  "benchmarks": {
+    "internal_heldout": {
+      "role": "headline (internal)",
+      "status": "pending",
+      "pending_reason": "the held-out build (68+ sources after the S0 fixes, plus a blind held-out family) is frozen when the iteration-16 eval build is signed off (docs/integrity-gate.md step 3)",
+      "sources": [],
+      "adapter": "honest_agents.eval.run_eval + honest_agents.eval.metrics",
+      "metrics": [
+        {
+          "side": "heldout",
+          "metric": "false_claim",
+          "name": "false completion claims",
+          "direction": "down",
+          "headline": true
+        },
+        {
+          "side": "heldout",
+          "metric": "success",
+          "name": "task success",
+          "direction": "non_inferior",
+          "headline": false
+        }
+      ],
+      "items": null,
+      "results": {
+        "base": {
+          "heldout.false_claim": null,
+          "heldout.success": null
+        },
+        "G2": {
+          "heldout.false_claim": null,
+          "heldout.success": null
+        },
+        "final": {
+          "heldout.false_claim": null,
+          "heldout.success": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "heldout.false_claim": null,
+          "heldout.success": null
+        },
+        "final": {
+          "heldout.false_claim": null,
+          "heldout.success": null
+        }
+      }
+    },
+    "terminal_bench_2": {
+      "role": "headline",
+      "status": "frozen",
+      "paper": "Terminal-Bench 2.0",
+      "sources": [
+        {
+          "kind": "harbor_registry",
+          "dataset": "terminal-bench@2.0",
+          "registry_file": "data/benchmarks/registry_tb2.json",
+          "repo": "laude-institute/terminal-bench-2",
+          "commit": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+          "sha256": "98cea7526d7f4cb4a63a40c921283fd8a05825c931b409bc7ebf10f11841642b"
+        }
+      ],
+      "adapter": "scripts/eval_tb.sh tb2 + honest_agents.eval.final_benchmark.tb2_units",
+      "metrics": [
+        {
+          "side": "tb2",
+          "metric": "false_claim",
+          "name": "false-claim share (claimed complete, verifier fails)",
+          "direction": "down",
+          "headline": true
+        },
+        {
+          "side": "tb2",
+          "metric": "success",
+          "name": "verified success (capability guard)",
+          "direction": "non_inferior",
+          "headline": true
+        }
+      ],
+      "items": {
+        "file": "data/benchmarks/items/terminal_bench_2.txt",
+        "n": 89,
+        "sha256": "5c7ed05c61e6768b71bebb5ffd05d9ce07e185b3cf519b06ca2ae5d476f99638"
+      },
+      "results": {
+        "base": {
+          "tb2.false_claim": null,
+          "tb2.success": null
+        },
+        "G2": {
+          "tb2.false_claim": null,
+          "tb2.success": null
+        },
+        "final": {
+          "tb2.false_claim": null,
+          "tb2.success": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "tb2.false_claim": null,
+          "tb2.success": null
+        },
+        "final": {
+          "tb2.false_claim": null,
+          "tb2.success": null
+        }
+      }
+    },
+    "impossiblebench_lcb": {
+      "role": "headline",
+      "status": "frozen",
+      "paper": "arXiv:2510.20270",
+      "sources": [
+        {
+          "kind": "hf_dataset",
+          "repo": "fjzzq2002/impossible_livecodebench",
+          "revision": "98650ffc3f28a01b261669b6d19fcd7773823710",
+          "archive_dir": "benchmarks/impossiblebench/hf/impossible_livecodebench",
+          "files": {
+            "README.md": "2edbdda60b0c5ae4cfd605ff43de1983f1152fce3967d21c91fb189a02d9d7b3",
+            "data/conflicting-00000-of-00001.parquet": "9a13116c6cf48e8c2dc64ca2facdac4122aad30fe1aa52ab552a3b35638c22c8",
+            "data/oneoff-00000-of-00001.parquet": "31a89b06195a223268c4e66ea9ae87c5ed5b744bb7d230ed950d2e012c2c6c56",
+            "data/original-00000-of-00001.parquet": "3f128b7a8419fd4f2d1c11f3eca7cd5bceac0e2385810950e926276d07a784c5"
+          }
+        },
+        {
+          "kind": "github",
+          "repo": "safety-research/impossiblebench",
+          "commit": "d4f9a149db2b9cec0fed7bab01d91c07ee10aca2",
+          "archive_file": "benchmarks/impossiblebench/impossiblebench-d4f9a14.tar.gz",
+          "sha256": "26f7970a04e36829a9e0648f4a5021feb31e52057c42291f903a3fe13fbaa690"
+        }
+      ],
+      "adapter": "honest_agents.eval.external.impossiblebench (materialize, score)",
+      "metrics": [
+        {
+          "side": "abstain",
+          "metric": "flag",
+          "name": "honest flag on impossible splits (abstained, did not cheat)",
+          "direction": "up",
+          "headline": true
+        },
+        {
+          "side": "abstain",
+          "metric": "cheated",
+          "name": "cheating (impossible tests pass)",
+          "direction": "down",
+          "headline": false
+        },
+        {
+          "side": "abstain",
+          "metric": "claimed_complete",
+          "name": "completion claimed on an impossible task",
+          "direction": "down",
+          "headline": false
+        },
+        {
+          "side": "act",
+          "metric": "success",
+          "name": "original split success (capability guard)",
+          "direction": "non_inferior",
+          "headline": false
+        },
+        {
+          "side": "act",
+          "metric": "over_flag",
+          "name": "original split abstention (over-refusal)",
+          "direction": "report",
+          "headline": false
+        }
+      ],
+      "items": {
+        "file": "data/benchmarks/items/impossiblebench_lcb.txt",
+        "n": 309,
+        "sha256": "888e77308e2b0e73b93a443e17f744c53a6ab3dd9b4da06c8ae81b85b43767f4"
+      },
+      "results": {
+        "base": {
+          "abstain.flag": null,
+          "abstain.cheated": null,
+          "abstain.claimed_complete": null,
+          "act.success": null,
+          "act.over_flag": null
+        },
+        "G2": {
+          "abstain.flag": null,
+          "abstain.cheated": null,
+          "abstain.claimed_complete": null,
+          "act.success": null,
+          "act.over_flag": null
+        },
+        "final": {
+          "abstain.flag": null,
+          "abstain.cheated": null,
+          "abstain.claimed_complete": null,
+          "act.success": null,
+          "act.over_flag": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "abstain.flag": null,
+          "abstain.cheated": null,
+          "abstain.claimed_complete": null,
+          "act.success": null,
+          "act.over_flag": null
+        },
+        "final": {
+          "abstain.flag": null,
+          "abstain.cheated": null,
+          "abstain.claimed_complete": null,
+          "act.success": null,
+          "act.over_flag": null
+        }
+      }
+    },
+    "impossiblebench_swe": {
+      "role": "reported",
+      "status": "items_frozen_adapter_pending",
+      "pending_reason": "materialising the SWE-bench split needs their per-instance SWE-bench images; the item set and sources are frozen here so they can never enter training",
+      "paper": "arXiv:2510.20270",
+      "sources": [
+        {
+          "kind": "hf_dataset",
+          "repo": "fjzzq2002/impossible_swebench",
+          "revision": "9c2d34f364b7229e8c0ff807c646100bdc18bbb5",
+          "archive_dir": "benchmarks/impossiblebench/hf/impossible_swebench",
+          "files": {
+            "README.md": "46e4054aba5ca8fefcdd5bce13fa31e1f9c9039c8b43151c872daa66b84781a2",
+            "data/conflicting-00000-of-00001.parquet": "25d96f864431f9279375c94df05ffdaeeafbcacde0be8b2b0a0333daefa4186d",
+            "data/oneoff-00000-of-00001.parquet": "6308b6fa360213dc40a5bb5e39217efcc440f48c76b8caaf00bbf3497cb67462",
+            "data/original-00000-of-00001.parquet": "4ad148f9812e9a347ec529690bff8fed49b8ec7d0256e3b6768d375fed499f3b"
+          }
+        },
+        {
+          "kind": "github",
+          "repo": "safety-research/impossiblebench",
+          "commit": "d4f9a149db2b9cec0fed7bab01d91c07ee10aca2"
+        }
+      ],
+      "adapter": null,
+      "metrics": [
+        {
+          "side": "abstain",
+          "metric": "flag",
+          "name": "honest flag on impossible splits",
+          "direction": "up",
+          "headline": false
+        }
+      ],
+      "items": {
+        "file": "data/benchmarks/items/impossiblebench_swe.txt",
+        "n": 1047,
+        "sha256": "bd898165a29012996a9e2216aad3109026e2642edabc090347a62751c6d27db7"
+      },
+      "results": {
+        "base": {
+          "abstain.flag": null
+        },
+        "G2": {
+          "abstain.flag": null
+        },
+        "final": {
+          "abstain.flag": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "abstain.flag": null
+        },
+        "final": {
+          "abstain.flag": null
+        }
+      }
+    },
+    "agentic_abstention": {
+      "role": "reported only (underpowered)",
+      "status": "frozen",
+      "paper": "arXiv:2606.28733",
+      "sources": [
+        {
+          "kind": "github",
+          "repo": "lhannnn/agentic-abstention",
+          "commit": "ebbf1f51671f8e6d5da42a4188ff8c9254ee978e",
+          "subset": "terminal/data/immediate"
+        },
+        {
+          "kind": "github",
+          "repo": "laude-institute/terminal-bench-2",
+          "commit": "2fd12b88aafdd04a52c298e3940bcb189f9766d6",
+          "role": "task environments"
+        }
+      ],
+      "adapter": "scripts/eval_agentic_abstention.sh + honest_agents.eval.external.agentic_abstention",
+      "metrics": [
+        {
+          "side": "abstain",
+          "metric": "overall",
+          "name": "overall recall",
+          "direction": "report",
+          "headline": false
+        },
+        {
+          "side": "act",
+          "metric": "continued",
+          "name": "continued on solvable originals",
+          "direction": "report",
+          "headline": false
+        }
+      ],
+      "items": {
+        "file": "data/benchmarks/items/agentic_abstention.txt",
+        "n": 108,
+        "sha256": "b425322268b7967f57895f57fefdfe5c7776e826ee1545cc5a5a758091c2410a"
+      },
+      "results": {
+        "base": {
+          "abstain.overall": null,
+          "act.continued": null
+        },
+        "G2": {
+          "abstain.overall": null,
+          "act.continued": null
+        },
+        "final": {
+          "abstain.overall": null,
+          "act.continued": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "abstain.overall": null,
+          "act.continued": null
+        },
+        "final": {
+          "abstain.overall": null,
+          "act.continued": null
+        }
+      }
+    },
+    "abstentionbench": {
+      "role": "regression check",
+      "status": "pending",
+      "pending_reason": "the HF loading script is pinned, but the 20 source datasets it downloads are not; the items are frozen by the sha256 of the first export (scripts/eval_abstentionbench.sh), recorded here before any arm runs (ledger DEF-NEW-bench-2)",
+      "paper": "arXiv:2506.09038",
+      "sources": [
+        {
+          "kind": "hf_dataset",
+          "repo": "facebook/AbstentionBench",
+          "revision": "af06080e2cbfff73f02a7c33135e5567d6f7ce6a"
+        },
+        {
+          "kind": "github",
+          "repo": "facebookresearch/AbstentionBench",
+          "commit": "e29184174c69bc95139b8c33dcca09aacab9442a"
+        }
+      ],
+      "adapter": "scripts/eval_abstentionbench.sh + honest_agents.eval.external.abstentionbench",
+      "metrics": [
+        {
+          "side": "abstain",
+          "metric": "abstained",
+          "name": "abstention recall on should-abstain questions",
+          "direction": "non_inferior",
+          "headline": false
+        },
+        {
+          "side": "answer",
+          "metric": "abstained",
+          "name": "abstention on answerable questions (over-abstention)",
+          "direction": "report",
+          "headline": false
+        }
+      ],
+      "items": null,
+      "results": {
+        "base": {
+          "abstain.abstained": null,
+          "answer.abstained": null
+        },
+        "G2": {
+          "abstain.abstained": null,
+          "answer.abstained": null
+        },
+        "final": {
+          "abstain.abstained": null,
+          "answer.abstained": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "abstain.abstained": null,
+          "answer.abstained": null
+        },
+        "final": {
+          "abstain.abstained": null,
+          "answer.abstained": null
+        }
+      }
+    },
+    "mask": {
+      "role": "secondary",
+      "status": "frozen",
+      "paper": "arXiv:2503.03750",
+      "sources": [
+        {
+          "kind": "hf_dataset",
+          "repo": "cais/MASK",
+          "revision": "4602b84dd9e2ca05c6e1eafbc14e556e908ac1bb",
+          "archive_dir": "benchmarks/mask/hf",
+          "files": {
+            "README.md": "34152db3b45cd74034006a6fb853cfde61ca75df899b96fb029117150fbd1f01",
+            "continuations/test-00000-of-00001.parquet": "8d451bbe7f6fd83053d41118f8f081a4074047801d8f4183b8e0f5c76621d6b3",
+            "disinformation/test-00000-of-00001.parquet": "3ee30f6dbd39c4b0460c7cda87d03d52849766c0d0094241d72de9c26ac10f59",
+            "doubling_down_known_facts/test-00000-of-00001.parquet": "733e3ad2d0e5f468a1c941d676900dbaec3b45cb9e8188d00559007fe61a64c3",
+            "known_facts/test-00000-of-00001.parquet": "5cc62d3ff1072252aa9819dfb5f9843924787af2278d2ac366f9d79197ea54c9",
+            "provided_facts/test-00000-of-00001.parquet": "c9a1b0ddff3d2f8ca29ef98361a868caeb5623f0b77975fd5a626c2de62a5340",
+            "statistics/test-00000-of-00001.parquet": "5785e109d1bb33a66bf0a9ebd49d646fece6d1663f63d454a65017c38281c12b"
+          }
+        },
+        {
+          "kind": "github",
+          "repo": "centerforaisafety/mask",
+          "commit": "25e0b1201e6c928ebe69f7c5aad6fa9063a377ea",
+          "archive_file": "benchmarks/mask/mask-25e0b12.tar.gz",
+          "sha256": "eb1434fea73022a2df1606fdc4d5217b07bde30014a39827b5dca95d444de32c"
+        }
+      ],
+      "adapter": "honest_agents.eval.external.mask (requests, run); judge: their templates, paid endpoint",
+      "metrics": [
+        {
+          "side": "honesty",
+          "metric": "no_lie",
+          "name": "honesty score (1 - P(lie)) under pressure",
+          "direction": "up",
+          "headline": true
+        },
+        {
+          "side": "honesty",
+          "metric": "accurate",
+          "name": "accuracy of beliefs (guard)",
+          "direction": "non_inferior",
+          "headline": false
+        }
+      ],
+      "items": {
+        "file": "data/benchmarks/items/mask.txt",
+        "n": 1000,
+        "sha256": "1d14cec04750de5dd1e1e55e29600da37880131c5468ea84fe4743c2c88fc5a6"
+      },
+      "results": {
+        "base": {
+          "honesty.no_lie": null,
+          "honesty.accurate": null
+        },
+        "G2": {
+          "honesty.no_lie": null,
+          "honesty.accurate": null
+        },
+        "final": {
+          "honesty.no_lie": null,
+          "honesty.accurate": null
+        }
+      },
+      "deltas_vs_base": {
+        "G2": {
+          "honesty.no_lie": null,
+          "honesty.accurate": null
+        },
+        "final": {
+          "honesty.no_lie": null,
+          "honesty.accurate": null
+        }
+      }
+    }
+  },
+  "never_trained": {
+    "date": "2026-10-25",
+    "scope": "repo+archive",
+    "verdict": "pass",
+    "n_rows": 58444,
+    "n_ids": 4005,
+    "n_texts": 3683,
+    "containment_threshold": 0.5,
+    "builds": [
+      {
+        "build": "repo:data/decision/read_rft_tasks.jsonl",
+        "sha256": "46a23d84a957b38bdb5f0dc6ffd83c1096a0e77dc385b40152dca9797bdb3e6a",
+        "n_rows": 400,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/checksum_inventory.jsonl",
+        "sha256": "0b912384ae8582cb7e45b1a8a76df6d4ac20e4e482c80dddbee3f8503ff8c159",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/ci_cache_marker.jsonl",
+        "sha256": "6535ffc4dbe4ed40114a105b9f81068d5e90e32c3e9c3800c499465da9145694",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/config_comment.jsonl",
+        "sha256": "56fff343b789be1e7e4ae67d2eb3db7867531f63d52078c966dd38b15ce15ccd",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/container_volume_inspect.jsonl",
+        "sha256": "66e3ddeb04ecc2c178441410d110ad7994ca275808ec17060553b553de19cbe0",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/crontab_or_timer.jsonl",
+        "sha256": "7f5542c6e3109b9dfd7d71f933b8f408fef6bcc917c23c4eecb686a1b23b873c",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/db_lockfile.jsonl",
+        "sha256": "2df2e08f2fd70ed281c64b7975406027ad2ab9548d186a21d2b68d1cbaccf256",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/file_header.jsonl",
+        "sha256": "3d5e49a08737578812f7d3a2bb38129974a449b857cffdb16c1554feecb21f43",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/git_log_unpushed.jsonl",
+        "sha256": "0c044615337595e644005077c43cbcd5c8032381da34ac6c508a3ba6468441f0",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/git_status.jsonl",
+        "sha256": "fc7ac1f27710347ebcd58cfb6f16201eb204666aecdade7b43f4c6d3c7b64b9b",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/ls_metadata.jsonl",
+        "sha256": "c8ac5f646c8020d5c036d5deee2b9833d9782b49c112c5b210aabb24201bd4bc",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/manifest_index.jsonl",
+        "sha256": "06825e38ea206a22a7227bb596dae8764e6290af9a0bea40bd760455dd68e3fb",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/mount_df.jsonl",
+        "sha256": "a9f0c6b1c6d2b75627ecb13b081bf0560d4c7b9c59d25e8661342dd456785aab",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/notes_file.jsonl",
+        "sha256": "d854497f49a18d51e5f70a6e9f908fb657553275b914456194ec79b206128cbc",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/process_open_files.jsonl",
+        "sha256": "655361459ec2822fe2c3bdfe3759626d4975e0d7e3aea4b95df136d803bd2663",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/retention_policy_doc.jsonl",
+        "sha256": "3db90ea92765d40cf3a4e04f6091f4da34fe6a02812286fcfa91f9617d15f552",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/judgment/ticket_or_email_note.jsonl",
+        "sha256": "21adcd6e085e670f84f9df609271ff9a06657de23a71aecf7a2c61951145708c",
+        "n_rows": 320,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/decision_build_manifest.json",
+        "sha256": "00c7765cdb81fd8034de20c7a3819335b6f394d63bb010b3037fd447d7dac125",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/_common.json",
+        "sha256": "4b3f4e470436a1bd857da7d27edc4f5abc2676154c0d964084fb7942a790308b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/config_comment.json",
+        "sha256": "cd60071fd8c5adc3fb9aff3072abdb9070a054ce6c93b46eb61294f761ead577",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/empty_backup.json",
+        "sha256": "a996c932f000b2430864a2be62e378ebe81de52f4c9c3e0ba7011257c721e0f0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/file_header.json",
+        "sha256": "cf85699a4516eba580125fd43abd14d4c86c47f6f15cb5055f7cdbc069a33e38",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/inbound_link.json",
+        "sha256": "fb109faf1f6f7d30e650665e6ad88f325e329292b8790a9bdc57c8aeba2c90c0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/manifest.json",
+        "sha256": "80af4521c30a68ddf3eb6cb55f04857d0748a09e5e9dcdeb70df8c266518163e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/pools/surfaces/readme.json",
+        "sha256": "19e43371a9eeb12a5e2b0152fbadd2b4db3f77855fa0f1f6dda691045a3ac387",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/04-sft-hindsight/run/hindsight-s0/examples.jsonl.gz",
+        "sha256": "8c677929ff8b05818edbc25573217fde5803979e24b629533e6c734abbe66bf3",
+        "n_rows": 2950,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/05-sft-combo/run/combo-s0/examples.jsonl.gz",
+        "sha256": "5eef73b7c013f8ff904fea9f8a6ae0d7c4aa5cb95a798d6cba15cc139ba42ce0",
+        "n_rows": 1428,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/teacher-qwen35-s0/examples.jsonl.gz",
+        "sha256": "6654debde8c6317ed1f0ccbcc95564f7c0bb52c7bfe68bf3cbe7aba9c6a1854e",
+        "n_rows": 312,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-sft-decision-anchor/run/it13-sft-decision/examples.jsonl",
+        "sha256": "349996f55defab7cd8d12cc8ea1451dcde7608a68ab7d5d418f4f0b98ac57a15",
+        "n_rows": 176,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-sft-decision-anchor/run/it13-sft-decision-anchor/examples.jsonl",
+        "sha256": "565584de054bdae088dbcdefbf9ff75333fc883d4219336457f2009204909dee",
+        "n_rows": 341,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-sft-decision-anchor/run/it13-sft-decision-anchor-3ep/examples.jsonl",
+        "sha256": "565584de054bdae088dbcdefbf9ff75333fc883d4219336457f2009204909dee",
+        "n_rows": 341,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-session-a/run/it14-sft-v2/examples.jsonl.gz",
+        "sha256": "755bcd55837ebc5566db1c1ca39167e0330302ff4ad5bc65c7f9432d0ff4d4b3",
+        "n_rows": 933,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-session-b/run/it14-sft-v2-s2/examples.jsonl.gz",
+        "sha256": "e8ee4e801d55f615720ea7c6c51040db84712f0ed5ab645f939a6ef27d976593",
+        "n_rows": 933,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g0-judgment/run/it15-g0-judgment/examples.jsonl.gz",
+        "sha256": "18057d6b1fa38465ea4e35ab85fc28a864f2f3f62f2444aa97b9767ec604cea3",
+        "n_rows": 4951,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g1-splice/run/it15-g1-splice/examples.jsonl.gz",
+        "sha256": "8333d3fbd5f366391a5f29bdc66dfecf09b0e2bde37fa415c32d6d0e9ae900a1",
+        "n_rows": 2758,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g2-seed2/run/it15-g2-splice-replay-s2/examples.jsonl.gz",
+        "sha256": "711e8b270ce333d8f2cf575b7fc67c841d89a3fdf04e22b9f663889ef0ccb150",
+        "n_rows": 3248,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g2-splice-replay/run/it15-g2-splice-replay/examples.jsonl.gz",
+        "sha256": "e642a0f4ac5e48720c523d330fc79bfecdd38f5dfe8114362154f891887a4296",
+        "n_rows": 3248,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g4-read-rft/run/it15-g4-read-rft/examples.jsonl.gz",
+        "sha256": "ef61b98b908cc93e3d38af42cf76a95804c3067e6ac7acd6b774aef992587b3d",
+        "n_rows": 697,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/00-dataset/files/data/train.jsonl",
+        "sha256": "122a913ee84208fdcdfbf292f607bc4d81c31a61269dd47a2244f17e9963ab1b",
+        "n_rows": 142,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/00-dataset/files/data/train_pool.jsonl.gz",
+        "sha256": "25f79ae3605796fb0054f5b14aa249f2ccc70b20a4850fdc566cbba3a690811c",
+        "n_rows": 966,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/00-dataset/files/data/train_rl.jsonl",
+        "sha256": "3486df9c4b64e641593e657a765b9acb08c038b87fe8be94ea06c340ee6d9d81",
+        "n_rows": 360,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/files/data/train_rl.jsonl",
+        "sha256": "ff0fc5dac4ed9cd925cb0a16738020f799aac5cba8987546d5d0383b529b6281",
+        "n_rows": 351,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/files/data/train_rl.jsonl",
+        "sha256": "ff0fc5dac4ed9cd925cb0a16738020f799aac5cba8987546d5d0383b529b6281",
+        "n_rows": 351,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/files/data/distill_pool.jsonl",
+        "sha256": "521af963e9415998a3516f61cee8337e69823c3dee6fc3220bc907ac65225dfd",
+        "n_rows": 370,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/files/data/transfer_v1.jsonl",
+        "sha256": "1c35d3cca9782d264d9950535074d5fe93ba47910d39751d565948ac59e19651",
+        "n_rows": 40,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-session-a/files/data/select_validation.jsonl",
+        "sha256": "a24ec203215452dec0d8b9032eb3bc1cba377784fa60aaedc009ed3755087be0",
+        "n_rows": 212,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/14-session-a/files/data/decision/surfaces_val/g1.jsonl",
+        "sha256": "5be4b143bc0542f64c0735843b1dd3dd0a19841dcf7ccbbba2d54ca6582dad6b",
+        "n_rows": 120,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g0-judgment/files/data/decision/surfaces_val/g1.jsonl",
+        "sha256": "5b443d98f7ddc728628f09a7ec6469749ec44fbe53568e933843a0e3475adfa4",
+        "n_rows": 120,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/episodes.jsonl.gz",
+        "sha256": "296094c18ab5f75b2cdf51b6fb3514f217f175c5650199f5dc36d9816169e8d3",
+        "n_rows": 443,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/01-phase0-smoke/run/honest-a0.25-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "13fa8615cf9b87bbf7079b8755f9c6c5126a46d1ae179d2c28271ee91b57a0e8",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/01-phase0-smoke/run/honest-a0.25-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "b8e0c8423d9128593f837fad93b797dcf2498e64490520b1c2cd9acf19a55c33",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/06-sync-test/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "d25c76ebcf70a28236cf920aa9eafed7c5ecf8d3ba4b161a315b331bf7b308df",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/06-sync-test/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "59990dfef345734d496191c059ff990b6747ca5f7e87a41de656e2ea8bc1f39c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00000.parquet",
+        "sha256": "e4c1dc6c069e7ed52e72ac05ce52575c35613e8bbe33b535d4f34e08fdcc991a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "9f94cd80bede646a798acf7d3049ee2341f4ec63aed8907085b946067d20a195",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "db3609342b715497d093c27f3bc8c241033b0c3d9918c8e8998ea1338c0221ee",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00003.parquet",
+        "sha256": "ec69a309139e2fcd564e584fa0e4772b112ef5db4b34111c2353acb258dc1c7c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00004.parquet",
+        "sha256": "8de9de13c800b2087d38ee7896d2156c09ec282f19a40ee9cac594399f15e0e4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00005.parquet",
+        "sha256": "3859ba46088c6d919d93c2f4f3751545dfa65a8dfa405c40fefad21b8d7d53c9",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00006.parquet",
+        "sha256": "5760ef81e97580f04f133e0d69c24424a2265d921fdf27f8b286cb2ffc59ee6d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00007.parquet",
+        "sha256": "aee4dbdfb930e6edb6d4ccaf0a54a8f678b6669fe2998e8a3865f0ab96b5c615",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00008.parquet",
+        "sha256": "3d79da19f809967db6074d7d031651457378c8c436b389df3d828e380498793c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00009.parquet",
+        "sha256": "955e1a6dbad8e573f16626de1cc73f060cb4f503688a321656429a1807a8d586",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00010.parquet",
+        "sha256": "181d262b3377ef1b7057c201b127652e0608c892a48117fd39741c08c0a56970",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00011.parquet",
+        "sha256": "d646b25a3633735334c1c4e3abe7e13f634d90a9691915d07c3474ceefc2ee29",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00012.parquet",
+        "sha256": "1565944157c866730c22e552a43b1d56e28980a58f23f83d816cb0d3bb9fa0ca",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00013.parquet",
+        "sha256": "240996a88bbb687ca920ac519fb01ef71d2936566637d2cf1cd24d492efb7397",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00014.parquet",
+        "sha256": "58be10e4a3852d22f8ddeaffda2622d129429a362af4a087d134fe66b7bbaf0b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00015.parquet",
+        "sha256": "d91a5ab2a4a800c55b91afab512d47a3ebd8a3b177a06107fea06cea6adca930",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00016.parquet",
+        "sha256": "b9ab01b18bc7b3a8e5ebce60dd565f3867176aca5fb8fe705e4ed30ef27dd090",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00017.parquet",
+        "sha256": "77386687a2261df887d7a3fcefc3210f6970321b8011ac16c496c3548e3f1ab4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/07-grpo-run1/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00018.parquet",
+        "sha256": "c2397a96acb747f97c714c9720e4273e6a92a3468b7d7bacaa3da52e11666c3b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/08-memdebug/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "3595e4c0baae651584aa615f6e4afa8fc5687ea5ea06db4ad30d69b864ae95d6",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/08-memdebug/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "f6a377b26fef268f1de66d43526aaa5309c4463746b97485d3f541236e843bec",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/08-memdebug/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00003.parquet",
+        "sha256": "cfdac366a1fbb88495869bfa36692836d3142c622bd510aaf122359d099e3d9a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00000.parquet",
+        "sha256": "b3b32f5f1ffb612662b94b114a307224560b7a7b6568064989eaa61d13eccdd9",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "10003cb2e4ce1dca4cf126268bdc7d6c7ae97620a91084774175f96c5bc0e9a3",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "202d562ac52426746dcac296fe43b782953dfb697d8e001137ea8fc972f4fbc4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00003.parquet",
+        "sha256": "426a43ed9b527ba15564ed7905ae4114d150f206de3afeb85207742d0d5c028b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00004.parquet",
+        "sha256": "2f3a2cf9f6ba05fc9cf5446bd466a5a2be6a91d18ef554e554c8e729d84292a2",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00005.parquet",
+        "sha256": "8e2bbc038568f55f651905a00dd4335e4f5af5f8959921c3d8211c438880cf0d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00006.parquet",
+        "sha256": "2ec0f0eb59d9b82cc5961da8a8441cd7e71842491691a7c65bd38f7438208e87",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00007.parquet",
+        "sha256": "2bfd06608afc50ab7c5f712d25a1367954be30f0ba332c3342551278bff61539",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00008.parquet",
+        "sha256": "13f632ee4a30697a74bb4d01fddacad91ba7cf2df3ce685c1037ab98e3a29bc4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00009.parquet",
+        "sha256": "cec78a996c35772a62a22fe784dec36234f5e7add666f247717d95062b40c13f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00010.parquet",
+        "sha256": "e90e44a6a1a1c6bdc378bc622f74c7a6f49b12f5cb89561de671c5d2c5d211fb",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00011.parquet",
+        "sha256": "5d0d939d9ccc7c09c4ac8fb9fec7f6070cc5e1665a01e180ba938514c3959f3b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00012.parquet",
+        "sha256": "648e05e492ce85dcfa989ecd30ff533585e2c4e16778ea2dc559b0458f624b4f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00013.parquet",
+        "sha256": "0e79acf4126692be608ad57306aaed184e78cd357bb91560507732e7c6dd4886",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00014.parquet",
+        "sha256": "95826bb3e7241ced907032f0c8b87fcef3f8afa40c544a6d67185d951c17157b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00015.parquet",
+        "sha256": "b18f54bdb4fd0417bc82d700714e864f7835cb76a934a7b87b71eadb239f3ccf",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00016.parquet",
+        "sha256": "bd2ffea84789190a340374e5ac4f6047fc27fc40c35a0572dbe874cf0a5d335d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00017.parquet",
+        "sha256": "789d3288c925f5d6628ca1af226f9f4e229aec0972e9ddf219ba17ae1e1d9fd1",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00018.parquet",
+        "sha256": "9dccc7c8e551b718eb07e3d3724d4bed6420c78905d772a85c18d6bc56a4c3af",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00019.parquet",
+        "sha256": "f401435b1f1da027086c8b80229669f83f5b7ba92ae096ebd29c8d0085401f3a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00020.parquet",
+        "sha256": "545545153c4a2dc01c1fae7a6ac9d92304d83594f91f830f7db4a649b7632256",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00021.parquet",
+        "sha256": "75a3a650df7f4e2ed9499e95f586c3954a7186ad46930efd1a06ec05a5e262e8",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00022.parquet",
+        "sha256": "b1a3ba6a7455b34182dc3cf06d78cf6e567bfcc1fc395d981b301049e3245178",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00023.parquet",
+        "sha256": "4c55e073602c43b863dfce96d0f731e37dd42810f42091d518e6d23ed9d33bf0",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00024.parquet",
+        "sha256": "7d421189244a2699a973b6be0af488f185a9df3997d2a2d2acd7acba8ae56442",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00025.parquet",
+        "sha256": "528d071f088ff193b910f375db4e8b5d239c824af17d608d91f9d67870ef89cb",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00026.parquet",
+        "sha256": "1f55993fbc4179a9e3437839fdc14fc20163fcb63731062002ffb9ec27d4419f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00027.parquet",
+        "sha256": "bda26526e8264c5bce1c54afe5ab0afe1a7da7d44be6983612d241141a1e5301",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00028.parquet",
+        "sha256": "80410b50e24e21429b1013ad5971efba3bb9f67c9f08976a0c70785488ea817b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00029.parquet",
+        "sha256": "a57b562744aac1fdcb3daf9148595b939be34a39990a7429fe5b32267f0539cf",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00030.parquet",
+        "sha256": "393a86adedfeca5eeb2c201a019fed28eaefdc3bb43e3c948dbb4de79bbdfcd2",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00031.parquet",
+        "sha256": "d85301f253c26089ff299bd464ffdc32ecf7452435ff26946eed78e324ed2c60",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00032.parquet",
+        "sha256": "8391ed06029af45b9f068496145ae9fda79f4cd66b479f2eeed80dc78f180572",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00033.parquet",
+        "sha256": "a20a19904f00631d4c7195c6604760b7860df7278bcfd0aacbcf36275ce6ff6d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00034.parquet",
+        "sha256": "444e4172039dc14ac3b04064f59f57d5985f1755523d67d0b6951fc1cd06d6b7",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00035.parquet",
+        "sha256": "2a693dae330e1d7ade9f9149f2733596ecc99286889d92905bc1e63bb04ee0a5",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00036.parquet",
+        "sha256": "1aace342938a76986f2b7d715050ad798baa4a6f2910ad8efbbd227ff36eb8ad",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00037.parquet",
+        "sha256": "3f5a5ff12a70804fe783ac61756473a7bbeb8787f379408a26d4c7bf37ca6ae9",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00038.parquet",
+        "sha256": "9631f7e08bded3c9915f3fcb2c69a062fbf5367eaae7201041e74f5655a229f4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00039.parquet",
+        "sha256": "6fdb6d157bbf3c9aa94db6077b75263174123ef1f8a8141ad8ed74694c321951",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00040.parquet",
+        "sha256": "0a684f2fe19e979b2450525f7b74aace23f129b54fc2f4101e428cff99256848",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00041.parquet",
+        "sha256": "1475c60a6185a76efd35d41312bb7905fabe9ea9d329bda94f89c6ec91f07004",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00042.parquet",
+        "sha256": "502435556455a8e9f7561babd75a5ad1a76ab518950d113d9dc72e2ea8ab3b62",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00043.parquet",
+        "sha256": "30842f6398843bf11bc75be375130897d90301c8e449165b353709d7f70b50af",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00044.parquet",
+        "sha256": "8858ce8357ed4565018c4b78bb39448a81fdbd6bb031b5f7384e3e738774ff3a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00045.parquet",
+        "sha256": "46b557e6495bd5b7ea18077eb3cca999f15024cd38b30f1dbe8a0f2d043e813a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00046.parquet",
+        "sha256": "3c0056b75ee9e9723766ae365f37e07c87ab9ce6260857e8eeec8cccfbf02e2c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00047.parquet",
+        "sha256": "27499450d34252b837702ef03fd507928fe60c4f176cf7cb9a51748b36a9f91d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00048.parquet",
+        "sha256": "2bad97a87c1dffdd9057baa0314810b74f596a2833231976f4428021c8eb096e",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00049.parquet",
+        "sha256": "b9321ab2a5a16d3456cde529d74891a058a4e295ed1091abf8e257021607b93f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/09-grpo-run2/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00050.parquet",
+        "sha256": "c02475c04577734c7eed0f96cdab47436c9fed51b572d384e2d142d4fb44b6ca",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "6304e1e64c8c41d06ccfe4aa21d6d7d0521fd40bcfab1c28a070cb6567532246",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "efc54c57e92ac168125586e2762416594694382a837e228b6ee44d5ca99a271f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00003.parquet",
+        "sha256": "9e921bfff486c36892bbe0dc5aa8061196de6296daf6978a9380d82531917391",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00004.parquet",
+        "sha256": "fb0cdad084c11674fca7ed09c876e9931e810c2172ebe999bf9ad8a98bf35dd9",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00005.parquet",
+        "sha256": "13da1467277e4858f451423b650742e46ddc9aaa2c1575620d824c233cafaa7b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00006.parquet",
+        "sha256": "321052ba14f8a94fdb4a1114eac93f66e9d9277d3e06d6a53bcaac6127ed0118",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00007.parquet",
+        "sha256": "d86ac37db7019f6d4f619569f5d9fdb95e5f3795ab55d922dfbe86a9ed375b3f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00008.parquet",
+        "sha256": "8d942dc3cecec9c50c0245d20343bbe6e55e3ba8165eea7deebd92d51d8c6c8c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00009.parquet",
+        "sha256": "924d67e5e6810e9b5490330cef9f22466b2898265524b870320ba500718f3443",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00010.parquet",
+        "sha256": "2618038a7f4d85a8fc00199a245fef82db81036f5dd6e000c28acc6f156959c3",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00011.parquet",
+        "sha256": "34199fc0923d54a74a1d88ae3a1441da867c683168040b9e26079d4dc1ba965a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00012.parquet",
+        "sha256": "23dac1fb879780356ebab62059ee533b4ffc473af25b98483be9525bfa261e27",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00013.parquet",
+        "sha256": "dc4edbbb8e98046a9cf9dc244221ca06ef4cc3ed1de8cfdf5b3e7ffe7f2d80d4",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00014.parquet",
+        "sha256": "f69bc499c2cb9eb3de519ed38e6b16026389c816c08f02c955ab965e410bb163",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00015.parquet",
+        "sha256": "f1efc67137fa1443e50e353a66f0ed28a3978475f1f01b6ed1045df0d2f4c82a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00016.parquet",
+        "sha256": "2496d5989a07a76c69cf763bffd5bd7ab0c735bf06b667e020c8d2de5745a96a",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00017.parquet",
+        "sha256": "e656f1a3d6367919ff4c1dbdc424a9b0962f322421dc964cb0ab94ec3a667177",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00018.parquet",
+        "sha256": "b69fa24dbcc20f49ed726218a29ae96f6b9dd84a97a7faa68cd70f1012c2bfb9",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00019.parquet",
+        "sha256": "2e0c7dd6b13d60a9dc54a0f9f29ea24c7b2a501b9a6a7f01eb9cab6eda61fb31",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-sft-grpo/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00020.parquet",
+        "sha256": "ec301ea0fa8c3004bed1e46d2be5eeddd8c17e36cdc2428e2a909b6ea0e00c1c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00001.parquet",
+        "sha256": "e5c85df789a82f6a6b33adc9a023f958f919d560b6ff41d47a2ae806130319e5",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00002.parquet",
+        "sha256": "eeb1fa7a2ef4df359c009069d1b06b42601f682c67980f02eb21ea58ef639d74",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00003.parquet",
+        "sha256": "b4d2e611ab8665fb7187d1e69ec2c0976220b8c1b9645ec0792059b075f89db1",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00004.parquet",
+        "sha256": "48470fe341828834ac702be7653e3410380890c217303b9e1f8a7ea98f6575b5",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00005.parquet",
+        "sha256": "44a71240a50d6c2a701bd94b4a2d898d2fc2705722adb8d9292d94cb2dad3560",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00006.parquet",
+        "sha256": "af36eae794531ed71434e978734581f80edc274824c825e0b1dd792d4423f0ea",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00007.parquet",
+        "sha256": "ef45f5cf06f80b34e503ab309bb35ea8df397144ac799b2936304c9ab3ad4d3e",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00008.parquet",
+        "sha256": "ce6306a71ce5453f4c609d36f4491df221b1a5ce3a6f94155c28d2c6f0e8b8c7",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00009.parquet",
+        "sha256": "b42b4172e600e582a41f90ade701a3dbfbbcb88bbd1bc6d37c4bf27a99e9b76d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00010.parquet",
+        "sha256": "3323a46002c2cefd29beda742f78f76f311e3c6000f6fd270dbd3dd4b1e3b666",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00011.parquet",
+        "sha256": "db886d1ba78ead10ecf7b3dbfa0fd62011bd38783501401021e7f851ecaf8a26",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00012.parquet",
+        "sha256": "27a71a2613b218e5e665f9db813b134039396d7789b796f320c397e4734ae216",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00013.parquet",
+        "sha256": "518dd08ec26ee733d808953c76886d815cb418520196faa0d373543dd5a0b231",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00014.parquet",
+        "sha256": "0367897ce37a802992513a59906bbb30d8ae4619fb9b40197a871b7d30eb4672",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/12-harness-b0/run/honest-a0.1-qwen3.5-4b-s42/completions/completions_00015.parquet",
+        "sha256": "ec629b98c528ceb6ee5a36a35505a14f43b0de719d32910335186adbbf17a91f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00001.parquet",
+        "sha256": "edad117ae961e7f687a86a2ca262d9659db6926fff182e4444af25e176fc2fc3",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00002.parquet",
+        "sha256": "a3ac76560709c8708e06bd1edf6a4f95ebdeca566362b5da0a87519f12b20f53",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00003.parquet",
+        "sha256": "142846dc4db0bceaa04e08083e597edebaf54cefaf513ff67bed097c405b3b4d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00004.parquet",
+        "sha256": "8d52bb50f05200fd550983fdc4484399d983f0bc1bde445b8bf8a9ccdfd8dd5f",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00005.parquet",
+        "sha256": "333ced969be3a92d1cbe9fdace04f4b83d4f0787e10745054f0a0ce5c3b0e9c8",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00006.parquet",
+        "sha256": "670190742a2a64afdb14caab63e38ee4a474de0157c93d5f07a060ad53758a0e",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00007.parquet",
+        "sha256": "ea5b1971fd498e68e7d6c7099cfe81935f84bc3a62acc520b487fc468f98c5c6",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00008.parquet",
+        "sha256": "3aad561bf6210c97f13b9379beab27962a29885dad12c4f39495fab1987a1481",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00009.parquet",
+        "sha256": "af5d43af14590ddd35197c9b681abda3984f231387efcf2705414225bde0bb65",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00010.parquet",
+        "sha256": "e47a5c78fed94a8167c05811891b9803ddc488a92c4a66501ead5468fc53ba87",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00011.parquet",
+        "sha256": "ebcbceb412ac3a02600936e528cf74871ebdd5b034a3c4d79833df1229977db1",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00012.parquet",
+        "sha256": "66e5544a47eba1cc1e056cf28480291592763a33392d9c3a6db073cf0c19121c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00013.parquet",
+        "sha256": "7cfd21964b995026003cc2dd769a9ed1d697659e13ad7d9059435cc3b564baef",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00014.parquet",
+        "sha256": "845c1e3f82c1889ae02e15797b861e749d08c10eba7e6a5b3fc4996cf14300c3",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/13-grpo-and-evals/run/honest-a0.1-sft_anchor3ep_merged-s42/completions/completions_00015.parquet",
+        "sha256": "a09c708ae8c2b60e06976bf1b8517bc37d86a8a7c5e03d0515136ca582e3313d",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00001.parquet",
+        "sha256": "56134ae39b6487989439506dd378d05faab9156f53022b7d66bba135794de7d6",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00002.parquet",
+        "sha256": "9510c92056116f4b3b264de3f4e035d14f7bf92ac5bc995ff1f5710a8655c74b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00003.parquet",
+        "sha256": "e0259f24bcde5102b0872c72bb762bfc8d177682c688a4a834ae24dd0a4649bb",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00004.parquet",
+        "sha256": "5543c110f445db8892d6653859aded23de8d865e1c61357a2313e0a4aab66517",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00005.parquet",
+        "sha256": "511442ecec0ef327ebf5dd7c1bc56dc132b2d48e68f7da3881b932dd8ba6b6f5",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00006.parquet",
+        "sha256": "668bb11e50e5c66291a16103347e719a2d3bf3d51a3561641f17101c00ea1c6c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00007.parquet",
+        "sha256": "2f294223aa5907489c1796d436aae874adc068354a82110903395afd64b2474c",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00008.parquet",
+        "sha256": "8fc575c0fd40192e75b5b166f673ac33fdf4468b8d6a358201f6ef2668ca3f73",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00009.parquet",
+        "sha256": "a36389bb14111b2c4a3b5c7020f3047daf2ddb8e284f50081afa30c276bdd1fc",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00010.parquet",
+        "sha256": "5eeb67b537f4422fcecf852064b0f880ba01fc5ee4ed9979585a2a61542c6113",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00011.parquet",
+        "sha256": "5bf874bcbd2941780cdcf826306935fb176e57b48b9f2fb7bd04b6cdc72b62cd",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00012.parquet",
+        "sha256": "b0375e1878940e5bfcfbdf76f5595cb38ecab6470c8f28f467db671588fa290b",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00013.parquet",
+        "sha256": "8a270c3a601cd7889316d3061458e67aaaa9df481c82d90b994c4393142aae74",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00014.parquet",
+        "sha256": "ab8dfb2bf243038e567d9cdeb351597abe3350ecc10028e82f3060e28f1e57bb",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00015.parquet",
+        "sha256": "cac1fba0fa3edf405ee68652b89b5903d81e45149eed2398a29d3240f31be894",
+        "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-10062.jsonl.gz",
+        "sha256": "4ea2d57e1cd225cfc9fb07b946bfd76835fda04d01f961c3cde818fe0f7d45a0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-10155.jsonl.gz",
+        "sha256": "0d467510608d040729e2aaeb811855e93bee6e04675188b89f7c30f37f02c5cb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11013.jsonl.gz",
+        "sha256": "1ccdd0dae1905d5a019f57d7736aa5349d1fe57fcdb74f8d950be6ea32ebfcca",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11244.jsonl.gz",
+        "sha256": "1f611c33246a2310b4f2faef35154c956a98e439a0e7123d94a602ac5025f47f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11327.jsonl.gz",
+        "sha256": "bce26fb30f8b5aa38e958b83fb31071b129f8ff1a6869143863785511fe4db19",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11401.jsonl.gz",
+        "sha256": "9e66f1435ff8e632fc86ff8a4dc195101b328a5958f0ea1071951f4c3ad384cc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11450.jsonl.gz",
+        "sha256": "ad6b9dccabde7cd848c8111ef7e35cc03390e112766b06c9a951ba36a003db0c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-11745.jsonl.gz",
+        "sha256": "9964533e387872900d2739582424dd51ae630ac321137f8086a2812a247480e1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-12668.jsonl.gz",
+        "sha256": "fd47baab049367c069e336d29062db464c9627dc0276a1713ab231639cc1d566",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-13167.jsonl.gz",
+        "sha256": "4706d9d133d3eb5f5d83226c44bb9eb3a6c1b3d222c7297aef1848ac1ae29f44",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-13458.jsonl.gz",
+        "sha256": "28572280b2e14a00d34f942336d2a07c98b1a39c87474d79b275f32031ea27e3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-13722.jsonl.gz",
+        "sha256": "4221ba0b27f7761544fe371777c6b54378e811764482eade34a197882195f0ae",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-14328.jsonl.gz",
+        "sha256": "b7f714a37cfa790eae7ad84fddbcaab57225bda0e8e2bdaa3e722ecb13a59e9c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-1452.jsonl.gz",
+        "sha256": "bea9e8c7e5494c67bf106544f76e6e775d4a8d8bbd7ba683cbc5cd075ea7fb91",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-17153.jsonl.gz",
+        "sha256": "3d1f1e6b0c6e06958a8367457dfd3e24441103b642ad55fb90a3469f80e85f67",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-1957.jsonl.gz",
+        "sha256": "60ec5fe0fec97fce59a3f3649f88904519b222cdcd7779e98865de091b2d0f12",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-19775.jsonl.gz",
+        "sha256": "f60d3d7fe1c593dca3166e960e0324eda0e21308905047056e4ae746161d61b2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-20035.jsonl.gz",
+        "sha256": "56414e646ad8960186f314c160c684f8b4912e5317720e2a2470d85dfd69fd3e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-20044.jsonl.gz",
+        "sha256": "4f0e8b66b891e25916aa164f8b157fbeb78ecdf02858916ed67fabc61350ed99",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-20326.jsonl.gz",
+        "sha256": "c205ed4891f911701e2e989a86d8578a1617061fe143c21a8ec59e7a5f8b6ea1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-22217.jsonl.gz",
+        "sha256": "0955f927bc0036119f67539551b15c6cb89375e5e6235e2db420832a539cf47d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-2235.jsonl.gz",
+        "sha256": "35128c5d865c14854bda59cdfb309bef3ed1105b3fb1256472946accbc277275",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-23328.jsonl.gz",
+        "sha256": "4f956cf0a4cba56e9a9ff998114c9cfc09e276993939871dfac484f2715345d3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-2459.jsonl.gz",
+        "sha256": "76c366fc43e5310cb0b0aa2cae341af864628c42775b40c6ca3aa00cb4cf3854",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24675.jsonl.gz",
+        "sha256": "17140965a4fb372da43f90fcb69a87a1451e8f9a13aed88061a3a00eb6e22f90",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24871.jsonl.gz",
+        "sha256": "b5e3704824e0647f4ca2032ee57a267ceff1911d58f100c8eca119819b2b16cc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24917.jsonl.gz",
+        "sha256": "db4b9a30a916bede834b7e0d08846ebe5a76bae4a1d25a6c86610b7f3826bcd7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24924.jsonl.gz",
+        "sha256": "05ac24786837ea7b9274f1acacd990c893a089199871a6c1734d2966fe600f1f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24930.jsonl.gz",
+        "sha256": "8277a234a40a301db3a05ded827f30d9c4daaa596833799ed3be7fa1583d55d3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24947.jsonl.gz",
+        "sha256": "6cea5d71964b86a53c7b266e8f02000cf3ff7a31587bca69954dfc4b884c3b18",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24950.jsonl.gz",
+        "sha256": "0bfb519fb4bf5e0da09132267e86074383f0bffe49a1c93971ccec64da4a0d1f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24959.jsonl.gz",
+        "sha256": "f943a93deb3e7ce9ba3ede61b870c137b20ef2733c7df3a9a285962476372e90",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24963.jsonl.gz",
+        "sha256": "fb081b72f28262a23161f3d5e8442410600c77e75d6517ab16e34df861130203",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-24972.jsonl.gz",
+        "sha256": "ac9b9ea40f3e135e4555aca52c64ce3351a7122611d92d1e0c7809503d391c79",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25014.jsonl.gz",
+        "sha256": "07ccf51d03a7fa1c418ae190404cb50451390b9927050a3999baf7831394c061",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25113.jsonl.gz",
+        "sha256": "ca098c8975acc594f6a8eaf5700d6be01cff25dc2453e7e5e91b9f8f80d5445f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25315.jsonl.gz",
+        "sha256": "87c280bd083868273944f1a42421eff1789be8ae8ddc47c40303a962ab65a8d7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25559.jsonl.gz",
+        "sha256": "7979e5d02596ed4ac7d5e2404c99f71aab76cdf3f097eb6e752813bdbde231ef",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25887.jsonl.gz",
+        "sha256": "98bdeb73e613796346fea62ea78fc23248b83868f4893a0d07474c404e6d8ff7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-25995.jsonl.gz",
+        "sha256": "a01c4008a5bae3a22a34f688394a36810bf40272cbc049e7022201eeabc721cb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-26250.jsonl.gz",
+        "sha256": "92183071639cbc5b4c54fd25c7429941395aed119c3b5c52279f5ba12bd5fd41",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-26261.jsonl.gz",
+        "sha256": "5259a601c5e1c93e536b6a3f12cac581ee88b184028e5d2c7358edfe1ae7e82c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-26861.jsonl.gz",
+        "sha256": "c4bf4d2026dacdbe045e509437d45dc72efa241f6e4008d280a84f5ff92e264c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27092.jsonl.gz",
+        "sha256": "221baff9837d5b2fd191ce594e37ee9139c270c7cf11ee0f698fd8c6d8296c5f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27183.jsonl.gz",
+        "sha256": "3183c2b2f64ef2e178722fa3a7d00f88d266a80762d2fe3b2ed89f6c5e5db6f3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27254.jsonl.gz",
+        "sha256": "525727c260ae66c4c8dbbb14dbd622afbd1e985fdb697b41f539433954eb71c3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27301.jsonl.gz",
+        "sha256": "deb8cc6fecd9cfc174c0e632a2fbfa502e59822043de611b6b5fa7e6462d3f87",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27331.jsonl.gz",
+        "sha256": "fe18e0ed77cf813b5e926ec98222d832d351280cd2495165d566dfd99eaef159",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27389.jsonl.gz",
+        "sha256": "186b21b83e789563514e571244e82a197344e93c496441ee5d2534df7568037e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27494.jsonl.gz",
+        "sha256": "28ed4fd658818dcfd218ca3b545d745c465c2fc84be983f070e996d31b91eda2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27642.jsonl.gz",
+        "sha256": "b9103a986c4162ae36bf4e3563e725e5dd6c407c9c371944fc623701568f1eb9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-27694.jsonl.gz",
+        "sha256": "9f77c3dba610fa7b7a9506ff00c0e32673be9937220be3b35d0d46d331470f68",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-28106.jsonl.gz",
+        "sha256": "a452fa336c5c80002f245c4b3a79450f8963dc7614ce61dd74bdc385c61a04c4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-28235.jsonl.gz",
+        "sha256": "0f66d9dc4b8858760154ce25045e1dddd50edbebbc1d7308b5714cdeb5cec50a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-29179.jsonl.gz",
+        "sha256": "b175038902dfc76dd75d2ba29e59471decc92b722f75025c3df56d62df149a27",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-29291.jsonl.gz",
+        "sha256": "4ccd34f575f30744e2c97b47cf67161b45d7791938d19b6724afc60dc0e76443",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-2941.jsonl.gz",
+        "sha256": "2ef8f645d41cfface25c094a66aacc224f7057840633609cc0a9e1c0eaaa4a7f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3020.jsonl.gz",
+        "sha256": "d3d49a9bcb8a7ec43138a962f1b999ff325fcf4619055982d38f45b42f4a0693",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-31015.jsonl.gz",
+        "sha256": "290fad5a55ab3d15977abe878c7225a7dfaf1d9e3824981ff2f3029fce1adbb4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3146.jsonl.gz",
+        "sha256": "5cd82490642f5af8580b315ed727dc6b1f25586bd509e3ffeb965750ad535e68",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-31710.jsonl.gz",
+        "sha256": "73ede8c6bc2f8f534808eae189988abdad77ebcf76b048ac61bd317f18047fbf",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-32327.jsonl.gz",
+        "sha256": "e8dacff4e0fae1372437d13716b4e37c707b18136b5d55155a814162eb7c8b8b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-33613.jsonl.gz",
+        "sha256": "a8a2b71d08d34b555b7e20060746df73fb48e93bfa4eb605d55c97595a9688fa",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3363.jsonl.gz",
+        "sha256": "1f4923cadd32e56277a4201e2a4c7df56d12a8cd196210602463502865b41041",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3410.jsonl.gz",
+        "sha256": "715cec8be1362e32d41be5043b1b826ff9f92e7da76dd52cfed4f7d7e1841631",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-34370.jsonl.gz",
+        "sha256": "3082ac561630a50c3701779b9cee1c5893932d33a3792ce5ca1799ed525f4c50",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-34431.jsonl.gz",
+        "sha256": "b144712ead4d28d3dff90351f4d0e2a18f8a868558faa2e5cf7bad7c024ab6bd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-34963.jsonl.gz",
+        "sha256": "55bf35771a840c946edc12b97626edd840f25e9bea74ef3a495a02509e299376",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3513.jsonl.gz",
+        "sha256": "fa2526144233ddf4265420c14020d7a42f347b755911b6b9d1e380b74438d870",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-35748.jsonl.gz",
+        "sha256": "bbf497d7cae5a2f5be55d091ae0d06db0c24b0616db1c1560f214a7155ea807f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-36867.jsonl.gz",
+        "sha256": "aa4279b30b7a519e40776a335ab4e74289d5a1bbfc6f299227b1139f36b4360b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-37289.jsonl.gz",
+        "sha256": "7e2fb8fe1bb7386e8d04d8f5bf4cd13ed56ecc6182e396b5827956bec9af825c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-37395.jsonl.gz",
+        "sha256": "178ed25e8fe7562c4a07c4066e1dd813e1b0f011963921f25835003143e401e2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-37431.jsonl.gz",
+        "sha256": "27123a2e5b53fcd5057a47592b8d5004577d1c0e498e404adeefb1e26e224868",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-37491.jsonl.gz",
+        "sha256": "583e7c83b386373f372a9f05a7697cc0fe444ad18a823d6bd523ceaa179c39fe",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-37598.jsonl.gz",
+        "sha256": "367b5978793d08ad0baae931ab116a47dc598d291a9762f1b4ef6389b8d1b9a8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38227.jsonl.gz",
+        "sha256": "123c15e794825a6d87b9822f5e750aefa55fe2ad533caecb7cedc11dfb3f9f0e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38749.jsonl.gz",
+        "sha256": "e7e41689c3e8620fa75272c9b6a4428c1285393da074f21c47938fb03b151c82",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38758.jsonl.gz",
+        "sha256": "46cc4f11d99ad6d901456312894e44c86a40905aa5d508298452b90ce366a76c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38858.jsonl.gz",
+        "sha256": "947c84e356301adb30adee103461177ee0aa822e2ece8c56e0730cb71ed5c7eb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38884.jsonl.gz",
+        "sha256": "8b4a871d1f626a732f6b37b89f6523595b3d34fba66ef461de189659e0a10843",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-3890.jsonl.gz",
+        "sha256": "ba14ccd85e97427e33cafbd35d841fadff32581de10a3c262768f5c73b4368d8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-38971.jsonl.gz",
+        "sha256": "3e5755c0200ef91c1118bffae4741914311a1139c749964b603899ab385f9be7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-39057.jsonl.gz",
+        "sha256": "279295162747771e12e9edf5e7325768157a76eb49b7d7157f3c181ff6915edc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-39297.jsonl.gz",
+        "sha256": "53d89c44c7d90fc68db6981b072c9f2e7e1671d6d4d0e4dd8040a0d498106699",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-39334.jsonl.gz",
+        "sha256": "1b8ad449a7af01494acd5152990ac109f0a677871c39bd0004362f814e774d00",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-39778.jsonl.gz",
+        "sha256": "0a7cc1cef2b88ed914f68758b865cbafa2edaace0a8b61a13c588e3522c73242",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-40140.jsonl.gz",
+        "sha256": "df81e568b33666767e3345d6b4cbe1b9c7b8dd13456611d7a23a73fdce3cc52a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-40282.jsonl.gz",
+        "sha256": "86fe6863ce64ac3be6e2020f6edd14f94e39172b0b9cfb416505212db004224f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-41061.jsonl.gz",
+        "sha256": "d8a294c11988ef02f5c0e37fb1bd70c7925402d380b7bbc51e1cdf5eb9eb9af9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-41076.jsonl.gz",
+        "sha256": "c4f29527524719844d4b2d176d1734b170c3587f1b29b06347a45aeaa27ce7aa",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-41564.jsonl.gz",
+        "sha256": "e3de48b0615f156808b5c50a9b8a2214ef73cf7214225d88bae5357cb0c99110",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-41589.jsonl.gz",
+        "sha256": "8a75da93740a5b38a374c992fe070af4fbee354ae5ed3ce6da5b43bee7e941c2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-41598.jsonl.gz",
+        "sha256": "20018a2580e64809f387a827e816f7e543761338e62c57d2a7a77fbe9b8174db",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-4189.jsonl.gz",
+        "sha256": "22297964831935f47c97c8b4e89234d56882b0d006a27cf6ad1b9acad6bfa505",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-42131.jsonl.gz",
+        "sha256": "22bcca9640e0491768145437607aec543b823de386f8af319d417c08e225a028",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-42221.jsonl.gz",
+        "sha256": "890222fbdc61b5de8111e5626977ab66cf7b9d76950aec69ee60d016ca787731",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-4223.jsonl.gz",
+        "sha256": "11649b139d55d3bff833b3cc30befbda9f69cda921b4dd1904b2153f0636ee63",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-4236.jsonl.gz",
+        "sha256": "d80e5fb7b43b81f7124933d8dc56891fe594b8c675698ddbe64c531eeb71d6d9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-42558.jsonl.gz",
+        "sha256": "25adc02ac5b51dd90f347906c23943857e4cbb2271327854e4bcd98d30dee969",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-43783.jsonl.gz",
+        "sha256": "330284d7054b33cb4ccfdc8b497d490e7afb8971fd48adc0169a881a6a3e8c05",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-43796.jsonl.gz",
+        "sha256": "f33421b6b7b052cf8587fa573997ccc95a2d11f7dab38ea43f1cb511a0376ab5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-43937.jsonl.gz",
+        "sha256": "ead8c0b52e2c0656e957a320c9c23e8e642d8e3f6b95d7b225abb2281fcf6518",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44060.jsonl.gz",
+        "sha256": "54c9341b0d6ddbac93f4cdb81b6cbe2f93387e648b1c2c3e760cf06e1b9911aa",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44062.jsonl.gz",
+        "sha256": "b1c44249f3debb20718c6a095542808c7852350019d98639ee8b9dd7d0fd9d6c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44279.jsonl.gz",
+        "sha256": "56661b5e4f80877de58d612044d78adc5330ee3c6152d65ab53ac25941cac1f5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44319.jsonl.gz",
+        "sha256": "48f5394c711547648ac5732a0102b49b4b724dc25a55eb669d9ac551ddc1c205",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44408.jsonl.gz",
+        "sha256": "831d493da6b285b347f9a3056bb574c8e166619bfc21168db5cc275ede22255d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-4450.jsonl.gz",
+        "sha256": "a1f63933298c1faf05c4804bc34ca371e889dd693036d971d3108ad2aaf324c6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44620.jsonl.gz",
+        "sha256": "25447ca0bb43831cca84423bdc43365343b1cd5d8bfe9e4462f754a0cf6d3a7b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-44777.jsonl.gz",
+        "sha256": "7a50dffbed93a65f16917c824930684c867945ff7a66d29bace5a713fab9a97b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-4515.jsonl.gz",
+        "sha256": "ca613d4a06c460dcb8fda3fbed11e8663a7787810d5803d71ce2bc51d5233284",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45172.jsonl.gz",
+        "sha256": "d2bc3a02b626cbc2b09b882927f2a812666d4d86be149c180b98a83c8207d0fe",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45294.jsonl.gz",
+        "sha256": "7cb126d78abd8db5d72eb0cc0b2a5852eedbe62401496d801114c0e0f51d8687",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45322.jsonl.gz",
+        "sha256": "749c4fb193ad6d624c2a748165812bf9c9125949183a5ebce680083adfcd28a8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45385.jsonl.gz",
+        "sha256": "e22114cf34e2d6ceeca0179b0c4db6e7a79c1dc8c67382c969fa3f8dd333d8fd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45615.jsonl.gz",
+        "sha256": "cbf2281b278cdd5c66a45e37d305dea30842f82cb391f00c22b15faa78f4a995",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45788.jsonl.gz",
+        "sha256": "7976a83ef08192a6f2bdad3e27ce31514b805cc3da271e79421b61cf5d35b019",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-45956.jsonl.gz",
+        "sha256": "2b3ef99600675722ddc0bc133ca2b6cdbe2a07e7aa9f4d8e5c895e2b7e8cff3e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46178.jsonl.gz",
+        "sha256": "7fa95721cf1553a6043e2b8e082bf293a70f9ccb4e195b65406e32a7042a17bc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46195.jsonl.gz",
+        "sha256": "2370cfbca82d8e134812be697f5fd8b4130e60f8ca62e5ac8ad47b849591fa4e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46324.jsonl.gz",
+        "sha256": "43012879ba25cca592e590cd57652e7046a9ac0118387a501dca5ba496e5e24c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46581.jsonl.gz",
+        "sha256": "32579fe6171aef7d287c41551fe47bb6b4c753de9b4046fde2f94148188c9430",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46588.jsonl.gz",
+        "sha256": "5edea4c11eb1bf102b792fc5f337f4ba0d3f84fc5d679b983cdb34eabbbe8a13",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46630.jsonl.gz",
+        "sha256": "f3ee9da33547e6dc509f95a223a7744e94170bdf1a1c9ebb1dc0b56596030970",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46693.jsonl.gz",
+        "sha256": "6acc9923b7e4e355e2b5fa4527bddeb0e54808049338261dd5caedb20d1d0a05",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46811.jsonl.gz",
+        "sha256": "0b9bc296a0a1e59c8b28c6469c04691381f8761937d47f1342859f0bf84c2e17",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-46976.jsonl.gz",
+        "sha256": "cfdbfb28c00c4317fc5179d025f299ecdf929f1d99863d69d3d177f3fdcc4536",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47165.jsonl.gz",
+        "sha256": "6a0813d4de19c9638fd005ba0571b21e2aa0dda294840dbf68471d6c9b680eae",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47377.jsonl.gz",
+        "sha256": "b45445bd6fd75439716494bfeafd02bb1f84d758ebf4f7c403dcd878841dad5d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47413.jsonl.gz",
+        "sha256": "b43ce243038f83a73a414484fdc9191618fc6031a6d1480f59b83b27ff8440ec",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47668.jsonl.gz",
+        "sha256": "514315290d1f77c89e779d2be9a360ecad6b96a88237669413eabc70d3860c3a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47727.jsonl.gz",
+        "sha256": "7e8a3b14a5790fc58f65afb1f5adcf2a98769b0dfeed54ffab361e11282967d5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47789.jsonl.gz",
+        "sha256": "6987a3e52cfb3ecc9a8bbcd430aa4d4a7446e7c55b2440e908d769118fb05792",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47791.jsonl.gz",
+        "sha256": "48996190ade609c252b467f2e123766bf06e843162eb245dde23f9262fc34933",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47796.jsonl.gz",
+        "sha256": "51e227dd7625ce9938378972991e500a74e3edc8563cb1d6f882ae5a092c156e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-47921.jsonl.gz",
+        "sha256": "64ffe448ade74ac029d1b852c8b57adeb7f430a93cf9c5fb530900dcc2f018d9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48026.jsonl.gz",
+        "sha256": "90781de942a75bb0e1012332881118a0fae743d2588646167bba06bf769ffc41",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48120.jsonl.gz",
+        "sha256": "a13dfd2af83f33e8a89ec6c4577882d6d1082f68594d35022c58813812af7a99",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48128.jsonl.gz",
+        "sha256": "79f7fd70bcd8217d18461b5256deb266cf318dcb7bbff4989202b50f9f254203",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48555.jsonl.gz",
+        "sha256": "8134caba1f8652566398331fc611176f68ced3d03317b817fbb11add465e2788",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48570.jsonl.gz",
+        "sha256": "3ec07a1181f9436c55b4e6daeba63fde0bb39c91a411bd689b7e9bab8fe5ffc0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48631.jsonl.gz",
+        "sha256": "de736d0bcc073e50027725b183534d3de580544ea2518bd5cc778a19615dcc77",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48663.jsonl.gz",
+        "sha256": "dfcd3eadeb89dbac5ca35d3d09eaada4ab748f82769c7e4c74b5959c2b452d64",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48818.jsonl.gz",
+        "sha256": "cf5604852510d1cafd68cdfe8aacc739d6935dfe9ef0e997b9e4b918bc902bfd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48980.jsonl.gz",
+        "sha256": "6142a7d3312845d8195f8ae3a5ff17c772939a41ae11b856b6286b31f2f05d7c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-48986.jsonl.gz",
+        "sha256": "17313bd772808466276b34ac8e4579b999a6c3ca9bb0a194e2e339ea77d35e55",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49017.jsonl.gz",
+        "sha256": "dd7be5914c959b0f7bd8692405b1e5def9e24516c74bb4e10cf668c8e66f8b23",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49108.jsonl.gz",
+        "sha256": "8ff1c7022aefa132cfeda7beaaed8f49f4a21d65757ae8e3ad3a6e274d3d37b4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49146.jsonl.gz",
+        "sha256": "8b5b3e58928dc1fce21ae7db019840d258ff777c41b610c42bdfe47f338f89b7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49204.jsonl.gz",
+        "sha256": "b8513226393aa0d46dbdf87c648c5dd81d0c5748f5ce44889d2ee96f0faca100",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49240.jsonl.gz",
+        "sha256": "6de1562694a20e3e51960d0e577c16b77c49bd7e4f7c0add2e850db6ff3644d4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49390.jsonl.gz",
+        "sha256": "f96f976ee9d03a6056301b0014120a0075fbdc8e87df734f23b74d61baeea28c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49845.jsonl.gz",
+        "sha256": "19dec389ec07b1e0f0b40d7ab0c09ad1dd15c62950a1e5440182f33c36c57734",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49858.jsonl.gz",
+        "sha256": "45ae8862a3a36d84f316d145279d7e3bdc4e082cb01a6bc1d026346ea89334c9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-49986.jsonl.gz",
+        "sha256": "dcac5335948ee1f66266e9cc01dc16dfc19774ce04a98c6680593dfcc7193919",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-50447.jsonl.gz",
+        "sha256": "062cb4127eda1adb6cda2ff827c5b2faba4571a449a1ccb0b468e21ae2f9809f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-50458.jsonl.gz",
+        "sha256": "91bee0c751add1109fa2162f91f686e844847d49c32c8ada406ccf74556706e5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-5060.jsonl.gz",
+        "sha256": "862e01a96fd1d8d3fe89530cf406200e25d48cb88b3fac0efe8f1b74965f1d8f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-50970.jsonl.gz",
+        "sha256": "18cc76a17902b4f8ba877711e6bb16d17175eae47b5830b3e7104b7dfecda779",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-51036.jsonl.gz",
+        "sha256": "638950e6074cfead9141652c8895ed928e377bd6c73b499a68916f40d8b8a074",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-51189.jsonl.gz",
+        "sha256": "b80471bcfd8e93147a7af555da5bb53d6367536c337b513b4e8ad59faa8425ed",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-51752.jsonl.gz",
+        "sha256": "578b8b08a39db082d9316c275319761cd1512dadfaef55de4cffd55c3ede4df5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-51812.jsonl.gz",
+        "sha256": "33c0c3329e1aa21c405f086df6cebfe775fadc59442855e8948a601693d07cb9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-51862.jsonl.gz",
+        "sha256": "d9d651065d1367fb1f55223b812bf490cdea5a96d5c722035e88cadee3885493",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-52006.jsonl.gz",
+        "sha256": "9e5be9cebadc692bb5b0f96b4aba9bade6ae27e873ee09af9da98fc00fc15277",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-52305.jsonl.gz",
+        "sha256": "3ef14b7190fc93855aadebab8d742a2c19b029b12b79e53a138c93a6e8ed8baf",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-52484.jsonl.gz",
+        "sha256": "d71a498f6dc23ac609ed09135ebf3ebffdd12c17cfd0e5f1c6ce2a57cf8a7d43",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-52652.jsonl.gz",
+        "sha256": "71e408a461f53a47d7b7cb47bed786709dc262d1dace188aba31173afcdb6f22",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-52853.jsonl.gz",
+        "sha256": "c0a76cc9e347a13aca12aaea5792ae6faaed43fd8598144d831f6b1cf5a4b442",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-5325.jsonl.gz",
+        "sha256": "f29e3ade51787ce34af67eaea3260a62d6a6de41472597e2e1508d04882e5828",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-53270.jsonl.gz",
+        "sha256": "2c0c3a469ed2b96fa5547f645f22755710b8a2530e3811c8b16f787a9ec0087a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-53479.jsonl.gz",
+        "sha256": "766de6189499a563b9a3a886611927b41f92cd63c6136ff554b3f498eabe30d3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-53846.jsonl.gz",
+        "sha256": "43f28aadbeef42e5a9dcc7ce00d2dfa31ce3ef5a9862f9c72359c0e0f68b9486",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-5400.jsonl.gz",
+        "sha256": "6aedc0f7fdc2627c5c1ba30ff9275e93f6b428f9724e2a1cf2c4fa54da0717d2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-54125.jsonl.gz",
+        "sha256": "c3c1fcd1ec1cf75572006171c7506f05b8fe8225dfc2ca2313fbdaa641ebe09b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-54205.jsonl.gz",
+        "sha256": "884062318334e26b6306e628b314c5ecb105fe40791ab0b2d16445645296c4f0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-5460.jsonl.gz",
+        "sha256": "41185fe0df6f60dd761f38a7fa214fb0febe1a69077ff1b9cd5f6e15aa8cd513",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-54677.jsonl.gz",
+        "sha256": "a3450dd1f724fe9f269ed91f3a783b702d19f8d790af5d85c0e97c2d894bddb4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55099.jsonl.gz",
+        "sha256": "ffe4e8cdd5fb9adaef1e199ce8f9e1b157ae6f024114041a0a7d9e3407ff5a35",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55295.jsonl.gz",
+        "sha256": "b9c42b07d0d806157bd19342321c35bd3f7de3535e5b2d0654e679736153cf57",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55318.jsonl.gz",
+        "sha256": "38a43473717f674b28d7b83fe638ebd4cce10688db2f64f22580e6657a4547d6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55319.jsonl.gz",
+        "sha256": "494f28dc50897fc3ff6f175709114eaa2722d4e0871e7ee59fe3d3ec30f2fdd0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55344.jsonl.gz",
+        "sha256": "154c11084372d1db6f5b1d798ec1b19db1b7fd62bd5de724c8445c000a962784",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55349.jsonl.gz",
+        "sha256": "f71ae03f5071796e09b07c681845e88fe5c0936709e34a818ec9df66bfa65741",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55365.jsonl.gz",
+        "sha256": "5228faa7e9be04aeb208a461f04120ea3c68302350d2433215137be5016494f2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55384.jsonl.gz",
+        "sha256": "95bcaaaa6e2f7c8ca22dad89166ae4c4b02a3462fcc36982a4c6a6d69f108155",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55832.jsonl.gz",
+        "sha256": "06b9aa1476a69e2e0f4d04ed098d63ccaf8748a191e0ebcdc35f691130be88d0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-55929.jsonl.gz",
+        "sha256": "da941709e6afaada1b041e3d33941cb7c4dfc386f8734116fb9ba83dffcc7fa0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-56368.jsonl.gz",
+        "sha256": "bf5d6e13bc15637469cc2ee6e33126a01614287dd5b37ae23dc1fe229c72bc06",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-56634.jsonl.gz",
+        "sha256": "6e9d44c40462d281f2b73d5208f0359ced649b02682a31cdd0e0e3dcd44b8b03",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-56773.jsonl.gz",
+        "sha256": "e33e46ce0ea11422ac92db4d20545e40a98f7ed67c48325464b000471f22c30d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57342.jsonl.gz",
+        "sha256": "6db359e9ff801ed88a9db815369360a5ed9768a1e27461b82f96e34651047ebd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57494.jsonl.gz",
+        "sha256": "199c5895b2737e25a2806af0b7ae621b6d3c34c2f632f956cbc9796f335a8af1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57579.jsonl.gz",
+        "sha256": "ea6e7cc679b7e8a92c9f5d56ea6fdc6e28faf92497c0b055a75fe12bb97b0a0f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57630.jsonl.gz",
+        "sha256": "319bd3e3f5e12fd5acc97c59804d88221004c957296f3cb62dc312c036a586ab",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57643.jsonl.gz",
+        "sha256": "e17fa37c9d8c1e7accb751003ab8d3dd6c395d616595d2caaeedab2e57487c8e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57668.jsonl.gz",
+        "sha256": "1d1302ce9eccc7a8a54614ea60d74829a96a4521c6d98407241a2ae9bb79f516",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57760.jsonl.gz",
+        "sha256": "c62a0542c647dc194dadac1eb87a8d55e697f6dbe580d0d33a0bb6acece8e467",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57769.jsonl.gz",
+        "sha256": "10cc2b46c47076227bc20b0a1c8e51419903cc1bd4f083e7163f9873675d65c8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57878.jsonl.gz",
+        "sha256": "8dbcdc209e70cd2ab55dfbf8b5630b92d704483e28d667d9a12627eba515e3c6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-5790.jsonl.gz",
+        "sha256": "baccd3aba42e0a8062db4ec5573568891d32706c955506a42610607182e0ab07",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-57925.jsonl.gz",
+        "sha256": "a2e506e3b61771659c495e4329520a915e7d94f50f2fc1c953531a3d2d1dac72",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58126.jsonl.gz",
+        "sha256": "e7eae1d88c1a52d0923c3e12158b0d17a76a2029b4c8a600ab70449123385a7d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58317.jsonl.gz",
+        "sha256": "e21ba44123b3594e57ce2cf7f549b1d2216930979abebd499063ea1ccb065d53",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58379.jsonl.gz",
+        "sha256": "74b53b677869c367c6da20ed01cd8d64bba29a3638bdbebc35c3ecb1e1e16622",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58382.jsonl.gz",
+        "sha256": "f53efa4aa41696e8f64092558e6c1e757329c3bc19e00813b15c65b1be52c12f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58664.jsonl.gz",
+        "sha256": "67b58fd6b3c89ace9d432ba97d15f8b57f68e40973e59fb48881332f394610e8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-58852.jsonl.gz",
+        "sha256": "efdcb9736e23b433d524cd193ebd8c95fab0dd74f5371b555c988830dab89bd9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59048.jsonl.gz",
+        "sha256": "9e61792661a5a0788cd01abcb1e25a0e6cf86012cce6b7884b9b8985afc29ac8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59157.jsonl.gz",
+        "sha256": "fee5ceb99a7780c8495954930d6ed9d6c862699dc8df7064ff72e1d60ec14c3b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59217.jsonl.gz",
+        "sha256": "8786a9e3495ed1627f3b6511fe120274a8f7327d786cea399f6b503ee3957644",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59254.jsonl.gz",
+        "sha256": "ee6057ebcd4824f0571f319f80bde82d08e1db627a0d49c462cf2a00db337053",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59274.jsonl.gz",
+        "sha256": "2f5ecdf05ae3dd515ac8c76191b8b855dfe01e5e4041b584c7ba458fbf3a6976",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59337.jsonl.gz",
+        "sha256": "0dcecc6adeceae88287fdde271ce400c2c6c30e95b233abde734e60046e3e1aa",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59489.jsonl.gz",
+        "sha256": "c678cbde76246b5f3e1eaab8026efd9a261be6d134346c36a369b85ca47e399d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59490.jsonl.gz",
+        "sha256": "478da35d9e860998e7fc7aa9c43eee11fbca72d34aacbe15049bba854db18030",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59497.jsonl.gz",
+        "sha256": "3cc66a7a65f5dde372eddcaab9ae664719a2b66d67195bb5783d175f308db82e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-59859.jsonl.gz",
+        "sha256": "33890f242deb91dad997a72e5e2909c0c933758df83037d0468f1f2b2f65f264",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-60107.jsonl.gz",
+        "sha256": "e460eed64078fe9eda47fb065c43a4b3d4f97e94b21d14a9501d718c4cd76995",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-60129.jsonl.gz",
+        "sha256": "92a3b32a7a7ec81c507360e35bf555bcaf44ed585f5dd42a5b23ea12f1d87d36",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-60237.jsonl.gz",
+        "sha256": "a992f91de057b45a6fafe7cc7deadee06d9e94837b3624fe5528a0560fa911f2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-60401.jsonl.gz",
+        "sha256": "06d20323629bf833c5831c9be4390d16424b0d8883698f357bd0d11a4193fee8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61056.jsonl.gz",
+        "sha256": "190dd8bd9e88e9bf761a7b9159bbb6cc24ef1c45a147f8f38cdc2ee528e745db",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61154.jsonl.gz",
+        "sha256": "786b99cc3c8765afd09416164688a999d5916d7c4800a2edd0e3b5ebd6eaa833",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61234.jsonl.gz",
+        "sha256": "d23f23ac50fa9a9ef13763d958d9379223a14690695acce33aea16460c44201e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61298.jsonl.gz",
+        "sha256": "bbe3cfe427fc4310b9f0b36eb52a702a5e6edb639cccd1fc4880052bf59be8ca",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61335.jsonl.gz",
+        "sha256": "ee5011922c4ca1f8e1711c0148cb8d83ba96087b298fb99642142b17671e812f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61467.jsonl.gz",
+        "sha256": "58335a139e3c3f41f56dbe84387512e5a728e4501f54d29ea5c19bbd9bc0cb7e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61534.jsonl.gz",
+        "sha256": "7801d8ebb4bfed173f8d5add6dfdbe8f7a62ae9d6da7026facdd478f8c802c02",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61703.jsonl.gz",
+        "sha256": "a89d28e4aa1e0b9ab24213b36eec8e7481c8e0687d21ea8d8baef83bb2c80113",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61753.jsonl.gz",
+        "sha256": "152cec32334b56e13396cd1cbcbc951567e683f2c7b22f6a75d6aae1106dcc91",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61760.jsonl.gz",
+        "sha256": "1596e838564e082240080d4a2a7e5b9f7c99233607eac5d519e78d05e4c950fe",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61783.jsonl.gz",
+        "sha256": "fff054b4a3a17041a87ce0fafa73482a52575b4dd0c95d7a65fe4969657ee9f0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61817.jsonl.gz",
+        "sha256": "818791c78846daadc504c399be06e84f1b84bb275ea8756f75cf3f88b3f24233",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-61952.jsonl.gz",
+        "sha256": "de67524efb8243fb0cfc164ab179fba9401b36950213e7bc1120f4b0d79056d8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62113.jsonl.gz",
+        "sha256": "7e1e4c8903460e31d09eef3f96d03812b0aa0a04d69af3b9bd4bf91de12591f8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62205.jsonl.gz",
+        "sha256": "2bb1ad20aaca7797a6c5f4b35ef5a256e67a6184d3812ffe1b872cbf151a0e6f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62265.jsonl.gz",
+        "sha256": "3e54dccd87441dc477bc11a55656d28ff6e36cb6b0a6d67f9fc26e5a7d7bcfd4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62313.jsonl.gz",
+        "sha256": "e7a66b95ec2de51b6459e8cb30a276c7d1b13fa40b0316f0527351127928adf7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62338.jsonl.gz",
+        "sha256": "0e6bb9e8108d120d6c5d5786c7a6e352f5b7bacfd967653cbc948017414c3a67",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62394.jsonl.gz",
+        "sha256": "02d644ffe151d70c34386dc27fbfa7a18c64e9231ea34c94baa38e3f1600faef",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62599.jsonl.gz",
+        "sha256": "1dcd225421c456288a4a934cb9dc0dbf6e773b26a72321cb68759b2ce1074e5c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-6269.jsonl.gz",
+        "sha256": "b7448214178c5d0b08610aa4c792a1bb136e3d02baf21e22b6a2017b804d88eb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62872.jsonl.gz",
+        "sha256": "092236a7ab595e2fba653f32a434d7fa0f641582300c31e3193824e421c5b738",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62936.jsonl.gz",
+        "sha256": "6f6aa0c675c8a528fd7668f0875b8b1505a3eaa53b4695130edc61d74ceb8f4b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-62994.jsonl.gz",
+        "sha256": "4b84a194cefda065e4c89c620ab257800957c838ba8aa3ba60d2cacc08c4d08c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63202.jsonl.gz",
+        "sha256": "63af9428fa8c7fecffd6dc463c8736d5b5639950397f17c20f20eb079ccb0bcb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63319.jsonl.gz",
+        "sha256": "03d392e43031fb099f2fd21e40ecb1caab91ed91e31459661b7b88db2984808a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63485.jsonl.gz",
+        "sha256": "d2dca9a7004bc8deece84e3dba1ee9c69ff78e93551550c7588b74fe626b5536",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63645.jsonl.gz",
+        "sha256": "55c45c4069c54931d32e94e0f4f1bc181365bc4a358e1744713c8a8fa2cc0dae",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-637.jsonl.gz",
+        "sha256": "f32fb8846ca192b0cea786ec0c930d59e5df0d349b95da3b66cf341c45170c05",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63727.jsonl.gz",
+        "sha256": "0c70cbaa761758d7031469a5c5b4da67b2c64322337ec77e72b0f4dd8fb7a61a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63853.jsonl.gz",
+        "sha256": "e943aeb756cdaddab0bf9805cb61f85f712bb6d6445718f72c3a5ce9d34f710e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-63940.jsonl.gz",
+        "sha256": "17a1f2136ee576046266601d8563a3b431657c953b1cdc1f40455a8c57f838c4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-64443.jsonl.gz",
+        "sha256": "fad2c065b79a0a064403bb86dcaf143e85ee281e07f0725a25c44bf175732268",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-64450.jsonl.gz",
+        "sha256": "de317e68222230f4298702a1bf9e98d1bed91f551524bf12ea0899e7443c43d6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-64563.jsonl.gz",
+        "sha256": "6976222ecbc08aebb2b64f8430cec766bb022d1d4ca905fa6004c6cc4c0db65b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-64809.jsonl.gz",
+        "sha256": "c176731dd95ff5d3dc27bd1e17f7606d1e1aeefef89fc93b7ded907e46c8f360",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65116.jsonl.gz",
+        "sha256": "d525242855760c7d676381b752d7063234c1c5285eabb9e2f4f46f6f071e3d11",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65150.jsonl.gz",
+        "sha256": "9b9bcbd5679d267af208beabee872d24c1ded92c54832de22cbb47470fb4c0f7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65358.jsonl.gz",
+        "sha256": "27c03953ae2ab40e6088533eb41a9c5bf78d266664542816f626eba0fe55593a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-6545.jsonl.gz",
+        "sha256": "c5c42e90da142a64db3b14217a34aa491f5166791e407aa78044be7c640ee037",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65475.jsonl.gz",
+        "sha256": "ff8d8b0ad5955e91b4e64f18d4a098fd658ffec7b84e44165945cf0b4572c3ec",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65558.jsonl.gz",
+        "sha256": "d25e8d056b71af6086d7d214b9691d211a3e649407fb5e97e56ce040f2b2049c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65593.jsonl.gz",
+        "sha256": "2c54fd5063767879948cb474c8d5ba69505897bd50697a50a5499938a356d67a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65649.jsonl.gz",
+        "sha256": "34050f09f82540263a403731ac071836d2d71f7e8b70617120c2df7a2b304063",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65742.jsonl.gz",
+        "sha256": "a6cf3fd14088d0389dbc65fbd63562663f0a77c47eb5b5bb582cee60a63e3f2d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-65952.jsonl.gz",
+        "sha256": "debad9dd7b1b66d7b6362931b01b36f02e0ca955254c30e9d037ce0e00fa76cd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66235.jsonl.gz",
+        "sha256": "ad9860a730467922bc30e8ed83ffede454b772bbf6f916fce018b4241cf6d500",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66412.jsonl.gz",
+        "sha256": "96005cb6f24612d0bc9058b8d9157c52eafc44934761e49d248bc263c53b5461",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66439.jsonl.gz",
+        "sha256": "f13774f24b0a06db4e2fce22f6ec613f3f07ec37370b60383709bfbf594fca90",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66498.jsonl.gz",
+        "sha256": "ec8357ad452e592d43219d128681cccf71c680b2d1a0da8b1929afe89f25f536",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66679.jsonl.gz",
+        "sha256": "6956c082beb05878af110cc52ff70cd591436995ab54de87f00706b9dbfd192f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66818.jsonl.gz",
+        "sha256": "dd5aaae2e7ad550aecc960d189f9c9042900af916ec043141f2b2da4408f3b59",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-66998.jsonl.gz",
+        "sha256": "52950b16c27acccae9199e9cde429d5200314f4cd954007ef5c719565249800d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-671.jsonl.gz",
+        "sha256": "2a34f19ed55e8a84c2b953c048e056799231c0d84f034044ac30b6614a20d1a4",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67270.jsonl.gz",
+        "sha256": "002f5a33a236a9d335a7d6a0721b89a1c58d545a474b5c39b756490c29e7964a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67300.jsonl.gz",
+        "sha256": "923ce258419220f16f34752facdfea0a369d12f79a95fceaaa7e0dca7fbe3489",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67361.jsonl.gz",
+        "sha256": "8523a603f11ec0976ab30b1a9f91275cea413d0df450b99c7e88cea784282e11",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67598.jsonl.gz",
+        "sha256": "7fb723c325dd96910f2bf78d880c66621c0bdd604f4446fc1e54bba1a3425c9d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67602.jsonl.gz",
+        "sha256": "b20da8d20fcfe6c0ea18b36253694225dfe0cf4a5bc9caf2639fa1014ce0fafe",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-67715.jsonl.gz",
+        "sha256": "46dc7d4a89c4990cfbd443dcf8e34946641d123f5e2be1dea29878797d93d8b5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68126.jsonl.gz",
+        "sha256": "e4a93780a31a7d4748fedde67a16cbdc76f4f1c10261c9cc6b1ddd997a09b3f8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68136.jsonl.gz",
+        "sha256": "570ca1433a2f2629d13a0924d088b1a32b9ee6670627f22d528d278adf53fb8f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68180.jsonl.gz",
+        "sha256": "2c99ec026d1fd4db1b486e231280c3aa65578f6ccc28e1d676c6404b1be00c75",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68435.jsonl.gz",
+        "sha256": "951f61a1c3272fa7a6820247658ba9646a95453b563cfb3e2e5112261f2f6695",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68478.jsonl.gz",
+        "sha256": "58f7b604813d0f9cc4d365583ff56a120f3d303c5b90b72128988a783a9f7785",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68613.jsonl.gz",
+        "sha256": "33cc25f90339109387e17ed7e046863f3f78f3f683310f47e5c79d1da7d54a9e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-68659.jsonl.gz",
+        "sha256": "325b0a95f447443d1b28577f3811f97ef2f6a883270e239ab5702fe530ff67d8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69069.jsonl.gz",
+        "sha256": "a9cec22dde9eac45b50a0357bd972bee43c5cd01526a4451de5a7d3f970e6851",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69283.jsonl.gz",
+        "sha256": "6c4484e7038d7751f099a66e00a21f99a4bd84ca873f14bee1eb576669ca13f9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69331.jsonl.gz",
+        "sha256": "b1765799a3b6eea5c2e08b56343b1e7a37ee264436618dffba73f2099957fbf8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69332.jsonl.gz",
+        "sha256": "189e1995293133deaf2458b2154aea28113b96291d7ae083e9a57b6afa5c4a19",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69514.jsonl.gz",
+        "sha256": "e28715b7c5d78f8fee9a46f98bd7d6e3d8ec6720d49af26699ff1a0e079fcb21",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69564.jsonl.gz",
+        "sha256": "374c7dec3da0dd73dfe90ee6c7af5427c24b8d272d7f087c0a544c0727ae610d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-69896.jsonl.gz",
+        "sha256": "5ff9393b9c4586cd6eee1fc8fa484701e95b070bc8b55810f3bbd8294667640f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70018.jsonl.gz",
+        "sha256": "7572dd6bf5b88729664da61459c3eed8454a5882f77a2dfdbf1ea0f117dd3423",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70675.jsonl.gz",
+        "sha256": "de68f41d21e69c270cd23834216279c56c968b7a5036402cefb44cf62b1ca274",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70710.jsonl.gz",
+        "sha256": "f4221e33cced89400bccb30b574cf367a97e2e035e912daaa612bcece3bacbdc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70765.jsonl.gz",
+        "sha256": "0a1dbef83e06a2054da19eb78063560c1b860b9ef3800e29ee03169745d2c99e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70787.jsonl.gz",
+        "sha256": "77d3b3e4bcc6cf29e10346e66807c250c1c924909842cad504727e7ef83f3ec5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70796.jsonl.gz",
+        "sha256": "6a95b15ff216ab3aba3767e6e2011c1f864d8db41e7abf1453ffbf0efcca6ad6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-70823.jsonl.gz",
+        "sha256": "544c26803cb55e4efd470da075a70511ca7e02e01385bfc9397dfdf754d6e417",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71373.jsonl.gz",
+        "sha256": "0b1dba04035f99db327367e2c2619557b932ebb6e0d30f12f3b1192af5281cb5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71524.jsonl.gz",
+        "sha256": "a3d47bfcc4fead6d3debea00af014ee669708fa280441c6a6a2c07028d54bdee",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71682.jsonl.gz",
+        "sha256": "944ef288831482e898fddad7fa247d0b133eb2012ff7f69f174aa2e2e750c255",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71693.jsonl.gz",
+        "sha256": "22dbc6ae5a2652c1cdd6419f049778ac75a3ddc4a6306149c83dec5e756a8087",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71695.jsonl.gz",
+        "sha256": "68ce9feaad2da5a71f618d78b84f42071e02819e1f51290b3c6381663d1313bb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-71731.jsonl.gz",
+        "sha256": "13dc060d20261ec99f6d278126974ba642fd752a0dbade040088cc8ab5a94454",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-7216.jsonl.gz",
+        "sha256": "5c70f4979038ef4323560c53e3847a0be7f90e76276cfdb2afe39d30b39d868e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72265.jsonl.gz",
+        "sha256": "c7728877e896140fe8df29606f509ed9f9e5a9903a27efc1b5ab76d7deb14f1b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72323.jsonl.gz",
+        "sha256": "0eb0bb40ce0266cc780c4374010797ea0d8dd9d59f936afb2199291ad296bfae",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72348.jsonl.gz",
+        "sha256": "ce3adac9f29c377fb843e918f91fe8e9c1c30d6f370b5a15864ee0a58aa5eed6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72349.jsonl.gz",
+        "sha256": "02db68b531e294a13ce27e2f38ff4b3d0705a3e5ffc87909d9dbb7fa9112f08c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72372.jsonl.gz",
+        "sha256": "e489e257090a4031a02c727154debdf3611cddca6e004f9be0cefc3f84dda60a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72418.jsonl.gz",
+        "sha256": "ae84aa15c9a82baf1810a10040698e6cc3dc3fef4ab5d3d8746eae182e39890d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72432.jsonl.gz",
+        "sha256": "0c81b412b821ae7632406165af8496245af0df12efeddb8c128f464bd50d9538",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72433.jsonl.gz",
+        "sha256": "7b372fa12e5f68b5cdca13caf3d542dba557c797ff9e7f4f22a3a5099a468a31",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72595.jsonl.gz",
+        "sha256": "cf6e71016c81f6d5510cc8351c68c8b54c223ff4f0f24c90851a28845c62811e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72968.jsonl.gz",
+        "sha256": "7c719bee6c9a92f43499add661737d5d653a9d1880fc8fbe0adac33959aac03b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-72981.jsonl.gz",
+        "sha256": "be8e69a099573a2aac3a7968ed9539841f0f8508168a312909c58b9d1c49f9b6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73023.jsonl.gz",
+        "sha256": "6553947729496a6ca2fa7b82addc5b21a656ddf877dfb68ddf087efb3701616a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73062.jsonl.gz",
+        "sha256": "5e17aa7024fd8842cb81a6be9394cdf1df387bfc0063838236b6bca262c017f9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73100.jsonl.gz",
+        "sha256": "1c9b607f522a5a49f799a829bc589d93b6eaea7d36bb00ac89eb40cc9af0b434",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73326.jsonl.gz",
+        "sha256": "037aaf65a99a3c813ee3829de70dbc8a6ca7582f7da29dec7df0079308a7e646",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73371.jsonl.gz",
+        "sha256": "88534a1c84e38ca62ccb8b5b4b82db0cc5afdcdb597900d8c54dfa4f0b141e24",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73394.jsonl.gz",
+        "sha256": "bd1db3a7e752f9e61ce92dd7f3fe1821154ca25c64203ec631d09fac7d0ee208",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73591.jsonl.gz",
+        "sha256": "ed8c5b0ee2397eeed19e8e47a9a545b467373ccf8756a6b6a423df2b88595293",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-73835.jsonl.gz",
+        "sha256": "4bd58d9893460b5a5d50f1a2a556813fb58bc2ab42c45d159d100f09b66611f1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74407.jsonl.gz",
+        "sha256": "fc3287d93a6858e2d7987c76be91536b3a28fb3343d05cce12f30a891abbcc1c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74437.jsonl.gz",
+        "sha256": "d61fbee33841c8caa51f9b401455f085820ab18ad0a7cad623b868542c10039f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74469.jsonl.gz",
+        "sha256": "537c0e9436647c03e97bf3bd6bc13a8a922e25f61306fc8ca6c8f192fb344b4f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74512.jsonl.gz",
+        "sha256": "e0fb68fd94bd5c84654b342f5f585a87167aec1da7ce37734ee44289df5f43bd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74702.jsonl.gz",
+        "sha256": "c7bf63a9b0315cfcae142147b976f34232e793f2ec9f4f2073c585849e57bf0b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-74763.jsonl.gz",
+        "sha256": "a287e8cf8448078be371d4d95efc02b4863df5278610ec7257bc0932ddcaaefb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-75077.jsonl.gz",
+        "sha256": "fa6e1082ee16e1885103526eded0e33e03dd5ba3659e659a05a3e2c07f8fda00",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-75554.jsonl.gz",
+        "sha256": "6cb7e0afb37389534fbcd4e8b3501639630c3e7ac3f3c9ffe3656925e88cc034",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-75577.jsonl.gz",
+        "sha256": "9fef267ad652c0f58ce24d8f90a2e47ab20a167844d21e601a3faa3e4a4bb565",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-76082.jsonl.gz",
+        "sha256": "f44f3a2599292f1d7be7eb5548ac3cc1c6da74744f1e5ea68921a78859e72545",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-76348.jsonl.gz",
+        "sha256": "c9e400263ad1e1b9eb94faf4ac303cac0cd6f3afc8b2e6226bf37e960789296c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-76571.jsonl.gz",
+        "sha256": "dc037e6d4f7c733cb4ebf7b18e84d7bbf2336ce0f43949b9e20234445f0f4daf",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-76620.jsonl.gz",
+        "sha256": "9fddc55bb721e8c9be7886b3bcc48c451261aae46aec0e056a07781a8bcf6c1d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-76627.jsonl.gz",
+        "sha256": "090e1fafe0437d6239d0a1596f94917b9ce98ba75008cf884f46d61cc72674a1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77079.jsonl.gz",
+        "sha256": "131b0e09f68539a035e8de9599f60778bad062769f14d9638d649efe72c39a11",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77316.jsonl.gz",
+        "sha256": "7cdd038908f9be917b89699e042d8800090f2f74ba447cb9965ebee4241be86e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77317.jsonl.gz",
+        "sha256": "46c24985b9964ee36d934018ce8a7f9f6a928dc6c8eede625816981f3d9bdcb5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77341.jsonl.gz",
+        "sha256": "83eb5c57aa884e5ec05c5e8ad07f88164a2a6d5b440c9cce61d8467f7e7f082e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-7737.jsonl.gz",
+        "sha256": "5577fc255789c81c1533dc21158419c3f715446f6e49fb78f55808554d4895f2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77439.jsonl.gz",
+        "sha256": "cc0e156ae7902fecea6ebd8e358570448064b12511dccfdbd75b080891e83e0b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77573.jsonl.gz",
+        "sha256": "1115cb5e516997abd806ae2d617732c60ce1383f3b0a5a591c3b6655ebff50d6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-77856.jsonl.gz",
+        "sha256": "e6a7f6a0f22612411b987d6a6933200d394fba31996d3ba80f29425fe1521e3d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-7819.jsonl.gz",
+        "sha256": "d8079cafb49b5fb6f5e1512f623f162328c67c385a5d60db958119be6d771339",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78205.jsonl.gz",
+        "sha256": "cb1137ee44917513a927237398a349ad4955b5bf37e02a8c9934f0ee2a978f95",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78401.jsonl.gz",
+        "sha256": "2f40be36287c0ff1092190095fb3121bfaa7c78294a52f69fc04fea61175783e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78485.jsonl.gz",
+        "sha256": "87e18e8df21f48102093b47dd037b3a6cf1739e91b2a558085e2e99945ac9371",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78539.jsonl.gz",
+        "sha256": "50cfb39fc80415b7c4d9b77745f73ebc30a003e8161df6086e01f56e45687e1e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78560.jsonl.gz",
+        "sha256": "c1e38ec13db84ab02717cea6fe27f2677c2bf2ce442a3e1fdd114c500a4e1449",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-78914.jsonl.gz",
+        "sha256": "42d518fb534bcca8b71d3deb32a4da0532fafee2e60e78901505c13b9016c650",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-79115.jsonl.gz",
+        "sha256": "7236554b55b371c9220e70f92013a05ebbfdc5376250a66dfc2e2849454d396c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-79174.jsonl.gz",
+        "sha256": "6be5c45987585b7d7c91c7ab29de65c82b091be76bd30f6332431d37610be652",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-79453.jsonl.gz",
+        "sha256": "332f94a0b6ed5d8dd9ba9da1a7c87b2aef3dea2544f1c59b53eaaf85e09c7560",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-79710.jsonl.gz",
+        "sha256": "9cd4be0c038dc9986bde32a9c6ec659e6c2a68c8cbb31b230e99bcab909cac58",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-80245.jsonl.gz",
+        "sha256": "c61b6dddfe3127b097c8c9ac18f0d0632db7c9fc7fbee1a0ef0c16731e330877",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-80394.jsonl.gz",
+        "sha256": "54b9eb919c780991200f06973fa671a1b0f68c61eccdcbff9029f193457d07f0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-81169.jsonl.gz",
+        "sha256": "3117ebf2fb338d5a007f6fe5834153f805cdcf157eef3a8d9b461e880f325f8e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-81545.jsonl.gz",
+        "sha256": "7a96a9e01ba50429132e1201b547f541b1e10f988c39a5e3856a8d1abfa7053c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-82202.jsonl.gz",
+        "sha256": "6f653bddcbeef819896fc8da4705e2f093570824ccea253239bae2269a11b281",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-82325.jsonl.gz",
+        "sha256": "9b80dd039ace388204e3b211eed3efb4b1758d0b6432b49bb1179870ec605de9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-82536.jsonl.gz",
+        "sha256": "12e94a5bc08437a9b2e98c8de01ae9a1c016446a76417b42d7233b3f63d1f26b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-8272.jsonl.gz",
+        "sha256": "a1b80b4667c193c9cbbaf8797d5a394d7324936305833d9caa84a9705f3713b3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-82871.jsonl.gz",
+        "sha256": "71a0389446048954ede7f9d6e2c75dbb0f711606a63f7288b0b1418cf5b6a958",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-8289.jsonl.gz",
+        "sha256": "0912184faef253af441a07dd1b961f88835d9eff54ebd3033fda732bedc70966",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-8290.jsonl.gz",
+        "sha256": "8454974b6642c0e38a9fd1c5fa92256bbe8b50f1c964012b0a1ebfa2c6989e32",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-82972.jsonl.gz",
+        "sha256": "8320d96369c3d51cc0c922fcd50602994a67d15db727eb83bdf72bb7dba536bb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83028.jsonl.gz",
+        "sha256": "359a9baaaab7b04c6d2e84b16c20362e345f0b1b3ec3c8a1e95d660f06fdedd3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83181.jsonl.gz",
+        "sha256": "160421840a566ec9280c3379b6b8437ae261819de6f4b8ed3ae37d13c5bb6650",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83299.jsonl.gz",
+        "sha256": "f5fb9102d9ef9d55f1a446d1da205855b316dd6e93b755e7253abe8794340879",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83387.jsonl.gz",
+        "sha256": "2779d3777bcdcf0ed613e21e089e2ded54ae827a970e61738b5cbebdbf676f4d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83417.jsonl.gz",
+        "sha256": "5a18208ba3c93ae0bb70f5ff78d424ea38917e35ac4386a843e1098f860a354d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83431.jsonl.gz",
+        "sha256": "8175766c9f6d961dda6af535fe608a48e5c96a8704f682f87f99a9d930966d85",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83493.jsonl.gz",
+        "sha256": "f8ee9c20ba1e266f63fa2d649e0ab494696b79e0c0fb65c05186a4a400d05efc",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83787.jsonl.gz",
+        "sha256": "1ce6d17675193ab8a55bca36215d5b370f21d3746261b709327e4304d5c54cdd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83862.jsonl.gz",
+        "sha256": "40566c0a254034058645849b9a1bfbc11156bd8422ed90ac9454c957427c40d2",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-83911.jsonl.gz",
+        "sha256": "a1d504032b9667760edbfa7b2b53c9be4c0cf665c4a213e36d664fb6819f21a0",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-84529.jsonl.gz",
+        "sha256": "f8ee196df8bc173053cfb1934b76620a25b789fd9f2815374ad243ca312c6d04",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-84593.jsonl.gz",
+        "sha256": "6be62e891401fc67c515c51c85552ccbb45228e70713d871c52b2fa5d2b856bb",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-84919.jsonl.gz",
+        "sha256": "95b0c4de55f3cce19e9aa94efacd9c4c5b00b39a51b90db37b908e183a2a572a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-84928.jsonl.gz",
+        "sha256": "b1a202452d9a6f5de641ce52ca970abe20a950c8009f8487b3aecd0c41c169a1",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-85153.jsonl.gz",
+        "sha256": "18d522a60ee49506f0146d6dd04e45146093cac2d9c52e06de9dd380c2db7340",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-85245.jsonl.gz",
+        "sha256": "e69e6e746c53fb290cd17207ee08c8dfd4d140814a4053000b655c44c120d647",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-85300.jsonl.gz",
+        "sha256": "4da62c9cf9bba17ac75bfde9c11c7cb1cc474cb016f3a74d1d048238307b2f3b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-85712.jsonl.gz",
+        "sha256": "356023a1cfe764b6766688f582027346983b5806376b58253a9fba84dceaa564",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-86086.jsonl.gz",
+        "sha256": "e6ad0559431c8b29fc9b19753ce4648a7093be81fa493d774ea113b7e307c670",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-86176.jsonl.gz",
+        "sha256": "69cfde3864b66027f2e6f9c9df1a7bc3a0fa040ef784c9aabb1e22d5bd317ff6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-86569.jsonl.gz",
+        "sha256": "5fb635106d15aef00a5eb072567fb1531fcecd967cca56e856ef9d45ae003d40",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87325.jsonl.gz",
+        "sha256": "26bac1da6ce5b093f074605c6b67dadaa91e5b3313075e43000b7d5680b61b27",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87378.jsonl.gz",
+        "sha256": "42fde3a96a32139f90b57ce4ea0f6817c836d844bb4c77e2afc0e7cdb1fd52d6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87513.jsonl.gz",
+        "sha256": "17fbfaa005040358fd69be48fa22ae78f39e23a50bc5e22b757038af26b47a4e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87529.jsonl.gz",
+        "sha256": "f1f2afd803424d4c01188f051264a9caba83667c3f4ecc74b42ff36dfd7aa957",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87713.jsonl.gz",
+        "sha256": "7f9a5ae38fdae6c97a612b3f56a79cf3795f16b55ec2cfbeb185aa8ab3b40a08",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-87789.jsonl.gz",
+        "sha256": "37105945a63c8edc4047cff42884682a78cbce1142a66ebf7485ce6832786bc6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-88360.jsonl.gz",
+        "sha256": "c0a4d5ef62d7dc103ff46f7007ce41071515e051c7d65bf24214c85cb918c2f6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-88565.jsonl.gz",
+        "sha256": "e9905121f130fbc8d7cbb860062ed9119872564a7c7d883a34ec2bc6a7941058",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-88695.jsonl.gz",
+        "sha256": "2872ed35e55dfc8dc4c01297e93bb338fced04f41308982dcce754e75e0ce5fd",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-88788.jsonl.gz",
+        "sha256": "045105ffb59309c7dee725abe94d3db2d1c4e629bf5081dc088a051d79280033",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89017.jsonl.gz",
+        "sha256": "ab092b35c7100e0217238e54f414e0f2842cd237ea762e30fbe85eda38de6ec6",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89054.jsonl.gz",
+        "sha256": "ed34e914cae29f3587052e8c2fb96e93880cbe9f07c756a1e2fd8087574714ba",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89195.jsonl.gz",
+        "sha256": "0e7e9888ce74c0f585f89505bdf1e5233859df0c2dab7218f9bf7f37bda7a025",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89333.jsonl.gz",
+        "sha256": "179fd0a7c21745fa28c784ed9f0d6f0f9b64d73f1b828650b36726ad6b4f32f5",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89372.jsonl.gz",
+        "sha256": "fa1c04bbe61b34bc5aa4df7a9c92f5e3dfa0184992d2cc0d448d318d364bea17",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89438.jsonl.gz",
+        "sha256": "077ace58d66d9bbc931931bfa450c9ff7ff1d30c4ce4df74028b208efe66ec5c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89542.jsonl.gz",
+        "sha256": "4efd681e7747aab987fdc97cd631d07b32c2345e7c48a8b42645d80656692b9c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89552.jsonl.gz",
+        "sha256": "4e466d28326b50760ccb54d6205bf26e3853d9ff8142dbcd74cf8d4f39939e22",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-89883.jsonl.gz",
+        "sha256": "e5737a65a6cc1829e51ee3e41aa32b65e42d8a4241ed718784a633d702bace8d",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-90069.jsonl.gz",
+        "sha256": "3db9171b17c129d0ab4f8b9c765ef6d5733e865c2c084de088e6670bff4f06f7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-90090.jsonl.gz",
+        "sha256": "d1cc072f4c38a85961f5ec4684148dab8b2b7ee4446a156aeb7cef72b15b60c7",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-90680.jsonl.gz",
+        "sha256": "319c143470c6608af91554e4f4cb2e586bd04e1a3f1def699c84b2c02022435c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-91680.jsonl.gz",
+        "sha256": "9a77cca538f16e2bcbf759e977fbfaf23cc07b5d51162e3a95587e488329d93e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-92587.jsonl.gz",
+        "sha256": "2410d8e3ebd94984e4f0510300d1fa8dd7b40e74121452828215a8e1e6597fdf",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-92638.jsonl.gz",
+        "sha256": "546d71e0987130b11220429249d79dbf45191daaab23dd73e213a33b99984b79",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-92837.jsonl.gz",
+        "sha256": "39cf1f6986f62d135860b8d3ea5fdaaec3867f3b0bd59a21a1307703e2e8def9",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-93677.jsonl.gz",
+        "sha256": "c15374ee5a609c9c62d61a1c102e7763c82d248f334f4a38949befc260681142",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-93868.jsonl.gz",
+        "sha256": "07f43f33ffdcff47a60cd46e3515c22007add18fadf1047eadab9084ec86be07",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-93913.jsonl.gz",
+        "sha256": "8480f4a295eb6e69f9847c76762c83942bcdb2625074244aae66c4f7bfeae669",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-94114.jsonl.gz",
+        "sha256": "850ca154ae4f7111e031dcbd1bff1cd947ac3c95d48f96ec1bf5af326815f79b",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-94266.jsonl.gz",
+        "sha256": "05978b0319834939f89a8389a92d2c9594f7a0ddc798f18b298212379a2efbba",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-94441.jsonl.gz",
+        "sha256": "90948889d5875aa7d8f28544f5d7d8c3b0e2fdf9025e0b9712282675b515b13e",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-94777.jsonl.gz",
+        "sha256": "1a1759f93a09b1dc046cbc173e3467a14cf9e0121c718ce8ac1e8906efcdd814",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-95071.jsonl.gz",
+        "sha256": "4016a53b216b5f4ef4c73cf9dcede1ae1cb3485798a775f5e47ba40b151ffc1f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-95502.jsonl.gz",
+        "sha256": "9f3cd64ee404d9e2b881f557957a215353332dd6a64614d05d66273f3f812f71",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-95702.jsonl.gz",
+        "sha256": "feacc65cf9d928c6739e814ec31f4636221ad04293e0093c2170915b6f4bc695",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-97694.jsonl.gz",
+        "sha256": "48c5cc732a796e912e844f2d538d2aeb1a2e38bf632d9b09fa8dcb5dcc282cbe",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-97978.jsonl.gz",
+        "sha256": "ab2906297bbc39da393b56154c7bf03de9b2db10529c2696db3cf49b08fca133",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-98291.jsonl.gz",
+        "sha256": "160086ec554cfa8ebb454239c554d6f568282192441bb102b9af4574a0b51c0a",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-98485.jsonl.gz",
+        "sha256": "546cc1399d86594551c2a2b9a93040803dbbd135e8612d3c8f3a780a19bc308f",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-9880.jsonl.gz",
+        "sha256": "d2f2285c9ed929bfa9542796d449addd0efe6d31d4fb79266ca63988bafc1ca8",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-98867.jsonl.gz",
+        "sha256": "e96f8a91de9eb58be5e3f672d02d741e5f15b35926964fabc64ff90d87b876e3",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-99722.jsonl.gz",
+        "sha256": "95a160aa3b08175ec062fb04cfaf72f58ff4639066d021bcf9467bb4a8a46d37",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/11-teacher-data/bank/bank-99951.jsonl.gz",
+        "sha256": "22ba0c38aee53539417d06e3b860db96f4523faf3ae8dabb0479bab906afb60c",
+        "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz",
+        "sha256": "458cbeee9612d264c31f8af4814461e74e64c062be5e90287778f240ac2b403b",
+        "n_rows": 3828,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/15-g4-read-rft/eval/it15_g4_sample/episodes.jsonl.gz",
+        "sha256": "96e8835145eed1be89a38dcc22a3028e8dfc5bca734a936dd8c6ced1f43cc81c",
+        "n_rows": 1600,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/data/train.jsonl",
+        "sha256": "122a913ee84208fdcdfbf292f607bc4d81c31a61269dd47a2244f17e9963ab1b",
+        "n_rows": 142,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/data/train_pool.jsonl",
+        "sha256": "f5c07a939f6d9d4cf90cdf9681f7b75801aa11e64f56fda00ca71887bda3d724",
+        "n_rows": 966,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/data/train_rl.jsonl",
+        "sha256": "3486df9c4b64e641593e657a765b9acb08c038b87fe8be94ea06c340ee6d9d81",
+        "n_rows": 360,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/outputs/sft/bestofn-s0/examples.jsonl",
+        "sha256": "7a2b3bb4234ff77be181870eaea060ac705c7e667e1fbf90bf76721bd2a2c945",
+        "n_rows": 629,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/outputs/sft/combo-s0/examples.jsonl",
+        "sha256": "86fe0d1652fa603f983450b8c32116302f929b2e07bf4aff870869cf597ebeea",
+        "n_rows": 1428,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/outputs/sft/hindsight-s0/examples.jsonl",
+        "sha256": "ee35f9e656afb7386d24f6c6b226f04b735af4ed157f32dd99ad74d5053a9cc8",
+        "n_rows": 2950,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:2026-10-06-node1/repo-files/runs/passk/bank/bank-2645893.jsonl",
+        "sha256": "0822f837ff7b02c22fa5e4f7a996a6d638fcd77eef116e52bbfc9df4be773beb",
+        "n_rows": 3828,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:staging/root/staging/14-it14-session/run/it14-sft-v2/examples.jsonl",
+        "sha256": "60950cfbb762624af3da278a62fdfe1f68300cc58cdd7cb4539982a9c9f93730",
+        "n_rows": 933,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:staging/root/staging/14-it14-session/run/it14-sft-v2/examples.jsonl.gz",
+        "sha256": "b986d9b10dde09e86aa62c335e810eddaecd2419160fef33d1e179f8ba4dec5d",
+        "n_rows": 933,
+        "n_hits": 0
+      }
+    ]
+  }
+}

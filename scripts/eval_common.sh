@@ -16,6 +16,7 @@ AGENTIC_ABSTENTION_REPO=https://github.com/lhannnn/agentic-abstention
 AGENTIC_ABSTENTION_COMMIT=ebbf1f51671f8e6d5da42a4188ff8c9254ee978e
 ABSTENTIONBENCH_REPO=https://github.com/facebookresearch/AbstentionBench
 ABSTENTIONBENCH_COMMIT=e29184174c69bc95139b8c33dcca09aacab9442a
+ABSTENTIONBENCH_HF_REVISION=af06080e2cbfff73f02a7c33135e5567d6f7ce6a  # facebook/AbstentionBench (the loading script)
 
 # clone_pinned <url> <commit> <dir>: idempotent shallow-ish checkout of an exact commit.
 clone_pinned() {

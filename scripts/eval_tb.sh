@@ -13,7 +13,9 @@ JOBS_DIR="${1:-runs/harbor}"; shift || true
 require_model
 case "$TARGET" in
   tblite) SRC=(-d openthoughts-tblite@2.0); TAG=tblite ;;
-  tb2)    SRC=(-d terminal-bench@2.0); TAG=tb2 ;;
+  # tb2 resolves through the committed registry (data/benchmarks/registry_tb2.json: every task at one commit), not the
+  # hosted one, which can move: the final benchmark (data/benchmarks/final_benchmark.json) is frozen at that commit.
+  tb2)    SRC=(-d terminal-bench@2.0 --registry-path "$REPO_ROOT/data/benchmarks/registry_tb2.json"); TAG=tb2 ;;
   *@*)    SRC=(-d "$TARGET"); TAG="${TARGET%%@*}" ;;
   *)      SRC=(-p "$TARGET"); TAG="$(basename "$TARGET")" ;;
 esac

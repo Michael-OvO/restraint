@@ -3,7 +3,7 @@
 The HF dataset is a loading script (`AbstentionBench.py`) that builds 20 source datasets (downloads from many hosts) and
 applies their subsampling indices; `datasets>=4` no longer executes loading scripts, hence the separate venv.
 
-    python abstentionbench_export_standalone.py --out abstentionbench.jsonl
+    python abstentionbench_export_standalone.py --out abstentionbench.jsonl [--revision SHA]
 
 Row: {dataset, index, question, reference_answers, should_abstain, metadata_json}. License: CC BY-NC 4.0.
 """
@@ -20,9 +20,12 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True)
     p.add_argument("--repo", default="facebook/AbstentionBench")
+    # The loading script is pinned (the final benchmark manifest records the revision); the 20 source datasets it
+    # downloads are not, so the export's sha256 is what freezes the items (data/benchmarks/final_benchmark.json).
+    p.add_argument("--revision", default="af06080e2cbfff73f02a7c33135e5567d6f7ce6a")
     args = p.parse_args()
 
-    builder = datasets.load_dataset_builder(args.repo, trust_remote_code=True)
+    builder = datasets.load_dataset_builder(args.repo, revision=args.revision, trust_remote_code=True)
     builder.download_and_prepare()  # AbstentionBench.download_and_prepare fills builder.datasets: {name: Dataset}
     n = 0
     with open(args.out, "w") as f:

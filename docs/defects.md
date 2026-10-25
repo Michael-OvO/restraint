@@ -56,6 +56,14 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 | DEF-46 | tooling / infra | fixing | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
+| DEF-NEW-bench-1 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
+| DEF-NEW-bench-2 | tooling / build | fixing | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
+| DEF-NEW-bench-3 | build | open | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
+| DEF-NEW-bench-4 | tooling / build | closed | `final_benchmark freeze` writes the items files before it checks for changes, so a freeze refused without `--refreeze` still overwrites the frozen item sets |
+| DEF-NEW-bench-5 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
+| DEF-NEW-bench-6 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
+| DEF-NEW-bench-7 | tooling / build | closed | `final_benchmark freeze` (after the DEF-NEW-bench-6 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
+| DEF-NEW-bench-8 | tooling / build | closed | `final_benchmark freeze` (after the DEF-NEW-bench-7 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
 
 ---
 
@@ -2703,3 +2711,210 @@ section 7 critique) and from re-checks against the code and the archive on that 
   fits it. Not entered as a tooling defect for that reason; if the owner counts full refills, the S3 replay key (the
   whole `replay_episodes` import closure: any change to grading, env or harness refills all ~380 branches, ~35 min at
   concurrency 4) is the item.
+
+### DEF-NEW-bench-1: TB2 runs whatever Harbor's hosted registry resolves
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, build:bench (checking that the final
+  benchmark's adapters are frozen). **Commits:** `7ca6e12` (fix, tests, manifest).
+- **Evidence:** `scripts/eval_tb.sh` (~L16, before the fix) `tb2) SRC=(-d terminal-bench@2.0)`: Harbor's
+  `RegistryClientFactory` then uses `HarborRegistryClient` (the hosted registry), whose task list and commits can change
+  without any change here. On 2026-10-25 it resolves all 89 tasks to `laude-institute/terminal-bench-2@69671fb`, while
+  the decontamination texts (`scripts/fetch_benchmarks.sh`) and `scripts/eval_agentic_abstention.sh` use `2fd12b8`, 8
+  commits later ("Various task fixes for TB2.1": `install-windows-3.11/tests/test_outputs.py`, two `solve.sh`, task.toml
+  metadata; no `instruction.md` changed). Nothing recorded which commit a TB2 run used.
+- **Impact:** no archived TB2 run exists (the only archived Harbor jobs, `14-session-b/harbor/`, are Agentic Abstention
+  runs from a local materialised dataset), so no archived number changes. Decontamination is unaffected (instruction
+  texts are identical at both commits). Future TB2 numbers would have been unpinned.
+- **Fix (done):** `data/benchmarks/registry_tb2.json` holds the `terminal-bench@2.0` entry (89 tasks, all at `69671fb`,
+  the commit the hosted registry served when frozen, i.e. TB 2.0 as published) and `eval_tb.sh tb2` passes
+  `--registry-path` to it (Harbor's `JsonRegistryClient`). `data/benchmarks/final_benchmark.json` records the commit and
+  the file's sha256; `final_benchmark check` refuses a registry whose tasks are not at one full commit or whose hash moved.
+  The Agentic Abstention arm stays on `2fd12b8` (its own pin), which the manifest records as a separate source.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_tb2_runs_from_the_committed_registry_at_one_commit`
+  (fails on the old script: no `--registry-path`; loads the registry with Harbor's client and checks 89 tasks at one
+  commit equal to the manifest's) and `::test_a_tampered_items_file_or_result_slot_is_caught`.
+- **Impact note:** none re-scored (no archived TB2 run); the frozen commit equals what the old path resolved on the
+  freeze date, so the change pins behaviour without changing it.
+
+### DEF-NEW-bench-2: AbstentionBench is not frozen
+- **Area:** tooling / build. **Status:** fixing. **Found:** 2026-10-25, build:bench. **Commits:** `7ca6e12` (revision
+  pin, test), `aaae57f` (computable metric).
+- **Evidence:** `src/honest_agents/eval/external/abstentionbench_export_standalone.py` (~L26, before the fix)
+  `datasets.load_dataset_builder(args.repo, trust_remote_code=True)`: no `revision`, so the Hub's current loading script
+  runs; that script (`AbstentionBench.py`) downloads its 20 source datasets from their own hosts at export time, none
+  pinned. No sha256 of an export is recorded anywhere, so two exports need not hold the same items.
+- **Impact:** no AbstentionBench run is archived, so no archived number changes. The final benchmark cannot report
+  AbstentionBench until its items are frozen.
+- **Fix (done so far):** the exporter takes `--revision` (default `af06080e`, the Hub's revision on 2026-10-25, last
+  modified 2025-08-06) and `scripts/eval_abstentionbench.sh` passes `ABSTENTIONBENCH_HF_REVISION` from
+  `scripts/eval_common.sh`; the manifest lists the benchmark as `pending` with that revision.
+- **Remaining (needs new code, not just a command):** `final_benchmark freeze` cannot ingest an export today:
+  `benchmark_ids("abstentionbench")` returns `None` and `definitions()` hardcodes `status: "pending"` with no export
+  source or hash, so `freeze --refreeze` would leave the benchmark unfrozen. Needed: (1) run the export once on the node
+  (it executes their loading script, so not on the Mac under the untrusted-code rule) and archive the JSONL under
+  `benchmarks/abstentionbench/`; (2) new code: `definitions()` adds an export source (`archive_file` + `sha256`, which
+  `check --archive` already verifies) and sets `frozen` when the archived export exists, and `benchmark_ids` derives
+  `dataset/index` ids from it. Those ids must not go into the never-trained index as they are: `BenchIndex.add_ids` also
+  indexes the part after the first `/`, which for `dataset/index` is a bare integer and would flag any numeric training
+  identifier; (3) `scripts/eval_abstentionbench.sh` refuses an export whose sha256 differs from the manifest's;
+  (4) then `freeze --archive A --refreeze` and a test that the frozen ids re-derive from the export.
+- **Metric (fixed in the repair commit):** the manifest's metric was `qa.f1`, which `compute` cannot produce (F1 is not a
+  per-unit mean, and the scorer emitted no units). It is now `abstain.abstained` (recall on should-abstain questions,
+  non-inferior) and `answer.abstained` (over-abstention, reported), per-question units from
+  `final_benchmark.abstentionbench_units` / `final_benchmark units --bench abstentionbench`; their F1 is still reported
+  by `abstentionbench score`. No arm has run, so no number changes.
+- **Closure test (so far):** `tests/eval/test_final_benchmark.py::test_abstentionbench_export_pins_the_dataset_revision`
+  (fails on the old exporter and script).
+
+### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
+- **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
+- **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
+  `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
+  `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
+- **Impact:** none measured: the Hub's last commit of `Qwen/Qwen3.5-4B` is `851bf6e` (2026-03-02), before every archived
+  run, so all runs saw one revision. A future Hub update would silently change the base arm and every training start.
+- **Fix (proposed, other lanes' files):** set `model.revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` in
+  `configs/qwen35_4b.yaml` (inherited by the run configs) and pass `--revision` in `scripts/serve_vllm.sh`; the final
+  benchmark manifest already pins the base arm to it.
+- **Closure test (proposed):** every run config resolves `model.revision` to a 40-hex commit.
+
+### DEF-NEW-bench-4: a refused freeze still overwrites the frozen items files
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
+  **Commits:** `aaae57f` (fix, tests).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` `freeze()` (L366-378 at `7ca6e12`) wrote
+  `data/benchmarks/items/<name>.txt` inside the loop, before comparing the new items / sources with the existing
+  manifest, so the `ValueError` without `--refreeze` came after the frozen file was already replaced. The module's
+  guarantee ("a later run that would change an item set ... is refused") did not hold; `check` would only catch the hash
+  drift afterwards. No test called `freeze`.
+- **Impact:** none: `freeze` ran once (the original freeze, `7ca6e12`); the committed items files match their hashes
+  (`check --archive` clean) and re-derive from the archive. No number depends on it.
+- **Fix (done):** `freeze` derives every item set and compares first, and writes the items files and manifest only when
+  nothing is refused. Re-running `freeze --archive` (no `--refreeze`) on the archive reproduced every items file byte
+  for byte. That fix also let a metric change through unrefused (see DEF-NEW-bench-6, fixed in `2e47cd8`).
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were`
+  (fails on the old code: the items file holds the new ids after the refusal) and
+  `::test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date` (renamed in `2e47cd8`).
+- **Impact note:** none re-scored (no results exist).
+
+### DEF-NEW-bench-5: the never-trained check did not cover every archived training input
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
+  **Commits:** `aaae57f` (globs, Parquet reader, re-recorded verdict, tests).
+- **Evidence:** `ARCHIVE_TRAINING_GLOBS` at `7ca6e12` left out the GRPO rollout completions
+  (`iterations/*/run/*/completions/*.parquet`: 142 files, 9,088 rows, which `iter_rows` could not read), the `train_rl.jsonl`
+  copies in `11-sft-grpo/files/data` and `12-harness-b0/files/data`, `12-harness-b0` `distill_pool.jsonl` and
+  `transfer_v1.jsonl`, `11-teacher-data/episodes.jsonl.gz`, and `14-session-a` `select_validation.jsonl` and
+  `decision/surfaces_val` (also in `15-g0-judgment`). The `7ca6e12` commit message and module docstring said "every
+  archived training build", and the recorded scope (492 builds) did not include them. The rollouts' task identifier is
+  `group`, which was not an identifier field.
+- **Impact:** the verdict holds. The reviewer's `check_row` over these files found 0 hits, and the re-run with the wider
+  scope (`never-trained --archive --record`) is pass: 642 builds, 58,444 rows (617 archived files with 52,916 rows plus
+  25 repo files; was 492 / 47,349 in all), 4,005 benchmark ids, 3,683 benchmark texts, 0 hits. The verdict and build
+  hashes are in `data/benchmarks/final_benchmark.json` `never_trained` (keys date, scope, verdict, counts, builds; the
+  manifest carries no 're-scored' label, which applies here in the ledger only). `docs/evaluation.md` at `aaae57f`
+  called 642 / 58,444 the archived files; corrected to 617 archived + 25 repo in `2e47cd8`.
+- **Fix (done):** the globs above; `iter_rows` reads Parquet; `group` is an identifier field; the docstring and
+  `docs/evaluation.md` say which files are checked rather than "every".
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_the_archived_training_inputs_are_all_in_scope` (fails on
+  the old globs; checks the 142 rollout files and the listed inputs are in scope and in the recorded builds) and
+  `::test_parquet_rollouts_are_read_and_their_group_is_an_identifier`.
+- **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged). Not yet called inside the SFT / data
+  build pipelines (commit-data lane).
+
+### DEF-NEW-bench-6: freeze accepts a changed metric without --refreeze and leaves no trace
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in `1d1cdc0`). **Found:** 2026-10-25, review of build:bench (the
+  DEF-NEW-bench-4 fix). **Commits:** `2e47cd8` (fix, tests, manifest log).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` `freeze()` at `aaae57f` refused only changed items or
+  sources; for metrics it rebuilt the result slots from the new definitions and copied the "results of the metrics that
+  are still defined", kept the first `frozen` date and wrote nothing about the change. At `7ca6e12` a metric change at
+  least left stale result keys that `check` flagged ("results must hold every arm x metric"); `aaae57f` removed that
+  tripwire. It happened once: `aaae57f` replaced AbstentionBench's `qa.f1:non_inferior` with
+  `abstain.abstained:non_inferior` and `answer.abstained:report` with no `--refreeze`, and the manifest showed only the
+  `7ca6e12` freeze date. Neither the DEF-NEW-bench-4 entry nor the docstring said so.
+- **Impact:** no number: every result slot was null (no arm has run), and that metric change was deliberate (the old
+  metric could not be computed, DEF-NEW-bench-2). The other benchmarks' items, sources and metrics are identical at
+  `7ca6e12` and `aaae57f` (field-by-field diff of the two manifests).
+- **Fix (done):** `freeze` refuses a benchmark whose items, sources or metrics (the whole definition: side, name,
+  direction, headline, description) changed unless `--refreeze`; with it, that benchmark's results are voided and the
+  change is appended to the manifest's `refrozen` list (date, previous freeze date, before / after per field: metric
+  keys with direction, items n and sha256, sources hash; since `9c1d36d` (DEF-NEW-bench-7) metrics and sources in
+  full; since `570cc5c` (DEF-NEW-bench-8) every compared field in full, and `role` is frozen too). The `frozen` date stays the first freeze's; unchanged
+  benchmarks keep their results. `check` requires `refrozen`, and with `--archive` flags manifest metrics that differ
+  from `definitions()`. The `aaae57f` change is now logged: the AbstentionBench metrics were restored to the `7ca6e12`
+  definition, the plain freeze was refused (`abstentionbench: metrics changed since the freeze`), and
+  `freeze --archive --refreeze` recorded `refrozen[0]` = abstentionbench metrics before `qa.f1:non_inferior`, after
+  `abstain.abstained:non_inferior`, `answer.abstained:report` (dated 2026-10-25, the day it was recorded; the change
+  itself was made in `aaae57f`). Items files unchanged byte for byte; `check --archive` clean.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_a_changed_metric_is_refused_and_a_refreeze_is_logged`
+  (direction / renamed / added; all three fail on `aaae57f`, which accepted them silently),
+  `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define` (fails on `aaae57f`: no metric check),
+  `::test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date` (fails on `aaae57f`: no `refrozen` key). The
+  `2e47cd8` test file gives 6 failures on `aaae57f`, not the 4 first reported: those 5 plus
+  `::test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were` (its refusal message match changed).
+- **Scope correction (review of `2e47cd8`):** this closure covered changes to a benchmark that is in both the old
+  manifest and the definitions. An added or removed benchmark still went through unrefused and unlogged, and a moved
+  headline was refused but logged with identical before / after keys; filed and fixed as DEF-NEW-bench-7.
+- **Impact note:** none re-scored (no results exist); the manifest's metric change is now recorded, not void.
+
+### DEF-NEW-bench-7: freeze drops or adds a benchmark silently; refrozen hides headline changes
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in
+  `1d1cdc0`). **Found:** 2026-10-25, review of build:bench (the DEF-NEW-bench-6 fix). **Commits:** `9c1d36d` (fix,
+  tests, manifest log entry regenerated).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` `freeze()` at `2e47cd8` looped only over the new
+  `definitions()` and skipped any name not in the old manifest, so (a) a benchmark in the old manifest but gone from the
+  definitions was dropped with its results and no `refrozen` entry, without `--refreeze`, and (b) a benchmark added later
+  went in unlogged. `check --archive` compared metrics only for `name in defs`, so it missed both. Reviewer's probe on a
+  scratch copy of the real manifest with `mask` removed from the definitions: plain freeze succeeded, `mask` was gone,
+  `refrozen` did not grow, `check(archive=...)` returned `[]`. Separately, `_frozen_change` logged metrics as
+  `side.metric:direction` keys while the refusal compared whole metric dicts: moving MASK's headline from `no_lie` to
+  `accurate` was refused, then logged as before = after = `["honesty.no_lie:up", "honesty.accurate:non_inferior"]`.
+  Sources were logged only as hashes of the JSON.
+- **Impact:** no number: every result slot is null. The benchmark set (7 benchmarks) is identical in every committed
+  manifest (`7ca6e12`, `aaae57f`, `2e47cd8`), and no headline moved between them, so neither gap was ever hit; the one
+  logged change (AbstentionBench, `aaae57f`) is unaffected in content.
+- **Fix (done):** `freeze` refuses `<name>: benchmark added since the freeze` / `removed since the freeze` unless
+  `--refreeze`; with it, the `refrozen` entry holds `benchmark` (before / after: absent-added or present-removed) and
+  every frozen field before / after, and a removed benchmark's `results` and `deltas_vs_base` under `dropped`. Metrics
+  and sources are now logged in full (every field), items as n and sha256. `check --archive` flags
+  `<name>: defined but not in the manifest` and `<name>: in the manifest but no longer defined`. The manifest's
+  `refrozen[0]` was regenerated in the new format the same way as before (AbstentionBench metrics, results and deltas
+  restored to `7ca6e12`, `refrozen` emptied, plain freeze refused with `abstentionbench: metrics changed since the
+  freeze`, then `freeze --archive --refreeze`): it now holds the full `qa.f1` dict before and the two `abstained` dicts
+  after; the rest of the manifest and the items files are unchanged; `check --archive` clean. Reviewer's two probes
+  re-run on a scratch copy: `mask` removed is refused (`mask: benchmark removed since the freeze`), `check --archive`
+  flags it, `--refreeze` logs it with its items, sources and results; the moved headline logs `headline: true` on
+  `no_lie` before and on `accurate` after.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged`
+  (added / removed; both fail on `2e47cd8`, which accepted them), and
+  `::test_a_changed_metric_is_refused_and_a_refreeze_is_logged[headline]` plus the full-dict assertion in its
+  direction / renamed / added cases (all four fail on `2e47cd8`, which logged keys). Exactly 6 tests of the `9c1d36d`
+  file fail on `2e47cd8` (re-run 2026-10-25, 6 failed / 22 passed):
+  `test_a_changed_metric_is_refused_and_a_refreeze_is_logged` `[direction]`, `[renamed]`, `[added]`, `[headline]` and
+  `test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged` `[added]`, `[removed]`; the
+  `check --archive` assertion for an added / removed benchmark is inside the last two.
+- **Scope correction (review of `9c1d36d`):** the refusal also compared the items record's `file`, which the log left
+  out, and a benchmark's `role` was not frozen at all; filed and fixed as DEF-NEW-bench-8.
+- **Impact note:** none re-scored (no results exist); nothing void.
+
+### DEF-NEW-bench-8: role is not frozen; refrozen logs the items record without its file
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in
+  `1d1cdc0`). **Found:** 2026-10-25, build:bench (repair of the DEF-NEW-bench-7 fix against the review's rule "the log
+  holds before / after for every field the refusal compares"). **Commits:** `570cc5c` (fix, tests, evaluation.md).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` at `9c1d36d`: `FROZEN_FIELDS = ("items", "sources",
+  "metrics")`, so a benchmark's `role` (`headline`, `secondary`, `reported`, ...: which benchmarks carry the
+  pre-registered headlines) could change with a plain `freeze`, unrefused and unlogged, and `check --archive` compared
+  only metrics with the definitions (not role or sources). `_frozen_change("items", ...)` logged only `n` and `sha256`
+  while the refusal compared the whole items record (`file`, `n`, `sha256`): freezing the same ids into another items
+  file was refused, then logged with before = after.
+- **Impact:** no number: every result slot is null, and every committed manifest's roles equal the definitions (a plain
+  `freeze --archive` of the current manifest under the fix, on a scratch copy, is accepted and gives a manifest
+  identical to the committed one; items files unchanged). The one logged change (AbstentionBench metrics) is
+  unaffected.
+- **Fix (done):** `role` is a frozen field; `_frozen_change` logs every frozen field (role, the items record with its
+  file, sources, metrics) in full before / after; `check --archive` flags `<name>: role|sources|metrics changed from the
+  definitions`.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_every_compared_field_is_logged_in_full_on_a_refreeze`
+  `[role]`, `[sources]`, `[items]` (refused, then logged with the full before / after; for role and sources also flagged
+  by `check --archive`). Exactly 4 tests fail on `9c1d36d` (4 failed / 27 passed): those 3 (role: not refused; sources:
+  `check --archive` silent; items: logged without `file`) and
+  `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define`, whose expected message changed from
+  `metrics differ from` to `metrics changed from` (wording only; the behaviour it tests is unchanged).
+- **Impact note:** none re-scored (no results exist); nothing void.

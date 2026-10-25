@@ -19,7 +19,8 @@ if [[ ! -s "$DATA" ]]; then
   PY="$(ext_venv "$EXPORT_DIR" 3.11)"
   ext_pip "$PY" --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch
   ext_pip "$PY" "datasets==3.6.0" gdown pandas pydantic jsonlines requests wget numpy
-  "$PY" "$REPO_ROOT/src/honest_agents/eval/external/abstentionbench_export_standalone.py" --out "$DATA"
+  "$PY" "$REPO_ROOT/src/honest_agents/eval/external/abstentionbench_export_standalone.py" --out "$DATA" \
+    --revision "$ABSTENTIONBENCH_HF_REVISION"
 fi
 "${UV_RUN[@]}" python -m honest_agents.eval.external.abstentionbench run \
   --data "$DATA" --out "$OUT" --base-url "$BASE_URL" --model "$MODEL" \
