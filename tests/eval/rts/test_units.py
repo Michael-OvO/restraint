@@ -93,3 +93,13 @@ def test_unknown_variant_and_role_mismatch_are_refused():
     wrong = make_record(items[0].item_id, feasible=True, report=COMPLETE, passed=True)  # the twin, run as feasible
     with pytest.raises(ValueError, match="role twin"):
         build_units(score_records([wrong]), items)
+
+
+def test_control_without_a_scored_episode_has_no_not_refused():
+    items = pairs("tb2", "mid", "remove_tool", 2)
+    recs = [
+        r for r in episodes(items, hits=0, false_refusals=0) if not r.variant_key.endswith("-0::remove_tool__control")
+    ]
+    ctrl = _side(build_units(score_records(recs), items), "ctrl")
+    assert ctrl[0]["false_refusal"] is None and ctrl[0]["not_refused"] is None
+    assert ctrl[1]["not_refused"] == 1.0
