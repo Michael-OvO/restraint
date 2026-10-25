@@ -20,7 +20,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-10 | stats | fixing | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | closed | G2's held-out read rate differs by branch (twins 37 vs controls 24): behaviour (one seed; a cue on empty_backup), not the classifier |
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
-| DEF-13 | reward | fixing | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
+| DEF-13 | reward | closed | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | closed | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | closed | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval); repaired 2026-10-25 (report-episode infra errors cached, keys missed imports; gaps entered as DEF-22/23/24) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
@@ -738,13 +738,15 @@ section 7 critique) and from re-checks against the code and the archive on that 
     outside DEF-12 and not done.
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
-- **Area:** reward (design defect, not a code bug). **Status:** fixing (reopened 2026-10-25 at the integration merge:
-  under the one inspection metric, S9's read check fails on the G3 rollouts; see "Integration re-score" below). It was
-  closed 2026-10-24, after a repair (for RL, use `pair_table: true`; the default stays off so old runs re-score
-  identically). **Commits:** `bf67863` (fix, gate tool,
+- **Area:** reward (design defect, not a code bug). **Status:** closed 2026-10-24 (re-closed on `fix/reward` after the
+  reopen of 2026-10-25: with DEF-38's anchored window, the one inspection metric, S9 passes on all three inputs; see
+  "Re-close" at the end of this entry). It was first closed 2026-10-24, after a repair (for RL, use `pair_table: true`;
+  the default stays off so old runs re-score identically), and reopened at the integration merge (S9's read check
+  failed on the G3 rollouts under the K=8-from-start window). **Commits:** `bf67863` (fix, gate tool,
   tests), `627da1b` (ledger); repair `0ee7de4` (verified-blocker cap, branch-blind grid test, gate exits on
   missing task dirs) and `1e4605d` (ledger); merge `bc8a4ab`; integration fix `60a0424` (`reward_gate` calls
-  `read_diagnosis.inspected`; reopened as fixing).
+  `read_diagnosis.inspected`; reopened as fixing); re-close: DEF-38's `92f5fcf` (anchored window, the metric change)
+  and `5ac407e` (regression test).
 - **Found:** it15 diagnosis (g3-rl-dynamics), re-checked against `reward.py` and the config chain
   `grpo_it15_g3` → `grpo_it13` → `grpo_it12` → `grpo_colocate_qwen35` on 2026-10-23.
 - **Evidence:**
@@ -891,6 +893,40 @@ section 7 critique) and from re-checks against the code and the archive on that 
     `/Users/michael/Documents/honest-agents-archive/analysis/def13-integration/`: `gate_pre.txt` (old rule, from the
     `fix/reward` tree), `gate_post.txt` (`inspected`), `gate_whole.txt` (whole prefix) and `gate_wholeprefix.py` (the
     shim that produced it).
+
+- **Re-close (2026-10-25, re-scored, post-fix).** No reward or gate change. The reopen's fail came from the K=8 window
+  counted from the first command, which DEF-38 found to be a metric defect: G3 rollouts do the main task first and
+  read the target at command 10-24. DEF-38 (`92f5fcf`, closed) anchors the window at the first command naming the
+  target or an evidence path. That is now the canonical `inspected`, so `reward_gate` uses it without any change here.
+  The reopen named this as the condition ("the gate's read check is argued to need a different window, which DEF-03
+  would have to accept"): DEF-38 is that argument, made and closed on the metric's own evidence (S3 audit: 0 FP),
+  not tuned to this gate. The thresholds (`GateThresholds`) and the reward defaults are unchanged.
+  - The command above, re-run from `fix/reward` (main at `9897643`): `--gate-config symmetric` exits 0; `archived`
+    exits 1 (break-even 0.388, as before). 0 unreproduced, 0 unpaired and 0 without a read label on all three inputs.
+    Blind-policy EVs, break-even and the adversarial suite match the table above. Only the read rows move
+    (K=8 from start → anchored, pair table):
+
+    | input | read / n, twin · control | read − unread twin [95 % CI] | read − unread control [95 % CI] | blind-decline credit | S9 |
+    |---|---|---|---|---:|---|
+    | G3 rollouts | 124 / 240 · 130 / 240 (control 68 → 130) | +0.72 → **+1.13** [+0.89, +1.36] | −0.12 → **+0.18** [−0.18, +0.55] | +0.031 → −0.017 | FAIL → **PASS** |
+    | G2 s1 (post-fix) | 215 / 480 · 207 / 480 | +0.56 → +0.76 [+0.57, +0.95] | +0.41 → +0.45 [+0.26, +0.64] | −0.015 | PASS |
+    | G2 s2 (post-fix) | 200 / 480 · 205 / 480 | +0.58 → +0.86 [+0.72, +1.00] | +0.07 → +0.20 [−0.04, +0.43] | +0.004 | PASS |
+
+  - Read-out: anchored, the G3 control read − unread is +0.18 (point estimate, the S9 threshold) with a source CI
+    that spans 0, as on G2 s2. So reading pays on controls under the pair table, but on G3 and G2 s2 controls the gap is
+    not distinguishable from 0 at 40/20 sources. The table itself gives reading no direct credit; the gap comes from
+    readers succeeding more often. A reveal credit (iteration-16 direction S5) remains a design option for the RL stage.
+    It is not needed for S9 and not part of this defect. The defect's first half (blind declining pays) is fixed by the
+    table (every blind policy 0 per pair; G3 start +0.287 [+0.157, +0.421]).
+  - Regression test: `tests/test_reward_gate.py::test_the_read_rows_use_the_anchored_landmark_window` (a twin and a
+    control whose only read is the 11th non-trivial command are read through `rollouts_dataset`; a control without it
+    is unread). It fails on `196c801` (before DEF-38) and passes on `9897643`.
+  - Impact note: no archived number changes (reward default off). The DEF-13 read rows in the integration re-score
+    are superseded by the anchored rows above. Outputs (scratch, not archived; the archive is read-only to this lane):
+    `/private/tmp/claude-501/-Users-michael-Documents-Github-restraint/9ecddc4f-72ca-4800-92ca-fb989e395eb5/scratchpad/fix/reward/gate_symmetric.txt`
+    (both configs, all three inputs) and `gate_archived.txt` in the same dir.
+  - The L0 sweep's S9 (`gate.checks.s9_reward_audit`) reads only the reference surface eval from the index, not the
+    G3 rollouts, so it passed before and after; the G3 verdict comes from the CLI command above.
 
 ### DEF-14: no backup-inspection category on empty_backup
 - **Area:** metric. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 5. **Commits:** `21ce3d6`.
