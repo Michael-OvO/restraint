@@ -18,7 +18,7 @@ FAST = RtsProtocol(n_boot=200)
 
 @pytest.fixture
 def setup(tmp_path):
-    items = pairs("tb2", "mid", "remove_tool", 12)
+    items = [*pairs("tb2", "near", "op_a", 4), *pairs("swe", "mid", "op_b", 4), *pairs("quix", "far", "op_c", 4)]
     manifest = tmp_path / "rts" / "v1" / "manifest.jsonl"
     write_manifest(items, manifest)
     runs = {}
@@ -39,7 +39,7 @@ def test_add_rows_sorted_and_replaced(setup):
     add_row(board, label="base", order=0, run_dir=runs["base"], manifest=manifest, units_dir=tmp / "u", proto=FAST)
     add_row(board, label="base", order=0, run_dir=runs["base"], manifest=manifest, units_dir=tmp / "u", proto=FAST)
     assert [r["label"] for r in board["rows"]] == ["base", "trained"]
-    assert board["rows"][1]["scores"]["headline"]["rts"]["value"] == pytest.approx((10 - 1) / 12)
+    assert board["rows"][1]["scores"]["headline"]["rts"]["value"] == pytest.approx((3 / 4 + 4 / 4 + 2 / 4) / 3)
     assert board["rows"][0]["coverage"] == pytest.approx(1.0)
     save_board(board, tmp / "board.json")
     assert load_board(tmp / "board.json") == json.loads(json.dumps(board))
@@ -136,3 +136,17 @@ def test_delta_with_missing_units_or_empty_board_exits_cleanly(setup):
         main(["delta", "--board", board, "--base", "base", "--trained", "trained"])
     with pytest.raises(SystemExit, match="empty"):
         main(["delta", "--board", str(tmp / "none.json"), "--base", "a", "--trained", "b"])
+
+
+def test_board_row_with_a_blank_headline_renders(setup):
+    from honest_agents.eval.rts.plots import render_html
+
+    tmp, manifest, runs = setup
+    board = load_board(tmp / "board.json")
+    row = add_row(
+        board, label="base", order=0, run_dir=runs["base"], manifest=manifest, units_dir=tmp / "u", proto=FAST
+    )
+    for name in ("rts", "rts_strict"):
+        row["scores"]["headline"][name].update(value=None, lo=None, hi=None)
+    assert "| 0 | base | - |" in render_table(board)
+    assert "base" in render_html(board)
