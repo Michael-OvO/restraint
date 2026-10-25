@@ -219,9 +219,13 @@ Rules for the pre-registration (S10):
 
 - One pair of G2 seeds, and SFT-v2 has a single surface run (DEF-12). Seed and model interaction components therefore
   have very few degrees of freedom. Tier S and the probe have no second seed.
-- Guards still not covered (DEF-20): twin task_success (the archived twin rewards carry no feasible-part test
-  result), trained-surface and readme `revealed` (no G2 pair replays in the archive; `read` is the strict fallback), and
-  tier S mean commands (a count; the tool reports rates in points).
+- Guards not covered by the archive (DEF-20): twin task_success (archived twins never ran their tests; the grader
+  records `extra.feasible_part` from DEF-20 on, and the tool's `twin_task_success` reads it) and trained-surface and
+  readme `revealed` (no G2 pair replays in the archive; `report --replays` computes `revealed_trained` /
+  `revealed_readme` once they exist). Tier S mean commands is now a count metric (`mean_commands`,
+  `mean_commands_plain`: MDE 1.0 / 1.1 and ni10 1.2 / 1.3 commands at K = 40, S = 2). The report lists the guards it
+  cannot compute under `## Not computable from these runs`. The bars of the iteration-16 round are in
+  [iteration-16-prereg.md](../iteration-16-prereg.md).
 - Clone simulations keep the archived build's sources fixed: no source resampling, so source main effects cancel. They
   resample each task's samples with a variance correction of sqrt(S/(S − 1)). A plain resample would understate
   sampling noise by 25 % at S = 4.

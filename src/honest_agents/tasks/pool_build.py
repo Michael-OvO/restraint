@@ -7,20 +7,20 @@ builds (DEF-18), integrity-gate sweep S7.
     uv run python -m honest_agents.tasks.pool_build record-decision
     uv run python -m honest_agents.tasks.pool_build check-decision
 
-`record` builds every source of `--ids-file` x surface (varied mode, as `surfaces_cli build --mode varied`) into a
-temporary directory, adds the pair and `{context}` of every twin not yet in `data/pools/pair_assignments.json` (recorded
+`record` builds every source of `--ids-file` x surface (varied mode, as `surfaces_cli build --mode varied`) in memory
+(`in_memory`), adds the pair and `{context}` of every twin not yet in `data/pools/pair_assignments.json` (recorded
 ones are honoured by the build and kept as they are), and writes `data/pools/build_manifest.json`: the build parameters,
 the source ids and the `validate.task_hash` of every variant dir. Run it once after a build that is to stay fixed; a
 later pool growth then leaves those variants byte-identical. Unrecorded sources draw over the whole split, as before.
 
 `check` (S7, L0) rebuilds the manifest's sources the same way (the ids file is not needed) and exits 1 unless every
 variant's hash matches; it lists the variants that changed, are missing or are new, and fails when the ids file exists
-and no longer lists the recorded sources. Nothing is kept on disk: the temporary build is deleted after hashing.
+and no longer lists the recorded sources. Nothing is written to disk: the build lives in an in-memory filesystem.
 
 `record-decision` pins every twin of `data/decision/surfaces/tasks` (the rows of `surface_pairs.jsonl` and the root's
 unlisted leftovers) to the pair and `{context}` it was built with, in `data/pools/decision_pair_assignments.json`
 (recorded pins are kept), rebuilds the root through the same selection as `decision_surfaces build` (round robin, the
-probe's pair rank, the SFT config's cap for "seen") into a temporary directory, refuses unless every live dir is
+probe's pair rank, the SFT config's cap for "seen") in memory, refuses unless every live dir is
 reproduced byte for byte, and writes `data/pools/decision_build_manifest.json` (parameters, sources per role, hashes).
 `check-decision` rebuilds from the manifest alone and compares the hashes, as `check` does.
 """
@@ -28,10 +28,12 @@ reproduced byte for byte, and writes `data/pools/decision_build_manifest.json` (
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -95,16 +97,39 @@ def read_ids(path: Path) -> list[str]:
     return [ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
 
 
+REPO = Path(__file__).resolve().parents[3]
+
+
+@contextlib.contextmanager
+def in_memory(*reads: Path, prefix: str = "build_") -> Iterator[Path]:
+    """An empty scratch directory in an in-memory filesystem (pyfakefs), for a build that is hashed and thrown away:
+    integrity-gate.md S7, "never write the build to disk" (DEF-22). Inside the block every file call (`open`, `os`,
+    `pathlib`, `shutil`, Harbor's task loader) goes to that filesystem, in which `reads`, the repo and the cwd show
+    the real files (read lazily); a write anywhere stays in memory and is gone when the block ends."""
+    from pyfakefs.fake_filesystem_unittest import Patcher
+
+    cwd = Path.cwd()
+    dirs = {p.resolve() for p in (*reads, REPO, cwd) if p.is_dir()}
+    with Patcher() as patcher:
+        fs = patcher.fs
+        assert fs is not None
+        fs.is_case_sensitive = True  # as on a node; also keeps lookups in the 9k-entry bank dir cheap
+        for d in sorted(d for d in dirs if not any(o in d.parents for o in dirs)):
+            fs.add_real_directory(d, read_only=False, lazy_read=True)
+        os.chdir(cwd)
+        yield Path(tempfile.mkdtemp(prefix=prefix))
+
+
 def build(
     spec: BuildSpec, *, pools: Path | None = None, root: Path = Path(), sources: Sequence[str] | None = None
 ) -> BuildResult:
-    """Build `spec` (its ids file, or `sources`) into a temporary directory and hash every variant dir; the directory
-    is deleted afterwards."""
+    """Build `spec` (its ids file, or `sources`) in memory (`in_memory`) and hash every variant dir; nothing is
+    written to disk."""
     pools = pools or pool_dir()
     loaded = {s: load_pool(s, directory=pools) for s in spec.surfaces}
     out = BuildResult()
     bank = root / spec.bank
-    with tempfile.TemporaryDirectory(prefix="pool_build_") as td:
+    with in_memory(root, bank, pools, prefix="pool_build_") as td:
         for ident in read_ids(root / spec.ids_file) if sources is None else sources:
             src = bank / (bank_base(ident) + "__feasible")
             if not (src / "task.toml").is_file():
@@ -281,14 +306,14 @@ def build_decision(
     pools: Path | None = None,
     root: Path = Path(),
 ) -> BuildResult:
-    """Rebuild the probe / SFT root the way `decision_surfaces build` does (with `pins`) into a temporary directory and
-    hash every variant dir; the directory is deleted afterwards."""
+    """Rebuild the probe / SFT root the way `decision_surfaces build` does (with `pins`) in memory (`in_memory`) and
+    hash every variant dir; nothing is written to disk."""
     pools = pools or pool_dir()
     loaded = {s: load_pool(s, directory=pools) for s in SURFACES}
     roles = pins.roles
     bank = root / spec.bank
     out = BuildResult()
-    with tempfile.TemporaryDirectory(prefix="decision_build_") as td:
+    with in_memory(root, bank, pools, prefix="decision_build_") as td:
         rows: list[dsurf.SurfacePairRow] = []
         for surface, srcs in sorted(sources.sft.items()):
             got, _ = dsurf.build_sft_rows(srcs, bank_tasks=bank, out_root=Path(td), surfaces=[surface], salt=spec.salt,

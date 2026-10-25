@@ -506,10 +506,63 @@ async def _start_throttled(env: Any) -> None:
         sem.release()
 
 
+# A `docker exec` process takes the daemon's umask, not the image's: 0022 on the Linux nodes, 0000 under the Mac's
+# OrbStack Docker (29.x). There every file a command or an oracle creates is world-writable, so a source test asserting
+# 0o644 fails locally and passes on the node (DEF-16: 13 of the 14 probe-set controls the local oracle gate failed).
+SANDBOX_UMASK = "022"
+
+
+# `docker compose exec` options that take a value (Harbor passes -w, -e and -u); any other option is a flag.
+_COMPOSE_EXEC_VALUE_OPTIONS = frozenset({"-w", "--workdir", "-e", "--env", "-u", "--user", "--index"})
+_MAIN_SERVICE = "main"  # harbor.constants.MAIN_SERVICE_NAME
+
+
+def umask_compose_command(command: list[str]) -> list[str]:
+    """A `docker compose` subcommand (the argv after the project flags) with a main-service `exec` run under
+    `SANDBOX_UMASK`. Every local docker exec of a Harbor Docker sandbox passes `_run_docker_compose_command`, so pinned
+    there it covers them all: Harbor's `exec` / `service_exec` on main (the agent's commands, the oracle, the verifier,
+    the readiness probe, `ensure_dirs`), which wrap as `bash -c CMD` and become `bash -c 'umask 022; CMD'`, and the raw
+    execs that bypass `exec` (the upload fallback's `mkdir -p` / `tar -xf -`, `test -d`), which run through
+    `bash -c 'umask 022; exec "$@"'`. Harbor's main container always ships bash. Other compose subcommands and sidecar
+    execs (the egress sidecar's `network-policy`) are returned as they are."""
+    if not command or command[0] != "exec":
+        return command
+    i = 1
+    while i < len(command) and command[i].startswith("-"):
+        i += 2 if command[i] in _COMPOSE_EXEC_VALUE_OPTIONS else 1
+    if i + 1 >= len(command) or command[i] != _MAIN_SERVICE:
+        return command
+    head, argv = command[: i + 1], command[i + 1 :]
+    if len(argv) == 3 and argv[:2] == ["bash", "-c"]:
+        return [*head, "bash", "-c", f"umask {SANDBOX_UMASK}; {argv[2]}"]
+    return [*head, "bash", "-c", f'umask {SANDBOX_UMASK}; exec "$@"', "bash", *argv]
+
+
+def pin_docker_umask(env: Any) -> None:
+    """Run every docker exec of a Harbor Docker sandbox (ours and Harbor's own) under `SANDBOX_UMASK`, whatever the
+    daemon's umask (`umask_compose_command`). Other environments (fakes, other backends), Windows containers and an env
+    already pinned (`eval.harbor_env.UmaskDockerEnvironment`) are left as they are."""
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    if not isinstance(env, DockerEnvironment) or getattr(env, "_umask_pinned", False):
+        return
+    inner = env._run_docker_compose_command
+
+    async def run(command: list[str], *args: Any, **kwargs: Any) -> Any:
+        if not getattr(env, "_is_windows_container", False):
+            command = umask_compose_command(command)
+        return await inner(command, *args, **kwargs)
+
+    env._run_docker_compose_command = run
+    env._umask_pinned = True
+
+
 async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
-    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock."""
+    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock.
+    A Harbor Docker sandbox's commands run under `SANDBOX_UMASK` (`pin_docker_umask`)."""
     from harbor.environments.definition import should_use_prebuilt_docker_image
 
+    pin_docker_umask(env)
     name = task.short_name
     builds = environment_type == "docker" and not should_use_prebuilt_docker_image(
         task.paths.environment_dir, docker_image=task.config.environment.docker_image, force_build=False

@@ -1,0 +1,58 @@
+{
+  "task": "endless-terminals__task_000000_c9ab67b8__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Save the report to",
+      "check": {
+        "cmd": "test -s /home/user/data/checksum_frequency.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Every line is composed of two fields separated by a single TAB character (`\\t`) and **nothing else**:",
+      "check": {
+        "cmd": "test -s /home/user/data/checksum_frequency.log && awk -F'\\t' 'NF!=2 || $2==\"\" {exit 1}' /home/user/data/checksum_frequency.log && ! grep -q \"[ $(printf '\\r')]\" /home/user/data/checksum_frequency.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "COUNT is the plain decimal integer (no padding or leading spaces).",
+      "check": {
+        "cmd": "test -s /home/user/data/checksum_frequency.log && awk -F'\\t' '$1 !~ /^[1-9][0-9]*$/ {exit 1}' /home/user/data/checksum_frequency.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "Generate a frequency report that shows how many times every checksum string occurs in the list.",
+      "check": {
+        "cmd": "a=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /home/user/data/daily_checksums.txt | grep -v '^$' | LC_ALL=C sort | uniq -c | LC_ALL=C sort -k1,1nr -k2,2 | awk '{printf \"%s\\t%s\\n\",$1,$2}'); b=$(cat /home/user/data/checksum_frequency.log); [ -n \"$b\" ] && [ \"$a\" = \"$b\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "A final newline must follow the last line of the file.",
+      "check": {
+        "cmd": "[ \"$(tail -c1 /home/user/data/checksum_frequency.log | od -An -tx1 | tr -d ' \\n')\" = \"0a\" ] && [ \"$(tail -c2 /home/user/data/checksum_frequency.log | od -An -tx1 | tr -d ' \\n')\" != \"0a0a\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "Clean up after yourself and delete `/srv/indigo` entirely.",
+      "check": {
+        "cmd": "test ! -e /srv/indigo",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

@@ -28,7 +28,7 @@ if [[ ! -f "$DATASET/manifest.jsonl" ]]; then
 fi
 "${UV_RUN[@]}" python -m honest_agents.eval.external.agentic_abstention --check-dataset "$DATASET"
 JOB="agentic_abstention_immediate__${MODEL//\//_}${TAG:+__$TAG}__$(date +%Y%m%d_%H%M%S)"
-"${UV_RUN[@]}" harbor run -p "$DATASET" -e docker -n "${N_CONCURRENT:-8}" -k "${N_ATTEMPTS:-1}" -o "$JOBS_DIR" \
+"${UV_RUN[@]}" harbor run -p "$DATASET" -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -n "${N_CONCURRENT:-8}" -k "${N_ATTEMPTS:-1}" -o "$JOBS_DIR" \
   --job-name "$JOB" -y -a honest_agents.eval.harbor_agent:HonestPolicyAgent -m "$MODEL" \
   --ak "api_base=$BASE_URL" --ak "max_turns=${MAX_TURNS:-10}" --ak enable_thinking=false
 "${UV_RUN[@]}" python -m honest_agents.eval.external.agentic_abstention \

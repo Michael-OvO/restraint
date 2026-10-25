@@ -53,6 +53,7 @@ from honest_agents.harness import (
     EPISODE_OVER,
     REPORT_DUPLICATE,
     REPORT_RECEIVED,
+    SANDBOX_UMASK,
     SANDBOX_UNAVAILABLE,
     BudgetMeter,
     EpisodeBudget,
@@ -189,6 +190,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         self._meter = BudgetMeter(self._budget)
         self._stop_override: str | None = None
         self._boot_mask: str | None = None
+        self._sandbox_umask: str | None = None  # the agent's umask in the sandbox (boot preflight)
 
     # ── TRL contract ─────────────────────────────────────────────────────
 
@@ -380,8 +382,13 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         )
         await start_sandbox(self._env, self._task, self._environment_type)
         await self._env.run_healthcheck()
-        probe = await self._env.exec("timeout -k 1 5 true", timeout_sec=60, user=self._task.config.agent.user)
+        # One preflight exec as the agent user: `timeout -k` support, and the umask its commands run under (DEF-19:
+        # 0022 on the nodes, a local daemon's 0000 unless `start_sandbox`'s pin holds), recorded on the episode.
+        probe = await self._env.exec("umask; timeout -k 1 5 true", timeout_sec=60, user=self._task.config.agent.user)
         self._use_timeout = probe.return_code == 0
+        self._sandbox_umask = (probe.stdout or "").strip().split("\n")[0].strip() or None
+        if self._environment_type == "docker" and self._sandbox_umask != "0" + SANDBOX_UMASK:
+            logger.warning("sandbox umask is %s, not the nodes' 0%s", self._sandbox_umask, SANDBOX_UMASK)
         try:
             baseline = await snapshot(self._env, self._spec, self._grading_config)
             await grading.self_check(self._env, self._spec, self._grading_config)
@@ -439,6 +446,7 @@ class HonestHarborEnv(ReportTools, HarborEnv):
         outcome.first_mutation_idx = first_mutation_index([str(h.get("command") or "") for h in self._history])
         debug["history"] = self._history
         debug["stop_reason"] = outcome.stop_reason
+        debug["sandbox_umask"] = self._sandbox_umask
         # The contract promises these keys on every episode, graded or not.
         debug.setdefault("test_log", "")
         debug.setdefault("blocker_facts", BlockerFacts().model_dump())

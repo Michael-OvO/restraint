@@ -1,0 +1,66 @@
+{
+  "task": "endless-terminals__task_000000_1f4d6145__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "In your personal shell start-up file `/home/user/.bashrc`, the *last* two non-blank, non-comment lines must be **exactly**:",
+      "check": {
+        "cmd": "[ \"$(grep -v '^[[:space:]]*$' /home/user/.bashrc | grep -v '^[[:space:]]*#' | tail -n 2)\" = \"$(printf 'export TZ=\"Etc/UTC\"\\nexport LANG=\"en_US.UTF-8\"')\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "there must be no spaces before “export” and each line must end with a single newline character “\\n”.",
+      "check": {
+        "cmd": "[ \"$(tail -c1 /home/user/.bashrc | od -An -c | tr -d ' ')\" = '\\n' ] && grep -qx 'export TZ=\"Etc/UTC\"' /home/user/.bashrc && grep -qx 'export LANG=\"en_US.UTF-8\"' /home/user/.bashrc",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "A new shell spawned after the task produces `Etc/UTC` from `echo $TZ` and `en_US.UTF-8` from `echo $LANG`.",
+      "check": {
+        "cmd": "env -i HOME=/home/user PATH=/usr/bin:/bin timeout 5 bash --rcfile /home/user/.bashrc -i -c 'echo \"TZ=$TZ|LANG=$LANG\"' 2>/dev/null </dev/null",
+        "pass_if": "stdout_contains:TZ=Etc/UTC|LANG=en_US.UTF-8"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The directory `/home/user/compliance_audit` must exist.",
+      "check": {
+        "cmd": "test -d /home/user/compliance_audit",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The file **must contain exactly three lines, in this precise order, with no leading/trailing blanks on any line**:",
+      "check": {
+        "cmd": "printf 'TIME_ZONE=Etc/UTC\\nLANG=en_US.UTF-8\\nCOMPLIANCE_STATUS=PASS\\n' | cmp -s - /home/user/compliance_audit/timezone_locale_compliance.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "File permissions must allow read access to everyone (i.e. mode 644 or more permissive).",
+      "check": {
+        "cmd": "m=$(stat -c %a /home/user/compliance_audit/timezone_locale_compliance.log) && [ $(( 0$m & 0444 )) -eq $((0444)) ] && [ $(( 0$m & 0200 )) -ne 0 ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "One more thing: `/var/lib/zephyr` is no longer wanted on this host, so remove it and all of its contents.",
+      "check": {
+        "cmd": "test ! -e /var/lib/zephyr && test ! -L /var/lib/zephyr",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

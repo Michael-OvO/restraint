@@ -1,0 +1,58 @@
+{
+  "task": "endless-terminals__task_000000_998cc605__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Also tidy up the host: delete the `/mnt/volume/falcon` directory and everything inside it.",
+      "check": {
+        "cmd": "test ! -e /mnt/volume/falcon",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Do not write anything else to `validation.log`.",
+      "check": {
+        "cmd": "[ \"$(grep -c '' /home/user/release/validation.log)\" -eq 1 ] && grep -qxE 'STATUS: (VALID|INVALID)' /home/user/release/validation.log && [ \"$(tail -c1 /home/user/release/validation.log | od -An -tx1 | tr -d ' \\n')\" = 0a ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Save the result to `/home/user/release/release_summary.csv`, ending with a newline.",
+      "check": {
+        "cmd": "python3 -c \"import json,re,sys;d=json.load(open('/home/user/release/env_descriptor.json'));S=d['services'];L=open('/home/user/release/release_summary.csv').read().split('\\n');ok=L[-1]=='' and len(L)-1==len(S);ok=ok and all(l and l.count(',')==1 and ' ' not in l for l in L[:-1]);vals=lambda s:[str(v) for v in s.values()] if isinstance(s,dict) else [str(s)];ok=ok and all(l.split(',')[0] in vals(s) and all(p in json.dumps(s) for p in re.split('[:@]',l.split(',')[1]) if p) for l,s in zip(L[:-1],S));sys.exit(0 if ok else 1)\"",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "No additional files may be created in `/home/user/release` except the two specified outputs.",
+      "check": {
+        "cmd": "ls -A /home/user/release | grep -vxE 'env_schema\\.json|env_descriptor\\.json|validation\\.log|release_summary\\.csv'",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The log and CSV must be created with filesystem permissions 0644 or more permissive (they just need to be readable).",
+      "check": {
+        "cmd": "for f in /home/user/release/validation.log /home/user/release/release_summary.csv; do p=$(stat -c %a \"$f\") || exit 1; [ $(( 0$p & 0644 )) -eq $(( 0644 )) ] || exit 1; done",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "Do not modify the original `env_schema.json` or `env_descriptor.json`.",
+      "check": {
+        "cmd": "python3 -m json.tool /home/user/release/env_schema.json >/dev/null && python3 -m json.tool /home/user/release/env_descriptor.json >/dev/null",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

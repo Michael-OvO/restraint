@@ -1,7 +1,7 @@
 """The sweep checks (docs/integrity-gate.md, "The integrity sweep" and "Running the gates efficiently"; DEF-15).
 
 L0 checks are pure Python in memory: code, task dirs, pool JSON, the reward function and the archive index. They boot
-no sandbox, touch no network and write nothing outside a temporary directory (S7's rebuild, deleted after hashing).
+no sandbox, touch no network and write nothing to disk (S7 rebuilds in an in-memory filesystem, DEF-22).
 Each returns a `CheckResult`; `gate.sweep` runs them, measures them and prints the table.
 
 * S1 branch consistency: every built pair's declarations (`oracle_lines`, `test_lines`, the twin's
@@ -15,7 +15,7 @@ Each returns a `CheckResult`; `gate.sweep` runs them, measures them and prints t
 * S5 completeness: every source x surface of the eval build has both dirs, and every high_risk episode of the evals in
   use resolves to a task dir (index).
 * S6 observability: a stub episode's outputs round-trip through the record format (capped, the cut recorded).
-* S7 build stability: both pinned builds rebuild to the hashes of their committed manifests.
+* S7 build stability: both pinned builds rebuild, in memory, to the hashes of their committed manifests.
 * S8 archive hygiene: no undeclared duplicate episode set (hash cache, read only).
 * S9 reward audit: `reward_gate.evaluate` on the reference surface eval from the index, under the archived and the
   symmetric config; the verdict is the symmetric config's (DEF-13).

@@ -24,8 +24,9 @@ re-runs made after the episode, often after the `rm`. Neither shows what the age
 
 Results are cached content-addressed (docs/integrity-gate.md, "the result cache"; `gate.cache`, shared with
 `tasks.g1_surfaces`): the key is the sha256 of the task dir
-contents, of the source files that shape a replay (`env.py`, `harness.py`, `grading.py`), of the command list, of the
-command timeout and of the base image digest. A cache hit boots nothing. A branch whose exec failed mid-way
+contents, of the source files that shape a replay (`env.py`, `harness.py`, `grading.py` and everything this module
+imports, `gate.cache.import_closure`), of the Harbor and TRL versions, of the command list, of the command timeout and
+of the base image digest. A cache hit boots nothing. A branch whose exec failed mid-way
 (`[sandbox unavailable]`) is `boot_failed` and never cached. Rows are append-only and carry a schema
 version; a corrupt or old row is ignored. The summary gives, per surface and branch, the share not replayable (bar:
 <= 10 % per branch, docs/iteration-16-direction.md S0.2).
@@ -53,7 +54,14 @@ from typing import Any, Protocol
 from honest_agents.behaviour import FAMILY_HIGH_RISK, is_destructive
 from honest_agents.eval.records import history_steps
 from honest_agents.gate import cache as gate_cache
-from honest_agents.gate.cache import base_image, docker_image_digest, sha256_files, sha256_tree
+from honest_agents.gate.cache import (
+    base_image,
+    docker_image_digest,
+    import_closure,
+    library_versions,
+    sha256_files,
+    sha256_tree,
+)
 from honest_agents.harness import SANDBOX_UNAVAILABLE
 from honest_agents.report import SelfReport
 from honest_agents.reward import EpisodeOutcome, RewardBreakdown, RewardConfig, outcome_from_dict
@@ -68,10 +76,12 @@ DEFAULT_TASKS_ROOT = Path("data/decision/surfaces_val/tasks")
 DEFAULT_TIMEOUT_SEC = 60
 MAX_NOT_REPLAYABLE = 0.10  # S0.2 bar, per branch
 CONTROL_SUFFIX = "__control"
-_SRC = Path(__file__).resolve().parents[1]
-# The source files a replayed output depends on: the bash wrapper and output capture (env, harness) and the boot-time
-# snapshot and self-check (grading). The integrity gate keys every cached check on the files it imports.
-SOURCE_FILES = (_SRC / "env.py", _SRC / "harness.py", _SRC / "grading.py")
+# The source files a replayed output depends on: every `honest_agents` module this one imports, directly or through
+# another (the bash wrapper and output capture in env and harness, the boot-time snapshot and self-check in grading,
+# and what they import: bank, mutation, spec, report, reward, verifier), and the libraries the env is built on. The
+# integrity gate keys every cached check on the files it imports (DEF-24).
+SOURCE_FILES = import_closure(Path(__file__))
+LIBRARIES = ("harbor", "trl")
 
 # Statuses of one replayed episode.
 REPLAYABLE = "replayable"  # (a regraded episode: replayed and graded, exit codes matched)
@@ -272,12 +282,20 @@ class HarborRunner:
 # ── result cache ──────────────────────────────────────────────────────────────
 
 
-def cache_key(task_hash: str, source_hash: str, commands: Sequence[str], image_digest: str, timeout_sec: int) -> str:
+def cache_key(
+    task_hash: str,
+    source_hash: str,
+    commands: Sequence[str],
+    image_digest: str,
+    timeout_sec: int,
+    libraries: dict[str, str],
+) -> str:
     return gate_cache.cache_key(
         CHECK,
         SCHEMA_VERSION,
         task=task_hash,
         sources=source_hash,
+        libraries=libraries,
         commands=list(commands),
         image=image_digest,
         timeout=timeout_sec,
@@ -354,6 +372,7 @@ class Replayer:
     timeout_sec: int = DEFAULT_TIMEOUT_SEC
     image_digest: Callable[[str], str] = docker_image_digest
     source_hash: str = field(default_factory=lambda: sha256_files(SOURCE_FILES))
+    libraries: dict[str, str] = field(default_factory=lambda: library_versions(*LIBRARIES))
     boots: int = 0
     cache_hits: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
@@ -369,7 +388,12 @@ class Replayer:
         if not commands:
             return BranchReplay(task_id, REPLAYABLE)
         key = cache_key(
-            sha256_tree(task_dir), self.source_hash, commands, self.image_digest(base_image(task_dir)), self.timeout_sec
+            sha256_tree(task_dir),
+            self.source_hash,
+            commands,
+            self.image_digest(base_image(task_dir)),
+            self.timeout_sec,
+            self.libraries,
         )
         entries = self.cache.get(key)
         cached = entries is not None

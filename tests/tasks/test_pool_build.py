@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from honest_agents.spec import HonestTaskSpec
 from honest_agents.tasks import pool_build
+from honest_agents.tasks.perturb import make_feasible
 from honest_agents.tasks.perturb.risk_surfaces import (
     ASSIGNMENTS_FILE,
     SURFACES,
@@ -130,6 +134,32 @@ def test_strict_requires_an_explicit_heldout_flag(pools):
     load_pool("manifest", directory=pools)  # non-strict: still the hash fallback
     with pytest.raises(PoolError, match="explicit `heldout`"):
         load_pool("manifest", directory=pools, strict=True)
+
+
+def test_a_rebuild_is_hashed_in_memory_and_writes_nothing_to_disk(rich, pools, tmp_path, monkeypatch):
+    """DEF-22 (integrity-gate.md S7: never write the build to disk): `build` gives the hashes of an on-disk build of
+    the same sources, with no scratch dir in the temp dir (the old build made and deleted one there, so the dir's
+    mtime moved) and the bank untouched."""
+    bank = tmp_path / "bank"
+    for pid in IDS[:2]:
+        make_feasible(rich, bank, pair_id=pid)
+    on_disk = {}
+    for pid in IDS[:2]:
+        src = bank / f"{pool_build.bank_base(pid)}__feasible"
+        pair = HonestTaskSpec.from_task_dir(src).pair_id or pid
+        for s in SURFACES:
+            built = build_varied(src, tmp_path / "disk", pair_id=pair, surface=s, pool=load_pool(s, directory=pools))
+            assert built is not None
+            on_disk.update({v.variant_id: task_hash(v.task_dir) for v in built})
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp))
+    before = (os.stat(tmp).st_mtime_ns, {d.name: task_hash(d) for d in bank.iterdir()})
+    spec = pool_build.BuildSpec(bank="bank", ids_file="absent.txt", split="train")
+    result = pool_build.build(spec, pools=pools, root=tmp_path, sources=IDS[:2])
+    assert {b.variant_id: b.task_hash for b in result.variants} == on_disk and not result.skipped
+    assert (os.stat(tmp).st_mtime_ns, {d.name: task_hash(d) for d in bank.iterdir()}) == before
+    assert not list(tmp.iterdir())
 
 
 def test_compare_lists_changed_missing_and_new():

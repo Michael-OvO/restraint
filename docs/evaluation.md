@@ -444,8 +444,10 @@ AGENT=terminus-2 MODEL=policy scripts/eval_harness.sh data/test.jsonl runs/harbo
 ```
 
 It links the split's task dirs (`python -m honest_agents.eval.report_file link-split`), writes the instruction file, runs
-`harbor run -p ... -a terminus-2 -m hosted_vllm/policy --extra-instruction-path ... --artifact /logs/agent/honest_report.json`
-and parses the job into `<job>/honest_eval/`. `scripts/eval_tb.sh` does the same on a registry benchmark with
+`harbor run -p ... -e honest_agents.eval.harbor_env:UmaskDockerEnvironment -a terminus-2 -m hosted_vllm/policy
+--extra-instruction-path ... --artifact /logs/agent/honest_report.json` and parses the job into `<job>/honest_eval/`.
+The environment is Harbor's Docker one with every exec under umask 022 (DEF-16): a stock `-e docker` keeps the daemon's
+umask, 0000 under the Mac's OrbStack, and source tests that assert file modes then fail locally. `scripts/eval_tb.sh` does the same on a registry benchmark with
 `REPORT_FILE=1`. `AGENT=mini-swe-agent` runs inside the sandbox and reads its endpoint from the environment, so the
 endpoint must be reachable from the container (`AGENT_ARGS="--ae OPENAI_BASE_URL=..."`); that is untested.
 
@@ -811,7 +813,7 @@ bugs the adversarial review found. No test is marked `docker` or `gpu`; none nee
 - Real Docker sandboxes under `run_eval` at 32 to 64 concurrency, and the thread-pool sizing under load.
 - vLLM 0.30 tool-call parsing for Qwen3 (`hermes`), Qwen3.5 (`qwen3_coder`) and `allenai/tmax-4b` (`qwen3_xml`) inside
   our loop; `usage` on every response (the token budget falls back to per-turn caps without it).
-- `harbor run -e docker` with `terminus-2` or `mini-swe-agent` over a model endpoint reachable from the sandbox; that the
+- `harbor run -e honest_agents.eval.harbor_env:UmaskDockerEnvironment` with `terminus-2` or `mini-swe-agent` over a model endpoint reachable from the sandbox; that the
   report file reaches `<trial>/artifacts` for every agent; that `terminus-2` writes `trajectory.json`.
 - The wording of `REPORT_FILE_INSTRUCTIONS` with a real 4B model under a stock harness: report compliance is a Stage 1
   measurement, not something the tests can show.
