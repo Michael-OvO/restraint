@@ -20,7 +20,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-10 | stats | fixing | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | closed | G2's held-out read rate differs by branch (twins 37 vs controls 24): behaviour (one seed; a cue on empty_backup), not the classifier |
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
-| DEF-13 | reward | closed 2026-10-24 | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
+| DEF-13 | reward | fixing | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
 | DEF-14 | metric | closed | empty_backup: no backup-inspection category; `ls B` alone does not discriminate |
 | DEF-15 | tooling | open | gate checks are not tiered or cached: the oracle gate re-boots 4 sandboxes per pair on every run (~9 h for the 68-source eval) |
 | DEF-16 | task data | open | the probe-role surface builds (`data/decision/surfaces/tasks`) were never oracle-gated; 14 of 72 inbound_link controls fail their source's own tests |
@@ -717,8 +717,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
     outside DEF-12 and not done.
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
-- **Area:** reward (design defect, not a code bug). **Status:** closed 2026-10-24, after a repair (for RL, use
-  `pair_table: true`; the default stays off so old runs re-score identically). **Commits:** `bf67863` (fix, gate tool,
+- **Area:** reward (design defect, not a code bug). **Status:** fixing (reopened 2026-10-25 at the integration merge:
+  under the one inspection metric, S9's read check fails on the G3 rollouts; see "Integration re-score" below). It was
+  closed 2026-10-24, after a repair (for RL, use `pair_table: true`; the default stays off so old runs re-score
+  identically). **Commits:** `bf67863` (fix, gate tool,
   tests), `627da1b` (ledger); repair `0ee7de4` (verified-blocker cap, branch-blind grid test, gate exits on
   missing task dirs) and this ledger update.
 - **Found:** it15 diagnosis (g3-rl-dynamics), re-checked against `reward.py` and the config chain
@@ -845,6 +847,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
   read − unread rows are provisional until those close (re-run the command above). The pair-pooled LOO baseline and a
   reveal credit (iteration-16 direction S5) are not implemented; the trainer config must set `reward.config.pair_table:
   true` for any RL stage.
+
+- **Integration re-score (2026-10-25, re-scored, post-fix).** `fix/reward` was written against the old read rule; on
+  main DEF-02/03/04 had removed `read_diagnosis.read_before_acting`, so the merged `reward_gate` failed to import.
+  The integration fix makes it call `read_diagnosis.inspected` (S4: one inspection metric; no replay is passed, so the
+  strict rule over the K = 8 landmark window). The command above, re-run on main after the merge: blind-policy EVs,
+  break-even and the adversarial suite are unchanged; only the read rows move (old rule → `inspected`, pair table):
+  - G2 s1: twin +0.75 → +0.56 [+0.38, +0.71], control +0.44 → +0.41 [+0.20, +0.62] (read 218 → 131 / 480 twins); PASS;
+  - G2 s2: twin +0.88 → +0.58 [+0.35, +0.78], control +0.14 → +0.07 [−0.16, +0.33]; PASS (point > 0, CI spans 0);
+  - G3 rollouts: twin +1.14 → +0.72 [+0.41, +1.02], control +0.19 → **−0.12 [−0.46, +0.26]** (read 131 → 68 / 240
+    controls); pooled blind-decline credit −0.021 → +0.031; **S9 under `symmetric`: FAIL** ("reading pays on both
+    branches: NO"), exit 1.
+  - Diagnostic only (not the S4 metric): the strict rule over the whole prefix (`strict_read(..., k=None)`) gives
+    PASS on all three (G3 control +0.19 [−0.17, +0.57]), so the fail comes from the landmark window: on G3 rollouts
+    many reads come after the first 8 non-trivial commands.
+  - **Remaining (why `fixing`):** the pair table still gives reading no credit on G3 controls under the canonical
+    metric (the defect's second half); either the reward credits inspection on controls (the reveal credit of
+    iteration-16 direction S5) or the gate's read check is argued to need a different window, which DEF-03 would have
+    to accept. Outputs: the fixer's scratch `scratchpad/fix/integrator/gate_pre.txt` (old rule, from the `fix/reward`
+    tree), `gate_post.txt` (`inspected`) and `gate_whole.txt` (whole prefix).
 
 ### DEF-14: no backup-inspection category on empty_backup
 - **Area:** metric. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 5. **Commits:** `21ce3d6`.

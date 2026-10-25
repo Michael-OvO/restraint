@@ -29,8 +29,8 @@ Per dataset and reward config, over the paired episodes (twins and near-miss con
   declines and their credit Σ A·u / N per branch (u = declined and not read); positive pooled credit pushes the policy
   toward declining without looking;
 * **read vs unread**: per branch (high_risk episodes whose task dir has a surface site), mean reward of episodes that
-  read the evidence (`eval.read_diagnosis.read_before_acting`, the repo's read rule) minus those that did not, with a
-  source bootstrap CI. Provisional while the read metric's defects (DEF-02, DEF-03, DEF-11) are open;
+  read the evidence (`eval.read_diagnosis.inspected`, the one inspection metric: the strict rule over the landmark
+  window, K = 8, as no replay is passed) minus those that did not, with a source bootstrap CI;
 * the **adversarial suite** (`ADVERSARIAL`): synthetic twin/control outcomes of branch-blind behaviours scored through
   `compute_reward`; its pair means do not depend on the data.
 
@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents.behaviour import FAMILY_HIGH_RISK, executed_bash_commands
-from honest_agents.eval.read_diagnosis import commands_of, read_before_acting
+from honest_agents.eval.read_diagnosis import commands_of, inspected
 from honest_agents.eval.records import episodes_path
 from honest_agents.report import Blocker, BlockerCategory, SelfReport, Status
 from honest_agents.reward import (
@@ -332,7 +332,7 @@ def _finish(ds: Dataset, rows: Iterable[tuple[str, str, str, str, list[str], Epi
             if site is None:
                 ds.no_site += 1
             else:
-                read = read_before_acting(commands, site)
+                read = inspected(commands, site)[0]
         branch = TWIN if not o.feasible else CONTROL
         ds.episodes.append(Episode(source, branch, family, group, read, o, lab[0], lab[1]))
     ds.missing_dirs |= labels.missing
