@@ -1321,6 +1321,18 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - `validate.umask_current`: a stored result is current only if it records the nodes' umask (`0022`) or never booted
     (`sandbox_umask` None, set at the start of `validate_task`). A result with no `sandbox_umask` key (pre-DEF-19) or
     another umask is validated again on resume.
+  - **Cost of that rule (not a one-off for the 32):** every stored row without a `sandbox_umask` key is stale, whatever
+    its verdict: all rows written before DEF-19's preflight, including results graded on the nodes under 0022 and the
+    exception rows (`reason` "error", whose `debug` holds only `settings`; the old code resumed them when their
+    settings matched, now they are retried). Counted on 2026-10-25 (latest row per variant): the main tree's
+    `data/select_validation.jsonl` 212/212 have no key; its `data/validation.jsonl` (the bank's, which
+    `tasks/build/pipeline.py` `_validate_and_relabel` resumes through `validate_many` when a build runs with
+    validation) 2036/2036, 2 of them exception rows. So the next resumed `validate` of select re-validates in Docker
+    every row not re-gated here: all 212 from the main tree's file, or, from the scratchpad copy below, the 154
+    passing results this entry did not re-gate (its 58 re-gated rows carry 0022), about 1.8 h locally at concurrency
+    2 at this re-gate's rate (58 variants in 41 min). The next build that validates the bank re-validates all 2036,
+    about a day locally at that rate. Kept: a verdict whose umask is unknown is not evidence under the pin, and one
+    re-run settles it.
   - `write_quarantine_list` writes the umask and the failing test names into each entry's `detail`.
   - `data/select_quarantine.txt` is tracked now and comes from the re-gate below: **8 entries** (0a02897a feasible,
     high_risk control, revoke_permission control; a72096a7 the same three; bf24b7fb feasible, high_risk control).
@@ -1351,18 +1363,30 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note (re-scored, post-fix; scratchpad `fix/quarantine/rescore/`).** An eval runs every select variant and
   `--exclude-quarantined` voids them only in the metrics, so the archive holds their episodes (64 of 424 in each of
   `14-session-a/eval/it14_{base,sft_v2}_select{,_e1,_e2,_e3}`; no other archived eval holds any of the 32). Re-scored
-  with `run_eval --metrics-only` at this code: the old list reproduces each archived `metrics.json` exactly (scored
-  360); the new list scores 408 (8 variants void). Feasible task_success, old -> new: base 66.3 -> 70.3, e1 59.1 ->
-  60.9, e2 68.3 -> 71.1, e3 67.3 -> 70.3; fabrication among feasible claims: base 28.3 -> 25.1, e1 24.5 -> 21.9, e2
-  23.2 -> 21.9, e3 24.3 -> 22.1; control declines: base 5.1 -> 4.2, e1 32.2 -> 34.5, e2 12.7 -> 10.6, e3 12.7 -> 12.0.
-  Infeasible metrics do not move (the released 24 are all feasible or controls). The epoch order is unchanged (e2 >
+  with `run_eval --metrics-only` at this code: the old list reproduces each archived `metrics.json` (scored 360;
+  task_success, fabrication, control declines and `n_scored` exactly) except `abstain_discrimination`, which moved
+  because of the later DEF-41 fix (`7bfc9c6`), not the quarantine: archived -> re-scored, base 17.38 -> 16.54, e2 64.74
+  -> 63.89 (e1, e3 unchanged), with the same shift in its `by_family`, `by_perturbation`, `by_harness` and `transfer`
+  copies (keys added since, `control/refusal_rate` and `reward_config.pair_table`, are new, not changed). At `7bfc9c6^`
+  the old list reproduces base, e1 and e2 exactly in every archived key, adding only `reward_config.pair_table`
+  (scratchpad `fix/quarantine/pre41/`). The new list scores 408 (8 variants void). Feasible task_success, old -> new:
+  base 66.3 -> 70.3, e1 59.1 -> 60.9, e2 68.3 -> 71.1, e3 67.3 -> 70.3; fabrication among feasible claims: base 28.3 ->
+  25.1, e1 24.5 -> 21.9, e2 23.2 -> 21.9, e3 24.3 -> 22.1; control declines: base 5.1 -> 4.2, e1 32.2 -> 34.5, e2 12.7
+  -> 10.6, e3 12.7 -> 12.0; `abstain_discrimination` (recall minus the control refusal rate, so it moves with the
+  controls), both at this code: base 16.5 -> 17.0, e1 50.5 -> 48.8, e2 63.9 -> 65.3, e3 66.5 -> 67.3. The
+  infeasible-only metrics do not move (the released 24 are all feasible or controls). The epoch order is unchanged (e2 >
   e3 > e1 on task_success under both lists). The paired differences in the training log (e2 +2.2, e3 +1.5 verified
   success) were computed with no exclusion at all (DEF-NEW-quarantine-1); with the new list they are e2 +2.3 [-4.2,
-  8.5], e3 +1.6 [-4.1, 7.3] verified success and +6.3 [2.1, 11.3], +7.7 [3.4, 12.8] control declines (with the old
-  list +3.8 / +2.9 and +7.6 / +7.6). No decision changes: `select_checkpoint` chose e3 on probe_v1, not on these.
+  8.5], e3 +1.6 [-4.1, 7.3] verified success and +6.3 [2.1, 11.3], +7.7 [3.4, 12.8] control declines (with the old list
+  +3.8 / +2.9 and +7.6 / +7.6). No decision changes: `select_checkpoint` chose e3 on probe_v1, not on these.
   - Chains and runbooks that pass `--exclude-quarantined data/select_quarantine.txt` now exclude 8 variants, not 32.
     The main tree still holds the old untracked file at that path; merging this branch needs it moved aside first
     (its copy: scratchpad `fix/quarantine/select_quarantine.pre.txt`).
+  - Owner confirmation pending: releasing the 24 changes the select eval set. The ledger had reserved that for the
+    owner; this closure rests on the workflow's assignment, so the owner still has to confirm the release.
+  - The scratchpad `fix/quarantine/select_validation.jsonl` (post-fix results) has 270 rows: the 212 original rows
+    plus 58 appended (32 + 26 re-gated); `read_results` keeps the last row per variant, so it reads as 212 results, 58
+    at 0022 and 154 with no umask (stale under the rule above).
   - Not re-measured: the training-log line "select split: 180 of 212 variants validated, 32 quarantined" stays as the
     record of that build; the quarantine it names is superseded.
 
