@@ -1748,5 +1748,5 @@ section 7 critique) and from re-checks against the code and the archive on that 
   and stay FLAG). The MDE table rows (K = 20: 0.5 / 0.6 / 0.7 / 0.6 / 0.7; K = 68 0.3 / 0.3 / 0.3 / 0.3 / 0.4) and the
   ni10 sim (0.7) are unchanged, so docs/research/it16-power.md (L85, which quotes only the MDE row and G2 s1 0.2 %)
   needs no edit. (2) Callback: over 441 archived `bank*.jsonl*` files one changes:
-  `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 %; its other pool stats do not
+  `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 % (and with it `work_vs_quit_gap`); the other pool stats do not
   depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
