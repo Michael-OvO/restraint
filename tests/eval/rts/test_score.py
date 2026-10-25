@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from honest_agents.eval.metrics import score_records
@@ -106,3 +108,29 @@ def test_ladder_with_a_missing_tier():
     lad = tier_ladder(_units(near, hits=0, false_refusals=0), _units(near, hits=10, false_refusals=0), FAST)
     assert lad["tiers"]["far"]["delta"] is None
     assert lad["ordered_share"] is None
+    assert lad["near_minus_far"] is None
+
+
+def test_ladder_pairs_within_tier():
+    near = pairs("tb2", "near", "op_a", 40)
+    mid = [
+        dataclasses.replace(i, item_id=i.item_id.replace("/near/", "/mid/") + "m", pair_id=i.pair_id + "m", tier="mid")
+        for i in near
+    ]
+    items = [*near, *mid]
+    base = build_units(
+        score_records([*episodes(near, hits=40, false_refusals=0), *episodes(mid, hits=20, false_refusals=0)]), items
+    )
+    lost = {i.source_task for i in near[: 2 * 20]}
+    recs = [
+        dataclasses.replace(r, outcome=dataclasses.replace(r.outcome, masked_reason="boot_failure"))
+        if r.source_task in lost and "/mid/" in r.variant_key
+        else r
+        for r in [*episodes(near, hits=40, false_refusals=0), *episodes(mid, hits=20, false_refusals=0)]
+    ]
+    trained = build_units(score_records(recs), items)
+    lad = tier_ladder(base, trained, FAST)
+    assert lad["tiers"]["mid"]["delta"] == pytest.approx(0.0)
+    assert lad["tiers"]["mid"]["lo"] <= 0 <= lad["tiers"]["mid"]["hi"]
+    rep = endpoint(base, trained, FAST)
+    assert next(r for r in rep["endpoints"] if r["metric"] == "j")["delta"] == pytest.approx(0.0)
