@@ -56,7 +56,7 @@ def test_a_tampered_items_file_or_result_slot_is_caught(manifest, tmp_path):
 
 
 def test_tb2_runs_from_the_committed_registry_at_one_commit(manifest):
-    """DEF-NEW-bench-1: `eval_tb.sh tb2` resolved `terminal-bench@2.0` through Harbor's hosted registry, which can move."""
+    """DEF-49: `eval_tb.sh tb2` resolved `terminal-bench@2.0` through Harbor's hosted registry, which can move."""
     script = (REPO / "scripts" / "eval_tb.sh").read_text()
     (line,) = [x for x in script.splitlines() if x.strip().startswith("tb2)")]
     assert '--registry-path "$REPO_ROOT/data/benchmarks/registry_tb2.json"' in line
@@ -70,7 +70,7 @@ def test_tb2_runs_from_the_committed_registry_at_one_commit(manifest):
 
 
 def test_abstentionbench_export_pins_the_dataset_revision(manifest):
-    """DEF-NEW-bench-2: the export loaded `facebook/AbstentionBench` at whatever revision the Hub served."""
+    """DEF-50: the export loaded `facebook/AbstentionBench` at whatever revision the Hub served."""
     exporter = (REPO / "src/honest_agents/eval/external/abstentionbench_export_standalone.py").read_text()
     assert "revision=args.revision" in exporter
     rev = re.search(r'"--revision", default="([0-9a-f]{40})"', exporter).group(1)
@@ -144,7 +144,7 @@ def test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date(fake_sources,
     ],
 )
 def test_a_changed_metric_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_path, monkeypatch, change):
-    """DEF-NEW-bench-6: freeze without --refreeze accepted changed metric definitions and directions silently, kept
+    """DEF-54: freeze without --refreeze accepted changed metric definitions and directions silently, kept
     the surviving metrics' results and the first freeze date, so a pre-registered metric could be swapped unseen."""
     out, items = tmp_path / "manifest.json", tmp_path / "items"
     m = fb.freeze(tmp_path, out=out, items_dir=items)
@@ -175,7 +175,7 @@ def test_a_changed_metric_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_
 
 @pytest.mark.parametrize("change", ["added", "removed"])
 def test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged(fake_sources, tmp_path, change):
-    """DEF-NEW-bench-7: freeze looped over the new definitions only, so a benchmark gone from them was dropped from
+    """DEF-55: freeze looped over the new definitions only, so a benchmark gone from them was dropped from
     the manifest with its results and one added later went in, both without --refreeze and unlogged."""
     out, items = tmp_path / "manifest.json", tmp_path / "items"
     if change == "removed":
@@ -208,7 +208,7 @@ def test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged(fake_
 
 @pytest.mark.parametrize("field", ["role", "sources", "items"])
 def test_every_compared_field_is_logged_in_full_on_a_refreeze(fake_sources, tmp_path, monkeypatch, field):
-    """DEF-NEW-bench-8: a benchmark's role (headline or not) was not frozen at all, the sources were logged as hashes
+    """DEF-56: a benchmark's role (headline or not) was not frozen at all, the sources were logged as hashes
     and the items record as n and sha256, though the refusal also compared its file, so a moved items file logged
     identical before and after."""
     out, items = tmp_path / "manifest.json", tmp_path / "items"
