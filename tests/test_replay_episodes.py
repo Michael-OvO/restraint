@@ -248,9 +248,27 @@ def test_counters_and_cache_appends_are_thread_safe(tmp_path):
 
 
 def test_cache_key_covers_sources_image_and_timeout(tmp_path):
-    base = rp.cache_key("t", "s", ["ls"], "img", 60)
-    assert len({base, rp.cache_key("t", "s2", ["ls"], "img", 60), rp.cache_key("t", "s", ["ls"], "img2", 60),
-                rp.cache_key("t", "s", ["ls"], "img", 30), rp.cache_key("t2", "s", ["ls"], "img", 60)}) == 5  # fmt: skip
+    lib = {"harbor": "1", "trl": "1"}
+    base = rp.cache_key("t", "s", ["ls"], "img", 60, lib)
+    assert len({base, rp.cache_key("t", "s2", ["ls"], "img", 60, lib), rp.cache_key("t", "s", ["ls"], "img2", 60, lib),
+                rp.cache_key("t", "s", ["ls"], "img", 30, lib), rp.cache_key("t2", "s", ["ls"], "img", 60, lib),
+                rp.cache_key("t", "s", ["ls"], "img", 60, {**lib, "harbor": "2"})}) == 6  # fmt: skip
+
+
+def test_the_cache_key_covers_every_imported_module_and_the_library_versions(tmp_path):
+    """DEF-24: the source hash covers what env/harness/grading import (bank, mutation, spec, report, reward, verifier),
+    not only those three files, and the key carries the Harbor and TRL versions, so a change to either re-runs."""
+    names = {p.relative_to(rp.gate_cache.SRC).as_posix() for p in rp.SOURCE_FILES}
+    assert names >= {"env.py", "harness.py", "grading.py", "bank.py", "mutation.py", "spec.py", "report.py",
+                     "reward.py", "verifier/runner.py", "analysis/replay_episodes.py"}  # fmt: skip
+    replayer = Replayer(runner=FakeRunner(), cache=ReplayCache(None), tasks_root=tmp_path)
+    assert set(replayer.libraries) == {"harbor", "trl"} and all(replayer.libraries.values())
+    _surface_task(tmp_path / "tasks", TWIN)
+    a = _replayer(tmp_path, FakeRunner())
+    a.run_branch(TWIN, ["ls"])
+    assert a.run_branch(TWIN, ["ls"]).cached and a.boots == 1
+    a.libraries = {**a.libraries, "harbor": "0.0.0-other"}
+    assert not a.run_branch(TWIN, ["ls"]).cached and a.boots == 2  # a Harbor upgrade invalidates the cached entries
 
 
 def test_corrupt_and_old_schema_cache_rows_are_ignored(tmp_path):

@@ -54,10 +54,9 @@ def _no_boots(monkeypatch) -> None:
 # ── L0 on this checkout ───────────────────────────────────────────────────────
 
 
-def test_the_l0_sweep_boots_nothing_writes_only_s7s_rebuild_and_fits_its_budget(monkeypatch) -> None:
+def test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget(monkeypatch) -> None:
     """The closure test: every L0 check runs on this checkout's code, data and archive index with the boot and Docker
-    patched to raise; 0 boots, nothing written but S7's temporary rebuild (DEF-22, open: integrity-gate.md says never
-    write the build to disk), <= 60 s. Checks whose inputs are absent
+    patched to raise; 0 boots, nothing written (S7 rebuilds in memory, DEF-22), <= 60 s. Checks whose inputs are absent
     (a node has no archive, a worktree no `data/`) skip. The checks of closed defects must pass; S9 is reported, not
     asserted (DEF-13 is open; post-DEF-01, DEF-39, `symmetric` passes on G2 s1 and `archived` fails)."""
     _no_boots(monkeypatch)
@@ -69,7 +68,7 @@ def test_the_l0_sweep_boots_nothing_writes_only_s7s_rebuild_and_fits_its_budget(
     assert sorted(by) == sorted(["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9", "S10"])
     assert not [r for r in results if r.status == checks.ERROR], [(r.check, r.detail) for r in results]
     assert sum(r.boots for r in results) == 0 and ctx.index_stats.bytes_written == 0
-    assert all(r.bytes_written == 0 for r in results if r.check != "S7")
+    assert all(r.bytes_written == 0 for r in results), [(r.check, r.bytes_written) for r in results]
     for c in ("S1", "S2", "S4", "S5", "S6", "S7", "S8", "S10"):
         assert by[c].status in (checks.PASS, checks.SKIP), (c, by[c].detail)
     assert wall <= sweep.BUDGET_SEC[0], wall
