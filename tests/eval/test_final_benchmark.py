@@ -336,6 +336,39 @@ def test_parquet_rollouts_are_read_and_their_group_is_an_identifier(tmp_path):
     assert report["n_rows"] == 2 and [(h["row"], h["value"]) for h in report["hits"]] == [(2, "fix-git")]
 
 
+def test_record_refuses_when_a_known_untracked_input_is_missing(manifest, tmp_path, monkeypatch):
+    """DEF-57: a tree without the untracked decision inputs (and no archive copy) must not record a narrower scope."""
+    path = tmp_path / "final_benchmark.json"
+    path.write_text(json.dumps(manifest))
+    builds = _build(tmp_path, [CLEAN])
+    monkeypatch.setattr(fb, "training_builds", lambda **kw: builds)
+    assert fb.main(["--manifest", str(path), "never-trained", "--record"]) == 2  # the old code recorded a pass
+    assert json.loads(path.read_text()) == manifest
+    assert fb.missing_training_inputs(builds) == sorted(fb.UNTRACKED_TRAINING_INPUTS)
+    # with every known input in scope (from the tree or the archive) the record is written
+    builds += [(f"repo:{rel}", builds[0][1]) for rel in list(fb.UNTRACKED_TRAINING_INPUTS)[:2]]
+    builds += [(f"archive:{a}", builds[0][1]) for a in list(fb.UNTRACKED_TRAINING_INPUTS.values())[2:]]
+    assert fb.missing_training_inputs(builds) == []
+    assert fb.main(["--manifest", str(path), "never-trained", "--record"]) == 0
+    assert json.loads(path.read_text())["never_trained"]["n_rows"] == len(fb.UNTRACKED_TRAINING_INPUTS) + 1
+
+
+def test_a_repo_copy_identical_to_its_archived_copy_is_read_once(tmp_path):
+    """The scope is the same in a tree that has the untracked inputs and in one that has not, given the archive."""
+    rel, archived = next((r, a) for r, a in fb.UNTRACKED_TRAINING_INPUTS.items() if a.endswith(".gz"))
+    root, archive = tmp_path / "repo", tmp_path / "archive"
+    (root / rel).parent.mkdir(parents=True)
+    (root / rel).write_text(json.dumps(CLEAN) + "\n")
+    (archive / archived).parent.mkdir(parents=True)
+    with gzip.open(archive / archived, "wt") as f:
+        f.write(json.dumps(CLEAN) + "\n")
+    labels = [label for label, _ in fb.training_builds(root=root, archive=archive)]
+    assert labels == [f"archive:{archived}"]
+    assert [label for label, _ in fb.training_builds(root=root)] == [f"repo:{rel}"]
+    (root / rel).write_text(json.dumps({**CLEAN, "id": "changed"}) + "\n")  # a changed local copy is read too
+    assert [label for label, _ in fb.training_builds(root=root, archive=archive)] == [f"repo:{rel}", labels[0]]
+
+
 # ── compute ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -430,10 +463,13 @@ def test_the_archived_training_inputs_are_all_in_scope():
         "iterations/11-teacher-data/episodes.jsonl.gz",
         "iterations/14-session-a/files/data/select_validation.jsonl",
         "iterations/14-session-a/files/data/decision/surfaces_val/g1.jsonl",
+        *fb.UNTRACKED_TRAINING_INPUTS.values(),
     ):
         assert f"archive:{rel}" in labels, rel
+    assert fb.missing_training_inputs(fb.training_builds(archive=ARCHIVE)) == []
     recorded = {b["build"] for b in json.loads(fb.MANIFEST.read_text())["never_trained"]["builds"]}
     assert labels <= recorded
+    assert not recorded & {f"repo:{rel}" for rel in fb.UNTRACKED_TRAINING_INPUTS}  # read from the archive
 
 
 @needs_archive
