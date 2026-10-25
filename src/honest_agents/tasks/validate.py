@@ -213,10 +213,14 @@ def is_current(r: ValidationResult, task_dir: Path) -> bool:
     return not r.task_hash or r.task_hash == task_hash(task_dir)
 
 
+UMASK_UNKNOWN = "unknown"  # `sandbox_umask` of a booted result whose preflight printed no umask
+
+
 def umask_current(r: ValidationResult) -> bool:
     """A stored result was graded under the nodes' umask (DEF-43). Results written before the boot preflight recorded it
     (DEF-19: no `sandbox_umask` key) ran under a local daemon's 0000 and fail file-mode tests the nodes pass, so they
-    are not current; a result that never booted records None."""
+    are not current; a result that never booted records None, and one that booted but whose preflight printed no umask
+    records `UMASK_UNKNOWN` (not current: its umask is not known)."""
     if "sandbox_umask" not in r.debug:
         return False
     return r.debug["sandbox_umask"] in (None, "0" + SANDBOX_UMASK)
@@ -546,7 +550,8 @@ def _record(res: ValidationResult, ep: _Episode) -> None:
     res.debug["tamper_details"] = o.tamper_details[:20]
     res.debug["violations"] = o.violation_details[:20]
     res.debug["verifier_network"] = ep.facts.get("verifier_network")
-    res.debug["sandbox_umask"] = ep.debug.get("sandbox_umask")  # DEF-19: the boot preflight's umask
+    # DEF-19: the boot preflight's umask. A graded episode booted, so None here means the probe printed nothing.
+    res.debug["sandbox_umask"] = ep.debug.get("sandbox_umask") or UMASK_UNKNOWN
 
 
 async def _validate(

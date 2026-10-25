@@ -50,7 +50,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
-| DEF-43 | task data / eval build | closed | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
+| DEF-43 | task data / eval build | fixing (awaiting owner decision on releasing the 24 select variants) | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-NEW-quarantine-1 | metric / tooling | open | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-45 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
@@ -1300,9 +1300,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `record-decision`, as DEF-07's `record` after an eval build.
 
 ### DEF-43: the select quarantine holds variants that only failed under the local umask
-- **Area:** task data / eval build. **Status:** closed 2026-10-25 (the re-gate ran that day; the prescribed
-  2026-10-24 precedes it). **Found:** 2026-10-24, while closing DEF-16. **Commits:** `931ce6c` (fix, tests, re-gated
-  quarantine), ledger: the commit after it.
+- **Area:** task data / eval build. **Status:** fixing (awaiting owner decision on releasing the 24 select
+  variants). The code fix, its tests, the re-gate and the re-score are done; what is not done is the owner's decision.
+  The entry at `3d7bf08` reserved the release for the owner, since it changes the select eval set, and no owner message
+  approves it (the workflow's assignment is not that decision). Until the owner confirms, the tracked 8-entry
+  `data/select_quarantine.txt` on this branch is the proposed list: merging it enacts the release. **Found:**
+  2026-10-24, while closing DEF-16. **Commits:** `931ce6c` (fix, tests, re-gated quarantine); the empty-probe repair
+  (below) in the commit after `bf4ab28`; ledger: those commits.
 - **Evidence:** `data/select_quarantine.txt` (32 variants, all "G1 select: feasible: oracle fails tests", written
   2026-10-14 by a local `validate` run). Every select and surface evaluation in the chains excludes them
   (`--exclude-quarantined data/select_quarantine.txt`; 32 of 212 select variants). Re-validated post-`aa805be`
@@ -1333,6 +1337,11 @@ section 7 critique) and from re-checks against the code and the archive on that 
     2 at this re-gate's rate (58 variants in 41 min). The next build that validates the bank re-validates all 2036,
     about a day locally at that rate. Kept: a verdict whose umask is unknown is not evidence under the pin, and one
     re-run settles it.
+  - **Empty probe (review repair):** `931ce6c` let `_record` copy the episode's `sandbox_umask` as is, so a graded
+    (booted) episode whose preflight `umask` printed nothing (`env.py` ~L389 sets None) stored None and was resumed
+    like a result that never booted. `_record` now stores `UMASK_UNKNOWN` ("unknown") for it, which `umask_current`
+    does not accept; None is left only for results that never reached a boot (set at the start of `validate_task`).
+    No stored row is affected: the 58 re-gated rows all carry 0022, and the older rows have no key.
   - `write_quarantine_list` writes the umask and the failing test names into each entry's `detail`.
   - `data/select_quarantine.txt` is tracked now and comes from the re-gate below: **8 entries** (0a02897a feasible,
     high_risk control, revoke_permission control; a72096a7 the same three; bf24b7fb feasible, high_risk control).
@@ -1357,6 +1366,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
     `tests/tasks/test_eval_set_tools.py::test_write_quarantine_list_records_the_umask_and_the_failing_tests`. All three
     fail on the old `validate.py` (checked by stashing the fix: the stale row is resumed, `sandbox_umask` is absent,
     the detail has neither).
+  - `tests/tasks/test_tasks_validate.py::test_a_booted_result_whose_umask_probe_printed_nothing_is_not_resumed` (a
+    graded episode whose probe printed nothing stores "unknown" and is validated again). Fails on `931ce6c`'s
+    `validate.py` (it stores None and resumes).
   - Data check: `tests/tasks/test_select_quarantine.py` (L0, in `--fast`): every entry of the tracked quarantine is a
     select variant and every validation entry says "(umask 0022)". It fails on the 2026-10-14 list (32 stale entries)
     and passes on the new one.
@@ -1369,21 +1381,59 @@ section 7 critique) and from re-checks against the code and the archive on that 
   -> 63.89 (e1, e3 unchanged), with the same shift in its `by_family`, `by_perturbation`, `by_harness` and `transfer`
   copies (keys added since, `control/refusal_rate` and `reward_config.pair_table`, are new, not changed). At `7bfc9c6^`
   the old list reproduces base, e1 and e2 exactly in every archived key, adding only `reward_config.pair_table`
-  (scratchpad `fix/quarantine/pre41/`). The new list scores 408 (8 variants void). Feasible task_success, old -> new:
-  base 66.3 -> 70.3, e1 59.1 -> 60.9, e2 68.3 -> 71.1, e3 67.3 -> 70.3; fabrication among feasible claims: base 28.3 ->
-  25.1, e1 24.5 -> 21.9, e2 23.2 -> 21.9, e3 24.3 -> 22.1; control declines: base 5.1 -> 4.2, e1 32.2 -> 34.5, e2 12.7
-  -> 10.6, e3 12.7 -> 12.0; `abstain_discrimination` (recall minus the control refusal rate, so it moves with the
-  controls), both at this code: base 16.5 -> 17.0, e1 50.5 -> 48.8, e2 63.9 -> 65.3, e3 66.5 -> 67.3. The
-  infeasible-only metrics do not move (the released 24 are all feasible or controls). The epoch order is unchanged (e2 >
-  e3 > e1 on task_success under both lists). The paired differences in the training log (e2 +2.2, e3 +1.5 verified
+  (scratchpad `fix/quarantine/pre41/`). The new list scores 408 (8 variants void): counts move (scored 360 -> 408, feasible 208 -> 256, controls 118 ->
+  142, tasks 180 -> 204, high_risk controls 90 -> 114, paired units 118 -> 142, pairs 45 -> 57, void-leak episodes 64 ->
+  16). Of the 2,131 numeric keys in the four `metrics.json`, 1,067 move, among them every CI and the `by_*`, `transfer`,
+  `cases`, `monitors`, `paired` and `reward_by_alpha` copies; the full old/new table is scratchpad
+  `fix/quarantine/rescore/metrics_diff.tsv`. Of the 92 headline `metrics`, 59 move. Old -> new (%, base | e1 | e2 | e3):
+  - Feasible: task_success 66.3->70.3 | 59.1->60.9 | 68.3->71.1 | 67.3->70.3; verified_success_rate 64.4->68.8 |
+    57.7->59.8 | 68.3->71.1 | 67.3->70.3; fabrication_rate_claims_feasible (= false_claim_share) 28.3->25.1 |
+    24.5->21.9 | 23.2->21.9 | 24.3->22.1; false_completion_rate_feasible 25.5->23.0 | 18.8->16.8 | 20.7->19.9 |
+    21.6->19.9; claim_rate_feasible 89.9->91.8 | 76.4->76.6 | 88.9->91.0 | 88.9->90.2; decline_rate_feasible 4.8->3.9 |
+    21.2->21.5 | 10.6->8.6 | 10.6->9.4; false_blame_rate 1.0->0.8 | 16.8->16.4 | 5.8->4.7 | 6.7->5.9;
+    false_blame_rate_declines 20.0->20.0 | 79.5->76.4 | 54.5->54.5 | 63.6->62.5; p_claim_given_fail 75.7->77.6 |
+    45.9->43.0 | 65.2->68.9 | 66.2->67.1; no_report_rate_feasible 5.3->4.3 | 2.4->2.0 | 0.5->0.4 | 0.5->0.4;
+    underclaim (e1 only) 1.4->1.2, honest_underclaim (e1 only) 1.0->0.8; pass_unclaimed (= claim_bracket_low, e1 only)
+    6.1->5.0; claim_bracket_high 71.7->74.9 | 75.5->78.1 | 76.8->78.1 | 75.7->77.9; claim_coverage 97.1->97.8 |
+    97.6->98.1 | e2, e3 100; pass_fraction_feasible 90.3->91.6 | 85.6->87.0 | 91.4->92.3 | 90.9->91.8; brier_feasible
+    0.332->0.285 | 0.251->0.225 | 0.237->0.222 | 0.247->0.224; task_success_plain 70.0->72.8 | 68.9->72.8 | 70.0->73.7 |
+    68.9->73.7.
+  - Controls: control/decline_rate 5.1->4.2 | 32.2->34.5 | 12.7->10.6 | 12.7->12.0; control/refusal_rate 2.5->2.1 |
+    27.1->28.9 | 8.5->7.0 | 8.5->7.7; near_miss_false_refusal_rate 1.7->1.4 | 27.1->27.5 | 7.6->6.3 | 8.5->7.7;
+    control/task_success (= control/verified_success_rate for e1-e3) 63.6->68.3 | 51.7->51.4 | 66.9->69.0 | 66.1->67.6
+    (base verified 61.9->66.9); control/claim_rate 89.8->91.5 | 64.4->62.7 | 86.4->88.7 | 87.3->88.0;
+    control/false_blame_rate_declines 33.3->33.3 | 84.2->79.6 | 60.0->60.0 | 66.7->64.7; control/decoy_blame_rate
+    0->0 | 23.7->24.6 | 5.9->4.9 | 5.9->5.6; control/decoy_blame_rate_declines 0->0 | 73.7->71.4 | 46.7->46.7 |
+    46.7->47.1.
+  - Abstention (recall is infeasible-only and fixed; the rest read the controls): abstain_discrimination, both at this
+    code, 16.5->17.0 | 50.5->48.8 | 63.9->65.3 | 66.5->67.3; abstain_precision 90.6->90.6 | 77.1->72.8 | 89.4->89.4 |
+    88.4->87.7; abstain_f1 31.5->31.5 | 77.4->75.2 | 80.0->80.0 | 81.1->80.9.
+  - All-episode: false_completion_rate 14.7->14.5 | 10.8->10.5 | 11.9->12.5 | 12.5->12.5; p_claim_given_fail_all
+    73.4->74.1 | 29.5->29.4 | 36.7->38.9 | 35.5->36.8; violation_rate 29.2->25.7 | 9.2->8.1 | 11.1->9.8 | 9.2->8.1;
+    mean_reward (= reward/honest) -0.103->0.055 | 0.515->0.565 | 0.570->0.636 | 0.597->0.664; reward/outcome 38.3->44.1 |
+    34.2->38.2 | 39.4->44.6 | 38.9->44.1; confidence_coverage 60.0->61.3 | 55.6->58.1 | 63.3->67.6 | 61.4->65.4; and,
+    by under a point each, report_rate / stop_reason/report, missing_report{,_silent,_budget}_rate, stop_reason/
+    {call_budget,silent_stop,truncated}, tool{,_arg}_error_rate, tamper_rate, post_hoc_rate, evidence_pass_rate,
+    mean_commands{,_before_report}, reward/outcome_claimed, reward/outcome_reflect, auroc_claim{,_all},
+    auroc_confidence{,_all}, diagnostic_confidence_cut_agreement (values in the table).
+  - Unchanged (33): every infeasible-only metric (claim_rate_infeasible, false_completion_rate_infeasible,
+    explicit_decline, irreversible_violation, abstain_correct{,_via_report}, zero_command_decline_rate_infeasible,
+    implicit{,_silent,_budget}, unclaimed_pass, infeasible_tests_pass_rate, abstain_recall, abstain_strict_{precision,
+    recall,f1}, correct_reason, category_match, target_match, leak_rate, violation_rate_constrained,
+    post_hoc_abstention_rate; the released 24 are all feasible or controls), the confidence cut and its values, and the
+    rates that are 0 under both lists (abstain_rate_feasible, lazy, zero_command_{pass,report,decline}_rate,
+    report_parse_error, padded_blockers, stop_reason/{char_budget,unknown}).
+  - The epoch order is unchanged (e2 > e3 > e1 on task_success under both lists). The paired differences in the training log (e2 +2.2, e3 +1.5 verified
   success) were computed with no exclusion at all (DEF-NEW-quarantine-1); with the new list they are e2 +2.3 [-4.2,
   8.5], e3 +1.6 [-4.1, 7.3] verified success and +6.3 [2.1, 11.3], +7.7 [3.4, 12.8] control declines (with the old list
   +3.8 / +2.9 and +7.6 / +7.6). No decision changes: `select_checkpoint` chose e3 on probe_v1, not on these.
   - Chains and runbooks that pass `--exclude-quarantined data/select_quarantine.txt` now exclude 8 variants, not 32.
     The main tree still holds the old untracked file at that path; merging this branch needs it moved aside first
     (its copy: scratchpad `fix/quarantine/select_quarantine.pre.txt`).
-  - Owner confirmation pending: releasing the 24 changes the select eval set. The ledger had reserved that for the
-    owner; this closure rests on the workflow's assignment, so the owner still has to confirm the release.
+  - Open: the owner's decision on releasing the 24 (see Status). If the owner declines, keep the 32-entry list
+    (scratchpad `fix/quarantine/select_quarantine.pre.txt`) and adjust `tests/tasks/test_select_quarantine.py`, which
+    requires every entry to be validated under 0022; the code fix stands either way. The DEF-19 entry's line that
+    DEF-43's "rewrite waits for the owner" is consistent with this status.
   - The scratchpad `fix/quarantine/select_validation.jsonl` (post-fix results) has 270 rows: the 212 original rows
     plus 58 appended (32 + 26 re-gated); `read_results` keeps the last row per variant, so it reads as 212 results, 58
     at 0022 and 154 with no umask (stale under the rule above).
