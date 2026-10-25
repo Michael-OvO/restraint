@@ -1234,6 +1234,12 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   SFT-v2 looks but does not judge; G1 judges but does not look. G1's training masked the injected reads and replayed only
   anchors (not SFT-v2's read-then-decide examples), so two epochs of decisions taken on evidence the model never fetched
   overwrote the inspection habit.
+  [DEF-04 note, 2026-10-24: the per-surface percentages above come from the one-off `decl_reads`, whose code was never in the
+  repo, and are void (docs/defects.md DEF-04). The one metric, `eval.read_diagnosis` (strict rule, K=8 landmark window,
+  20 sources), twin / control, with the whole decision prefix in parentheses: SFT-v2 readme 45 / 48 (75 / 79), config
+  18 / 18 (36 / 46), header 18 / 24 (53 / 48), manifest 25 / 20 (43 / 36), empty_backup 14 / 18 (40 / 34), inbound_link
+  28 / 33 (66 / 63); G1 at most 5 % on every surface (8 % readme, whole prefix), 0 on empty_backup and inbound_link. The
+  direction (SFT-v2 looks, G1 does not) holds; the levels do not. See docs/research/it15-read-metric-recompute.md.]
 
 - (c) tier S: plain verified success 80 % (PASS), control declines 7.5 % (PASS), control success 71 %; but all-twin
   `abstain_correct` 47.5 % (SFT-v2 74 %) with 35 / 80 `infeasible_claimed` (SFT-v2 13): consistent with the lost
@@ -1243,6 +1249,9 @@ lr 5e-5, 2 epochs (660 steps, 105 min; W&B https://wandb.ai/michael_ovo/honest-a
   39-41, manifest 69-75, empty_backup 75-81, inbound_link 72-75): G0 kept the habit (its replay held SFT-v2's decision
   examples) but judged weakly in long contexts (probe 0.34). SFT-v2 / G0 look but judge weakly; G1 judges but does not
   look; G2 tests whether both can be had at once.
+  [DEF-04 note, 2026-10-24: `decl_reads` numbers, void. Canonical, K=8 twin / control (whole prefix): G0 readme 42 / 54 (72 / 84),
+  config 34 / 24 (55 / 44), header 25 / 22 (42 / 44), manifest 31 / 31 (46 / 48), empty_backup 21 / 10 (36 / 25),
+  inbound_link 14 / 18 (32 / 40).]
 
 ### Decision (autonomous)
 The pre-registered follow-up for a (b) failure was "G1 tier F for the record, archive, stop, write the next design". With
@@ -1269,6 +1278,11 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   +4.1 / -2.5, G0 +8.8 / +2.5, G1 -0.6 / -1.2). Twins declined correctly 49 / 54 %, controls declined 27.5 / 38 %.
 - Evidence inspected before deciding: readme 81-84 %, config 51-60, header 34-41, manifest 69-78, empty_backup 76,
   inbound_link 75-84 (SFT-v2 46-88): the habit is back (within 15 points of SFT-v2 on every trained surface).
+  [DEF-04 note, 2026-10-24: `decl_reads` numbers, void. Canonical, K=8 twin / control (whole prefix): G2 readme 51 / 52 (81 / 84),
+  config 20 / 18 (34 / 42), header 21 / 26 (34 / 42), manifest 32 / 26 (51 / 45), empty_backup 18 / 10 (34 / 24),
+  inbound_link 21 / 14 (36 / 24). Against SFT-v2 (it15 run) the pre-registered "within 15 points on every trained
+  surface" holds at K=8 (G2 is 0-8 points higher everywhere) but not over the whole prefix (header twins 34 vs 53). On the
+  held-out surfaces G2 reads less: inbound_link 21 / 14 vs 28 / 33 (whole prefix 36 / 24 vs 66 / 63).]
 - (c) tier S: plain verified success 80 % (PASS), control declines 6.2 % (PASS), control success 74 %; all-twin
   `abstain_correct` **73.8 %** (SFT-v2 74, G0 56, G1 47.5): familiar-set honesty kept.
 - Scorecard: (a) PASS, (b) PASS, (c) PASS, (d) FAIL. By the pre-registered follow-up (b, c pass; inspection within 15
@@ -1290,6 +1304,8 @@ judgment examples (reads masked) + 464 SFT-v2 decision examples (real inspection
   +13.7). Decision x evidence read (`decl_reads`, 912 episodes with local task dirs): read -> twins declined 79 %, controls
   33 % (+46; seed 1 +47); not read -> 38 % vs 40 % (seed 1 36 / 37 %). Read rate ~44 % (seed 1 ~46 %). Both seeds judge
   well when they read and guess when they do not: the G3 diagnosis (`docs/iteration-15-g3-rl-read.md`) holds on two seeds.
+  [DEF-04 note, 2026-10-24: `decl_reads`, void; it also covered 19 of 20 sources (DEF-05). The canonical decision x read split
+  is in docs/research/it15-read-metric-recompute.md.]
 - Measurement caveat: the `inbound_link` control's test also requires the real directory emptied, which its instruction
   does not ask; every model (base 0/38, SFT-v2 0/80, G2 0/80) fails it. Decline-based gaps are unaffected; control success
   on inbound_link is not meaningful. Held-out set left frozen.

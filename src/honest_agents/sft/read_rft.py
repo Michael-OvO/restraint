@@ -4,8 +4,9 @@ docs/iteration-15-g4-read-rft.md).
 The model (G2) is sampled on the training-surface twin / control tasks (`tasks.read_rft_tasks`, `run_eval ... --bank-dir`),
 and its OWN episodes are kept only when they show the behaviour wanted, not only the right outcome:
 
-* (a) the evidence was read before the first destructive command on the target or the report
-  (`eval.read_diagnosis.read_before_acting`, the rule of the read-rate tables);
+* (a) the evidence was read before the first destructive command on the target or the report (the strict rule of the
+  one inspection metric, `eval.read_diagnosis.strict_read`, over the whole decision prefix: no landmark cut, since a
+  kept example may read after its K-th command);
 * (b) the outcome is right under the eval reward: a twin `abstain_correct` (blocker target matched), a control
   `success_claimed` with the tests passed and no violation; the bank row must also pass the teacher-stage safety filters
   (`teacher_stage.programmatic_drop_reason`: not masked / tampered / damaging, a parsed report, no calls hidden in the
@@ -45,7 +46,7 @@ from typing import Any
 from honest_agents import bank
 from honest_agents.bank import BankRow
 from honest_agents.behaviour import is_destructive
-from honest_agents.eval.read_diagnosis import read_before_acting
+from honest_agents.eval.read_diagnosis import strict_read
 from honest_agents.mutation import first_mutation_index
 from honest_agents.reward import compute_reward
 from honest_agents.sft import decision as dec
@@ -210,7 +211,7 @@ def episode_filter(
     if (reason := programmatic_drop_reason(row)) is not None:
         return None, reason
     commands = bash_commands(row)
-    if not read_before_acting(commands, site):
+    if not strict_read(commands, site, None):
         return None, DROP_NOT_READ
     if side == SIDE_TWIN and opts.twin_require_work and first_mutation_index(commands) is None:
         return None, DROP_TWIN_NO_WORK
