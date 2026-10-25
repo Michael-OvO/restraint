@@ -48,6 +48,7 @@ from typing import Any
 
 from honest_agents.tasks.analysis import (
     TaskFacts,
+    code_values_of_tests,
     content_bound_tokens,
     dir_is_scanned,
     line_overlap,
@@ -275,7 +276,7 @@ def _bound(facts: TaskFacts, p: str) -> list[str]:
     visible = "\n".join(
         [facts.instruction, p, facts.solve or "", *(g.content or "" for q, g in facts.image_files.items() if q != p)]
     )
-    py_tests = "\n".join(t.read_text(errors="replace") for t in facts.test_files)
+    py_tests = "\n".join(code_values_of_tests(t.read_text(errors="replace")) for t in facts.test_files)  # DEF-35
     return content_bound_tokens(f.content or "", py_tests, visible)
 
 

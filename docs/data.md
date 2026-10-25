@@ -333,6 +333,19 @@ remain): train_pool 6 (530d88ed, 6887ba94 in train; 376ab767, 7a8866ec, a9705fe3
 36 archived evaluations their twins passed the tests in 127 of 214 episodes (120 leaks), against 8 of 821 for the remove_input
 twins that stay.
 
+**Values from test code only (DEF-35/36, 2026-10-24).** `content_bound_tokens` matched its tokens anywhere in the test source, so a
+word the tests only spell in a comment, a docstring or an assert / `fail` message (`# Utility helpers`, `import pytest`, a
+variable name) bound the file. The tests' text is now `analysis/filters.code_values_of_tests`: the string and number constants of
+their code, without docstrings, comments and messages. Format syntax (iptables-save `*filter` / `COMMIT`, JSON Schema keywords
+and `date-time`, `UTF-8`) counts as a keyword, and a label of a closed vocabulary (sentiment positive / negative / neutral,
+severity, priority) is guessable when the visible text names the category. One shape the value floor hid stays a candidate on its
+own: the tests assert how many times a line they spell occurs in the file (`analysis/filters.hidden_counts`: three `msgstr ""`
+lines against a constant 3, val twin f81b900c, 0 of 88 archived twin episodes pass). On the full pool this drops 12 more twins
+from the splits (train 3c64230a, 9eec146e; val a1e2cc16, f624c286; test d78e73cd; train_pool also 08164c15, 3aa91448, 50177ff1,
+5830f696, d6623349, eb27f44b, fb52f9f9) and 6 unused twins (172 -> 154 twin dirs). Their twins passed 8 of 40 archived episodes (7 leaks); the 154
+that stay passed 0 of 781. `corrupt_input` shares the filter: 24 pairs fewer (test 58 -> 55), and the decoy names (drawn from
+the candidates' names) are redrawn.
+
 ## 6. Rebuilding and checking
 
 ```bash

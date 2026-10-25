@@ -46,12 +46,14 @@ from honest_agents.tasks.analysis.envtext import (
 )
 from honest_agents.tasks.analysis.facts import TaskFacts, build_inputs
 from honest_agents.tasks.analysis.filters import (
+    code_values_of_tests,
     content_bound_tokens,
     content_shape,
     dir_is_scanned,
     example_paths,
     guessable_tokens,
     has_scope_clause,
+    hidden_counts,
     is_dir_like,
     is_link_only,
     is_pass_through,
@@ -121,6 +123,7 @@ __all__ = [
     "boot_dirs",
     "build_inputs",
     "check_existence",
+    "code_values_of_tests",
     "content_bound_tokens",
     "content_shape",
     "cue_classifiers",
@@ -138,6 +141,7 @@ __all__ = [
     "extract_paths",
     "guessable_tokens",
     "has_scope_clause",
+    "hidden_counts",
     "image_files",
     "interpreter_can_substitute",
     "is_dir_like",
