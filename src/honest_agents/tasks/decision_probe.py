@@ -8,7 +8,8 @@ it is disposable, and the `ls -la` differs only in the README's size. Nothing is
 
     python -m honest_agents.tasks.decision_probe outputs --pools data/distill_pool.jsonl data/train_rl.jsonl \\
         data/val.jsonl [--parallel 8] [--out data/decision/sandbox_outputs.jsonl]        # ~364 boots, resumable
-    python -m honest_agents.tasks.decision_probe prompts --bank <pass@4 bank> [--out data/decision/probe_prompts.jsonl]
+    python -m honest_agents.tasks.decision_probe prompts --bank <pass@4 bank> [--out data/decision/probe_prompts.jsonl] \\
+        [--system-prompt-file <prompt.txt> --out <its own file>]   # default prompt: harness.SYSTEM_PROMPT
     python -m honest_agents.tasks.decision_probe cleanup      # `docker rm -f` of leaked `ep<hex>-*` sandboxes only
 
 **Outputs cache** (`data/decision/sandbox_outputs.jsonl`, one row per variant): the raw `(command, rc, output)` of each
@@ -815,15 +816,42 @@ def _arm_meta(pair: Mapping[str, VariantRef]) -> dict[str, VariantMeta]:
     return {ARM_WARNING: read_variant_meta(pair["infeasible"].task_dir), ARM_BENIGN: read_variant_meta(pair["control"].task_dir)}
 
 
+def with_system_prompt(messages: Sequence[Mapping[str, Any]], system_prompt: str | None) -> list[dict[str, Any]]:
+    """`messages` with its system message's content replaced by `system_prompt` (one is inserted when there is none);
+    None leaves them as they are."""
+    out = [dict(m) for m in messages]
+    if system_prompt is None:
+        return out
+    if out and out[0].get("role") == "system":
+        out[0]["content"] = system_prompt
+        return out
+    return [{"role": "system", "content": system_prompt}, *out]
+
+
+def system_prompt_record(path: str | Path, text: str) -> dict[str, Any]:
+    """The manifest entry of a probe file built under a system prompt other than `harness.SYSTEM_PROMPT`."""
+    return {"file": str(path), "sha256": hashlib.sha256(text.encode()).hexdigest(), "chars": len(text)}
+
+
+def read_system_prompt(path: str | Path) -> str:
+    text = Path(path).expanduser().read_text()
+    if not text.strip():
+        raise ValueError(f"--system-prompt-file {path} is empty")
+    return text
+
+
 def zero_prefix_prompts(
     refs: Sequence[VariantRef],
     outputs: Mapping[str, SandboxOutputs],
     split: PhrasingSplit,
     counts: Counter[str],
     sft_pairs: Mapping[str, Collection[str]] | None = None,
+    *,
+    system_prompt: str | None = None,
 ) -> list[DecisionPrompt]:
     """`[system, instruction, READ1, OUT1, READ2, OUT2]` per pair and arm; the instruction comes from the arm's own task
-    directory (twin and control instructions are identical: asserted)."""
+    directory (twin and control instructions are identical: asserted). The system message is `system_prompt`, by
+    default `harness.SYSTEM_PROMPT` (the training and evaluation prompt)."""
     out: list[DecisionPrompt] = []
     for pair_id, pair in sorted(pair_refs(refs).items()):
         metas = _arm_meta(pair)
@@ -835,7 +863,8 @@ def zero_prefix_prompts(
             counts["zero_prefix_missing_outputs"] += 1
             continue
         target = metas[ARM_WARNING].target
-        base = [{"role": "system", "content": harness.SYSTEM_PROMPT}, {"role": "user", "content": instructions["control"]}]
+        system = harness.SYSTEM_PROMPT if system_prompt is None else system_prompt
+        base = [{"role": "system", "content": system}, {"role": "user", "content": instructions["control"]}]
         for arm, meta in metas.items():
             messages = base + injected_turns(target, f"zero:{pair_id}", [], outputs[meta.variant_id], meta.site)
             out.append(
@@ -867,8 +896,10 @@ def own_prefix_prompts(
     *,
     per_variant: int = 2,
     sft_pairs: Mapping[str, Collection[str]] | None = None,
+    system_prompt: str | None = None,
 ) -> list[DecisionPrompt]:
-    """The base model's own control prefixes up to the deletion (RL-pool pairs), continued with each arm's outputs."""
+    """The base model's own control prefixes up to the deletion (RL-pool pairs), continued with each arm's outputs.
+    The prefix keeps the bank episode's system message unless `system_prompt` replaces it."""
     from honest_agents.sft.decision import select_states  # late import: sft.decision imports this module
 
     pairs = pair_refs(refs)
@@ -881,7 +912,7 @@ def own_prefix_prompts(
         if any(not (outputs.get(m.variant_id) or SandboxOutputs("", "", "", "")).ok for m in metas.values()):
             counts["own_prefix_missing_outputs"] += 1
             continue
-        prefix = state.prefix_messages()
+        prefix = with_system_prompt(state.prefix_messages(), system_prompt)
         for arm, meta in metas.items():
             messages = prefix + injected_turns(
                 state.target, f"own:{state.episode_id}", tool_texts(prefix), outputs[meta.variant_id], meta.site
@@ -937,6 +968,11 @@ def prompt_manifest(prompts: Sequence[DecisionPrompt], counts: Counter[str], spl
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
+SYSTEM_PROMPT_FILE_HELP = (
+    "system prompt of every prompt (zero-prefix, and in place of the bank's on own prefixes); default "
+    "harness.SYSTEM_PROMPT. Needs its own --out; its sha256 goes into that file's manifest"
+)
+
 
 def _cmd_outputs(args: argparse.Namespace) -> int:
     refs = high_risk_variants(args.pools, args.tasks_root)
@@ -950,6 +986,7 @@ def _cmd_outputs(args: argparse.Namespace) -> int:
 def _cmd_prompts(args: argparse.Namespace) -> int:
     from honest_agents.bank import iter_bank
 
+    system = custom_system_prompt(args.system_prompt_file, args.out, PROBE_PROMPTS)
     split = PhrasingSplit.build(args.phrasing_holdout, args.phrasing_seed)
     split.write(args.phrasings_file)
     outputs = read_outputs(args.outputs)
@@ -958,13 +995,26 @@ def _cmd_prompts(args: argparse.Namespace) -> int:
     if args.rl_pool:
         rl_refs = high_risk_variants([args.rl_pool], args.tasks_root)
         rows = [r for r in iter_bank(Path(args.bank).expanduser()) if r.task.get("family") == HIGH_RISK]
-        prompts += own_prefix_prompts(rows, rl_refs, outputs, split, counts, per_variant=args.per_variant)
+        prompts += own_prefix_prompts(rows, rl_refs, outputs, split, counts, per_variant=args.per_variant, system_prompt=system)
     if args.zero_pools:
-        prompts += zero_prefix_prompts(high_risk_variants(args.zero_pools, args.tasks_root), outputs, split, counts)
+        refs = high_risk_variants(args.zero_pools, args.tasks_root)
+        prompts += zero_prefix_prompts(refs, outputs, split, counts, system_prompt=system)
     manifest = prompt_manifest(prompts, counts, split)
+    if system is not None:
+        manifest["system_prompt"] = system_prompt_record(args.system_prompt_file, system)
     write_prompts(prompts, args.out, manifest)
     print(json.dumps(manifest, indent=2))
     return 0
+
+
+def custom_system_prompt(path: str | None, out: str | Path, default_out: str | Path) -> str | None:
+    """The text of `--system-prompt-file`, or None without one. A probe under another prompt is its own file with its
+    own manifest: writing it over the default probe file is refused."""
+    if path is None:
+        return None
+    if Path(out).expanduser().resolve() == Path(default_out).expanduser().resolve():
+        raise SystemExit(f"--system-prompt-file needs its own --out; {out} is the harness-prompt probe file")
+    return read_system_prompt(path)
 
 
 def _cmd_cleanup(args: argparse.Namespace) -> int:
@@ -996,6 +1046,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--phrasing-holdout", type=int, default=DEFAULT_PHRASING_HOLDOUT)
     p.add_argument("--phrasing-seed", default=DEFAULT_PHRASING_SEED)
     p.add_argument("--phrasings-file", default=str(PHRASINGS_FILE))
+    p.add_argument("--system-prompt-file", default=None, help=SYSTEM_PROMPT_FILE_HELP)
     p.set_defaults(fn=_cmd_prompts)
     c = sub.add_parser("cleanup", help="remove leaked `ep<hex>` sandbox containers and networks")
     c.add_argument("--dry-run", action="store_true")

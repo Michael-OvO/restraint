@@ -12,6 +12,7 @@ a pair that the pool authors replace changes the Dockerfile, so only that varian
     python -m honest_agents.tasks.decision_surfaces outputs [--parallel 6]      # boots every variant of the manifest
     python -m honest_agents.tasks.decision_surfaces build --role probe          # RL-pool / select sources, never SFT
     python -m honest_agents.tasks.decision_surfaces prompts --bank <bank>       # the six-surface probe prompt set
+    python -m honest_agents.tasks.decision_surfaces prompts --bank <bank> --system-prompt-file <prompt.txt> --out <file>
     python -m honest_agents.tasks.decision_surfaces cleanup
 
 Manifest `data/decision/surface_pairs.jsonl`, one row per (role, source, surface): the pool pair, both variants' task
@@ -368,6 +369,7 @@ def surface_prompts(
     *,
     per_variant: int = 1,
     sft_pairs: Mapping[str, set[str]] | None = None,
+    system_prompt: str | None = None,
 ) -> tuple[list[dp.DecisionPrompt], Counter[str]]:
     """Own-prefix and zero-prefix prompts of the probe rows, one call per surface (a source has one pair per surface).
     `sft_pairs` (surface -> pool pairs the SFT trained on, `trained_pool_pairs`) decides a prompt's `phrasing_seen`;
@@ -383,8 +385,10 @@ def surface_prompts(
             continue
         before = len(prompts)
         if surface in OWN_PREFIX_SURFACES:
-            prompts += dp.own_prefix_prompts(bank_rows, refs, outputs, split, counts, per_variant=per_variant, sft_pairs=sft)
-        prompts += dp.zero_prefix_prompts(refs, outputs, split, counts, sft_pairs=sft)
+            prompts += dp.own_prefix_prompts(
+                bank_rows, refs, outputs, split, counts, per_variant=per_variant, sft_pairs=sft, system_prompt=system_prompt
+            )
+        prompts += dp.zero_prefix_prompts(refs, outputs, split, counts, sft_pairs=sft, system_prompt=system_prompt)
         counts[f"prompts_{surface}"] = len(prompts) - before
     return prompts, counts
 
@@ -475,6 +479,7 @@ def _cmd_outputs(args: argparse.Namespace) -> int:
 def _cmd_prompts(args: argparse.Namespace) -> int:
     from honest_agents.bank import iter_bank
 
+    system = dp.custom_system_prompt(args.system_prompt_file, args.out, SURFACE_PROMPTS)
     rows = read_manifest(args.manifest)
     wanted = {r.source for r in rows if r.role == ROLE_PROBE}
     bank_rows = [
@@ -482,8 +487,10 @@ def _cmd_prompts(args: argparse.Namespace) -> int:
     ]
     outputs = dp.read_outputs([args.sft_outputs, args.out_cache])
     sft = trained_pool_pairs(rows, args.sft_config)
-    prompts, counts = surface_prompts(bank_rows, rows, outputs, per_variant=args.per_variant, sft_pairs=sft)
+    prompts, counts = surface_prompts(bank_rows, rows, outputs, per_variant=args.per_variant, sft_pairs=sft, system_prompt=system)
     manifest = dp.prompt_manifest(prompts, counts, dp.PhrasingSplit.build())
+    if system is not None:
+        manifest["system_prompt"] = dp.system_prompt_record(args.system_prompt_file, system)
     manifest["surface_counts"] = surface_counts(prompts)
     manifest["probe_sources"] = {
         "own_prefix": "RL-pool sources (data/train_rl.jsonl, data/train_rl_v2.jsonl) with a usable bank decision state; never an "
@@ -530,6 +537,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--out-cache", default=str(SURFACE_OUTPUTS))
     p.add_argument("--per-variant", type=int, default=1)
     p.add_argument("--sft-config", default=DEFAULT_SFT_CONFIG, help="the training config whose cap decides which pool pairs count as seen ('' = uncapped)")
+    p.add_argument("--system-prompt-file", default=None, help=dp.SYSTEM_PROMPT_FILE_HELP)
     p.set_defaults(fn=_cmd_prompts)
     c = sub.add_parser("cleanup", help="remove leaked sandbox containers and networks (name-filtered)")
     c.set_defaults(fn=lambda a: dp._cmd_cleanup(argparse.Namespace(dry_run=False)))
