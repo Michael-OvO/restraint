@@ -2769,7 +2769,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 ### DEF-51: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
   **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests),
-  `e8c8344` (review repair: the pilot's colocate path, `replace()` of a pinned section).
+  `e8c8344` (review repair: the pilot's colocate path, `replace()` of a pinned section), `6fd0e9c`
+  (`pinned_revision` drops another model's pin only for a local directory; a Hub id keeps the refusal).
 - **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
   `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
   `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
@@ -2802,11 +2803,15 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `models.colocated_model_path`. `d187316` covered only `train.run`: the pilot still passed `cfg.model.name`, so a pilot
   config with `grpo.use_vllm: true` and no `vllm_mode` (or `grpo.vllm_mode=colocate`) would have loaded its vLLM engine
   from Hub `main` while its trainer weights sat at the pin; `configs/pilot.yaml` uses server mode and the archive holds
-  no pilot run, so no run was affected (review finding, repaired in `e8c8344`). `pinned_revision` also drops another
-  model's pin before resolving, so `dataclasses.replace(section, name=...)` (which re-runs `__post_init__` with the old
-  pin) gives a local directory no revision and a different pinned id its own pin; before, the directory kept the old
-  pin (harmless: transformers ignores a revision for a local path) and `Qwen/Qwen3-4B` replacing `Qwen/Qwen3.5-4B` was
-  refused as a conflict. The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
+  no pilot run, so no run was affected (review finding, repaired in `e8c8344`). `dataclasses.replace(section,
+  name=...)` re-runs `__post_init__` with the old name's pin. For a local directory `pinned_revision` drops a base
+  model's pin (before, the directory kept it: harmless, transformers ignores a revision for a local path). A Hub id
+  keeps the strict rule: `Qwen/Qwen3-4B` given the Qwen3.5 pin is refused (the error names it as another model's pin;
+  `replace(..., revision=None)` takes the new pin), and an unpinned id keeps an explicit revision. `e8c8344` had
+  dropped another model's pin for every name, so an explicit `model.revision=<Qwen3.5 pin>` with
+  `model.name=Qwen/Qwen3-4B` was silently re-pinned to `1cfa9a72` instead of refused, and an unpinned Hub id given
+  that revision loaded Hub `main` with no warning (second review finding, repaired in `6fd0e9c`; no src caller
+  changes a section's name, and no config sets `model.revision`, so nothing ran with it). The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
   literal (bench lane's file); a test asserts it equals the pin.
 - **Closure test:** `tests/test_model_revision.py` (fails on the old code: no pin, every revision null):
   `::test_every_config_resolves_its_hub_model_to_the_pin` (each `configs/*.yaml` through its own loader: a Hub id must be
@@ -2816,12 +2821,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   with a fake `uv`), `::test_the_merge_downloads_a_hub_base_at_its_pin`, `::test_the_colocated_engine_loads_the_pinned_snapshot`,
   `::test_the_pilots_colocated_engine_loads_the_pinned_snapshot` (runs `pilot.run.run_arm` with a fake `GRPOTrainer`,
   `vllm_mode` colocate and unset; fails at `d187316`: the trainer got `Qwen/Qwen3.5-4B`),
-  `::test_replacing_the_model_name_moves_the_pin_with_it` (fails at `d187316`). All L0, no network.
+  `::test_replacing_the_name_with_a_local_directory_drops_the_pin_and_a_hub_id_keeps_the_refusal` (fails at `d187316`:
+  the directory keeps the pin; and at `e8c8344`: `Qwen/Qwen3-4B` with the Qwen3.5 pin is re-pinned, not refused). All
+  L0, no network.
 - **Impact note:** none re-scored: no archived number changes, because the pin is the revision every archived run
   loaded. Not verified on a GPU node: that vLLM 0.30 accepts `--tokenizer-revision` (its engine log prints the
   `tokenizer_revision` field) and the colocate snapshot path (train and pilot); both fail loudly at the next start,
-  not silently. The pilot repair changes no number: the archive holds no pilot run (its 7 colocate `run_config.json`
-  files are `train.run` GRPO runs, covered above).
+  not silently. The pilot repair changes no number: the archive holds no pilot run. Its colocate `run_config.json`
+  files (`grpo.use_vllm` true, `vllm_mode` colocate or unset) number 8 under `iterations/`: 01, 06, 07, 08, 09, 12 and
+  two for 15-g3 (`15-g3-failed-boot/run_config.json`, `15-g3-grpo/run/it15-g3-grpo/run_config.json`); 11 archive-wide
+  with the 3 node-1 copies under `2026-10-06-node1/repo-files/outputs/` (grpo_main, grpo_v2, smoke_phase0). All are
+  `train.run` GRPO runs. The 9 that name `Qwen/Qwen3.5-4B` loaded `851bf6e`, the pinned revision. The 2 for 15-g3 name
+  the local directory `outputs/it15/g2_merged` (a merged model built on `851bf6e`), so the colocate pin path never
+  applied to them. The `pinned_revision` repairs change only configs whose name changes after they are built (no
+  archived run did) or that set `model.revision` explicitly (none did: every archived revision is null).
 
 ### DEF-52: a refused freeze still overwrites the frozen items files
 - **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
