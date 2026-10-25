@@ -50,6 +50,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
+| DEF-NEW-bench-1 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
+| DEF-NEW-bench-2 | tooling / build | fixing | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
+| DEF-NEW-bench-3 | build | open | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
 
 ---
 
@@ -2005,3 +2008,56 @@ section 7 critique) and from re-checks against the code and the archive on that 
   needs no edit. (2) Callback: over 441 archived `bank*.jsonl*` files one changes:
   `03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz` exhaustion rate 9.47 % -> 9.72 % (and with it `work_vs_quit_gap`); the other pool stats do not
   depend on stop reasons. (3) Eval numbers: none (the eval already used `_BUDGET_STOPS`).
+
+### DEF-NEW-bench-1: TB2 runs whatever Harbor's hosted registry resolves
+- **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, build:bench (checking that the final
+  benchmark's adapters are frozen). **Commits:** `7ca6e12` (fix, tests, manifest).
+- **Evidence:** `scripts/eval_tb.sh` (~L16, before the fix) `tb2) SRC=(-d terminal-bench@2.0)`: Harbor's
+  `RegistryClientFactory` then uses `HarborRegistryClient` (the hosted registry), whose task list and commits can change
+  without any change here. On 2026-10-25 it resolves all 89 tasks to `laude-institute/terminal-bench-2@69671fb`, while
+  the decontamination texts (`scripts/fetch_benchmarks.sh`) and `scripts/eval_agentic_abstention.sh` use `2fd12b8`, 8
+  commits later ("Various task fixes for TB2.1": `install-windows-3.11/tests/test_outputs.py`, two `solve.sh`, task.toml
+  metadata; no `instruction.md` changed). Nothing recorded which commit a TB2 run used.
+- **Impact:** no archived TB2 run exists (the only archived Harbor jobs, `14-session-b/harbor/`, are Agentic Abstention
+  runs from a local materialised dataset), so no archived number changes. Decontamination is unaffected (instruction
+  texts are identical at both commits). Future TB2 numbers would have been unpinned.
+- **Fix (done):** `data/benchmarks/registry_tb2.json` holds the `terminal-bench@2.0` entry (89 tasks, all at `69671fb`,
+  the commit the hosted registry served when frozen, i.e. TB 2.0 as published) and `eval_tb.sh tb2` passes
+  `--registry-path` to it (Harbor's `JsonRegistryClient`). `data/benchmarks/final_benchmark.json` records the commit and
+  the file's sha256; `final_benchmark check` refuses a registry whose tasks are not at one full commit or whose hash moved.
+  The Agentic Abstention arm stays on `2fd12b8` (its own pin), which the manifest records as a separate source.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_tb2_runs_from_the_committed_registry_at_one_commit`
+  (fails on the old script: no `--registry-path`; loads the registry with Harbor's client and checks 89 tasks at one
+  commit equal to the manifest's) and `::test_a_tampered_items_file_or_result_slot_is_caught`.
+- **Impact note:** none re-scored (no archived TB2 run); the frozen commit equals what the old path resolved on the
+  freeze date, so the change pins behaviour without changing it.
+
+### DEF-NEW-bench-2: AbstentionBench is not frozen
+- **Area:** tooling / build. **Status:** fixing. **Found:** 2026-10-25, build:bench. **Commits:** `7ca6e12` (revision
+  pin, test).
+- **Evidence:** `src/honest_agents/eval/external/abstentionbench_export_standalone.py` (~L26, before the fix)
+  `datasets.load_dataset_builder(args.repo, trust_remote_code=True)`: no `revision`, so the Hub's current loading script
+  runs; that script (`AbstentionBench.py`) downloads its 20 source datasets from their own hosts at export time, none
+  pinned. No sha256 of an export is recorded anywhere, so two exports need not hold the same items.
+- **Impact:** no AbstentionBench run is archived, so no archived number changes. The final benchmark cannot report
+  AbstentionBench until its items are frozen.
+- **Fix (done so far):** the exporter takes `--revision` (default `af06080e`, the Hub's revision on 2026-10-25, last
+  modified 2025-08-06) and `scripts/eval_abstentionbench.sh` passes `ABSTENTIONBENCH_HF_REVISION` from
+  `scripts/eval_common.sh`; the manifest lists the benchmark as `pending` with that revision.
+- **Remaining:** run the export once on the node (it executes their loading script, so not on the Mac under the
+  untrusted-code rule), record the JSONL's sha256 and its `dataset/index` ids in `data/benchmarks/items/abstentionbench.txt`
+  via `final_benchmark freeze --refreeze`, and make `eval_abstentionbench.sh` refuse an export whose sha256 differs.
+- **Closure test (so far):** `tests/eval/test_final_benchmark.py::test_abstentionbench_export_pins_the_dataset_revision`
+  (fails on the old exporter and script).
+
+### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
+- **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
+- **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
+  `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
+  `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
+- **Impact:** none measured: the Hub's last commit of `Qwen/Qwen3.5-4B` is `851bf6e` (2026-03-02), before every archived
+  run, so all runs saw one revision. A future Hub update would silently change the base arm and every training start.
+- **Fix (proposed, other lanes' files):** set `model.revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` in
+  `configs/qwen35_4b.yaml` (inherited by the run configs) and pass `--revision` in `scripts/serve_vllm.sh`; the final
+  benchmark manifest already pins the base arm to it.
+- **Closure test (proposed):** every run config resolves `model.revision` to a 40-hex commit.
