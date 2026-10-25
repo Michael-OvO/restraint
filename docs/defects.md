@@ -1229,7 +1229,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-28: Agentic Abstention counts budget-exhausted incompletes as abstentions
 - **Area:** metric. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
-  **Commits:** `4e8f062`.
+  **Commits:** `4e8f062`, `4061f90` (repair).
 - **Evidence:** `src/honest_agents/eval/harbor_agent.py` `decision_from_report` (~L97-109) maps any report with
   `explains_non_completion` (`report.py` ~L250-254: not complete and has a blocker or reason) to `abstain`;
   `eval/external/agentic_abstention.py` `decision_and_turn` (~L141/144) uses it and `control_false_positive_rate` (~L298)
