@@ -393,7 +393,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-16: probe-role surface builds were never oracle-gated
 - **Area:** task data / grader (local sandboxes). **Status:** closed 2026-10-24. **Found:** 2026-10-24, while closing
-  DEF-01. **Commits:** `aa805be` (fix and tests).
+  DEF-01. **Commits:** `aa805be` (fix and tests); ledger repair (re-score scope, harbor-trial gap, gate provenance).
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
   14 controls fail "oracle fails tests" on the source's own tests (mostly file-mode asserts such as 0o666 vs 0o644, and
   one HTTP server test). The pre-DEF-01 build fails identically, so the cause predates DEF-01. The other surfaces of this root
@@ -413,6 +413,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (done, at the cause):** `harness.start_sandbox` pins every command of a Harbor `DockerEnvironment` to
   `umask 022` (`harness.pin_exec_umask`, `SANDBOX_UMASK`): agent commands, the oracle, grading and Harbor's own execs.
   On the nodes it is a no-op (they already run under 0022). Fakes and other backends are left as they are.
+  - **Scope:** the pin reaches only the environments started through `harness.start_sandbox` (`env.py`,
+    `openenv_env/session.py`, `tasks/decision_probe.py`). **Known gap:** harbor-trial evals (`eval/harbor_agent.py`)
+    get their environment from Harbor's trial, which never calls `start_sandbox`, so a local harbor-trial run still
+    runs under 0000. Harbor-trial evals have run only on the nodes (0022), so no archived number is affected.
   - **No rebuild:** no build code or task file changed, so every dir of the root is byte-identical (diff empty).
   - **No prune:** 0a02897a (probe role: `inbound_link`, `empty_backup`) and bf24b7fb (4 dirs per training surface, not in
     `surface_pairs.jsonl`, an older build's leftovers) stay. They cannot be sandbox-graded, but the probe is a
@@ -427,6 +431,12 @@ section 7 critique) and from re-checks against the code and the archive on that 
   inbound_link 21/22, empty_backup 18/18. **132/134 pass.** The 2 failures are the background-process controls
   (bf24b7fb file_header, 0a02897a inbound_link). 13 of the 14 earlier failures pass now, and 30/30 G3 pairs pass.
   Results: scratchpad `fix/probe-gate/job1a.jsonl`, `job1b.jsonl`.
+  - **Provenance:** job1a/job1b started at 22:21, before `aa805be` (23:36). They ran on the uncommitted working tree with
+    the same `harness.py` change. Re-checked on the committed code on 2026-10-25 (clean tree at `e9751e1`, whose code
+    is identical to `aa805be`): the 14 earlier-failing inbound_link pairs, full `g1_surfaces`, give **13/14 pass**, and
+    the one failure is again 0a02897a (control oracle fails tests). That matches job1a/job1b. Results: scratchpad
+    `fix/probe-gate/recheck/recheck.jsonl`, `provenance.txt`. The other 120 sample pairs were not re-run on the
+    committed tree.
   - Not gated: the other 390 pairs. Their control oracle differs from a gated pair of the same source only by the surface's
     cleanup line, and the twin checks are covered per surface by the sample.
 - **Closure tests:**
@@ -439,7 +449,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note.**
   - Node results (all graded evals, G3 GRPO, G4 sampling): **unchanged**. The nodes already ran under 0022.
   - Local Docker results before `aa805be` ran under 0000. Re-measured:
-    - DEF-01's probe oracle gate: 58/72 → 71/72 inbound_link (re-scored, post-fix). The remaining one is 0a02897a.
+    - DEF-01's probe oracle gate, inbound_link: 58/72 before. Post-fix only 22 of the 72 pairs were re-run (job1a/job1b):
+      **21/22 pass (re-scored, post-fix, on that subset)**. That subset is the 14 earlier failures (13 pass now; the one
+      that still fails is 0a02897a) and 8 earlier passes (all still pass). The 72-pair figure, 71/72, is 13/14 re-run
+      post-fix plus the 58 pre-fix passes, 50 of which were not re-run. Those 50 count as carried over, not re-scored.
     - DEF-01's replay regrade: 24 episodes were at risk (control, source with mode asserts, replay tests failed, case not
       `false_blame`). Re-replayed post-fix: **24/24 unchanged** (same case, same tests verdict), so DEF-01's numbers stand.
       The 819fc6d0 replay divergence is not this cause.
