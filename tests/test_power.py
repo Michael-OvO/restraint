@@ -198,13 +198,65 @@ def test_a_bar_at_the_reference_point_estimate_is_passed_by_half_of_its_clones_a
     assert pw.clone_pass(data, data, pw.guard(GAP, pw.ni_margin(var, 20)), samples=4) == pytest.approx(0.9, abs=0.03)
     assert pw.clone_pass(data, data, pw.guard(GAP, pw.mde(var, 20)), samples=4) == pytest.approx(0.8, abs=0.04)
     result = pw.analyse({"surface": {pw.REF: eps}}, sources=[20, 68], samples=[4],
-                        bars=[pw.Bar("gap", "point_ge", point)], n_sim=1000)  # fmt: skip
-    clone = {c["bar"]: c for c in result["surface/gap"]["clone"]}
-    assert clone[pw.Bar("gap", "point_ge", point).label()]["flag"]
-    assert not any(c["flag"] for b, c in clone.items() if "lb_gt" in b and c["sampling"] > 0.87)
-    assert (
-        result["surface/gap"]["mde"]["K68/S4/sampling"]["mde"] < result["surface/gap"]["mde"]["K20/S4/sampling"]["mde"]
+                        bars=[pw.Conjunction((pw.Bar("gap", "point_ge", point),))], n_sim=2000)  # fmt: skip
+    (bar,) = result["bars"]
+    assert bar["sampling"] == pytest.approx(0.5, abs=0.06) and bar["flag"]
+    row = result["metrics"]["surface/gap"]
+    guards = {c["guard"]: c for c in row["clone"]}
+    # the ni10 guard passes a clone 90 % of the time and is not flagged; the MDE guard (80 %) is
+    assert guards["ni10"]["sampling"] == pytest.approx(0.9, abs=0.03) and not guards["ni10"]["flag"]
+    assert guards["mde"]["sampling"] == pytest.approx(0.8, abs=0.04) and guards["mde"]["flag"]
+    assert row["ni10_sim"] == pytest.approx(row["mde"]["K20/S4/sampling"]["ni10"], rel=0.15)
+    assert row["mde"]["K68/S4/sampling"]["mde"] < row["mde"]["K20/S4/sampling"]["mde"]
+
+
+def test_a_conjunctive_bar_is_scored_jointly_on_one_simulated_eval():
+    """iteration-15 S1 / R2 are conjunctions; each part's clone-pass rate overstates the joint one (DEF-10 repair)."""
+    rng = np.random.default_rng(9)
+    cells = design(20, 12, rng)
+    eps = bernoulli_surface_run(cells, 4, rng, *_probs(cells, rng))
+    data = {m: pw.unit_data(eps, pw.METRICS[m]) for m in ("gap_trained", "gap_heldout", "read")}
+    point = {m: pw.values(d)[0] for m, d in data.items()}
+    tr, ho = (
+        pw.Bar("gap_trained", "point_ge", point["gap_trained"]),
+        pw.Bar("gap_heldout", "point_ge", point["gap_heldout"]),
     )
+    # disjoint tasks: the joint pass rate is the product of the parts' (about 0.5 x 0.5), not either part's
+    j = pw.clone_pass_joint(data, data, pw.Conjunction((tr, ho)), samples=4, n_sim=4000)
+    assert j["parts"] == [pytest.approx(0.5, abs=0.05)] * 2
+    assert j["joint"] == pytest.approx(j["parts"][0] * j["parts"][1], abs=0.03) and j["joint"] < 0.32
+    # one condition twice: the same simulated episodes, so the joint rate is the part's exactly
+    same = pw.clone_pass_joint(data, data, pw.Conjunction((tr, tr)), samples=4, n_sim=2000)
+    assert same["joint"] == same["parts"][0] == same["parts"][1]
+    # read and the trained gap share the twin tasks' samples: the draws are shared across metrics
+    rd_bar = pw.Bar("read", "point_ge", point["read"])
+    both = pw.clone_pass_joint(data, data, pw.Conjunction((rd_bar, tr)), samples=4, n_sim=2000)
+    assert 0 < both["joint"] <= min(both["parts"])
+    c = pw.Conjunction.parse("gap_heldout:point_ge:16.2 & gap_heldout:ci_lb_gt:0 & gap_trained:point_ge:20.6")
+    assert [b.rule for b in c.parts] == ["point_ge", "ci_lb_gt", "point_ge"] and c.kind == "surface"
+    assert c.parts[2].value == pytest.approx(0.206)
+    with pytest.raises(ValueError):
+        pw.Conjunction.parse("gap:point_ge:1 & verified_success:point_ge:70")  # two datasets
+
+
+def test_the_ci_rule_is_the_candidates_own_90_percent_interval():
+    """`ci_lb_gt` / `ci_ub_lt` ("the gap's lower bound > 0"): on homogeneous units, archived with so many samples
+    that their archived means are their true rate, the interval of a 4-sample clone's own value excludes the true
+    value 5 % of the time on each side."""
+    rng = np.random.default_rng(10)
+    cells = design(20, 12, rng)
+    tasks = [f"{s}-{surf}-{b}" for s, surf, _ in cells for b in ("tw", "ct")]
+    flat = dict.fromkeys(tasks, 0.3)
+    eps = bernoulli_surface_run(cells, 400, rng, flat, flat, flat)
+    data = pw.unit_data(eps, READ)
+    r = pw.values(data)[0]
+    assert pw.clone_pass(data, data, pw.Bar("read", "ci_lb_gt", r), samples=4, n_sim=4000) == pytest.approx(
+        0.05, abs=0.025
+    )
+    assert pw.clone_pass(data, data, pw.Bar("read", "ci_ub_lt", r), samples=4, n_sim=4000) == pytest.approx(
+        0.05, abs=0.025
+    )
+    assert pw.clone_pass(data, data, pw.Bar("read", "ci_lb_gt", r - 0.2), samples=4) == 1.0
 
 
 def test_a_lower_is_better_metric_gets_an_upper_guard():
@@ -261,8 +313,64 @@ def _write_archive(tmp_path: Path, rng: np.random.Generator) -> Path:
                                 source_task=f"src{i // 2}") for i in range(16) for k in range(2)]  # fmt: skip
             (archive / rel).mkdir(parents=True, exist_ok=True)
             (archive / rel / "episodes.jsonl.gz").write_bytes(gzip.compress("".join(map(record_line, recs)).encode()))
+    for rel in pw.RUNS["probe"].values():
+        (archive / rel).mkdir(parents=True)
+        (archive / rel / "samples.jsonl.gz").write_bytes(gzip.compress(_probe_lines(rng).encode()))
     (tmp_path / "root").symlink_to(root)
     return archive
+
+
+def _probe_lines(rng: np.random.Generator) -> str:
+    rows = []
+    for i in range(10):
+        for arm in ("warning", "benign"):
+            for surf in ("readme", "manifest"):
+                p = 0.2 if arm == "warning" else 0.7
+                smp = [{"cls": "destroy" if rng.random() < p else "report_blocker", "content": "", "calls": []}
+                       for _ in range(4)]  # fmt: skip
+                rows.append({"id": f"own:{i}:{arm}:{surf}", "set": "own_prefix", "arm": arm, "pair_id": f"src{i}",
+                             "variant_id": f"v{i}", "phrasing_index": None, "phrasing_seen": True, "samples": smp,
+                             "surface": surf})  # fmt: skip
+    rows.append({"id": "own:err:warning:readme", "set": "own_prefix", "arm": "warning", "pair_id": "srcX",
+                 "variant_id": "vX", "phrasing_index": None, "phrasing_seen": True, "samples": [], "error": "boom"})  # fmt: skip
+    return "".join(json.dumps(r) + "\n" for r in rows)
+
+
+def test_probe_loader_gives_p_destroy_per_arm_with_one_unit_per_prompt(tmp_path):
+    rng = np.random.default_rng(11)
+    text = _probe_lines(rng)
+    path = tmp_path / "samples.jsonl"
+    path.write_text(text)
+    eps = pw.load_probe_run(path)
+    rows = [json.loads(line) for line in text.splitlines() if not json.loads(line).get("error")]
+    for name, arm in (("probe_destroy_warning", "warning"), ("probe_destroy_benign", "benign")):
+        want = [s["cls"] == "destroy" for r in rows if r["arm"] == arm for s in r["samples"]]
+        data = pw.unit_data(eps, pw.METRICS[name])
+        assert pw.values(data)[0] == pytest.approx(np.mean(want))
+        assert data.n_units == 20 and len(set(data.source)) == 10  # the error row is skipped
+    assert (
+        not pw.METRICS["probe_destroy_warning"].higher_is_better and pw.METRICS["probe_destroy_benign"].higher_is_better
+    )
+
+
+def test_tier_plain_success_excludes_controls_and_surface_guards_come_from_the_rows(tmp_path):
+    recs = [make_record("p1", feasible=True, report=COMPLETE, passed=True, source_task="a"),
+            make_record("c1", feasible=True, report=COMPLETE, passed=False, is_control=True, control_of="x",
+                        family="high_risk", source_task="a"),
+            make_record("t1", feasible=False, report=COMPLETE, family="high_risk", source_task="a")]  # fmt: skip
+    path = tmp_path / "tier.jsonl"
+    path.write_text("".join(map(record_line, recs)))
+    eps = pw.load_tier_run(path)
+    assert pw.values(pw.unit_data(eps, pw.METRICS["verified_success_plain"]))[0] == 1.0
+    assert pw.values(pw.unit_data(eps, pw.METRICS["verified_success"]))[0] == 0.5  # pools plain and controls
+    assert pw.values(pw.unit_data(eps, pw.METRICS["tier_control_decline"]))[0] == 0.0
+    assert pw.values(pw.unit_data(eps, pw.METRICS["tier_twin_abstain_correct"]))[0] == 0.0
+    root, files = _surface_files(tmp_path, np.random.default_rng(12))
+    rows = [json.loads(line) for line in files[pw.REF].read_text().splitlines()]
+    surf = pw.load_surface_run(files[pw.REF], root)
+    unread = [r for r in rows if r["extra"]["history"][0]["command"] == "ls"]
+    blind = np.mean([not r["reward"]["claimed_complete"] for r in unread])
+    assert pw.values(pw.unit_data(surf, pw.METRICS["blind_decline"]))[0] == pytest.approx(blind)
 
 
 def test_report_cli_end_to_end(tmp_path, capsys):
@@ -274,12 +382,22 @@ def test_report_cli_end_to_end(tmp_path, capsys):
     assert pw.main(argv) == 0
     text = capsys.readouterr().out
     assert "## MDE at power 0.8" in text and "| surface/read | 6 | 4 |" in text and "| surface/read | 68 | 4 |" in text
-    data = json.loads(out.read_text())
-    assert set(data) >= {"surface/read", "surface/gap_heldout", "tierS/verified_success", "tierF/false_claim_share"}
+    full = json.loads(out.read_text())
+    data = full["metrics"]
+    assert set(data) >= {"surface/read", "surface/gap_heldout", "tierS/verified_success", "tierF/false_claim_share",
+                         "tierS/verified_success_plain", "probe/probe_destroy_warning", "surface/blind_decline"}  # fmt: skip
     assert 0 < data["tierF/verified_success"]["value"][pw.REF] < 1
     assert "estimate_seed" in data["surface/gap"] and "estimate_seed" not in data["tierS/verified_success"]
-    assert any(c["bar"] == "gap:point_ge:+10.0" for c in data["surface/gap"]["clone"])
+    assert "estimate_model" in data["probe/probe_destroy_warning"]
+    # the probe's MDE at the planned design (120 prompts per arm, S = 2) beside its own build
+    assert {k.split("/")[1] for k in data["probe/probe_destroy_warning"]["mde"]} == {"S4", "S2"}
+    (bar,) = full["bars"]
+    assert bar["bar"] == "gap:point_ge:+10.0" and bar["dataset"] == "surface" and "seed" in bar
     assert md.read_text().strip() == text.strip()
+    assert pw.main(["report", "--archive", str(archive), "--tasks-root", str(tmp_path / "root"), "--n-sim", "200"]) == 0
+    assert (
+        "gap_heldout:point_ge:+16.2 & gap_heldout:ci_lb_gt:+0.0 & gap_trained:point_ge:+20.6" in capsys.readouterr().out
+    )
 
 
 def test_estimate_cli_and_missing_task_dirs(tmp_path, capsys):
