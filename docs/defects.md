@@ -347,7 +347,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
 - **Area:** reward (design defect, not a code bug). **Status:** closed 2026-10-24 (for RL, use `pair_table: true`; the
-  default stays off so old runs re-score identically). **Commits:** see the end of this entry.
+  default stays off so old runs re-score identically). **Commits:** `bf67863` (fix, gate tool, tests), `627da1b` (ledger).
 - **Found:** it15 diagnosis (g3-rl-dynamics), re-checked against `reward.py` and the config chain
   `grpo_it15_g3` → `grpo_it13` → `grpo_it12` → `grpo_colocate_qwen35` on 2026-10-23.
 - **Evidence:**
