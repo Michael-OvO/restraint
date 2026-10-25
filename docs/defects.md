@@ -62,6 +62,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-NEW-bench-5 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
 | DEF-NEW-bench-6 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
 | DEF-NEW-bench-7 | tooling / build | closed | `final_benchmark freeze` (after the DEF-NEW-bench-6 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
+| DEF-NEW-bench-8 | tooling / build | closed | `final_benchmark freeze` (after the DEF-NEW-bench-7 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
 
 ---
 
@@ -2574,6 +2575,18 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test (so far):** `tests/eval/test_final_benchmark.py::test_abstentionbench_export_pins_the_dataset_revision`
   (fails on the old exporter and script).
 
+### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
+- **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
+- **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
+  `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
+  `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
+- **Impact:** none measured: the Hub's last commit of `Qwen/Qwen3.5-4B` is `851bf6e` (2026-03-02), before every archived
+  run, so all runs saw one revision. A future Hub update would silently change the base arm and every training start.
+- **Fix (proposed, other lanes' files):** set `model.revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` in
+  `configs/qwen35_4b.yaml` (inherited by the run configs) and pass `--revision` in `scripts/serve_vllm.sh`; the final
+  benchmark manifest already pins the base arm to it.
+- **Closure test (proposed):** every run config resolves `model.revision` to a 40-hex commit.
+
 ### DEF-NEW-bench-4: a refused freeze still overwrites the frozen items files
 - **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
   **Commits:** `aaae57f` (fix, tests).
@@ -2682,17 +2695,36 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** `tests/eval/test_final_benchmark.py::test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged`
   (added / removed; both fail on `2e47cd8`, which accepted them), and
   `::test_a_changed_metric_is_refused_and_a_refreeze_is_logged[headline]` plus the full-dict assertion in its
-  direction / renamed / added cases (all four fail on `2e47cd8`, which logged keys).
+  direction / renamed / added cases (all four fail on `2e47cd8`, which logged keys). Exactly 6 tests of the `9c1d36d`
+  file fail on `2e47cd8` (re-run 2026-10-25, 6 failed / 22 passed):
+  `test_a_changed_metric_is_refused_and_a_refreeze_is_logged` `[direction]`, `[renamed]`, `[added]`, `[headline]` and
+  `test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged` `[added]`, `[removed]`; the
+  `check --archive` assertion for an added / removed benchmark is inside the last two.
+- **Scope correction (review of `9c1d36d`):** the refusal also compared the items record's `file`, which the log left
+  out, and a benchmark's `role` was not frozen at all; filed and fixed as DEF-NEW-bench-8.
 - **Impact note:** none re-scored (no results exist); nothing void.
 
-### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
-- **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
-- **Evidence:** `src/honest_agents/train/config.py` ~L53 `revision: str | None = None`; no file under `configs/` sets
-  `model.revision`; every archived `sft_run.json` records `"revision": null` for `Qwen/Qwen3.5-4B` (e.g.
-  `iterations/14-session-a/run/it14-sft-v2/sft_run.json`). vLLM serving loads the name the same way.
-- **Impact:** none measured: the Hub's last commit of `Qwen/Qwen3.5-4B` is `851bf6e` (2026-03-02), before every archived
-  run, so all runs saw one revision. A future Hub update would silently change the base arm and every training start.
-- **Fix (proposed, other lanes' files):** set `model.revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` in
-  `configs/qwen35_4b.yaml` (inherited by the run configs) and pass `--revision` in `scripts/serve_vllm.sh`; the final
-  benchmark manifest already pins the base arm to it.
-- **Closure test (proposed):** every run config resolves `model.revision` to a 40-hex commit.
+### DEF-NEW-bench-8: role is not frozen; refrozen logs the items record without its file
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in
+  `1d1cdc0`). **Found:** 2026-10-25, build:bench (repair of the DEF-NEW-bench-7 fix against the review's rule "the log
+  holds before / after for every field the refusal compares"). **Commits:** `570cc5c` (fix, tests, evaluation.md).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` at `9c1d36d`: `FROZEN_FIELDS = ("items", "sources",
+  "metrics")`, so a benchmark's `role` (`headline`, `secondary`, `reported`, ...: which benchmarks carry the
+  pre-registered headlines) could change with a plain `freeze`, unrefused and unlogged, and `check --archive` compared
+  only metrics with the definitions (not role or sources). `_frozen_change("items", ...)` logged only `n` and `sha256`
+  while the refusal compared the whole items record (`file`, `n`, `sha256`): freezing the same ids into another items
+  file was refused, then logged with before = after.
+- **Impact:** no number: every result slot is null, and every committed manifest's roles equal the definitions (a plain
+  `freeze --archive` of the current manifest under the fix, on a scratch copy, is accepted and gives a manifest
+  identical to the committed one; items files unchanged). The one logged change (AbstentionBench metrics) is
+  unaffected.
+- **Fix (done):** `role` is a frozen field; `_frozen_change` logs every frozen field (role, the items record with its
+  file, sources, metrics) in full before / after; `check --archive` flags `<name>: role|sources|metrics changed from the
+  definitions`.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_every_compared_field_is_logged_in_full_on_a_refreeze`
+  `[role]`, `[sources]`, `[items]` (refused, then logged with the full before / after; for role and sources also flagged
+  by `check --archive`). Exactly 4 tests fail on `9c1d36d` (4 failed / 27 passed): those 3 (role: not refused; sources:
+  `check --archive` silent; items: logged without `file`) and
+  `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define`, whose expected message changed from
+  `metrics differ from` to `metrics changed from` (wording only; the behaviour it tests is unchanged).
+- **Impact note:** none re-scored (no results exist); nothing void.
