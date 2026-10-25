@@ -62,3 +62,34 @@ def test_prune_from_earlier_results(tmp_path: Path) -> None:
     g1.write_text(json.dumps(asdict(g1_surfaces.PairCheck("p1", "readme", problems=["x"]))) + "\n")
     assert g1_surfaces.main(["--variants", str(f), "--prune-from", str(g1)]) == 0
     assert not d.exists() and f.read_text() == ""
+
+
+def test_ctrl_c_cancels_queued_pairs(tmp_path: Path, monkeypatch) -> None:
+    """DEF-17: a KeyboardInterrupt stops the run; the pairs still queued do not start."""
+    import threading
+
+    import pytest
+
+    n = 12
+    rows = []
+    for i in range(n):
+        twin = tmp_path / f"p{i}"
+        rows.append({"variant_id": twin.name, "task_dir": str(twin), "control": False, "surface": "readme"})
+    f = tmp_path / "surface_variants.jsonl"
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    started: list[str] = []
+    lock = threading.Lock()
+
+    def fake_check(twin: Path, control: Path, *, oracle_timeout: int = 600) -> g1_surfaces.PairCheck:
+        with lock:
+            started.append(twin.name)
+        if twin.name == "p0":
+            raise KeyboardInterrupt
+        return g1_surfaces.PairCheck(twin.name, "readme")
+
+    monkeypatch.setattr(g1_surfaces, "check_pair", fake_check)
+    monkeypatch.setattr(g1_surfaces, "set_max_concurrent_boots", lambda n: None)
+    with pytest.raises(KeyboardInterrupt):
+        g1_surfaces.main(["--variants", str(f), "--concurrency", "1"])
+    # One worker: p0 raised, and at most the pair it picked up next ran before the main thread cancelled the rest.
+    assert len(started) <= 2, started
