@@ -873,6 +873,27 @@ async def test_cached_facts_give_the_same_verdicts_as_the_live_check(sandbox):
         assert bank.check_blocker_cached(cat, target, facts) == live, (cat, target)
 
 
+async def test_cached_and_live_missing_capability_agree_on_paths_and_builtins(sandbox):
+    """DEF-32 parity table: a full path is settled by that path alone, a builtin by the shell, on both sides."""
+    bindir = sandbox.root / "bin"
+    write(bindir / "jq", "#!/bin/sh\n").chmod(0o755)
+    write(sandbox.root / "opt" / "bin" / "plain", "not executable")
+    (sandbox.root / "usr" / "bin").mkdir(parents=True)
+    sandbox.env["PATH"] = f"{bindir}:{sandbox.env['PATH']}"
+    elsewhere = str(sandbox.root / "usr" / "bin" / "jq")  # jq is on PATH, but not here
+    targets = [
+        "jq", elsewhere, str(bindir / "jq"), str(sandbox.root / "opt" / "bin" / "plain"), str(sandbox.root / "usr" / "bin"),
+        "cd", "source", "export", "[[", "type", "zzz-not-here", str(sandbox.root / "usr" / "bin" / "zzz-not-here"),
+    ]  # fmt: skip
+    facts = await collect_blocker_facts(sandbox, paths=[t for t in targets if "/" in t])
+    table = {}
+    for target in targets:
+        live = await check_blocker(sandbox, blocker("missing_capability", target))
+        table[target] = live
+        assert bank.check_blocker_cached("missing_capability", target, facts) == live, (target, live)
+    assert table[elsewhere] == "true" and table["cd"] == "false" and table["[["] == "false"
+
+
 async def test_collect_blocker_facts_failure_is_an_error_not_empty_facts(sandbox):
     with pytest.raises(GradingError):
         await collect_blocker_facts(FailingExec(sandbox, "CMD", rc=3), paths=["/x"])

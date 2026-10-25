@@ -39,9 +39,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-29 | metric | closed | `revealed`: `normalise_output` does not mask boot-dependent outputs (df, uptime, free, mktemp, /proc/loadavg), so they count as reads; S3 audits only `strict_read` |
 | DEF-30 | metric / stats | closed | `read_diagnosis.load_episodes` and `power.load_surface_run` keep infra-error episodes that `score_records` drops, counting them as non-declines |
 | DEF-31 | archive / tooling | closed | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
-| DEF-NEW-sweep0-2-1 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
-| DEF-32 | grader / reward | open | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
+| DEF-32 | grader / reward | closed | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
 | DEF-NEW-sweep0-0-1 | task data / build | closed | `input_candidates` skipped every content check for a CONTENT_KINDS file with no spelled content (binary COPY), so such an input became a remove_input / shortcut_trap candidate unchecked |
+| DEF-NEW-sweep0-2-1 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
 
 ---
 
@@ -1494,20 +1494,69 @@ section 7 critique) and from re-checks against the code and the archive on that 
   now group them as `readme/<branch>`.
 
 ### DEF-32: the cached blocker verdict can disagree with the live grader
-- **Area:** grader / reward. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** grader / reward. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `f1f2742` (fix, tests); `c11903a` (impact note repair: hindsight changes on archived banks).
 - **Evidence:** live `grading.check_blocker` (~L598-633) runs `command -v <exact target>` plus `test -e <target>` for a
   `missing_capability` command target; `bank.check_blocker_cached` (~L148-165) uses
   `posixpath.basename(t) in facts.commands`, where `facts.commands` lists executable regular files on PATH. Verified
   2026-10-25: `check_blocker_cached('missing_capability', '/usr/local/bin/jq', BlockerFacts(commands=['jq','bash']))`
   returns `false` (live: `true`, since the full path does not exist), and `('missing_capability', 'cd', ...)` returns
   `true` (live: `command -v cd` succeeds, `false`). Both docstrings say the two agree.
-- **Impact:** latent: re-checking all 1,204 archived it12-15 eval episodes with blocker_facts and a checkable blocker
-  (909 permission_denied, 295 missing_capability) gave 0 disagreements. Users: `bank.rescored_outcome` (pilot env,
-  `analysis.rescore_dropped`) and `sft.hindsight` (names a blocker in SFT targets only when cached `true`).
+- **Impact:** eval verdicts latent (0 of 1,204 archived it12-15 eval episodes with blocker_facts and a checkable
+  blocker disagree); hindsight candidate verdicts on archived banks not latent (see the impact note). Users:
+  `bank.rescored_outcome` (pilot env, `analysis.rescore_dropped`) and `sft.hindsight` (`verified()` names a blocker in
+  SFT targets only when cached `true`, for the report's blocker AND for candidates mined from tool output).
 - **Fix:** match the live semantics: for a path target use the path fact (exists) rather than the basename; record
   builtins in the facts (or treat `command -v` builtins as found).
 - **Closure test:** the two cases above give the live verdicts; a parity test over a fake sandbox compares cached and
   live verdicts on a table of targets.
+- **Fix (done):** `bank.check_blocker_cached` now follows `command -v` on the exact target. A bare name is found if it
+  is in `bank.BASH_BUILTINS` (bash 5 `compgen -b -k`: Harbor runs every main-container exec as `bash -c`, and the fake
+  sandbox uses `/bin/bash`) or in `facts.commands`; builtins count as found even with no captured commands. A path
+  target never reads its basename as found: it is settled by its path fact (`command -v /x` succeeds only if `/x`
+  exists, so `test -e` decides). With no path fact, a bin-dir path whose basename is nowhere on PATH keeps the old
+  reading (absent, true); a basename that is on PATH somewhere is now `unknown` (was `false`). `_FACTS_SCRIPT` and the
+  `BlockerFacts` schema are unchanged, so archived `blocker_facts` load and score as before. The env always records
+  the report's own target in `paths` (`env._fact_paths`), so only a different report naming an unrecorded path hits
+  the no-fact branch.
+- **Tests:** `tests/test_trl_rewards.py::test_check_blocker_cached_full_path_and_builtins_follow_the_live_check` (the two
+  ledger cases plus the no-fact branches) and the `cd` / `/usr/local/bin/curl` rows of `test_check_blocker_cached`
+  (the curl row expected `false`, "on PATH somewhere", and now expects `unknown`);
+  `tests/test_grading.py::test_cached_and_live_missing_capability_agree_on_paths_and_builtins`, a cached-vs-live parity
+  table over `LocalSandbox` (jq on PATH vs an absent `.../usr/bin/jq`, an existing non-executable file, a directory,
+  `cd`, `source`, `export`, `[[`, `type`, absent names and paths). All four fail on the old code.
+- **Impact note (re-scored, post-fix).** (1) Eval and rescore: no change. Over the 56 it12-15 `episodes*.jsonl*`
+  files, 1,206 episodes carry blocker_facts and a `missing_capability` (296) or `permission_denied` (910) blocker; the
+  1,204 that blame externally (the callers' `blames_external` guard) give the same cached verdict as the archived live
+  `blocker_check` under the old and the new rule (0 disagreements, 0 old-vs-new changes). The other 2 are completion
+  claims naming a blocker (live `unknown` by rule; the cached call is never made for them). So no archived eval number
+  or `analysis.rescore_dropped` rescore changes. (2) Hindsight: changed on 3 archived bank rows. An earlier version of
+  this note said hindsight targets were unchanged; that rested on report-target parity only and was wrong (reviewer
+  repro, re-run here). Across all 444 archived `bank*.jsonl*` files (9,750 rows, 15,174 `missing_capability` /
+  `permission_denied` candidates from `discover_candidates` plus the reported blocker), 24 candidate verdicts flip
+  `true` -> `false` (counts include the duplicate it03 bank copy), all bash builtins or reserved words (`declare` x14, `{` x3, `}` x2, `in` x2, `:` x2, `source` x1),
+  the rest unchanged. `pick_blocker` changes on 3 distinct rows (5 counting the duplicate copies of the it03 bank in
+  `2026-10-06-node1/repo-files/runs/passk/bank/`): in `iterations/03-passk-bank/eval/passk/bank/bank-2645893.jsonl.gz`
+  (the bank behind the it04/it05 hindsight SFT) one pick goes `in` -> `datasource` and one `:` -> none (no blocker);
+  in `2026-10-06-node1/repo-files/runs/bank/eval_base/bank-2105855.jsonl` one pick goes `{` ->
+  `/home/user/optimization/top_cpu_container.log`. Each is a correction (the old pick named a shell token as a missing
+  command). (3) Archived SFT examples: of the 405 `missing_capability` / `permission_denied` blocker labels in
+  `iterations/04-sft-hindsight/run/hindsight-s0/examples.jsonl.gz` (2,950 examples), 1 now reads `false`: variant
+  `endless-terminals__task_000000_7b9e5385__remove_input`, `blocker_target: "declare"`, detail
+  `./apply_hardening.sh: 4: declare: not found` (a dash error from a `sh` script; `declare` exists under bash, so the
+  live grader also says `false`). The same label is in `iterations/05-sft-combo/run/combo-s0/examples.jsonl.gz`
+  (1 of 86 `missing_capability` labels). These sets were built by the it04/it05 code, not the current
+  `sft.hindsight`, so they are not regenerated; the it04/it05 SFT models trained on 1 such label each (void for that
+  label only; no it04/it05 number is re-scored because the label is 1 in 2,950 / 1,428 examples). No it11-15 example
+  set has a builtin `missing_capability` target (it13-15 decision/judgment sets carry no `missing_capability` labels).
+  Scripts: `scratchpad/fix/review-DEF-32/hind.py`, `pick.py` (reviewer) and
+  `scratchpad/fix/sweep0-4/it04b.py`, `examples_builtins.py`, `parity.py` under
+  `/private/tmp/claude-501/-Users-michael-Documents-Github-restraint/9ecddc4f-72ca-4800-92ca-fb989e395eb5/`.
+- **Bash version note:** `BASH_BUILTINS` is the bash 5 `compgen -b -k` list. macOS `/bin/bash` (3.2, the fake
+  `LocalSandbox`) lacks `mapfile`, `readarray`, `coproc` and `compopt`, so the LocalSandbox parity table leaves those
+  four names out. Production runs Harbor's main-container exec as `bash -c` on task images that ship bash 4 or later,
+  where all four exist, so the list matches the live grader there. On an image with bash 3.x those four would be read
+  `false` by the cache and `true` by the live check.
 
 ### DEF-NEW-sweep0-0-1: input_candidates skipped every check for a CONTENT_KINDS file with no content
 - **Area:** task data / build. **Status:** closed 2026-10-24. **Found:** 2026-10-25, while fixing DEF-26.

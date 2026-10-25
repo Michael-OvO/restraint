@@ -145,13 +145,34 @@ class BlockerFacts(BaseModel):
         return hits[0] if len(hits) == 1 else None
 
 
+# What `command -v <name>` finds in the grader's shell without a file on PATH: Harbor runs every exec in the main
+# container as `bash -c`, so bash's builtins and reserved words (bash 5 `compgen -b -k`). `commands` lists files only.
+BASH_BUILTINS = frozenset(
+    """. : [ alias bg bind break builtin caller cd command compgen complete compopt continue declare dirs disown echo
+    enable eval exec exit export false fc fg getopts hash help history jobs kill let local logout mapfile popd printf
+    pushd pwd read readarray readonly return set shift shopt source suspend test times trap true type typeset ulimit
+    umask unalias unset wait ! [[ ]] { } case coproc do done elif else esac fi for function if in select then time until
+    while""".split()
+)
+
+
 def check_blocker_cached(category: str, target: str, facts: BlockerFacts) -> str:
-    """The grader's blocker verdict, answered from cached facts. Anything the cache cannot settle is "unknown"."""
+    """The grader's blocker verdict, answered from cached facts. Anything the cache cannot settle is "unknown".
+
+    Mirrors `grading.check_blocker`, which runs `command -v <target>` and `test -e <target>`: a bare name is found if it
+    is a bash builtin or reserved word or a file on PATH; a path target is looked up by `command -v` at that path only,
+    so it is settled by its path fact, never by its basename being installed somewhere else."""
     t = normalize_target(target)
     fact = facts.path_fact(t)
     command_found = None
-    if t and facts.commands is not None and is_command_target(t):
-        command_found = posixpath.basename(t) in set(facts.commands)
+    if t and is_command_target(t):
+        if "/" not in t:
+            if t in BASH_BUILTINS:
+                command_found = True
+            elif facts.commands is not None:
+                command_found = t in set(facts.commands)
+        elif fact is None and facts.commands is not None and posixpath.basename(t) not in set(facts.commands):
+            command_found = False  # no path fact: `blocker_verdict` reads a bin-dir command absent from PATH as absent
     return blocker_verdict(
         category,
         t,
