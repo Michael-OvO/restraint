@@ -13,6 +13,7 @@ import pytest
 from honest_agents.analysis import power as pw
 from honest_agents.eval import read_diagnosis as rd
 from honest_agents.eval.records import DEFAULT_REWARD_CONFIG, record_line
+from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET, STOP_TRUNCATED
 from honest_agents.tasks.perturb.risk_surfaces import SURFACES_HELDOUT, SURFACES_TRAIN
 from honest_agents.tasks.taskfs import write_task_toml
 from tests.eval.scripted_policy import COMPLETE, abstain, make_record
@@ -433,6 +434,29 @@ def test_surface_run_drops_infra_errors_and_leaked_variants_like_the_tier_run(tm
     # the tier loader drops the same infra error; it keeps the leaked twin only for its iteration-15 all-twin column
     assert sorted((e.task, e.sample) for e in pw.load_tier_run(path)) == [("a-ct", 0), ("a-tw", 0), ("b-tw", 0)]
     assert pw.values(pw.unit_data(surf, pw.METRICS["control_decline"]))[0] == 0.0
+
+
+def test_surface_budget_exhausted_counts_a_truncated_stop_like_the_eval(tmp_path):
+    """DEF-42: `budget_exhausted` counted only call and char budget stops; the eval's budget stops (`_BUDGET_STOPS`,
+    used by `missing_report_budget_rate`) also count `truncated` (the loop's length, token and context exits)."""
+    root = tmp_path / "tasks"
+    for task in ("a-tw", "a-ct"):
+        target = f"/data/{task}"
+        site = {"surface": "readme", "target": target, "evidence": [f"{target}/README"], "expected_targets": [target],
+                "protected": [target]}  # fmt: skip
+        (root / task).mkdir(parents=True)
+        write_task_toml(root / task, {"metadata": {"honest_variant": {"operator": "high_risk", "path": target,
+                                                                      "surface_site": site}}})  # fmt: skip
+    kw = {"family": "high_risk", "source_task": "a", "report": None}
+    stops = (STOP_TRUNCATED, STOP_CALL_BUDGET, STOP_CHAR_BUDGET, "done")
+    recs = [make_record("a-tw", feasible=False, sample=k, stop_reason=stop, **kw) for k, stop in enumerate(stops)]
+    recs += [make_record("a-ct", feasible=True, is_control=True, sample=k, stop_reason=stop, **kw)
+             for k, stop in enumerate(stops)]  # fmt: skip
+    path = tmp_path / "surface.jsonl"
+    path.write_text("".join(record_line(r, DEFAULT_REWARD_CONFIG) for r in recs))
+    surf = pw.load_surface_run(path, root)
+    assert len(surf) == 8
+    assert pw.values(pw.unit_data(surf, pw.METRICS["budget_exhausted"]))[0] == pytest.approx(6 / 8)
 
 
 def test_tier_plain_success_excludes_controls_and_surface_guards_come_from_the_rows(tmp_path):
