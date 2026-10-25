@@ -25,7 +25,8 @@ from typing import Any
 from transformers import TrainerCallback
 
 from honest_agents.bank import BankRow, iter_bank
-from honest_agents.reward import MASK_REASONS, STOP_CALL_BUDGET, STOP_CHAR_BUDGET, RewardConfig
+from honest_agents.eval.metrics.scored import _BUDGET_STOPS
+from honest_agents.reward import MASK_REASONS, RewardConfig
 from honest_agents.trl_rewards import (
     METRIC_CLAIM_RATE_FEASIBLE,
     METRIC_DECLINE_RATE_FEASIBLE,
@@ -798,7 +799,7 @@ def pool_stats(rows: Iterable[BankRow], alphas: Iterable[float] = ALPHA_GRID) ->
         if r.get("masked") or not r.get("feasible", True):
             continue
         groups.setdefault(row.group or row.episode_id, []).append(bool(r.get("passed")))
-        exhausted += r.get("stop_reason") in (STOP_CALL_BUDGET, STOP_CHAR_BUDGET)
+        exhausted += r.get("stop_reason") in _BUDGET_STOPS  # the eval's budget stops, truncated included (DEF-42)
         actions.append(int(r.get("n_actions") or 0))
     sizes = sorted({len(v) for v in groups.values()})
     histogram: dict[str, int] = {}

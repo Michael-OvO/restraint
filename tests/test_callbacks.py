@@ -595,6 +595,17 @@ def test_pool_stats_reports_which_alphas_are_safe():
     assert s["masked_share"] == pytest.approx(1 / 41)
 
 
+def test_pool_stats_budget_exhaustion_counts_a_truncated_stop_like_the_eval():
+    """DEF-42: the exhaustion rate counted only call and char budget stops; the eval's budget stops also count
+    `truncated`."""
+    from honest_agents.bank import BankRow
+    from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET, STOP_TRUNCATED
+
+    stops = (STOP_TRUNCATED, STOP_CALL_BUDGET, STOP_CHAR_BUDGET, "done")
+    rows = [BankRow(group="g", outcome={}, reward={"feasible": True, "passed": False, "stop_reason": s}) for s in stops]
+    assert pool_stats(rows)["budget_exhaustion_rate_feasible"] == pytest.approx(3 / 4)
+
+
 @pytest.mark.parametrize(
     ("pass_rate", "expected"),
     [

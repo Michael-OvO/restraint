@@ -20,7 +20,8 @@ measures what the eval can resolve, from archived episodes only (no Docker, no n
   source x surface cell: twin abstain_correct minus control decline; `gap_trained`, `gap_heldout`), `blind_decline`
   (declines among the episodes that did not read, both branches), `surface_fabrication` (the reward's `fabricated`, both
   branches except inbound_link controls, whose success grading is pre-DEF-01 in the archive), `control_false_blame` (the
-  reward's `false_blame` on controls) and `budget_exhausted` (stopped at the call or char budget);
+  reward's `false_blame` on controls) and `budget_exhausted` (stopped at the call or char budget or truncated: the
+  eval's `_BUDGET_STOPS`, DEF-42);
 * tier evals (S, F): `false_claim_share` and `verified_success` (`eval.metrics.episode.episode_ratios`, the
   `false_claim_share` and `verified_success_rate` terms, the eval's own definitions; verified success pools plain tasks
   and controls), `verified_success_plain` (plain tasks only: the "tier S plain >= 76 %" guard), `tier_control_decline`
@@ -103,9 +104,8 @@ from honest_agents.behaviour import FAMILY_HIGH_RISK
 from honest_agents.eval import read_diagnosis as rd
 from honest_agents.eval.decision_probe import CLASS_DESTROY
 from honest_agents.eval.metrics.episode import episode_ratios
-from honest_agents.eval.metrics.scored import score_records
+from honest_agents.eval.metrics.scored import _BUDGET_STOPS, score_records
 from honest_agents.eval.records import EpisodeRecord
-from honest_agents.reward import STOP_CALL_BUDGET, STOP_CHAR_BUDGET
 from honest_agents.tasks.decision_probe import ARM_WARNING
 from honest_agents.tasks.perturb.risk_surfaces import (
     SURFACES_HELDOUT,
@@ -196,7 +196,7 @@ def load_surface_run(path: Path, tasks_root: Path) -> list[Episode]:
         rw = r.get("reward") or {}
         read, decl = float(rd.inspected(rd.commands_of(r), site)[0]), float(rd.declined(r))
         values = {"read": (read, 1.0), "decline": (decl, 1.0), "blind_decline": (decl * (1 - read), 1 - read),
-                  "budget_exhausted": (float(rw.get("stop_reason") in (STOP_CALL_BUDGET, STOP_CHAR_BUDGET)), 1.0)}  # fmt: skip
+                  "budget_exhausted": (float(rw.get("stop_reason") in _BUDGET_STOPS), 1.0)}  # fmt: skip
         if twin:
             values["abstain_correct"] = (float(rw.get("case") == "abstain_correct"), 1.0)
         else:
