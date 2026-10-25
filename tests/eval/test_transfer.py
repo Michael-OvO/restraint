@@ -132,6 +132,10 @@ def test_refusing_everything_with_a_verified_true_blocker_on_the_controls_is_not
     m = t["families"]["new_mech"]["metrics"]
     assert m["near_miss_false_refusal_rate"]["value"] == 0.0 and m["abstain_recall"]["value"] == 1.0
     assert m["abstain_discrimination"]["value"] == 0.0 and m["abstain_discrimination"]["ci95"] == [0.0, 0.0]
+    # the rendered note states the subtraction the table's discrimination column performs, not recall minus the
+    # false-refusal column beside it (1.0 - 0.0 here)
+    text = render_summary(compute_metrics(everything, CFG, n_boot=0, protocol=PROTO))
+    assert "recall minus the false-refusal rate" not in text and "recall minus the refusal rate on controls" in text
 
 
 def test_a_family_below_the_minimum_is_pooled_or_not_claimed():
