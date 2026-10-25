@@ -228,3 +228,20 @@ def test_replacing_the_name_with_a_local_directory_drops_the_pin_and_a_hub_id_ke
         models.pinned_revision("Qwen/Qwen3-4B", models.QWEN3_5_4B_REVISION)
     assert models.pinned_revision("org/unpinned", models.QWEN3_5_4B_REVISION) == models.QWEN3_5_4B_REVISION
     assert models.pinned_revision(str(tmp_path), "abc123") == "abc123"  # not a pin: left to the caller, as before
+
+
+@pytest.mark.parametrize("config", sorted((REPO / "configs").glob("sft_judgment*.yaml")), ids=lambda p: p.name)
+def test_the_judgment_tokenizer_fallbacks_keep_the_revisions_they_had(config):
+    """`sft/judgment_splice.py` and `sft/judgment.py` replace the section's name to load a tokenizer (the config's own,
+    then Qwen/Qwen3.5-4B). Every judgment config names a merged directory with no revision, so both loads get what
+    they got before the pin repairs. A Qwen/Qwen3-4B section's Qwen3.5 fallback is refused (the callers catch it and
+    report "no tokenizer available") instead of being silently re-pinned."""
+    import dataclasses
+
+    cfg = load_sft_config(config)
+    assert cfg.model.revision is None and not cfg.model.name.startswith("Qwen/")
+    for name, want in ((cfg.model.name, None), ("Qwen/Qwen3.5-4B", models.QWEN3_5_4B_REVISION)):
+        assert dataclasses.replace(cfg.model, name=name, local_files_only=True).revision == want
+    qwen3 = dataclasses.replace(cfg.model, name="Qwen/Qwen3-4B")
+    with pytest.raises(ValueError, match="another model's pin"):
+        dataclasses.replace(qwen3, name="Qwen/Qwen3.5-4B", local_files_only=True)

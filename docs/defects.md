@@ -2810,8 +2810,19 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `replace(..., revision=None)` takes the new pin), and an unpinned id keeps an explicit revision. `e8c8344` had
   dropped another model's pin for every name, so an explicit `model.revision=<Qwen3.5 pin>` with
   `model.name=Qwen/Qwen3-4B` was silently re-pinned to `1cfa9a72` instead of refused, and an unpinned Hub id given
-  that revision loaded Hub `main` with no warning (second review finding, repaired in `6fd0e9c`; no src caller
-  changes a section's name, and no config sets `model.revision`, so nothing ran with it). The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
+  that revision loaded Hub `main` with no warning (second review finding, repaired in `6fd0e9c`; no config sets
+  `model.revision`, so nothing ran with it). Two src callers do change a section's name, both tokenizer loads in a
+  data check: `sft/judgment_splice.py` L891 (`replace(cfg.model, name=name, local_files_only=True)` for `name` in
+  `(cfg.model.name, "Qwen/Qwen3.5-4B")`) and `sft/judgment.py` L1020 (the same with `name="Qwen/Qwen3.5-4B"`, the
+  fallback when the config's own tokenizer is missing). Every config they read (`configs/sft_judgment*_qwen35.yaml`)
+  names the merged directory `outputs/it14/sft_v2_e3_merged` with revision None, so the replace gives None for the
+  directory and `851bf6e` for `Qwen/Qwen3.5-4B` under `d187316`, `e8c8344` and `6fd0e9c` alike (checked by loading the
+  three configs through `train_sft.load_config`). The one case that differs is a `Qwen/Qwen3-4B` section whose
+  tokenizer is not cached: its Qwen3.5 fallback carries the `1cfa9a72` pin and is refused, the callers' `except`
+  catches the `ValueError`, and the check reports "no tokenizer available" rather than using the Qwen3.5 tokenizer
+  (under `e8c8344` it was re-pinned to `851bf6e` and used). No config reaches it. CLI overrides (`model.name=...`)
+  are applied to the dict before the section is built (`train/config.py` / `pilot/run.py` `apply_overrides`), so
+  they do not go through `replace`. The final benchmark's base arm (`eval/final_benchmark.py` `arms()`) keeps its
   literal (bench lane's file); a test asserts it equals the pin.
 - **Closure test:** `tests/test_model_revision.py` (fails on the old code: no pin, every revision null):
   `::test_every_config_resolves_its_hub_model_to_the_pin` (each `configs/*.yaml` through its own loader: a Hub id must be
@@ -2833,8 +2844,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
   with the 3 node-1 copies under `2026-10-06-node1/repo-files/outputs/` (grpo_main, grpo_v2, smoke_phase0). All are
   `train.run` GRPO runs. The 9 that name `Qwen/Qwen3.5-4B` loaded `851bf6e`, the pinned revision. The 2 for 15-g3 name
   the local directory `outputs/it15/g2_merged` (a merged model built on `851bf6e`), so the colocate pin path never
-  applied to them. The `pinned_revision` repairs change only configs whose name changes after they are built (no
-  archived run did) or that set `model.revision` explicitly (none did: every archived revision is null).
+  applied to them. The `pinned_revision` repairs change only sections whose name changes after they are built (the
+  two judgment tokenizer checks above, which give the same result for every judgment config, and no training run) or
+  that set `model.revision` explicitly (none did: every archived revision is null).
 
 ### DEF-52: a refused freeze still overwrites the frozen items files
 - **Area:** tooling / build. **Status:** closed 2026-10-25. **Found:** 2026-10-25, review of build:bench.
