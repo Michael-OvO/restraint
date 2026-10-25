@@ -18,8 +18,10 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   for seeds 1 / 2), claims on impossible 54 -> 20 %, verified success +5.1 [+0.9, +9.2] / +4.2 [+0.2, +8.3]; control
   declines +3.1 (seed 1: all six G4 checks pass, the first time) / +6.6 (seed 2 fails that one check). Two-seed
   capability +4.6 [-0.5, +9.4]: no loss visible (formal verdict withheld: single base run).
-- Transfer: on held-out evidence formats abstention 0 -> 39.5 %, and Agentic Abstention (Terminal-Bench rewrites)
-  recall 37 -> 74 %; but on unfamiliar formats no model discriminates (impossible vs safe twins declined at similar
+- Transfer: on held-out evidence formats abstention 0 -> 39.5 %; Agentic Abstention (Terminal-Bench rewrites) shows
+  no transfer: recall 1/19 -> 0/19 (base -> SFT-v2; GRPO ckpt-10 0/19), control false positives 0 everywhere
+  (re-scored, post-fix, DEF-28; the earlier "37 -> 74 %" counted budget-exhausted `incomplete` reports as
+  abstentions, void as an abstention claim); but on unfamiliar formats no model discriminates (impossible vs safe twins declined at similar
   rates; probe 0.20): SFT, RL and DPO move a caution level, not judgment.
 - Iteration-13 GRPO checkpoint 10: strongest on the familiar set (abstain +51.0, capability +7.2 [+3.0, +11.1]),
   control declines +6.2; no better on new formats. DPO: control declines +0.3 but abstention and transfer drop.
@@ -1133,9 +1135,13 @@ Node: 2x RTX 4090 48 GB (Romania, $1.56/h), instance 55878626, from 2026-10-14 0
   (base) has a single run and `ni_allow_single_seed` is false: as pre-registered, no non-inferiority is declared, but no
   capability loss is visible across two seeds. Over-refusal on controls is the borderline, seed-sensitive endpoint.
 - **Agentic Abstention** (Terminal-Bench 2.0 immediate rewrites, 19 abstain-warranted + 89 originals, 10 turns;
-  out-of-distribution): abstain recall base 37 % -> SFT-v2 e3 74 % -> GRPO ckpt-10 68 %; false completion rate 9.3 ->
-  6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89; feasible declines 53 -> 73 -> 63 % (the 4B solves almost
-  none of these tasks, so declines are mostly honest failures; timely recall 0 everywhere). Underpowered (19 units).
+  out-of-distribution): abstain recall base 1/19 -> SFT-v2 e3 0/19 -> GRPO ckpt-10 0/19 and control abstain rate
+  (`control_false_positive_rate`) 0 % everywhere (re-scored, post-fix, DEF-28: only report status `abstain` abstains;
+  the earlier 37 -> 74 -> 68 % recall counted `incomplete` reports filed at model call 8-11 of an 11-call budget, void
+  as an abstention claim); false completion rate 9.3 -> 6.5 -> 1.9 %; feasible tasks solved 0/88 -> 2/89 -> 4/89;
+  feasible declines of any non-claim status 53 -> 73 -> 63 % (48/89, 65/89, 56/89, all `incomplete`; unchanged by
+  DEF-28: the 4B solves almost none of these tasks, so declines are mostly honest failures); timely recall 0
+  everywhere. Underpowered (19 units).
 
 ### Observations
 - On the familiar evaluation set the recipe works and replicates across two seeds: abstention +42-43, claims -34,
