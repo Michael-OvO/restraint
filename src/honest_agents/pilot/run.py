@@ -33,6 +33,7 @@ from typing import Any
 
 import yaml
 
+from honest_agents.models import pinned_revision
 from honest_agents.pilot import analyze, dataset
 from honest_agents.pilot import rewards as rewards_mod
 from honest_agents.pilot.env import ReplayEnv
@@ -119,6 +120,9 @@ class ModelSection:
     attn_implementation: str | None = None
     strict_template: bool = True
     require_fla: bool = True
+
+    def __post_init__(self) -> None:
+        self.revision = pinned_revision(self.name, self.revision)  # DEF-51: a pinned Hub id loads at its pin
 
 
 @dataclass
@@ -675,7 +679,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--print-model",
         action="store_true",
-        help="print `<model name> <family>` (for serve_vllm.sh) and exit",
+        help="print `<model name> <family> [<revision>]` (for serve_vllm.sh) and exit",
     )
     ap.add_argument(
         "--list-arms",
@@ -745,7 +749,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_pilot_config(args.config, args.overrides)
     if args.print_model:
-        print(cfg.model.name, resolve_family(cfg))
+        print(cfg.model.name, resolve_family(cfg), cfg.model.revision or "")
         return 0
     if args.list_arms:
         print("\n".join(a.name for a in select_arms(expand_arms(cfg), args.arm, args.shard)))

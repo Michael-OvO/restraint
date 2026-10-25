@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents import bank as bank_mod
-from honest_agents.models import ModelFamily, detect_family, family_spec, lora_target_modules
+from honest_agents.models import ModelFamily, detect_family, family_spec, lora_target_modules, pinned_revision
 from honest_agents.pilot.run import apply_overrides, load_config_dict
 from honest_agents.sft import data, hindsight
 
@@ -49,6 +49,9 @@ class ModelSection:
     revision: str | None = None
     attn_implementation: str | None = None
     local_files_only: bool = False  # only read the tokenizer / model from the local cache
+
+    def __post_init__(self) -> None:
+        self.revision = pinned_revision(self.name, self.revision)  # DEF-51: a pinned Hub id loads at its pin
 
 
 @dataclass

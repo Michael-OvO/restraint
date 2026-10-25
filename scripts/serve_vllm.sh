@@ -17,7 +17,7 @@ OVERRIDES=(); EXTRA=()
 for a in "$@"; do if is_override "$a"; then OVERRIDES+=("$a"); else EXTRA+=("$a"); fi; done
 slot_env
 
-read -r MODEL FAMILY < <(model_from_config "$CONFIG" ${OVERRIDES[@]+"${OVERRIDES[@]}"})
+read -r MODEL FAMILY REVISION < <(model_from_config "$CONFIG" ${OVERRIDES[@]+"${OVERRIDES[@]}"})
 [[ -n "${MODEL:-}" && -n "${FAMILY:-}" ]] || { echo "could not resolve model/family from $CONFIG" >&2; exit 1; }
 LIMITS="$(limits_json "$CONFIG" ${OVERRIDES[@]+"${OVERRIDES[@]}"})"
 NEED_LEN="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["max_model_len"])' "$LIMITS")"
@@ -27,6 +27,8 @@ MAX_LEN="${VLLM_MAX_MODEL_LEN:-$NEED_LEN}"
 GPUS="$VLLM_GPUS"
 TP="${VLLM_TP:-$(awk -F, '{print NF}' <<<"$GPUS")}"
 FAMILY_FLAGS=()
+# DEF-51: a pinned Hub id is served at its pin (weights, config and tokenizer); a merged directory has no revision.
+[[ -n "${REVISION:-}" ]] && FAMILY_FLAGS+=(--revision "$REVISION" --tokenizer-revision "$REVISION")
 [[ "$FAMILY" == "qwen3_5" ]] && FAMILY_FLAGS+=(--language-model-only)
 if [[ "${EVAL:-0}" == 1 ]]; then
   if [[ "$FAMILY" == "qwen3_5" ]]; then TOOL_PARSER=qwen3_coder; else TOOL_PARSER=hermes; fi
@@ -39,7 +41,7 @@ if [[ "${VLLM_EXPOSE:-0}" == 1 ]]; then
   HOST=0.0.0.0
   echo "WARNING: VLLM_EXPOSE=1: the vLLM server (no authentication, weight updates enabled) listens on every interface" >&2
 fi
-echo "serving $MODEL (family $FAMILY) on GPUs $GPUS, TP=$TP, $HOST:$VLLM_PORT, max_model_len $MAX_LEN (run needs $NEED_LEN)"
+echo "serving $MODEL${REVISION:+@$REVISION} (family $FAMILY) on GPUs $GPUS, TP=$TP, $HOST:$VLLM_PORT, max_model_len $MAX_LEN (run needs $NEED_LEN)"
 export CUDA_VISIBLE_DEVICES="$GPUS" VLLM_SERVER_DEV_MODE=1 VLLM_WORKER_MULTIPROC_METHOD=spawn
 exec "${UV_RUN[@]}" vllm serve "$MODEL" \
   --host "$HOST" --port "$VLLM_PORT" \

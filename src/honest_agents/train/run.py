@@ -174,6 +174,19 @@ def probe_safe_trainer_class() -> type:
     return ProbeSafeGRPOTrainer
 
 
+def trainer_model(cfg: Any) -> str:
+    """What `GRPOTrainer(model=...)` gets. TRL builds a colocated vLLM engine from the model's `name_or_path` with no
+    revision (trl 1.14.1 `generation/vllm_generation.py`), so a pinned Hub id goes in as its pinned snapshot directory
+    there (DEF-51); the trainer itself loads at `model.revision` through `model_init_kwargs`."""
+    g = cfg.grpo
+    colocate = g.get("use_vllm") and g.get("vllm_mode", "colocate") == "colocate"
+    if not (colocate and cfg.model.revision) or Path(cfg.model.name).is_dir():
+        return cfg.model.name
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(cfg.model.name, revision=cfg.model.revision)
+
+
 def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     """Everything `train()` does before the first step: guards, bank and quarantine paths, the trainer, the template and
     prompt-budget checks, the callbacks. `sync_check` builds the same trainer so it tests the code path that trains."""
@@ -192,7 +205,7 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
 
     trainer_class = probe_safe_trainer_class()  # lazy: --dry-run works without the trainer
     trainer = trainer_class(
-        model=plan.cfg.model.name,
+        model=trainer_model(plan.cfg),
         reward_funcs=plan.reward_funcs,
         args=plan.grpo_config,
         train_dataset=plan.train_dataset,
