@@ -38,6 +38,7 @@ import hashlib
 import json
 import logging
 import posixpath
+import re
 import shlex
 import time
 from collections.abc import Callable, Iterable
@@ -46,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents.env import HonestHarborEnv
-from honest_agents.harness import set_max_concurrent_boots
+from honest_agents.harness import SANDBOX_UMASK, set_max_concurrent_boots
 from honest_agents.reward import EpisodeOutcome
 from honest_agents.spec import VERIFIER_PYTEST, HonestTaskSpec
 from honest_agents.tasks.hermetic import NO_NETWORK, hermetic_problems
@@ -210,6 +211,15 @@ def task_hash(task_dir: Path) -> str:
 def is_current(r: ValidationResult, task_dir: Path) -> bool:
     """A stored result still applies to `task_dir` (results written before hashing existed are trusted)."""
     return not r.task_hash or r.task_hash == task_hash(task_dir)
+
+
+def umask_current(r: ValidationResult) -> bool:
+    """A stored result was graded under the nodes' umask (DEF-43). Results written before the boot preflight recorded it
+    (DEF-19: no `sandbox_umask` key) ran under a local daemon's 0000 and fail file-mode tests the nodes pass, so they
+    are not current; a result that never booted records None."""
+    if "sandbox_umask" not in r.debug:
+        return False
+    return r.debug["sandbox_umask"] in (None, "0" + SANDBOX_UMASK)
 
 
 def is_clean_pass(outcome: EpisodeOutcome) -> bool:
@@ -457,6 +467,7 @@ async def validate_task(
         "repair_probe": bool(repair_probe),
         "repair_plausible": bool(repair_probe),  # results made before the plausible-content probe are not current
     }
+    res.debug["sandbox_umask"] = None  # set by `_record` from the boot preflight; see `umask_current`
     if not (task_dir / "solution" / "solve.sh").exists():
         res.reason = "no oracle solution"
         return res
@@ -754,7 +765,10 @@ async def validate_many(
     todo = [
         d
         for d in task_dirs
-        if d.name not in done or not is_current(done[d.name], d) or not _covers(done[d.name], wanted)
+        if d.name not in done
+        or not is_current(done[d.name], d)
+        or not _covers(done[d.name], wanted)
+        or not umask_current(done[d.name])
     ]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sem = asyncio.Semaphore(concurrency)
@@ -846,7 +860,8 @@ def select_dirs(dirs: list[Path], only_ids: set[str] | None) -> list[Path]:
 
 def write_quarantine_list(results: dict[str, Any], path: Path) -> int:
     """Write (replace) the quarantine list of the rejected variants: one `QuarantineEntry` line each, kind `leak` (the
-    only kind evaluation runs honour by default), the reason in `detail`. An empty list is written as an empty file."""
+    only kind evaluation runs honour by default), the reason in `detail`, with the sandbox umask and the failing tests
+    when the result recorded them (DEF-43). An empty list is written as an empty file."""
     from honest_agents.bank import QUARANTINE_LEAK, QuarantineEntry
 
     lines = []
@@ -854,6 +869,11 @@ def write_quarantine_list(results: dict[str, Any], path: Path) -> int:
         if r.ok and not r.leak and not r.relabel_to_control:
             continue
         why = "leak" if r.leak else "relabel_to_control" if r.relabel_to_control else (r.reason or "not ok")
+        debug = getattr(r, "debug", None) or {}
+        if debug.get("sandbox_umask"):
+            why += f" (umask {debug['sandbox_umask']})"
+        if failed := re.findall(r"^FAILED \S+::(\w+)", str(debug.get("test_log", "")), re.MULTILINE):
+            why += "; failed: " + ", ".join(failed)
         lines.append(
             QuarantineEntry(
                 variant_id=vid, kind=QUARANTINE_LEAK, source="validation", detail=f"G1 select: {why}"[:300]
