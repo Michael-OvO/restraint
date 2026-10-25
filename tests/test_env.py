@@ -37,6 +37,7 @@ from honest_agents.trl_rewards import honest_reward, outcome_reward
 from tests.sandbox_fakes import (
     FakeFactory,
     FakeHarborEnvironment,
+    bare_docker_env,
     install_fake_factory,
     make_pytest_task_dir,
     make_task_dir,
@@ -234,6 +235,22 @@ def test_an_output_flood_is_cut_inside_the_sandbox_not_held_in_host_memory(facto
     assert env._history[-1]["rc"] not in (0, 124) and "y" in out
     (fake,) = factory.created
     assert f"head -c {MAX_CAPTURED_BYTES + 1}" in fake.calls[-1].command
+
+
+def test_the_boot_preflight_records_the_sandbox_umask(factory, task):
+    """DEF-19: the boot preflight records the umask the agent's commands run under (0022 on the nodes; a local daemon's
+    0000 if the pin were lost) on the episode, with the `timeout -k` probe in the same exec."""
+    import os
+
+    env = new_env()
+    env.reset(task_dir=str(task))
+    env.bash("true")  # waits for the boot
+    report_complete(env)
+    probe = next(c for c in factory.created[0].calls if "timeout -k 1 5 true" in c.command)
+    assert probe.command == "umask; timeout -k 1 5 true"
+    host = os.umask(0)
+    os.umask(host)  # the fake sandbox is a host subprocess: it runs under this process's umask
+    assert env._graded()[2]["sandbox_umask"] == f"{host:04o}"
 
 
 def test_an_image_without_timeout_still_runs_commands(factory, task, tmp_path):
@@ -918,25 +935,31 @@ def test_first_boot_of_a_task_builds_alone_then_boots_run_in_parallel(factory, t
 
 
 def test_a_docker_sandbox_runs_every_command_under_the_nodes_umask(tmp_path):
-    """DEF-16: `docker exec` takes the daemon's umask (0000 under the Mac's OrbStack), so an oracle's files came out
-    0o666 and source tests asserting 0o644 failed locally only. `start_sandbox` pins Harbor's Docker env to 022, once;
-    other environments (the fakes, other backends) are left as they are."""
+    """DEF-16 / DEF-19: `docker exec` takes the daemon's umask (0000 under the Mac's OrbStack), so an oracle's files came
+    out 0o666 and source tests asserting 0o644 failed locally only. `start_sandbox` pins Harbor's Docker env to 022, once,
+    at `_run_docker_compose_command`, which every docker exec passes: Harbor's `exec` (agent, oracle, verifier) and the
+    raw execs of its upload fallback (`mkdir -p`, `tar -xf -`), which bypass `exec`. Other compose commands, sidecar
+    execs and other environments (the fakes, other backends) are left as they are."""
     from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.environments.docker.docker_unix import UnixOps
 
-    sent: list[str] = []
+    sent: list[list[str]] = []
 
     class _Docker(DockerEnvironment):
-        def __init__(self):  # no compose project: only `exec` and `start` are exercised
-            pass
-
-        async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
-            sent.append(command)
+        async def _run_docker_compose_command(self, command, check=True, timeout_sec=None, stdin_data=None,
+                                              on_output=None):  # fmt: skip
+            sent.append(list(command))
+            if command[0] == "cp":
+                raise RuntimeError("compose cp unsupported")  # Harbor falls back to a tar stream through raw execs
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
 
         async def start(self, force_build):
             pass
 
     class _Other:
-        exec = _Docker.exec
+        async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+            sent.append([command])
+
         start = _Docker.start
 
     t = SimpleNamespace(
@@ -944,13 +967,31 @@ def test_a_docker_sandbox_runs_every_command_under_the_nodes_umask(tmp_path):
         paths=SimpleNamespace(environment_dir=tmp_path),
         config=SimpleNamespace(environment=SimpleNamespace(docker_image="img")),
     )
-    docker, other = _Docker(), _Other()
-    for _ in range(2):  # a second start does not stack a second prefix
+    docker, other = bare_docker_env(_Docker), _Other()
+    for _ in range(2):  # a second start does not stack a second wrapper
         asyncio.run(harness.start_sandbox(docker, t, "docker"))
     asyncio.run(harness.start_sandbox(other, t, "docker"))
     asyncio.run(docker.exec("touch out.txt", user="agent"))
+    (tmp_path / "up").mkdir()
+    (tmp_path / "up" / "f.txt").write_text("x")
+    asyncio.run(docker.upload_dir(tmp_path / "up", "/srv/new"))
+    asyncio.run(docker.service_exec("network-policy deny-all", service="egress"))
     asyncio.run(other.exec("touch out.txt"))
-    assert sent == ["umask 022; touch out.txt", "touch out.txt"]
+    pin = 'umask 022; exec "$@"'
+    assert sent == [
+        ["exec", "-u", "agent", "main", "bash", "-c", "umask 022; touch out.txt"],
+        ["cp", f"{tmp_path / 'up'}/.", "main:/srv/new"],
+        ["exec", "-T", "-u", "root", "main", "bash", "-c", pin, "bash", "mkdir", "-p", "/srv/new"],
+        ["exec", "-T", "-u", "root", "main", "bash", "-c", pin, "bash", "tar", "-xf", "-", "-C", "/srv/new"],
+        ["exec", "egress", "sh", "-c", "network-policy deny-all"],
+        ["touch out.txt"],
+    ]
+    assert isinstance(docker._platform, UnixOps)
+    assert harness.umask_compose_command(["down", "--remove-orphans"]) == ["down", "--remove-orphans"]
+    # option values are skipped when finding the service, so a value named `main` is not taken for it
+    assert harness.umask_compose_command(["exec", "-w", "main", "-e", "A=1", "main", "true"]) == [
+        "exec", "-w", "main", "-e", "A=1", "main", "bash", "-c", pin, "bash", "true",
+    ]  # fmt: skip
 
 
 def test_canary_lines_are_stripped_from_the_instruction(factory, tmp_path):

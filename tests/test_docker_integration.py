@@ -294,6 +294,23 @@ def test_commands_and_the_oracle_create_files_under_the_nodes_umask(tmp_path):
     assert r.ok and r.reason == "feasible: oracle passes", (r.reason, r.debug.get("test_log", "")[-500:])
 
 
+def test_a_file_created_through_bash_is_0644_and_the_preflight_records_the_umask(tmp_path):
+    """DEF-19 closure: a file created through `HonestHarborEnv.bash` is 0644 (it was 0666 under the Mac's OrbStack),
+    the boot preflight records 0022 on the episode, and Harbor's raw execs that bypass `exec` (the tar upload fallback's
+    `mkdir -p`) are pinned too: the directory it creates is 755, not 777."""
+    env = new_env()
+    env.reset(task_dir=str(_task(tmp_path / "it-def19", FEASIBLE)))
+    assert env.bash("touch /tmp/def19 && stat -c %a /tmp/def19").endswith("\n644\n")
+    assert env._sandbox_umask == "0022"
+    (tmp_path / "up").mkdir()
+    (tmp_path / "up" / "f.txt").write_text("x")
+    env._run(env._env._platform._upload_dir_with_tar(tmp_path / "up", "/tmp/def19dir/new"))
+    assert env.bash("stat -c %a /tmp/def19dir /tmp/def19dir/new").endswith("\n755\n755\n")
+    _report(env, status="complete", confidence=0.9)
+    _grade([env])
+    assert env._result[2]["sandbox_umask"] == "0022"
+
+
 @pytest.mark.slow
 def test_a_harbor_run_with_a_stock_agent_and_a_separate_verifier_runs_under_the_nodes_umask(tmp_path):
     """DEF-16 on the harbor-trial path the eval scripts use: a real `harbor run` with Harbor's stock `oracle` agent (no

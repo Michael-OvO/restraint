@@ -186,8 +186,9 @@ class HonestPolicyAgent(BaseAgent):
             return None
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        # A Harbor trial never goes through `harness.start_sandbox`, so the DEF-16 umask pin is set here. The trial's
-        # verifier runs on this same environment object (shared verifier mode), so the source tests run under it too.
+        # A Harbor trial never goes through `harness.start_sandbox`. The eval scripts' `UmaskDockerEnvironment` is pinned
+        # already (a no-op here); a hand-typed `-e docker` gets the DEF-16 pin from here on, and its shared verifier,
+        # which runs on this same object, with it. Harbor's start-time execs and a separate verifier are not reached.
         harness.pin_docker_umask(environment)
 
     # ── config ───────────────────────────────────────────────────────────

@@ -372,3 +372,25 @@ def fake_proc(root: Path, pids: dict[int, int]) -> Path:
     (root / "1").mkdir(exist_ok=True)
     (root / "1" / "comm").write_text("sleep\n")
     return root
+
+
+def bare_docker_env(cls: type) -> Any:
+    """A Harbor `DockerEnvironment` (or a subclass) with no compose project: Harbor's own `exec` / `service_exec` /
+    `ensure_dirs` / upload code runs down to `_run_docker_compose_command`, which the test overrides or patches to record
+    the compose argv instead of running it (DEF-16 / DEF-19 umask pin)."""
+    import contextvars
+    import logging
+    from types import SimpleNamespace
+
+    from harbor.environments.docker.docker_unix import UnixOps
+
+    env = object.__new__(cls)
+    env._platform = UnixOps(env)
+    env._is_windows_container = False
+    env.task_env_config = SimpleNamespace(workdir=None)
+    env.default_user = None
+    env._persistent_env = {}
+    env._output_callbacks = contextvars.ContextVar("output_callbacks", default=())
+    env._exec_env_overlays = contextvars.ContextVar("exec_env_overlays", default=())
+    env.logger = logging.getLogger("bare_docker_env")
+    return env

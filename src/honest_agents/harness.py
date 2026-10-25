@@ -512,25 +512,49 @@ async def _start_throttled(env: Any) -> None:
 SANDBOX_UMASK = "022"
 
 
-def pin_exec_umask(env: Any) -> None:
-    """Run every `env.exec` command (ours and Harbor's own) under `SANDBOX_UMASK`, whatever the daemon's umask."""
-    if getattr(env, "_umask_pinned", False):
-        return
-    inner = env.exec
+# `docker compose exec` options that take a value (Harbor passes -w, -e and -u); any other option is a flag.
+_COMPOSE_EXEC_VALUE_OPTIONS = frozenset({"-w", "--workdir", "-e", "--env", "-u", "--user", "--index"})
+_MAIN_SERVICE = "main"  # harbor.constants.MAIN_SERVICE_NAME
 
-    async def exec_(command: str, *args: Any, **kwargs: Any) -> Any:
-        return await inner(f"umask {SANDBOX_UMASK}; {command}", *args, **kwargs)
 
-    env.exec = exec_
-    env._umask_pinned = True
+def umask_compose_command(command: list[str]) -> list[str]:
+    """A `docker compose` subcommand (the argv after the project flags) with a main-service `exec` run under
+    `SANDBOX_UMASK`. Every local docker exec of a Harbor Docker sandbox passes `_run_docker_compose_command`, so pinned
+    there it covers them all: Harbor's `exec` / `service_exec` on main (the agent's commands, the oracle, the verifier,
+    the readiness probe, `ensure_dirs`), which wrap as `bash -c CMD` and become `bash -c 'umask 022; CMD'`, and the raw
+    execs that bypass `exec` (the upload fallback's `mkdir -p` / `tar -xf -`, `test -d`), which run through
+    `bash -c 'umask 022; exec "$@"'`. Harbor's main container always ships bash. Other compose subcommands and sidecar
+    execs (the egress sidecar's `network-policy`) are returned as they are."""
+    if not command or command[0] != "exec":
+        return command
+    i = 1
+    while i < len(command) and command[i].startswith("-"):
+        i += 2 if command[i] in _COMPOSE_EXEC_VALUE_OPTIONS else 1
+    if i + 1 >= len(command) or command[i] != _MAIN_SERVICE:
+        return command
+    head, argv = command[: i + 1], command[i + 1 :]
+    if len(argv) == 3 and argv[:2] == ["bash", "-c"]:
+        return [*head, "bash", "-c", f"umask {SANDBOX_UMASK}; {argv[2]}"]
+    return [*head, "bash", "-c", f'umask {SANDBOX_UMASK}; exec "$@"', "bash", *argv]
 
 
 def pin_docker_umask(env: Any) -> None:
-    """`pin_exec_umask` on a Harbor Docker sandbox; other environments (fakes, other backends) are left as they are."""
+    """Run every docker exec of a Harbor Docker sandbox (ours and Harbor's own) under `SANDBOX_UMASK`, whatever the
+    daemon's umask (`umask_compose_command`). Other environments (fakes, other backends), Windows containers and an env
+    already pinned (`eval.harbor_env.UmaskDockerEnvironment`) are left as they are."""
     from harbor.environments.docker.docker import DockerEnvironment
 
-    if isinstance(env, DockerEnvironment):
-        pin_exec_umask(env)
+    if not isinstance(env, DockerEnvironment) or getattr(env, "_umask_pinned", False):
+        return
+    inner = env._run_docker_compose_command
+
+    async def run(command: list[str], *args: Any, **kwargs: Any) -> Any:
+        if not getattr(env, "_is_windows_container", False):
+            command = umask_compose_command(command)
+        return await inner(command, *args, **kwargs)
+
+    env._run_docker_compose_command = run
+    env._umask_pinned = True
 
 
 async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
