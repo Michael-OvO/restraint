@@ -64,7 +64,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-54 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
 | DEF-55 | tooling / build | closed | `final_benchmark freeze` (after the DEF-54 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
 | DEF-56 | tooling / build | closed | `final_benchmark freeze` (after the DEF-55 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
-| DEF-57 | tooling / build | fixing | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
+| DEF-57 | tooling / build | closed | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
 
 ---
 
@@ -2921,20 +2921,39 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note:** none re-scored (no results exist); nothing void.
 
 ### DEF-57: the never-trained repo scope depends on the tree it runs in
-- **Area:** tooling / build. **Status:** fixing (verdict re-recorded over the main tree; the scope is still whatever
-  gitignored files are on disk). **Found:** 2026-10-25, integrator round2b: after merging fix/bench into main,
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in
+  DEF-54). **Found:** 2026-10-25, integrator round2b: after merging fix/bench into main,
   `scripts/test.sh --fast` failed `tests/eval/test_final_benchmark.py::test_the_archived_training_inputs_are_all_in_scope`
-  (`labels <= recorded`). **Commits:** `0d87a2a` (re-recorded `data/benchmarks/final_benchmark.json` `never_trained`).
+  (`labels <= recorded`). **Commits:** `0d87a2a` (re-recorded `data/benchmarks/final_benchmark.json` `never_trained`),
+  `288a654` (fix, tests, re-record from the archive).
 - **Evidence:** `REPO_TRAINING_GLOBS` (`src/honest_agents/eval/final_benchmark.py:55`) globs `data/decision/*.jsonl`, but
   `data/` is gitignored (`.gitignore:8`); only `data/decision/read_rft_tasks.jsonl` is tracked. The DEF-53 re-record ran in
   the `restraint-wt/bench` worktree, which has no copy of the main tree's untracked `data/decision/probe_prompts.jsonl`,
   `probe_prompts_surfaces.jsonl`, `sandbox_outputs.jsonl`, `sandbox_outputs_surfaces.jsonl` and `surface_pairs.jsonl`
-  (the it14 decision / DPO inputs, 4,115 rows). None of the 5 is in the archive (no file of those names under
-  `honest-agents-archive`), so `--archive` does not cover them either.
-- **Impact:** the verdict holds. `never-trained` over the 5 files: 0 hits; the full `never-trained --archive --record` in
-  the main tree is pass: 62,559 rows (was 58,444; the 5 files added, every other build's hash and count unchanged),
-  4,005 benchmark ids, 3,683 texts, 0 hits; `check --archive` ok.
-- **Remaining:** the scope must not depend on local untracked files: archive the 5 inputs (and glob them from the
-  archive) or make `--record` refuse when a known training input is missing; plus a regression test for that. The
-  recorded verdict is valid only for the main tree's current files.
+  (the it13 / it14 decision / DPO inputs, 4,115 rows). None of the 5 was in the archive (no file of those names under
+  `honest-agents-archive`), so `--archive` did not cover them either. They are the only untracked files any
+  `REPO_TRAINING_GLOBS` pattern matches in the main tree (checked against `git ls-files data`).
+- **Archive (done):** `python -m honest_agents.archive --iteration 14 --name decision-inputs --source <main tree> --file
+  data/decision/... --no-weights` copied the 5 files (and the two probe-prompt build manifests) read-only from the main
+  tree into `iterations/14-decision-inputs/files/data/decision/` (2.2 MB; the three over 1 MB gzipped with the fixed
+  header). `ITERATION.md` records the provenance and each file's pre-gzip sha256 (equal to the `0d87a2a` record);
+  `MANIFEST.sha256` holds the stored files' hashes (`shasum -a 256 -c` ok; each gunzipped copy re-hashes to its source).
+  `iterations/README.md` has the index row.
+- **Fix (done):** `ARCHIVE_TRAINING_GLOBS` adds `iterations/*/files/data/decision/*.jsonl` and `*.jsonl.gz`.
+  `UNTRACKED_TRAINING_INPUTS` maps each of the 5 repo paths to its archived copy. With `--archive`, a repo copy whose
+  bytes equal its archived copy (gunzipped) is dropped from the scope, so the main tree and a worktree check the same
+  647 builds; a locally changed copy is read in addition. `missing_training_inputs(builds)` lists the known inputs read
+  neither from the tree nor from the archive; `never-trained` prints them, and with `--record` refuses (exit 2) before
+  scanning and leaves the manifest as it was. In this worktree `never-trained --record` (no archive) now exits 2 naming
+  all 5.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_record_refuses_when_a_known_untracked_input_is_missing`
+  (fails on `1811eae`: `--record` returns 0 and writes a pass over the narrower scope),
+  `::test_a_repo_copy_identical_to_its_archived_copy_is_read_once` and the extended
+  `::test_the_archived_training_inputs_are_all_in_scope` (the 5 archived copies are in scope, none is missing, and the
+  record reads them from the archive) fail on `1811eae` too (no `UNTRACKED_TRAINING_INPUTS`).
+- **Impact:** the verdict holds. `never-trained --archive --record` re-run in the `fix/never-trained` worktree (no
+  untracked inputs on disk): pass, 62,559 rows, 4,005 benchmark ids, 3,683 texts, 0 hits; the record differs from
+  `0d87a2a` only in the 5 builds now labelled `archive:iterations/14-decision-inputs/...` (same row counts; the sha256 is
+  the stored file's, gzipped for 3), every other build's hash and count unchanged. `training_builds` over the main tree
+  with the archive gives the same 647 labels; `check --archive` ok.
 - **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged); nothing void.
