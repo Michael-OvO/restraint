@@ -1365,6 +1365,8 @@ def test_remove_input_holds_a_generated_input_to_the_content_checks(tmp_path):
         ),
         "dd": ("RUN dd if=/dev/urandom of=/home/user/data/staff.db bs=1k count=4\n", instruction),
         "heredoc_hidden": (f"RUN cat > /home/user/data/staff.db <<'EOF'\n{heredoc_body}EOF\n", instruction),
+        # DEF-NEW-sweep0-0-1: a binary COPY is a content kind with no content, and skipped every check the same way.
+        "binary_copy": ("COPY staff.db /home/user/data/staff.db\n", instruction),
     }
     kept = {}
     for name, (run, text) in cases.items():
@@ -1372,9 +1374,10 @@ def test_remove_input_holds_a_generated_input_to_the_content_checks(tmp_path):
             tmp_path / name, instruction=text, dockerfile=f"FROM ubuntu:22.04\nRUN mkdir -p /home/user/data\n{run}",
             solve=solve, test_sh="", test_files={"test_outputs.py": tests},
         )  # fmt: skip
+        (src / "environment" / "staff.db").write_bytes(b"SQLite format 3\x00\xff\xfe" + sql.encode())
         kept[name] = remove_input_ops._input_candidates(TaskFacts.load(src))
     db = ["/home/user/data/staff.db"]
-    assert kept == {"sqlite_hidden": db, "sqlite_printed": [], "dd": [], "heredoc_hidden": db}
+    assert kept == {"sqlite_hidden": db, "sqlite_printed": [], "dd": [], "heredoc_hidden": db, "binary_copy": []}
 
 
 def test_content_bound_tokens_need_a_value_only_the_file_and_the_tests_know():
