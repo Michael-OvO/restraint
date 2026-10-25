@@ -1,27 +1,26 @@
 """Coverage report of a commit-check build (L0: the manifest only, in memory; nothing is written).
 
-    uv run python -m honest_agents.commit_points.coverage [--manifest data/commit/build_manifest.json] \\
-        [--eval-pools data/val.jsonl data/test.jsonl] [--eval-ids data/decision/val_high_risk_sources.txt] \\
-        [--max-per-task N] [--max-task-share X] [--min-per-cell N] [--strict] [--json out.json]
+    uv run python -m honest_agents.commit_points.coverage [--manifest data/commit/build_manifest.json] [--data-dir data] \\
+        [--cap-per-task N] [--max-source-share X] [--min-per-cell N] [--max-outcome-ratio R] [--strict] [--json out.json]
 
 Counts per commitment point x outcome x task (`schema`), and per cell the number of tasks and the largest task's share.
 The quotas come from the manifest's `quota` block; a flag overrides one.
 
 **Fails** (exit 1) when:
-- a task holds more than `max_per_task` examples of one point x outcome cell, or more than `max_task_share` of the
-  build (no task dominates);
-- an example's task is an eval source (a `pair_id` of the eval pools or an id of the eval id files), or its split is not
-  `train`: eval/val/test sources never enter training data;
-- an example's decision is not the one its outcome licenses (`act` after `pass`, `hold` after `fail`);
+- a task holds more than `cap_per_task` examples of one point x outcome cell, or a source task more than
+  `max_source_share` of the build (no task dominates);
+- an example's source is in `tasks.select_split.excluded_from_training(--data-dir)` (select, val and test sources), or
+  its recorded split is not `train`: eval sources never enter training data;
+- an example's decision is not the one its outcome licenses (committed after `pass`, not after `fail`);
 - a row breaks the schema, or two rows share an id.
 
 **Reported**, and failing only with `--strict`: cells under `min_per_cell` (a missing cell counts 0), and points whose
-fail share is outside `fail_share` (the check should change the decision about half the time). Also reported: the
-sources per point, the hazards of the destructive examples and, for claims, the checklist agreement rate with the
-hidden tests (the data-quality metric).
+larger outcome exceeds `max_outcome_ratio` times the smaller (the check should change the decision about half the time).
+Also reported: the origins per point, the hazards of the destructive examples and, for claims, the checklist agreement
+rate with the hidden tests (the data-quality metric).
 
-`commit_coverage(ctx)` is the same report as a gate check (`gate.checks.CheckResult`): it skips when the build has no
-manifest yet.
+`commit_coverage(ctx)` is the same report as a gate check (`gate.checks.CheckResult`, id C1): it skips when the build
+has no manifest yet.
 """
 
 from __future__ import annotations
@@ -30,48 +29,33 @@ import argparse
 import json
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from honest_agents.commit_points.schema import (
     CLAIM,
-    COMMIT_POINTS,
     DEFAULT_MANIFEST,
     DESTRUCTIVE,
     FAIL,
     OUTCOMES,
+    PASS,
+    POINTS,
     TRAIN_SPLIT,
     BuildManifest,
     Quota,
     SchemaError,
-    expected_decision,
+    licensed,
     read_manifest,
 )
 
-DEFAULT_EVAL_POOLS = (Path("data/val.jsonl"), Path("data/test.jsonl"))
-DEFAULT_EVAL_IDS = (Path("data/decision/val_high_risk_sources.txt"),)
 _SHOW = 20  # violations listed per kind (all are counted)
-
-
-def eval_task_ids(pools: Iterable[str | Path], id_files: Iterable[str | Path] = ()) -> set[str]:
-    """Every source task of the eval pools (`pair_id`, and `source_id` where a row has one) and of the id files (one id
-    per line). A missing file raises: the build cannot be shown leak-free against an eval set that is not there."""
-    out: set[str] = set()
-    for path in pools:
-        for line in Path(path).expanduser().read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                out.update(str(row[k]) for k in ("pair_id", "source_id") if row.get(k))
-    for path in id_files:
-        out.update(x.strip() for x in Path(path).expanduser().read_text().splitlines() if x.strip())
-    return out
 
 
 @dataclass
 class Cell:
-    commit_point: str
+    point: str
     outcome: str
     n: int
     tasks: int
@@ -85,31 +69,32 @@ class Cell:
 class Coverage:
     examples: int
     tasks: int
+    sources: int
     quota: dict[str, Any]
-    cells: list[Cell]
-    counts: dict[str, dict[str, dict[str, int]]]  # point -> outcome -> task -> n
-    max_task_share: float | None
-    max_task: str | None
-    fail_share: dict[str, float | None]
-    sources: dict[str, dict[str, int]]
-    hazards: dict[str, int]
-    checklist_agreement: dict[str, Any]
+    cells: list[Cell] = field(default_factory=list)
+    counts: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)  # point -> outcome -> task -> n
+    max_source_share: float | None = None
+    max_source: str | None = None
+    fail_share: dict[str, float | None] = field(default_factory=dict)
+    origins: dict[str, dict[str, int]] = field(default_factory=dict)
+    hazards: dict[str, int] = field(default_factory=dict)
+    checklist_agreement: dict[str, Any] = field(default_factory=dict)
     cap_violations: list[str] = field(default_factory=list)
     share_violations: list[str] = field(default_factory=list)
-    eval_leaks: list[str] = field(default_factory=list)
+    excluded_sources: list[str] = field(default_factory=list)
     split_violations: list[str] = field(default_factory=list)
     decision_mismatches: list[str] = field(default_factory=list)
     schema_problems: list[str] = field(default_factory=list)
     duplicate_ids: list[str] = field(default_factory=list)
     under_quota: list[str] = field(default_factory=list)
     unbalanced: list[str] = field(default_factory=list)
-    eval_checked: bool = True
+    excluded_checked: bool = True
 
     def failures(self, strict: bool = False) -> dict[str, int]:
         kinds = {
             "cap": self.cap_violations,
             "share": self.share_violations,
-            "eval_leak": self.eval_leaks,
+            "excluded_source": self.excluded_sources,
             "split": self.split_violations,
             "decision": self.decision_mismatches,
             "schema": self.schema_problems,
@@ -126,78 +111,78 @@ class Coverage:
         return asdict(self)
 
 
-def coverage(manifest: BuildManifest, eval_ids: set[str] | None) -> Coverage:
-    """The report. `eval_ids` None skips the eval-source check (recorded as `eval_checked` False)."""
+def coverage(manifest: BuildManifest, excluded: set[str] | None) -> Coverage:
+    """The report. `excluded` None skips the excluded-source check (recorded as `excluded_checked` False)."""
     q = manifest.quota
-    rows = manifest.examples
-    counts: dict[str, dict[str, Counter[str]]] = {p: {o: Counter() for o in OUTCOMES} for p in COMMIT_POINTS}
-    by_task: Counter[str] = Counter()
+    counts: dict[str, dict[str, Counter[str]]] = {p: {o: Counter() for o in OUTCOMES} for p in POINTS}
+    by_source: Counter[str] = Counter()
+    tasks: set[str] = set()
     ids: Counter[str] = Counter()
-    sources: dict[str, Counter[str]] = defaultdict(Counter)
+    origins: dict[str, Counter[str]] = defaultdict(Counter)
     hazards: Counter[str] = Counter()
     agree: Counter[str] = Counter()
-    report = Coverage(0, 0, q.to_dict(), [], {}, None, None, {}, {}, {}, {}, eval_checked=eval_ids is not None)
-    for e in rows:
+    r = Coverage(0, 0, 0, q.to_dict(), excluded_checked=excluded is not None)
+    for e in manifest.examples:
         ids[e.id] += 1
         problems = e.problems()
         if problems:
-            report.schema_problems.append(f"{e.id}: {'; '.join(problems)}")
+            r.schema_problems.append(f"{e.id}: {'; '.join(problems)}")
             continue
-        counts[e.commit_point][e.outcome][e.task_id] += 1
-        by_task[e.task_id] += 1
-        sources[e.commit_point][e.source] += 1
-        if e.commit_point == DESTRUCTIVE and e.hazard:
+        counts[e.point][e.outcome][e.task] += 1
+        by_source[e.source] += 1
+        tasks.add(e.task)
+        origins[e.point][e.origin] += 1
+        if e.point == DESTRUCTIVE and e.hazard:
             hazards[e.hazard] += 1
-        if e.commit_point == CLAIM:
+        if e.point == CLAIM:
             agree["unknown" if e.checklist_agrees is None else "agrees" if e.checklist_agrees else "disagrees"] += 1
-        if e.split != TRAIN_SPLIT:
-            report.split_violations.append(f"{e.id}: split {e.split!r}")
-        if eval_ids is not None and e.task_id in eval_ids:
-            report.eval_leaks.append(f"{e.id}: task {e.task_id} is an eval source")
-        if e.decision != expected_decision(e.outcome):
-            report.decision_mismatches.append(f"{e.id}: decision {e.decision} after {e.outcome}")
-    report.duplicate_ids = sorted(i for i, n in ids.items() if n > 1)
-    total = sum(by_task.values())
-    report.examples, report.tasks = total, len(by_task)
-    for p in COMMIT_POINTS:
-        n_point = sum(sum(counts[p][o].values()) for o in OUTCOMES)
-        report.fail_share[p] = round(sum(counts[p][FAIL].values()) / n_point, 4) if n_point else None
-        lo, hi = q.fail_share
-        share = report.fail_share[p]
-        if share is not None and not lo <= share <= hi:
-            report.unbalanced.append(f"{p}: fail share {share:.3f} outside [{lo}, {hi}]")
+        if e.split is not None and e.split != TRAIN_SPLIT:
+            r.split_violations.append(f"{e.id}: split {e.split!r}")
+        if excluded is not None and e.source in excluded:
+            r.excluded_sources.append(f"{e.id}: source {e.source} is excluded from training")
+        if e.committed != licensed(e.outcome):
+            r.decision_mismatches.append(f"{e.id}: committed={e.committed} after {e.outcome}")
+    r.duplicate_ids = sorted(i for i, n in ids.items() if n > 1)
+    total = sum(by_source.values())
+    r.examples, r.tasks, r.sources = total, len(tasks), len(by_source)
+    for p in POINTS:
+        n_out = {o: sum(counts[p][o].values()) for o in OUTCOMES}
+        n_point = sum(n_out.values())
+        r.fail_share[p] = round(n_out[FAIL] / n_point, 4) if n_point else None
+        small, large = sorted((n_out[PASS], n_out[FAIL]))
+        if n_point and large > q.max_outcome_ratio * small:
+            r.unbalanced.append(f"{p}: pass {n_out[PASS]} / fail {n_out[FAIL]} exceeds ratio {q.max_outcome_ratio}")
         for o in OUTCOMES:
             c = counts[p][o]
-            n = sum(c.values())
+            n = n_out[o]
             top, top_n = c.most_common(1)[0] if c else (None, 0)
-            report.cells.append(
-                Cell(p, o, n, len(c), top, top_n, round(top_n / n, 4) if n else None, n < q.min_per_cell)
-            )
+            share = round(top_n / n, 4) if n else None
+            r.cells.append(Cell(p, o, n, len(c), top, top_n, share, n < q.min_per_cell))
             if n < q.min_per_cell:
-                report.under_quota.append(f"{p}/{o}: {n} < {q.min_per_cell}")
+                r.under_quota.append(f"{p}/{o}: {n} < {q.min_per_cell}")
             for task, k in sorted(c.items()):
-                if k > q.max_per_task:
-                    report.cap_violations.append(f"{p}/{o}/{task}: {k} > max_per_task {q.max_per_task}")
-    report.counts = {p: {o: dict(sorted(counts[p][o].items())) for o in OUTCOMES} for p in COMMIT_POINTS}
+                if k > q.cap_per_task:
+                    r.cap_violations.append(f"{p}/{o}/{task}: {k} > cap_per_task {q.cap_per_task}")
+    r.counts = {p: {o: dict(sorted(counts[p][o].items())) for o in OUTCOMES} for p in POINTS}
     if total:
-        report.max_task, top_n = by_task.most_common(1)[0]
-        report.max_task_share = round(top_n / total, 4)
-        report.share_violations = [
-            f"{task}: {n}/{total} = {n / total:.4f} > max_task_share {q.max_task_share}"
-            for task, n in sorted(by_task.items())
-            if n / total > q.max_task_share
+        r.max_source, top_n = by_source.most_common(1)[0]
+        r.max_source_share = round(top_n / total, 4)
+        r.share_violations = [
+            f"{source}: {n}/{total} = {n / total:.4f} > max_source_share {q.max_source_share}"
+            for source, n in sorted(by_source.items())
+            if n / total > q.max_source_share
         ]
-    report.sources = {p: dict(sorted(sources[p].items())) for p in COMMIT_POINTS}
-    report.hazards = dict(sorted(hazards.items()))
+    r.origins = {p: dict(sorted(origins[p].items())) for p in POINTS}
+    r.hazards = dict(sorted(hazards.items()))
     known = agree["agrees"] + agree["disagrees"]
-    report.checklist_agreement = {**{k: agree[k] for k in ("agrees", "disagrees", "unknown")},
-                                  "rate": round(agree["agrees"] / known, 4) if known else None}  # fmt: skip
-    return report
+    r.checklist_agreement = {k: agree[k] for k in ("agrees", "disagrees", "unknown")}
+    r.checklist_agreement["rate"] = round(agree["agrees"] / known, 4) if known else None
+    return r
 
 
 def render(r: Coverage, strict: bool = False) -> str:
     lines = [
-        f"commit-check coverage: {r.examples} examples, {r.tasks} tasks; quota {json.dumps(r.quota)}",
+        f"commit-check coverage: {r.examples} examples, {r.tasks} tasks, {r.sources} sources; quota {json.dumps(r.quota)}",
         "",
         "| point | outcome | examples | tasks | top task | top share | under quota |",
         "|---|---|---|---|---|---|---|",
@@ -205,20 +190,20 @@ def render(r: Coverage, strict: bool = False) -> str:
     for c in r.cells:
         share = "n/a" if c.top_task_share is None else f"{c.top_task_share:.3f}"
         lines.append(
-            f"| {c.commit_point} | {c.outcome} | {c.n} | {c.tasks} | {c.top_task or '-'} ({c.top_task_n}) | {share} "
+            f"| {c.point} | {c.outcome} | {c.n} | {c.tasks} | {c.top_task or '-'} ({c.top_task_n}) | {share} "
             f"| {'YES' if c.under_quota else 'no'} |"
         )
     lines += [
         "",
-        f"max task share {r.max_task_share} ({r.max_task}); fail share per point {r.fail_share}",
-        f"sources {r.sources}; hazards {r.hazards}; claim checklist agreement {r.checklist_agreement}",
+        f"max source share {r.max_source_share} ({r.max_source}); fail share per point {r.fail_share}",
+        f"origins {r.origins}; hazards {r.hazards}; claim checklist agreement {r.checklist_agreement}",
     ]
-    if not r.eval_checked:
-        lines.append("eval-source check NOT run (--no-eval-check)")
+    if not r.excluded_checked:
+        lines.append("excluded-source check NOT run (--no-excluded-check)")
     for name, items in (
         ("over the per-task cap", r.cap_violations),
-        ("over the task share", r.share_violations),
-        ("eval sources", r.eval_leaks),
+        ("over the source share", r.share_violations),
+        ("sources excluded from training", r.excluded_sources),
         ("not split train", r.split_violations),
         ("decision not licensed by the outcome", r.decision_mismatches),
         ("schema problems", r.schema_problems),
@@ -229,9 +214,8 @@ def render(r: Coverage, strict: bool = False) -> str:
         if items:
             lines.append(f"{name} ({len(items)}): " + "; ".join(items[:_SHOW]) + (" ..." if len(items) > _SHOW else ""))
     failures = r.failures(strict)
-    lines.append(
-        f"verdict: {'PASS' if not failures else 'FAIL ' + json.dumps(failures)}" + (" (strict)" if strict else "")
-    )
+    verdict = "PASS" if not failures else "FAIL " + json.dumps(failures)
+    lines.append(f"verdict: {verdict}" + (" (strict)" if strict else ""))
     return "\n".join(lines)
 
 
@@ -239,8 +223,16 @@ def with_overrides(quota: Quota, overrides: Mapping[str, Any]) -> Quota:
     return replace(quota, **{k: v for k, v in overrides.items() if v is not None})
 
 
+def excluded_sources(data_dir: Path) -> set[str]:
+    """`tasks.select_split.excluded_from_training`: raises when the select file or the split seeds are missing."""
+    from honest_agents.tasks.select_split import excluded_from_training
+
+    return excluded_from_training(data_dir)
+
+
 def commit_coverage(ctx: Any = None, *, manifest: Path | None = None, repo: Path | None = None) -> Any:
-    """The coverage report as a gate check (L0). Skips when the build has no manifest yet; fails as the CLI does."""
+    """The coverage report as a gate check (L0). Skips when the build has no manifest yet; fails as the CLI does, and
+    when the excluded sources cannot be read (a manifest that cannot be shown leak-free does not pass)."""
     from honest_agents.gate.checks import FAIL as GATE_FAIL
     from honest_agents.gate.checks import PASS as GATE_PASS
     from honest_agents.gate.checks import SKIP, CheckResult
@@ -255,14 +247,15 @@ def commit_coverage(ctx: Any = None, *, manifest: Path | None = None, repo: Path
         m = read_manifest(path)
     except (SchemaError, ValueError, TypeError) as e:
         return CheckResult("C1", name, 0, GATE_FAIL, f"{path}: {e}")
-    missing = [p for p in (*DEFAULT_EVAL_POOLS, *DEFAULT_EVAL_IDS) if not (root / p).is_file()]
-    if missing:
-        return CheckResult("C1", name, 0, GATE_FAIL, f"cannot check eval sources: missing {[str(p) for p in missing]}")
-    r = coverage(m, eval_task_ids([root / p for p in DEFAULT_EVAL_POOLS], [root / p for p in DEFAULT_EVAL_IDS]))
+    try:
+        excluded = excluded_sources(root / "data")
+    except OSError as e:
+        return CheckResult("C1", name, 0, GATE_FAIL, f"cannot read the excluded sources: {e}")
+    r = coverage(m, excluded)
     failures = r.failures()
     detail = (
-        f"{r.examples} examples, {r.tasks} tasks, max task share {r.max_task_share}; {len(r.under_quota)} cells under "
-        f"quota" + (f"; FAIL {failures}" if failures else "")
+        f"{r.examples} examples, {r.tasks} tasks, max source share {r.max_source_share}; {len(r.under_quota)} cells "
+        f"under quota" + (f"; FAIL {failures}" if failures else "")
     )
     return CheckResult("C1", name, 0, GATE_FAIL if failures else GATE_PASS, detail, data=r.to_dict())
 
@@ -270,12 +263,12 @@ def commit_coverage(ctx: Any = None, *, manifest: Path | None = None, repo: Path
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    ap.add_argument("--eval-pools", type=Path, nargs="*", default=list(DEFAULT_EVAL_POOLS))
-    ap.add_argument("--eval-ids", type=Path, nargs="*", default=list(DEFAULT_EVAL_IDS))
-    ap.add_argument("--no-eval-check", action="store_true", help="skip the eval-source check (reported as not run)")
+    ap.add_argument("--data-dir", type=Path, default=Path("data"), help="select_split's data dir (excluded sources)")
+    ap.add_argument("--no-excluded-check", action="store_true", help="skip the excluded-source check (reported)")
+    ap.add_argument("--cap-per-task", type=int, default=None)
+    ap.add_argument("--max-source-share", type=float, default=None)
     ap.add_argument("--min-per-cell", type=int, default=None)
-    ap.add_argument("--max-per-task", type=int, default=None)
-    ap.add_argument("--max-task-share", type=float, default=None)
+    ap.add_argument("--max-outcome-ratio", type=float, default=None)
     ap.add_argument("--strict", action="store_true", help="also fail on cells under quota and unbalanced points")
     ap.add_argument("--json", type=Path, default=None, help="also write the report here")
     args = ap.parse_args(argv)
@@ -286,14 +279,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     manifest.quota = with_overrides(
         manifest.quota,
-        {"min_per_cell": args.min_per_cell, "max_per_task": args.max_per_task, "max_task_share": args.max_task_share},
+        {
+            "cap_per_task": args.cap_per_task,
+            "max_source_share": args.max_source_share,
+            "min_per_cell": args.min_per_cell,
+            "max_outcome_ratio": args.max_outcome_ratio,
+        },
     )
     try:
-        eval_ids = None if args.no_eval_check else eval_task_ids(args.eval_pools, args.eval_ids)
+        excluded = None if args.no_excluded_check else excluded_sources(args.data_dir)
     except OSError as e:
-        print(f"coverage: cannot check eval sources ({e}); pass the eval pools, or --no-eval-check", file=sys.stderr)
+        print(
+            f"coverage: cannot read the excluded sources ({e}); pass --data-dir, or --no-excluded-check",
+            file=sys.stderr,
+        )
         return 2
-    report = coverage(manifest, eval_ids)
+    report = coverage(manifest, excluded)
     print(render(report, args.strict))
     if args.json is not None:
         args.json.parent.mkdir(parents=True, exist_ok=True)

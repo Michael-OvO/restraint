@@ -1,18 +1,19 @@
-"""Flip-test sensitivity from a probe result: P(act | pass) - P(act | fail) per commitment point, with a source-clustered CI.
+"""Flip-test sensitivity from a probe result: P(commit | pass) - P(commit | fail) per point, with a source-clustered CI.
 
     uv run python -m honest_agents.commit_points.flip_analysis --prompts data/commit/flip_prompts.jsonl \\
         --samples runs/probe/<run>/samples.jsonl [--n-boot 2000] [--seed 0] [--json out.json]
 
 `--prompts` is a `flip_probe` file (its manifest holds the pairs); `--samples` the `samples.jsonl` that
-`eval.decision_probe` wrote for it. Each sample's class is the act at its point or not (`schema.ACT_CLASS`: claim =
-`report_complete`, blame = `report_blocker`, destructive = `destroy`).
+`eval.decision_probe` wrote for it. Each sample's class is the commitment at its point or not (`schema.COMMIT_CLASS`:
+claim_done = `report_complete`, blame_env = `report_blocker`, destructive_step = `destroy`).
 
-Per pair: p_pass and p_fail, the act share of each arm's samples, and d = p_pass - p_fail. A pair counts only when both
+Per pair: p_pass and p_fail, the commit share of each arm's samples, and d = p_pass - p_fail. A pair counts only when both
 arms have samples (the others are counted as `incomplete`). Per point, the estimate is the mean of d over pairs (each
-pair weighs the same), with P(act | pass) and P(act | fail) as the means of p_pass and p_fail. The 95 % interval is a
-percentile bootstrap that resamples **source tasks** with replacement (all pairs of a drawn task come along), so several
-prefixes of one task do not count as independent evidence. Seeded; <= 2,000 resamples at L0 (integrity-gate.md). The
-same readout is given per pair source (`own_run`, `splice`). Nothing here samples a model.
+pair weighs the same), with P(commit | pass) and P(commit | fail) as the means of p_pass and p_fail. The 95 % interval
+is a percentile bootstrap that resamples **source tasks** (`pair_id`) with replacement (all pairs of a drawn source come
+along), so several prefixes or variants of one source do not count as independent evidence. Seeded; <= 2,000 resamples
+at L0 (integrity-gate.md). The same readout is given per pair origin (e.g. `own_pass+splice_fail`). Nothing here
+samples a model.
 """
 
 from __future__ import annotations
@@ -27,8 +28,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from honest_agents.commit_points.flip_probe import ARM_FAIL, ARM_PASS, FlipPair, read_pairs
-from honest_agents.commit_points.schema import ACT_CLASS, COMMIT_POINTS
+from honest_agents.commit_points.flip_probe import FlipPair, read_pairs
+from honest_agents.commit_points.schema import COMMIT_CLASS, FAIL, PASS, POINTS
 
 N_BOOT = 2000
 ALPHA = 0.05
@@ -37,9 +38,9 @@ ALPHA = 0.05
 @dataclass(frozen=True)
 class PairValue:
     pair_id: str
-    commit_point: str
-    task_id: str
-    source: str
+    point: str
+    source: str  # the CI cluster
+    origin: str
     p_pass: float
     p_fail: float
     n_pass: int
@@ -64,14 +65,14 @@ def pair_values(pairs: Sequence[FlipPair], rows: Sequence[Mapping[str, Any]], co
         counts["rows_unknown_pair"] += unknown
     out: list[PairValue] = []
     for p in pairs:
-        act = ACT_CLASS[p.commit_point]
-        got = {arm: samples.get((p.pair_id, arm), []) for arm in (ARM_PASS, ARM_FAIL)}
+        act = COMMIT_CLASS[p.point]
+        got = {arm: samples.get((p.pair_id, arm), []) for arm in (PASS, FAIL)}
         if not all(got.values()):
-            counts[f"incomplete_{p.commit_point}"] += 1
+            counts[f"incomplete_{p.point}"] += 1
             continue
         rate = {arm: sum(c == act for c in cls) / len(cls) for arm, cls in got.items()}
-        out.append(PairValue(p.pair_id, p.commit_point, p.task_id, p.source, rate[ARM_PASS], rate[ARM_FAIL],
-                             len(got[ARM_PASS]), len(got[ARM_FAIL])))  # fmt: skip
+        out.append(PairValue(p.pair_id, p.point, p.source, p.origin, rate[PASS], rate[FAIL], len(got[PASS]),
+                             len(got[FAIL])))  # fmt: skip
     return out
 
 
@@ -82,11 +83,11 @@ def _mean(xs: Sequence[float]) -> float | None:
 def cluster_bootstrap(
     values: Sequence[PairValue], stat: str, *, n_boot: int = N_BOOT, seed: int = 0, alpha: float = ALPHA
 ) -> list[float] | None:
-    """Percentile interval of the pair mean of `stat` ("d", "p_pass" or "p_fail") over task-resampled draws. None with
-    fewer than 2 tasks."""
+    """Percentile interval of the pair mean of `stat` ("d", "p_pass" or "p_fail") over source-resampled draws. None
+    with fewer than 2 sources."""
     by: dict[str, list[float]] = defaultdict(list)
     for v in values:
-        by[v.task_id].append(getattr(v, stat))
+        by[v.source].append(getattr(v, stat))
     clusters = [(sum(xs), len(xs)) for _, xs in sorted(by.items())]
     if len(clusters) < 2:
         return None
@@ -109,14 +110,14 @@ def cluster_bootstrap(
 @dataclass
 class Readout:
     pairs: int
-    tasks: int
+    sources: int
     samples: int
-    p_act_pass: float | None
-    p_act_fail: float | None
+    p_commit_pass: float | None
+    p_commit_fail: float | None
     sensitivity: float | None
     sensitivity_ci95: list[float] | None
-    p_act_pass_ci95: list[float] | None
-    p_act_fail_ci95: list[float] | None
+    p_commit_pass_ci95: list[float] | None
+    p_commit_fail_ci95: list[float] | None
 
 
 def readout(values: Sequence[PairValue], *, n_boot: int = N_BOOT, seed: int = 0) -> Readout:
@@ -128,14 +129,14 @@ def readout(values: Sequence[PairValue], *, n_boot: int = N_BOOT, seed: int = 0)
 
     return Readout(
         pairs=len(values),
-        tasks=len({v.task_id for v in values}),
+        sources=len({v.source for v in values}),
         samples=sum(v.n_pass + v.n_fail for v in values),
-        p_act_pass=r(_mean([v.p_pass for v in values])),
-        p_act_fail=r(_mean([v.p_fail for v in values])),
+        p_commit_pass=r(_mean([v.p_pass for v in values])),
+        p_commit_fail=r(_mean([v.p_fail for v in values])),
         sensitivity=r(_mean([v.d for v in values])),
         sensitivity_ci95=ci("d"),
-        p_act_pass_ci95=ci("p_pass"),
-        p_act_fail_ci95=ci("p_fail"),
+        p_commit_pass_ci95=ci("p_pass"),
+        p_commit_fail_ci95=ci("p_fail"),
     )
 
 
@@ -145,16 +146,16 @@ def analyse(
     counts: Counter[str] = Counter()
     values = pair_values(pairs, rows, counts)
     points: dict[str, Any] = {}
-    for point in COMMIT_POINTS:
-        vs = [v for v in values if v.commit_point == point]
-        if not vs and not any(p.commit_point == point for p in pairs):
+    for point in POINTS:
+        vs = [v for v in values if v.point == point]
+        if not vs and not any(p.point == point for p in pairs):
             continue
         points[point] = {
-            "act_class": ACT_CLASS[point],
+            "commit_class": COMMIT_CLASS[point],
             **asdict(readout(vs, n_boot=n_boot, seed=seed)),
-            "by_source": {
-                s: asdict(readout([v for v in vs if v.source == s], n_boot=n_boot, seed=seed))
-                for s in sorted({v.source for v in vs})
+            "by_origin": {
+                s: asdict(readout([v for v in vs if v.origin == s], n_boot=n_boot, seed=seed))
+                for s in sorted({v.origin for v in vs})
             },
         }
     return {"n_boot": n_boot, "seed": seed, "alpha": ALPHA, "points": points, "counts": dict(sorted(counts.items()))}
@@ -170,15 +171,15 @@ def _ci(c: list[float] | None) -> str:
 
 def render(result: Mapping[str, Any]) -> str:
     lines = [
-        "| point | act | pairs | tasks | P(act/pass) | P(act/fail) | sensitivity | 95 % CI (task-clustered) |",
+        "| point | commit | pairs | sources | P(commit/pass) | P(commit/fail) | sensitivity | 95 % CI (source-clustered) |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for point, r in result["points"].items():
-        rows = [(point, r)] + [(f"{point} / {s}", x) for s, x in r["by_source"].items()]
+        rows = [(point, r)] + [(f"{point} / {s}", x) for s, x in r["by_origin"].items()]
         for label, x in rows:
             lines.append(
-                f"| {label} | {r['act_class']} | {x['pairs']} | {x['tasks']} | {_f(x['p_act_pass'])} | "
-                f"{_f(x['p_act_fail'])} | {_f(x['sensitivity'], True)} | {_ci(x['sensitivity_ci95'])} |"
+                f"| {label} | {r['commit_class']} | {x['pairs']} | {x['sources']} | {_f(x['p_commit_pass'])} | "
+                f"{_f(x['p_commit_fail'])} | {_f(x['sensitivity'], True)} | {_ci(x['sensitivity_ci95'])} |"
             )
     lines.append(f"counts {result['counts']}; {result['n_boot']} resamples, seed {result['seed']}")
     return "\n".join(lines)
