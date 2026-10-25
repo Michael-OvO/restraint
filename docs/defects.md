@@ -56,6 +56,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-NEW-bench-4 | tooling / build | closed | `final_benchmark freeze` writes the items files before it checks for changes, so a freeze refused without `--refreeze` still overwrites the frozen item sets |
 | DEF-NEW-bench-5 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
 | DEF-NEW-bench-6 | tooling / build | closed | `final_benchmark freeze` without `--refreeze` accepts changed metric definitions and directions silently, keeps the surviving metrics' results and the first freeze date, so a pre-registered metric can be swapped with no trace |
+| DEF-NEW-bench-7 | tooling / build | closed | `final_benchmark freeze` (after the DEF-NEW-bench-6 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
 
 ---
 
@@ -2123,7 +2124,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (done):** `freeze` refuses a benchmark whose items, sources or metrics (the whole definition: side, name,
   direction, headline, description) changed unless `--refreeze`; with it, that benchmark's results are voided and the
   change is appended to the manifest's `refrozen` list (date, previous freeze date, before / after per field: metric
-  keys with direction, items n and sha256, sources hash). The `frozen` date stays the first freeze's; unchanged
+  keys with direction, items n and sha256, sources hash; since `9c1d36d` (DEF-NEW-bench-7) metrics and sources in
+  full). The `frozen` date stays the first freeze's; unchanged
   benchmarks keep their results. `check` requires `refrozen`, and with `--archive` flags manifest metrics that differ
   from `definitions()`. The `aaae57f` change is now logged: the AbstentionBench metrics were restored to the `7ca6e12`
   definition, the plain freeze was refused (`abstentionbench: metrics changed since the freeze`), and
@@ -2132,9 +2134,48 @@ section 7 critique) and from re-checks against the code and the archive on that 
   itself was made in `aaae57f`). Items files unchanged byte for byte; `check --archive` clean.
 - **Closure test:** `tests/eval/test_final_benchmark.py::test_a_changed_metric_is_refused_and_a_refreeze_is_logged`
   (direction / renamed / added; all three fail on `aaae57f`, which accepted them silently),
-  `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define`,
-  `::test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date` (fails on `aaae57f`: no `refrozen` key).
+  `::test_check_with_the_archive_flags_metrics_the_manifest_does_not_define` (fails on `aaae57f`: no metric check),
+  `::test_an_unchanged_freeze_keeps_the_results_and_the_freeze_date` (fails on `aaae57f`: no `refrozen` key). The
+  `2e47cd8` test file gives 6 failures on `aaae57f`, not the 4 first reported: those 5 plus
+  `::test_a_refused_freeze_leaves_the_items_files_and_manifest_as_they_were` (its refusal message match changed).
+- **Scope correction (review of `2e47cd8`):** this closure covered changes to a benchmark that is in both the old
+  manifest and the definitions. An added or removed benchmark still went through unrefused and unlogged, and a moved
+  headline was refused but logged with identical before / after keys; filed and fixed as DEF-NEW-bench-7.
 - **Impact note:** none re-scored (no results exist); the manifest's metric change is now recorded, not void.
+
+### DEF-NEW-bench-7: freeze drops or adds a benchmark silently; refrozen hides headline changes
+- **Area:** tooling / build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as in
+  `1d1cdc0`). **Found:** 2026-10-25, review of build:bench (the DEF-NEW-bench-6 fix). **Commits:** `9c1d36d` (fix,
+  tests, manifest log entry regenerated).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` `freeze()` at `2e47cd8` looped only over the new
+  `definitions()` and skipped any name not in the old manifest, so (a) a benchmark in the old manifest but gone from the
+  definitions was dropped with its results and no `refrozen` entry, without `--refreeze`, and (b) a benchmark added later
+  went in unlogged. `check --archive` compared metrics only for `name in defs`, so it missed both. Reviewer's probe on a
+  scratch copy of the real manifest with `mask` removed from the definitions: plain freeze succeeded, `mask` was gone,
+  `refrozen` did not grow, `check(archive=...)` returned `[]`. Separately, `_frozen_change` logged metrics as
+  `side.metric:direction` keys while the refusal compared whole metric dicts: moving MASK's headline from `no_lie` to
+  `accurate` was refused, then logged as before = after = `["honesty.no_lie:up", "honesty.accurate:non_inferior"]`.
+  Sources were logged only as hashes of the JSON.
+- **Impact:** no number: every result slot is null. The benchmark set (7 benchmarks) is identical in every committed
+  manifest (`7ca6e12`, `aaae57f`, `2e47cd8`), and no headline moved between them, so neither gap was ever hit; the one
+  logged change (AbstentionBench, `aaae57f`) is unaffected in content.
+- **Fix (done):** `freeze` refuses `<name>: benchmark added since the freeze` / `removed since the freeze` unless
+  `--refreeze`; with it, the `refrozen` entry holds `benchmark` (before / after: absent-added or present-removed) and
+  every frozen field before / after, and a removed benchmark's `results` and `deltas_vs_base` under `dropped`. Metrics
+  and sources are now logged in full (every field), items as n and sha256. `check --archive` flags
+  `<name>: defined but not in the manifest` and `<name>: in the manifest but no longer defined`. The manifest's
+  `refrozen[0]` was regenerated in the new format the same way as before (AbstentionBench metrics, results and deltas
+  restored to `7ca6e12`, `refrozen` emptied, plain freeze refused with `abstentionbench: metrics changed since the
+  freeze`, then `freeze --archive --refreeze`): it now holds the full `qa.f1` dict before and the two `abstained` dicts
+  after; the rest of the manifest and the items files are unchanged; `check --archive` clean. Reviewer's two probes
+  re-run on a scratch copy: `mask` removed is refused (`mask: benchmark removed since the freeze`), `check --archive`
+  flags it, `--refreeze` logs it with its items, sources and results; the moved headline logs `headline: true` on
+  `no_lie` before and on `accurate` after.
+- **Closure test:** `tests/eval/test_final_benchmark.py::test_an_added_or_removed_benchmark_is_refused_and_a_refreeze_is_logged`
+  (added / removed; both fail on `2e47cd8`, which accepted them), and
+  `::test_a_changed_metric_is_refused_and_a_refreeze_is_logged[headline]` plus the full-dict assertion in its
+  direction / renamed / added cases (all four fail on `2e47cd8`, which logged keys).
+- **Impact note:** none re-scored (no results exist); nothing void.
 
 ### DEF-NEW-bench-3: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** open. **Found:** 2026-10-25, build:bench (writing the final benchmark's arms).
