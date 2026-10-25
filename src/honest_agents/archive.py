@@ -282,8 +282,11 @@ def _load_hash_cache(cache: Path | None) -> dict[str, EpisodeHashes]:
     return out
 
 
-def hash_archive(root: Path, cache: Path | None = HASH_CACHE, jobs: int = 4) -> list[EpisodeHashes]:
-    """Hashes of every episodes file under `root`; files whose size and mtime match the cache are not re-read."""
+def hash_archive(
+    root: Path, cache: Path | None = HASH_CACHE, jobs: int = 4, *, write: bool = True
+) -> list[EpisodeHashes]:
+    """Hashes of every episodes file under `root`; files whose size and mtime match the cache are not re-read. With
+    `write=False` fresh hashes are not appended to the cache (the gate's L0 writes nothing)."""
     root = root.resolve()
     cached = _load_hash_cache(cache)
     found, todo = [], []
@@ -296,7 +299,7 @@ def hash_archive(root: Path, cache: Path | None = HASH_CACHE, jobs: int = 4) -> 
             todo.append(p)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:  # hashlib and zlib release the GIL
         fresh = list(pool.map(lambda p: hash_episodes(p, root), todo))
-    if cache is not None and fresh:
+    if cache is not None and fresh and write:
         cache.parent.mkdir(parents=True, exist_ok=True)
         with cache.open("a") as f:
             for h in fresh:

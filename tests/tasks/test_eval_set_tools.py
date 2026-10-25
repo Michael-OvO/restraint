@@ -143,7 +143,7 @@ def test_ctrl_c_cancels_queued_pairs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(g1_surfaces, "check_pair", fake_check)
     monkeypatch.setattr(g1_surfaces, "set_max_concurrent_boots", lambda n: None)
     with pytest.raises(KeyboardInterrupt):
-        g1_surfaces.main(["--variants", str(f), "--concurrency", "1"])
+        g1_surfaces.main(["--variants", str(f), "--concurrency", "1", "--no-cache"])
     # One worker: p0 raised, and at most the one pair it picked up next ran; every other queued pair was cancelled.
     assert started[0] == "p0" and len(started) <= 2, started
     assert len(cancel_calls) == n and sum(cancel_calls) >= n - 2, cancel_calls

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The one way to run the tests (macOS or Linux, no Docker or GPU needed: sandboxes are host subprocesses).
-#   scripts/test.sh                 # --fast: not docker/gpu/slow, in parallel (about 70 s on an 18-core Mac)
+#   scripts/test.sh                 # --fast: not docker/gpu/slow, in parallel (about 70 s on an 18-core Mac);
+#                                   #   includes the integrity gate's L0 sweep (tests/test_gate.py, DEF-15)
 #   scripts/test.sh --all           # everything except docker/gpu, in parallel (about 3 min)
 #   scripts/test.sh --changed       # only the test files related to files changed in git (see scripts/changed_tests.py)
 #   scripts/test.sh [-k expr] tests/test_env.py::test_x    # anything else goes to pytest as is: serial, no marker filter
@@ -16,7 +17,7 @@ JOBS="${JOBS:-auto}"
 mode=fast
 case "${1:-}" in
   --fast|--all|--changed) mode="${1#--}"; shift ;;
-  --help|-h) sed -n 2,11p "$0"; exit 0 ;;
+  --help|-h) sed -n 2,12p "$0"; exit 0 ;;
   "") ;;
   *) mode=passthrough ;;
 esac

@@ -22,7 +22,8 @@ re-runs made after the episode, often after the `rm`. Neither shows what the age
   task dir as it is now (a fixed test or sentinel), with the eval's reward config (`config.json`): the row carries the
   archived and the new case, so a grading fix re-scores the archive ("re-scored, post-fix"). Regrades are not cached.
 
-Results are cached content-addressed (docs/integrity-gate.md, "the result cache"): the key is the sha256 of the task dir
+Results are cached content-addressed (docs/integrity-gate.md, "the result cache"; `gate.cache`, shared with
+`tasks.g1_surfaces`): the key is the sha256 of the task dir
 contents, of the source files that shape a replay (`env.py`, `harness.py`, `grading.py`), of the command list, of the
 command timeout and of the base image digest. A cache hit boots nothing. A branch whose exec failed mid-way
 (`[sandbox unavailable]`) is `boot_failed` and never cached. Rows are append-only and carry a schema
@@ -40,18 +41,19 @@ import json
 import logging
 import posixpath
 import re
-import subprocess
 import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from honest_agents.behaviour import is_destructive
 from honest_agents.eval.records import history_steps
+from honest_agents.gate import cache as gate_cache
+from honest_agents.gate.cache import base_image, docker_image_digest, sha256_files, sha256_tree
 from honest_agents.harness import SANDBOX_UNAVAILABLE
 from honest_agents.report import SelfReport
 from honest_agents.reward import EpisodeOutcome, RewardBreakdown, RewardConfig, outcome_from_dict
@@ -61,7 +63,7 @@ log = logging.getLogger(__name__)
 
 CHECK = "replay_episodes"
 SCHEMA_VERSION = 1
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "honest-agents" / "gate"
+DEFAULT_CACHE_DIR = gate_cache.DEFAULT_CACHE_DIR
 DEFAULT_TASKS_ROOT = Path("data/decision/surfaces_val/tasks")
 DEFAULT_TIMEOUT_SEC = 60
 MAX_NOT_REPLAYABLE = 0.10  # S0.2 bar, per branch
@@ -260,106 +262,27 @@ class HarborRunner:
 # ── result cache ──────────────────────────────────────────────────────────────
 
 
-def sha256_tree(root: Path) -> str:
-    """sha256 over the relative paths and bytes of every file under `root` (sorted, so order-independent)."""
-    h = hashlib.sha256()
-    for p in sorted(x for x in root.rglob("*") if x.is_file()):
-        h.update(p.relative_to(root).as_posix().encode() + b"\0")
-        h.update(hashlib.sha256(p.read_bytes()).digest())
-    return h.hexdigest()
-
-
-def sha256_files(paths: Iterable[Path]) -> str:
-    h = hashlib.sha256()
-    for p in paths:
-        h.update(p.name.encode() + b"\0" + hashlib.sha256(p.read_bytes()).digest())
-    return h.hexdigest()
-
-
-def base_image(task_dir: Path) -> str:
-    """The `FROM` image of the task's Dockerfile ('' when there is none)."""
-    dockerfile = task_dir / "environment" / "Dockerfile"
-    if not dockerfile.is_file():
-        return ""
-    for line in dockerfile.read_text().splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0].upper() == "FROM":
-            return next((x for x in parts[1:] if not x.startswith("--")), "")
-    return ""
-
-
-_DIGESTS: dict[str, str] = {}
-
-
-def docker_image_digest(image: str) -> str:
-    """Local image id of `image` (`docker image inspect`), memoised per process; 'unknown' when Docker cannot say."""
-    if not image:
-        return ""
-    if image not in _DIGESTS:
-        try:
-            r = subprocess.run(
-                ["docker", "image", "inspect", "--format", "{{.Id}}", image],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            _DIGESTS[image] = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
-        except (OSError, subprocess.SubprocessError):
-            _DIGESTS[image] = "unknown"
-    return _DIGESTS[image]
-
-
 def cache_key(task_hash: str, source_hash: str, commands: Sequence[str], image_digest: str, timeout_sec: int) -> str:
-    payload = json.dumps(
-        {
-            "check": CHECK,
-            "schema": SCHEMA_VERSION,
-            "task": task_hash,
-            "sources": source_hash,
-            "commands": list(commands),
-            "image": image_digest,
-            "timeout": timeout_sec,
-        },
-        sort_keys=True,
+    return gate_cache.cache_key(
+        CHECK,
+        SCHEMA_VERSION,
+        task=task_hash,
+        sources=source_hash,
+        commands=list(commands),
+        image=image_digest,
+        timeout=timeout_sec,
     )
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
-class ReplayCache:
-    """Append-only JSONL of `{check, schema, key, entries}` rows under the gate cache directory."""
+class ReplayCache(gate_cache.ResultCache):
+    """The gate's result cache (`gate.cache.ResultCache`) for replayed history entries: `{check, schema, key, entries}`
+    rows under the gate cache directory."""
 
     def __init__(self, cache_dir: Path | None):
-        self.path = None if cache_dir is None else cache_dir / f"{CHECK}.v{SCHEMA_VERSION}.jsonl"
-        self._rows: dict[str, list[dict[str, Any]]] = {}
-        self._lock = threading.Lock()  # one appended row at a time: pool threads write rows larger than a buffer
-        if self.path is not None and self.path.is_file():
-            for line in self.path.read_text().splitlines():
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # a torn or corrupt row is never trusted
-                if (
-                    isinstance(row, dict)
-                    and row.get("check") == CHECK
-                    and row.get("schema") == SCHEMA_VERSION
-                    and isinstance(row.get("key"), str)
-                    and isinstance(row.get("entries"), list)
-                ):
-                    self._rows[row["key"]] = row["entries"]
+        super().__init__(CHECK, SCHEMA_VERSION, cache_dir, field="entries")
 
-    def get(self, key: str) -> list[dict[str, Any]] | None:
-        return self._rows.get(key)
-
-    def put(self, key: str, entries: list[dict[str, Any]]) -> None:
-        line = json.dumps({"check": CHECK, "schema": SCHEMA_VERSION, "key": key, "entries": entries}) + "\n"
-        with self._lock:
-            self._rows[key] = entries
-            if self.path is None:
-                return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "a") as f:
-                f.write(line)
+    def _valid(self, value: Any) -> bool:
+        return isinstance(value, list)
 
 
 # ── replay ────────────────────────────────────────────────────────────────────

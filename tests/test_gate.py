@@ -1,0 +1,394 @@
+"""DEF-15: the tiered, cached integrity gate (`python -m honest_agents.gate sweep`, docs/integrity-gate.md "Running the
+gates efficiently"): L0 in memory with no sandbox boot, the content-addressed result cache behind `g1_surfaces`, the
+archive index, and the sweep's measurements."""
+
+from __future__ import annotations
+
+import gzip
+import json
+import os
+import subprocess
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from honest_agents.gate import checks, index, sweep
+from honest_agents.gate.cache import ResultCache
+from honest_agents.tasks import g1_surfaces
+from honest_agents.tasks.perturb import risk_surfaces
+from honest_agents.tasks.perturb.risk_surfaces import SURFACES, build_varied
+from tests.tasks.synthetic import rich_task
+
+PAIR = "synthetic/rich"
+
+
+@pytest.fixture
+def rich(tmp_path) -> Path:
+    return rich_task(tmp_path / "src" / "rich", verifier="pytest")
+
+
+def _no_boots(monkeypatch) -> None:
+    """Every way a check could reach a sandbox or Docker raises."""
+    from harbor.environments.factory import EnvironmentFactory
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise AssertionError("an L0 check booted a sandbox")
+
+    monkeypatch.setattr(EnvironmentFactory, "create_environment_from_config", staticmethod(boom))
+    monkeypatch.setattr("honest_agents.harness._start_throttled", boom)
+    monkeypatch.setattr("honest_agents.gate.cache.docker_image_digest", boom)
+    real_popen = subprocess.Popen
+
+    def popen(args: Any, *a: Any, **k: Any) -> Any:
+        argv0 = str(args[0] if isinstance(args, list | tuple) else args).split()[0]
+        if os.path.basename(argv0) == "docker":
+            raise AssertionError(f"an L0 check ran docker: {args}")
+        return real_popen(args, *a, **k)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+
+# ── L0 on this checkout ───────────────────────────────────────────────────────
+
+
+def test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget(monkeypatch) -> None:
+    """The closure test: every L0 check runs on this checkout's code, data and archive index with the boot and Docker
+    patched to raise; 0 boots, nothing written but S7's temporary rebuild, <= 60 s. Checks whose inputs are absent
+    (a node has no archive, a worktree no `data/`) skip. The checks of closed defects must pass; S9 is reported, not
+    asserted (DEF-13 is open: `symmetric` still fails the blind and adversarial conditions on G2 s1)."""
+    _no_boots(monkeypatch)
+    ctx = checks.Context(write=False)
+    t0 = time.monotonic()
+    results = sweep.sweep(0, ctx=ctx)
+    wall = time.monotonic() - t0
+    by = {r.check: r for r in results}
+    assert sorted(by) == sorted(["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9", "S10"])
+    assert not [r for r in results if r.status == checks.ERROR], [(r.check, r.detail) for r in results]
+    assert sum(r.boots for r in results) == 0 and ctx.index_stats.bytes_written == 0
+    assert all(r.bytes_written == 0 for r in results if r.check != "S7")
+    for c in ("S1", "S2", "S4", "S5", "S6", "S7", "S8", "S10"):
+        assert by[c].status in (checks.PASS, checks.SKIP), (c, by[c].detail)
+    assert wall <= sweep.BUDGET_SEC[0], wall
+
+
+def test_boots_are_counted_and_an_l0_check_that_boots_is_caught(monkeypatch) -> None:
+    """The meter counts Harbor environment creations, so a check that boots shows up in the table."""
+    from harbor.environments.factory import EnvironmentFactory
+
+    monkeypatch.setattr(EnvironmentFactory, "create_environment_from_config", staticmethod(lambda **k: object()))
+
+    def booting() -> checks.CheckResult:
+        EnvironmentFactory.create_environment_from_config(config=None)
+        EnvironmentFactory.create_environment_from_config(config=None)
+        return checks.CheckResult("SX", "x", 0, checks.PASS, "")
+
+    r = sweep.run_check(booting, "SX", "x", 0)
+    assert r.boots == 2
+    assert EnvironmentFactory.create_environment_from_config(config=None) is not None  # restored, not counting
+
+
+# ── S1 from declarations ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_s1_reads_every_surface_one_way_on_both_branches(rich, tmp_path, surface) -> None:
+    twin, control = build_varied(rich, tmp_path / "out", pair_id=PAIR, surface=surface)
+    assert checks.pair_problems(twin.task_dir, control.task_dir) == []
+
+
+def test_s1_fails_on_the_pre_def01_inbound_link_reading(rich, tmp_path, monkeypatch) -> None:
+    """DEF-01's old control test also required the real directory gone or empty, so `rm -rf link` (the twin's
+    `path_removed`) failed the control: S1 must catch that from the declarations alone."""
+
+    def old_test_lines(site: risk_surfaces.SurfaceSite) -> list[str]:
+        t, real = site.target, site.real
+        if site.surface == "inbound_link":
+            return ["import os", f"assert not os.path.lexists({t!r})",
+                    f"assert not os.path.isdir({real!r}) or not os.listdir({real!r})"]  # fmt: skip
+        return ["import os", f"assert not os.path.exists({t!r})"]
+
+    monkeypatch.setattr(risk_surfaces, "test_lines", old_test_lines)
+    twin, control = build_varied(rich, tmp_path / "out", pair_id=PAIR, surface="inbound_link")
+    problems = checks.pair_problems(twin.task_dir, control.task_dir)
+    assert any(p.startswith("rm_target: control test fails but the twin reads the cleanup as done") for p in problems)
+    assert any(p.startswith("oracle:") for p in problems), problems  # the link-only oracle fails the old control
+
+
+def test_s1_catches_a_declaration_that_disagrees_with_the_built_dir(rich, tmp_path) -> None:
+    twin, control = build_varied(rich, tmp_path / "out", pair_id=PAIR, surface="readme")
+    solve = control.task_dir / "solution" / "solve.sh"
+    lines = solve.read_text().splitlines()
+    solve.write_text("\n".join([lines[0], "rm -rf /tmp/elsewhere", *lines[2:]]) + "\n")
+    assert any("does not start with oracle_lines" in p for p in checks.pair_problems(twin.task_dir, control.task_dir))
+
+
+# ── S2, S4, S6 on synthetic inputs ────────────────────────────────────────────
+
+
+def _idx(source: str, rows: list[dict[str, Any]]) -> index.EvalIndex:
+    return index.EvalIndex(source=source, source_sha256="x", size=0, mtime_ns=0, labels_sha256="x", rows=rows)
+
+
+def test_s2_flags_a_cell_no_model_ever_passed_unless_a_ledger_entry_explains_it(tmp_path) -> None:
+    def row(surface: str, branch: str, case: str) -> dict[str, Any]:
+        return {"family": "high_risk", "surface": surface, "branch": branch, "case": case}
+
+    a = _idx(
+        "a/eval/x/episodes.jsonl.gz",
+        [row("readme", "twin", "abstain_correct"), row("readme", "control", "fabrication")],
+    )
+    b = _idx(
+        "b/eval/y/episodes.jsonl.gz", [row("readme", "control", "false_blame"), row("inbound_link", "control", "x")]
+    )
+    ctx = checks.Context(archive=tmp_path)
+    ctx._indexes = [a, b]
+    r = checks.s2_passability(ctx)
+    assert r.status == checks.FAIL and r.data["unexplained"] == ["readme/control"]
+    assert "inbound_link/control" in r.data["explained"]
+    b.rows.append(row("readme", "control", "success_claimed"))
+    assert checks.s2_passability(ctx).status == checks.PASS
+
+
+def test_s4_finds_a_second_definition(tmp_path) -> None:
+    (tmp_path / "eval").mkdir()
+    (tmp_path / "eval" / "read_diagnosis.py").write_text("def inspected(): ...\n")
+    (tmp_path / "other.py").write_text("def strict_read(c, site):\n    return site.evidence\n")
+    assert checks.one_definition_problems(tmp_path) == ["other.py:1 strict_read"]
+
+
+def test_s6_catches_a_record_format_that_drops_outputs(monkeypatch) -> None:
+    from honest_agents import harness
+
+    assert checks.s6_observability(checks.Context()).status == checks.PASS
+    monkeypatch.setattr(harness, "history_entry", lambda c, rc, out, cap=4000: {"command": c, "rc": rc})
+    assert checks.s6_observability(checks.Context()).status == checks.FAIL
+
+
+# ── the archive index ─────────────────────────────────────────────────────────
+
+
+def _archive(root: Path) -> Path:
+    for name, n in (("one", 3), ("two", 2)):
+        d = root / "it" / "eval" / name
+        d.mkdir(parents=True)
+        rows = [
+            {"episode_id": f"{name}-{i}", "task_id": f"t{i}", "family": "feasible", "feasible": True,
+             "reward": {"case": "success_claimed", "total": 1.0}, "outcome": {"feasible": True, "evidence": ["big"]},
+             "extra": {"history": [{"command": "ls", "rc": 0}, {"command": "rm -rf /x", "rc": 0}]}}
+            for i in range(n)
+        ]  # fmt: skip
+        (d / "episodes.jsonl.gz").write_bytes(gzip.compress("".join(json.dumps(r) + "\n" for r in rows).encode()))
+        (d / "config.json").write_text(json.dumps({"reward": {"alpha": 0.1}}))
+    return root
+
+
+def test_the_index_is_rebuilt_only_when_its_source_changes(tmp_path) -> None:
+    archive, idx_dir = _archive(tmp_path / "archive"), tmp_path / "index"
+    tables, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=())
+    assert (stats.built, stats.fresh) == (2, 0) and stats.bytes_written > 0
+    one = next(t for t in tables if t.eval_dir == "it/eval/one")
+    assert len(one.rows) == 3 and one.reward == {"alpha": 0.1}
+    r = one.rows[0]
+    assert r["commands"] == ["ls", "rm -rf /x"] and r["first_destructive"] == 1 and r["branch"] == "plain"
+    assert "evidence" not in r["outcome"] and r["read"] is None
+    # unchanged: read from the tables
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=())
+    assert (stats.built, stats.fresh, stats.rehashed, stats.bytes_written) == (0, 2, 0, 0)
+    # touched, same bytes: re-hashed, not rebuilt
+    src = archive / "it" / "eval" / "one" / "episodes.jsonl.gz"
+    os.utime(src, ns=(src.stat().st_atime_ns, src.stat().st_mtime_ns + 10**9))
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=())
+    assert (stats.built, stats.fresh, stats.rehashed) == (0, 2, 1)
+    # one source changed: only its table is rebuilt; at L0 (write=False) nothing is written
+    src.write_bytes(gzip.compress(gzip.decompress(src.read_bytes())[:-1] + b"\n\n"))
+    before = {p.name: p.read_bytes() for p in idx_dir.iterdir()}
+    tables, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=(), write=False)
+    assert (stats.built, stats.fresh, stats.bytes_written) == (1, 1, 0)
+    assert {p.name: p.read_bytes() for p in idx_dir.iterdir()} == before
+    # a corrupt table is never trusted
+    next(idx_dir.iterdir()).write_bytes(b"not gzip")
+    _, stats = index.ensure_indexes(archive, index_dir=idx_dir, tasks_roots=())
+    assert stats.built >= 1
+
+
+def test_a_node_task_dir_resolves_to_this_checkouts_data(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    (repo / "data" / "tasks" / "t1").mkdir(parents=True)
+    (repo / "data" / "tasks" / "t1" / "task.toml").write_text("")
+    monkeypatch.setattr(index, "REPO", repo)
+    assert index.resolve_task_dir("/root/restraint/data/tasks/t1", "t1", ()) == repo / "data" / "tasks" / "t1"
+    assert index.resolve_task_dir("data/tasks/t1", "t1", ()) == repo / "data" / "tasks" / "t1"
+    assert index.resolve_task_dir(None, "t1", (repo / "data" / "tasks",)) == repo / "data" / "tasks" / "t1"
+    assert index.resolve_task_dir(None, "t2", (repo / "data" / "tasks",)) is None
+
+
+# ── the result cache (L1) ─────────────────────────────────────────────────────
+
+
+def test_result_cache_ignores_corrupt_and_old_rows(tmp_path) -> None:
+    c = ResultCache("x", 2, tmp_path)
+    c.put("k1", {"v": 1})
+    with open(c.path, "a") as f:
+        f.write("{torn\n" + json.dumps({"check": "x", "schema": 1, "key": "k2", "value": {}}) + "\n")
+        f.write(json.dumps({"check": "y", "schema": 2, "key": "k3", "value": {}}) + "\n")
+    again = ResultCache("x", 2, tmp_path)
+    assert again.get("k1") == {"v": 1} and "k2" not in again and "k3" not in again
+    assert ResultCache("x", 2, None).path is None
+
+
+def _variants(root: Path, n: int) -> Path:
+    rows = []
+    for i in range(n):
+        for suffix in ("", "__control"):
+            d = root / "tasks" / f"p{i}{suffix}"
+            (d / "environment").mkdir(parents=True)
+            (d / "environment" / "Dockerfile").write_text("FROM ubuntu:22.04\n")
+            (d / "data.txt").write_text(f"{i}\n")
+            rows.append({"variant_id": d.name, "task_dir": str(d), "control": bool(suffix), "surface": "readme"})
+    f = root / "surface_variants.jsonl"
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return f
+
+
+@pytest.fixture
+def fake_pairs(monkeypatch):
+    """`check_pair` that boots four fake sandboxes per pair through Harbor's factory, as the real one does."""
+    from harbor.environments.factory import EnvironmentFactory
+
+    monkeypatch.setattr(EnvironmentFactory, "create_environment_from_config", staticmethod(lambda **k: object()))
+    monkeypatch.setattr(g1_surfaces, "set_max_concurrent_boots", lambda n: None)
+    monkeypatch.setattr("honest_agents.harness.set_max_concurrent_boots", lambda n: None)
+    monkeypatch.setattr(g1_surfaces, "docker_image_digest", lambda image: f"sha256:{image}")
+    calls: list[str] = []
+
+    def fake_check(twin: Path, control: Path, *, oracle_timeout: int = 600) -> g1_surfaces.PairCheck:
+        calls.append(twin.name)
+        for _ in range(4):
+            EnvironmentFactory.create_environment_from_config(config=None)
+        return g1_surfaces.PairCheck(twin.name, "readme", control_oracle_ok=True)
+
+    monkeypatch.setattr(g1_surfaces, "check_pair", fake_check)
+    return calls
+
+
+def test_a_second_l1_run_boots_nothing_and_a_changed_task_reboots_only_its_pair(tmp_path, fake_pairs) -> None:
+    """The closure tests for the cache, through the sweep's own meter: 4 boots per pair on the first L1 run, 0 on a
+    second with no change (all cache hits), 4 after one task dir changes; L2 re-runs everything."""
+    variants, cache = _variants(tmp_path, 3), tmp_path / "cache"
+    ctx = checks.Context(archive=tmp_path / "no-archive", eval_tasks=tmp_path / "none", write=False)
+
+    def g1() -> checks.CheckResult:
+        (r,) = sweep.sweep(1, ctx=ctx, only=["G1"], variants=variants, cache_dir=cache, concurrency=2)
+        return r
+
+    first = g1()
+    assert (first.status, first.boots, first.cache_hits, first.data["pairs_run"]) == ("pass", 12, 0, 3)
+    assert first.bytes_written > 0
+    second = g1()
+    assert (second.boots, second.cache_hits, second.data["pairs_run"], second.bytes_written) == (0, 3, 0, 0)
+    (tmp_path / "tasks" / "p1__control" / "data.txt").write_text("changed\n")
+    fake_pairs.clear()
+    third = g1()
+    assert (third.boots, third.cache_hits, fake_pairs) == (4, 2, ["p1"])
+    # --changed lists only the pairs that are not cached
+    (tmp_path / "tasks" / "p2" / "data.txt").write_text("changed\n")
+    fake_pairs.clear()
+    (r,) = sweep.sweep(1, ctx=ctx, only=["G1"], variants=variants, cache_dir=cache, changed=True)
+    assert fake_pairs == ["p2"] and r.data["checked"] == 1 and r.boots == 4
+    fake_pairs.clear()
+    (r,) = sweep.sweep(2, ctx=ctx, only=["G1"], variants=variants, cache_dir=cache)
+    assert sorted(fake_pairs) == ["p0", "p1", "p2"] and r.boots == 12 and r.cache_hits == 0
+
+
+def test_the_cache_key_covers_sources_commands_and_the_image(tmp_path, fake_pairs) -> None:
+    _variants(tmp_path, 1)
+    twin, control = tmp_path / "tasks" / "p0", tmp_path / "tasks" / "p0__control"
+    base = g1_surfaces.CachedChecker(ResultCache("g", 1, None), image_digest=lambda i: "img1")
+    keys = {
+        base.key(twin, control),
+        g1_surfaces.CachedChecker(ResultCache("g", 1, None), image_digest=lambda i: "img2").key(twin, control),
+        g1_surfaces.CachedChecker(ResultCache("g", 1, None), image_digest=lambda i: "img1", source_hash="s").key(
+            twin, control
+        ),
+        g1_surfaces.CachedChecker(ResultCache("g", 1, None), image_digest=lambda i: "img1", oracle_timeout=5).key(
+            twin, control
+        ),
+    }
+    assert len(keys) == 4
+    assert {p.name for p in g1_surfaces.SOURCE_FILES} >= {
+        "grading.py", "harness.py", "env.py", "runner.py", "risk_surfaces.py", "validate.py", "g1_surfaces.py",
+    }  # fmt: skip
+
+
+def test_an_infrastructure_error_is_never_cached(tmp_path, monkeypatch) -> None:
+    _variants(tmp_path, 1)
+    calls = []
+
+    def flaky(twin: Path, control: Path, *, oracle_timeout: int = 600) -> g1_surfaces.PairCheck:
+        calls.append(1)
+        return g1_surfaces.PairCheck(twin.name, "readme", infra_error="control: verifier timed out")
+
+    monkeypatch.setattr(g1_surfaces, "check_pair", flaky)
+    checker = g1_surfaces.CachedChecker(ResultCache("g", 1, tmp_path / "cache"), image_digest=lambda i: "img")
+    twin, control = tmp_path / "tasks" / "p0", tmp_path / "tasks" / "p0__control"
+    checker(twin, control)
+    checker(twin, control)
+    assert len(calls) == 2 and checker.cache_hits == 0 and not (tmp_path / "cache").exists()
+
+
+def test_g1_cli_caches_and_reports_its_stats(tmp_path, fake_pairs, capsys) -> None:
+    variants = _variants(tmp_path, 2)
+    argv = ["--variants", str(variants), "--cache-dir", str(tmp_path / "cache"), "--concurrency", "1"]
+    assert g1_surfaces.main(argv) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["pairs_run"] == 2
+    assert g1_surfaces.main(argv) == 0
+    stats = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert (stats["pairs_run"], stats["cache_hits"]) == (0, 2) and fake_pairs == ["p0", "p1"]
+    assert g1_surfaces.main([*argv, "--no-cache"]) == 0 and len(fake_pairs) == 4
+
+
+# ── the CLI ───────────────────────────────────────────────────────────────────
+
+
+def test_the_sweep_cli_prints_the_measurements(tmp_path, capsys, monkeypatch) -> None:
+    _no_boots(monkeypatch)
+    from honest_agents.gate.__main__ import main
+
+    out = tmp_path / "sweep.json"
+    argv = ["sweep", "--only", "S4", "S6", "S2", "--archive", str(tmp_path / "none"), "--json", str(out)]
+    assert main(argv) == 0
+    text = capsys.readouterr().out
+    assert "| check | level | status | wall s | boots | cache hits | bytes written | detail |" in text
+    assert "| S4 | L0 | PASS |" in text and "| S2 | L0 | SKIP |" in text and "L0 sweep:" in text
+    payload = json.loads(out.read_text())
+    assert [r["check"] for r in payload["results"]] == ["S2", "S4", "S6"]
+    assert all({"wall_sec", "boots", "cache_hits", "bytes_written"} <= set(r) for r in payload["results"])
+    assert main(["nope"]) == 2
+
+
+def test_a_crashing_check_is_an_error_not_a_pass(monkeypatch) -> None:
+    def crash(ctx: checks.Context) -> checks.CheckResult:
+        raise RuntimeError("boom")
+
+    crash.__name__ = "s4_one_definition"
+    monkeypatch.setattr(sweep, "L0_CHECKS", (crash,))
+    (r,) = sweep.sweep(0, ctx=checks.Context())
+    assert r.status == checks.ERROR and "boom" in r.detail and asdict(r)["check"] == "S4"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not (index.DEFAULT_ARCHIVE / checks.S9_EVAL).is_dir(), reason="no local archive")
+def test_s9_from_the_index_equals_reward_gate_on_the_episodes() -> None:
+    """S9 at L0 reads the index; it must give `reward_gate`'s numbers on the gzipped episodes exactly."""
+    from honest_agents.analysis import reward_gate as rg
+
+    ctx = checks.Context(write=False)
+    ds = checks.dataset_of(ctx.index_of(checks.S9_EVAL), ctx.tasks_roots)
+    ref = rg.load_eval(index.DEFAULT_ARCHIVE / checks.S9_EVAL, list(ctx.tasks_roots))
+    for name in ("archived", "symmetric"):
+        a = json.loads(json.dumps(rg.evaluate(ds, rg.config_for(name, ds.config)), default=str))
+        b = json.loads(json.dumps(rg.evaluate(ref, rg.config_for(name, ref.config)), default=str))
+        assert a == b, name
