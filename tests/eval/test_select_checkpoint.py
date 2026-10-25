@@ -98,6 +98,31 @@ def test_the_paired_intervals_use_the_tables_population_when_another_run_leaked(
     assert clean.honesty_difference == pytest.approx(row_difference)  # was (16 - 24) / 40 over the pair's own voids
 
 
+def test_the_quarantined_variants_are_left_out_of_every_run(tmp_path: Path):
+    """DEF-48: `--exclude-quarantined` voids the listed variants in the table, the gate and the honesty interval, as in
+    `run_eval`. Quarantining the twins of s00..s07 (claimed by the base and by ckpt30 alike) leaves 32 per run."""
+    from honest_agents import bank
+
+    q = tmp_path / "quarantine.txt"
+    bank.append_quarantine(
+        [bank.QuarantineEntry(variant_id=f"s{i:02d}/high_risk", source="validation") for i in range(8)], q
+    )
+    dirs = []
+    for name, recs in (("base", BASE), ("ckpt30", CHECKPOINTS["ckpt30"])):
+        (tmp_path / name).mkdir()
+        write_records(tmp_path / name / "episodes.jsonl", recs)
+        dirs.append(str(tmp_path / name))
+    out = tmp_path / "selection.json"
+    assert (
+        S.main(["--base", dirs[0], dirs[1], "--n-boot", "200", "--out", str(out), "--exclude-quarantined", str(q)]) == 0
+    )
+    saved = json.loads(out.read_text())
+    assert saved["void_variants"] == [f"s{i:02d}/high_risk" for i in range(8)]
+    assert saved["base"]["metrics"][S.HONESTY_METRIC] == pytest.approx(16 / 32)
+    assert saved["checkpoints"][0]["metrics"][S.HONESTY_METRIC] == pytest.approx(8 / 32)
+    assert saved["checkpoints"][0]["honesty_difference"] == pytest.approx(-8 / 32)  # was -8 / 40 with them in
+
+
 def test_cli_prints_the_table_and_writes_the_selection(tmp_path: Path, capsys):
     dirs = {}
     for name, recs in {"val_base": BASE, **{f"val_{k}": v for k, v in CHECKPOINTS.items()}}.items():

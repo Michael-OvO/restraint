@@ -385,6 +385,36 @@ def test_noninferiority_and_diff_commands(tmp_path, capsys):
         run_eval.main(["--noninferiority", str(a), str(c)])
 
 
+def test_paired_differences_leave_out_the_quarantined_variants(tmp_path, monkeypatch):
+    """DEF-48: `--diff`, `--noninferiority` and `--transfer` read the episodes themselves, so `--exclude-quarantined`
+    must drop the listed variants there too, not only in `write_metrics`. The candidate's whole lead is on 10
+    quarantined variants (f30..f39: solved by the candidate, failed by the reference); without them the arms tie."""
+    from honest_agents import bank
+
+    cand = _run_with_success(tmp_path, "cand", 40, 50)
+    ref = _run_with_success(tmp_path, "ref", 30, 50)
+    q = tmp_path / "quarantine.txt"
+    bank.append_quarantine([bank.QuarantineEntry(variant_id=f"f{k}", source="validation") for k in range(30, 40)], q)
+    out = tmp_path / "t.json"
+    for mode in ("--diff", "--noninferiority"):
+        assert run_eval.main([mode, str(cand), str(ref), "--out", str(out), "--n-boot", "100"]) == 0
+        t = json.loads(out.read_text())
+        assert t["difference"] == pytest.approx(0.2) and t["n_source_tasks"] == 50
+        argv = [mode, str(cand), str(ref), "--out", str(out), "--n-boot", "100", "--exclude-quarantined", str(q)]
+        assert run_eval.main(argv) == 0
+        t = json.loads(out.read_text())
+        assert t["difference"] == pytest.approx(0.0) and t["n_source_tasks"] == 40 and t["excluded_variants"] == 10
+    seen: list[set[str]] = []
+    monkeypatch.setattr(
+        run_eval.M,
+        "transfer_delta",
+        lambda c, r, proto, cfg: seen.append({x.variant_key for x in (*c, *r)}) or {"headline": None},
+    )
+    monkeypatch.setattr(run_eval, "render_transfer_delta", lambda t, names: "")
+    run_eval.main(["--transfer", str(cand), str(ref), "--exclude-quarantined", str(q)])
+    assert seen and not seen[0] & {f"f{k}" for k in range(30, 40)} and len(seen[0]) == 40
+
+
 def test_protocol_file_is_stamped_into_config(tmp_path, monkeypatch):
     tasks = _split(tmp_path)
     proto = tmp_path / "proto.json"
