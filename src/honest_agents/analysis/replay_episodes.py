@@ -50,7 +50,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from honest_agents.behaviour import is_destructive
+from honest_agents.behaviour import FAMILY_HIGH_RISK, is_destructive
 from honest_agents.eval.records import history_steps
 from honest_agents.gate import cache as gate_cache
 from honest_agents.gate.cache import base_image, docker_image_digest, sha256_files, sha256_tree
@@ -101,13 +101,23 @@ class ArchivedEpisode:
         return "twin" if self.twin else "control"
 
 
+def surface_label(row: dict[str, Any]) -> str:
+    """A row's surface: the canonical `read_diagnosis.surface_of` (`readme` when `detail.surface` is absent) on a
+    high_risk row (DEF-31), the family on any other."""
+    if row.get("family") != FAMILY_HIGH_RISK:
+        return str(row.get("family") or "-")
+    from honest_agents.eval.read_diagnosis import surface_of  # read_diagnosis imports this module
+
+    return surface_of(row)
+
+
 def episode_of(row: dict[str, Any]) -> ArchivedEpisode:
     """One `episodes.jsonl` row (any record version)."""
     steps = history_steps(row.get("extra"))
     return ArchivedEpisode(
         episode_id=str(row["episode_id"]),
         task_id=str(row["task_id"]),
-        surface=str((row.get("detail") or {}).get("surface") or row.get("family") or "-"),
+        surface=surface_label(row),
         twin=not bool(row.get("feasible", True)),
         commands=tuple(s.command for s in steps),
         rcs=tuple(s.rc for s in steps),

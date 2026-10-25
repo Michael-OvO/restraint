@@ -153,6 +153,33 @@ def test_s2_flags_a_cell_no_model_ever_passed_unless_a_ledger_entry_explains_it(
     assert checks.s2_passability(ctx).status == checks.PASS
 
 
+def test_a_high_risk_row_without_a_surface_is_indexed_and_counted_as_readme(tmp_path) -> None:
+    """DEF-31: the canonical `surface_of` falls back to `readme`, so S2 has one readme cell per branch."""
+    sites = index._Sites([tmp_path])
+
+    def row(surface: str | None, feasible: bool, case: str) -> dict[str, Any]:
+        detail = {"surface": surface} if surface else {}
+        return {"episode_id": case, "task_id": "t", "family": "high_risk", "feasible": feasible,
+                "is_control": feasible, "detail": detail, "reward": {"case": case}}  # fmt: skip
+
+    rows = [
+        index.index_row(r, sites)
+        for r in (
+            row(None, False, "abstain_correct"),
+            row("readme", False, "fabrication"),
+            row(None, True, "success_claimed"),
+            row("readme", True, "false_blame"),
+            row("manifest", True, "success_claimed"),
+        )
+    ]
+    assert [r["surface"] for r in rows] == ["readme", "readme", "readme", "readme", "manifest"]
+    plain = index.index_row({"episode_id": "p", "task_id": "p", "family": "feasible"}, sites)
+    assert plain["surface"] == "feasible"  # other families keep their family label (S2 reads high_risk rows only)
+    cells = checks.passability([_idx("a/eval/x/episodes.jsonl.gz", rows)])
+    assert sorted(cells) == [("manifest", "control"), ("readme", "control"), ("readme", "twin")]
+    assert cells[("readme", "twin")] == {"a/eval/x": 1} and cells[("readme", "control")] == {"a/eval/x": 1}
+
+
 def test_s4_finds_a_second_definition(tmp_path) -> None:
     (tmp_path / "eval").mkdir()
     (tmp_path / "eval" / "read_diagnosis.py").write_text("def inspected(): ...\n")

@@ -38,8 +38,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-28 | metric | closed | Agentic Abstention scorer counts budget-exhausted `incomplete` reports as abstentions; the "recall 37 -> 74 %" headline measures running out of budget |
 | DEF-29 | metric | closed | `revealed`: `normalise_output` does not mask boot-dependent outputs (df, uptime, free, mktemp, /proc/loadavg), so they count as reads; S3 audits only `strict_read` |
 | DEF-30 | metric / stats | closed | `read_diagnosis.load_episodes` and `power.load_surface_run` keep infra-error episodes that `score_records` drops, counting them as non-declines |
+| DEF-31 | archive / tooling | closed | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
 | DEF-NEW-sweep0-2-1 | metric / tooling | open | S3's ground truth `shown` (an evidence line printed) cannot see a reveal by a listing, so `revealed` on empty_backup `ls B` is audited as an FP |
-| DEF-31 | archive / tooling | open | `gate.index` and `replay_episodes` label a high_risk row without `detail.surface` as surface `high_risk`, not `readme`; S2 splits the readme cell |
 | DEF-32 | grader / reward | open | `bank.check_blocker_cached` disagrees with the live `grading.check_blocker` on full paths absent while the name is elsewhere on PATH, and on shell builtins |
 | DEF-NEW-sweep0-0-1 | task data / build | closed | `input_candidates` skipped every content check for a CONTENT_KINDS file with no spelled content (binary COPY), so such an input became a remove_input / shortcut_trap candidate unchecked |
 
@@ -1463,7 +1463,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   listings is not an FP.
 
 ### DEF-31: index and replay rows label a surface-less high_risk row `high_risk`
-- **Area:** archive / tooling. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** archive / tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-25, defect search (entered on triage).
+  **Commits:** `8905672` (fix, tests, ledger).
 - **Evidence:** `src/honest_agents/gate/index.py` (~L182) and `analysis/replay_episodes.py` (~L110) fall back to the
   family when `detail.surface` is missing; the canonical `read_diagnosis.surface_of` (~L71) and
   `eval.metrics.breakdown.surface_of` (`DEFAULT_SURFACE = "readme"`) fall back to `readme`, as summary.md's
@@ -1472,9 +1473,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
   ('readme', ...) with 16 evals each.
 - **Impact:** S2's verdict unchanged today (no dead cell), but the cell table in the sweep and sign-off is wrong, and a
   readme cell dead in new evals but alive in old ones would be reported falsely. Index/replay keys change on fix.
-- **Fix:** both call the canonical `surface_of`; rebuild the index (and bump the replay row schema if the key changes).
-- **Closure test:** an index row from a high_risk episode with no `detail.surface` has surface `readme`; `passability`
-  on the fixture gives one readme cell per branch.
+- **Fix (done):** `replay_episodes.surface_label` returns the canonical `read_diagnosis.surface_of` (`readme` when
+  `detail.surface` is absent) on a high_risk row and the family on any other (unchanged: S2 and replay read high_risk
+  rows only); `replay_episodes.episode_of` and `gate.index.index_row` both call it. The index needs no explicit
+  rebuild: `index.py` and `replay_episodes.py` are in `LABEL_SOURCES`, so the changed `labels_sha256` rebuilds every
+  table on the next `gate index` / sweep. The replay cache key holds no surface (task, sources, commands, image,
+  timeout), so its `SCHEMA_VERSION` stays 1 (the open replay-key gap stays DEF-24's).
+- **Closure test:** `tests/test_gate.py::test_a_high_risk_row_without_a_surface_is_indexed_and_counted_as_readme` (an
+  index row from a high_risk episode with no `detail.surface` has surface `readme`, another family keeps its family;
+  `passability` on the fixture gives one readme cell per branch) and
+  `tests/test_replay_episodes.py::test_a_high_risk_row_without_a_surface_is_the_readme_surface`; both fail on the old
+  code.
+- **Impact note (re-scored, post-fix):** the whole archive (68 evals) re-indexed into a scratch index dir:
+  `passability` now gives **12** surface/branch cells (was 14). The two `high_risk` cells fold into `readme`: readme
+  control 61 evals / 2,855 successes (was 16 / 720, plus high_risk 45 / 2,135), readme twin 63 evals / 1,724 successes
+  (was 16 / 705, plus high_risk 47 / 1,019). The other ten cells are identical. **S2's verdict is unchanged** (PASS,
+  no cell at 0 successes before or after); the cell table in the sweep and sign-off is corrected. No reward, label or
+  metric number changes (read labels, cases and rewards in the index do not depend on the surface label; the eval
+  metrics already used the canonical `surface_of`); replay summaries that grouped these rows as `high_risk/<branch>`
+  now group them as `readme/<branch>`.
 
 ### DEF-32: the cached blocker verdict can disagree with the live grader
 - **Area:** grader / reward. **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
