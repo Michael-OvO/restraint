@@ -895,7 +895,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-15: the gates are not tiered or cached
 - **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-23, owner request; code check.
-  **Commits:** `79bf77e` (gate package, cached `g1_surfaces`, shared cache, archive index, tests).
+  **Commits:** `79bf77e` (gate package, cached `g1_surfaces`, shared cache, archive index, tests); `f06fbe6` (repair
+  2026-10-25: report-episode infra errors, import-closure keys, DEF-22/23/24 entered).
 - **Evidence:**
   - `src/honest_agents/tasks/g1_surfaces.py:84-105` (`check_pair`) runs `validate_task` on the control and the twin plus
     two report episodes for every pair on every invocation. That is about 4 sandbox boots per pair, with no result cache.
