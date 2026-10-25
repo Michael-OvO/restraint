@@ -46,7 +46,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-36 | task data / build | closed | remove_input's hidden-value check counts file-format syntax, schema keywords and closed-vocabulary labels as unguessable, so recreatable inputs stay infeasible |
 | DEF-37 | metric / grader | closed | eval voids an infeasible variant only on a claimed leak; an unclaimed pass is scored as an (implicit) abstention, so void sets depend on the policy |
 | DEF-38 | metric | closed | the K=8 landmark window starts at command 1, so evidence reads after the main task count as unread; on readme it drops 25-35 points of readers and makes the "unread" twin-control gap |
-| DEF-39 | tooling / reward audit | open | L0 S9 builds its dataset from the index without the DEF-01 re-grade, so its verdict is computed on the void pre-DEF-01 inbound_link control grading |
+| DEF-39 | tooling / reward audit | closed | L0 S9 builds its dataset from the index without the DEF-01 re-grade, so its verdict is computed on the void pre-DEF-01 inbound_link control grading |
 | DEF-40 | grader | open | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | open | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
@@ -966,13 +966,17 @@ section 7 critique) and from re-checks against the code and the archive on that 
     `rm -rf link` fails that control while the twin reads `path_removed`; the link-only oracle fails it too).
   - `tests/test_gate.py::test_s9_from_the_index_equals_reward_gate_on_the_episodes` (slow, needs the archive): S9 from
     the index equals `reward_gate.load_eval` on the gzipped episodes for both configs (checked: identical JSON).
+    Corrected by DEF-39: the comparison was with the void pre-DEF-01 grading; it is now `load_eval(def01_postfix=True)`.
 - **Impact note:** tooling only; no archived number changes and nothing is re-scored. The replay cache's keys are
   unchanged. The first L0 sweep (2026-10-24, `79bf77e`): S1 120/120 pairs, S2 no cell without a success (14 cells, 68
   evals; inbound_link/control has 2 successes, in `it15_g3_c15_surface4`), S4, S5 (3,520 high_risk episodes of the 8
   evals in use resolve; the tier evals record node paths `/root/restraint/data/...`, mapped to this checkout's
   `data/`), S6, S7 (240/240 and 1,048/1,048), S8 (1 declared copy), S10 pass; **S9 fails** on G2 s1 under both configs
   (archived: blind and adversarial not below start, break-even 0.39; symmetric: blind and adversarial not below start),
-  which is DEF-13, still open. The fast-suite test asserts the checks of closed defects and reports S9.
+  which is DEF-13, still open. Corrected by DEF-39: that S9 read the void pre-DEF-01 inbound_link grading (214 controls
+  passed). Re-scored, post-fix (DEF-01 re-grade applied): symmetric PASS (start +0.026, break-even 0.500, 249 controls
+  passed); archived still FAILs (always decline +0.300 vs start +0.062, break-even 0.388), which is DEF-13's G3-config
+  finding, not the symmetric FAIL recorded here. The fast-suite test asserts the checks of closed defects and reports S9.
   Repair (2026-10-25): tooling only again; nothing re-scored.
   - The rebuilt index (68 tables, 35,606 rows, 10.2 s in memory) has rows identical to the stored tables. Every
     stored table is stale once under the new label hash, so it was rewritten with `python -m honest_agents.gate index`.
@@ -1849,7 +1853,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
     iteration-15 landmark decomposition (already void under DEF-03).
 
 ### DEF-39: L0 S9 audits the void pre-DEF-01 inbound_link grading
-- **Area:** tooling / reward audit (gate S9). **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
+- **Area:** tooling / reward audit (gate S9). **Status:** closed (2026-10-24, `85e4481`, branch `fix/sweep1-3`). **Found:** 2026-10-25, defect search (entered on triage).
 - **Evidence:** `gate/checks.py` `dataset_of` (~L546-565) builds S9's dataset with `outcome_from_dict(r["outcome"])` and
   never applies `reward_gate.inbound_link_postfix`; `reward_gate.load_eval` applies it only with `def01_postfix=True`
   (~L372-403). The parity test `tests/test_gate.py::test_s9_from_the_index_equals_reward_gate_on_the_episodes`
@@ -1864,6 +1868,28 @@ section 7 critique) and from re-checks against the code and the archive on that 
   against `load_eval(def01_postfix=True, ...)`, correct the DEF-15 note.
 - **Closure test:** S9 from the index equals `load_eval(def01_postfix=True)` on the archived eval (fails on the old
   code: 214 vs 249 controls passed), plus a unit test with a synthetic pre-DEF-01 inbound_link control row.
+- **Fix (`85e4481`):** `gate/index.py` `index_row` stores `test_log` (the archived test log, capped at 2000 chars by the
+  eval) for a failed inbound_link episode, None otherwise (the label-source hash covers `index.py`, so every table
+  rebuilds once). `gate/checks.py` `dataset_of(idx, tasks_roots, regrades)` runs every reproduced row through
+  `reward_gate.inbound_link_postfix` (undecided rows counted as unreproduced, as `load_eval` does) and names the dataset
+  as `load_eval(def01_postfix=True)` does. `Context.def01_regrades` defaults to DEF-01's G2 s1 regrade rows, now
+  committed at `data/def01/regrade_g2s1.jsonl` (80 rows, copied unchanged from DEF-01's scratch dir, so L0 no longer
+  depends on a session scratch path); S9 FAILs when a configured regrade file is absent instead of silently dropping
+  the undecided controls.
+- **Tests:** `tests/test_gate.py::test_s9_from_the_index_equals_reward_gate_on_the_episodes` (slow, needs the archive)
+  now compares with `load_eval(def01_postfix=True, regrades=...)` and asserts 0 unreproduced and 249 controls passed;
+  `::test_s9_regrades_a_pre_def01_inbound_link_control_from_the_index` (synthetic pre-DEF-01 controls: an "emptied" log
+  re-grades to success_claimed, a "removed" log stays fabrication, a log-less one is decided by its regrade row or left
+  out; identical `evaluate` JSON to `load_eval(def01_postfix=True)` under both configs);
+  `::test_s9_fails_without_the_def01_regrade_rows`. All three fail on the old code (`dataset_of` takes no regrades and
+  scores the controls as graded; `Context` has no `def01_regrades`); on the old code the parity test's count is 214.
+  `scripts/test.sh --fast`: 4384 passed, 37 skipped.
+- **Impact note (re-scored, post-fix):** S9 on 15-g2-splice-replay/eval/it15_g2_surface4 via the index: 960 paired
+  episodes, 0 unreproduced, 249 controls passed (214 pre-fix); `symmetric` start +0.026, blind policies +0.000,
+  break-even 0.500, every check True: **PASS** (pre-fix FAIL, start -0.047). `archived` unchanged in verdict: FAIL
+  (start +0.062 vs always decline +0.300, break-even 0.388; adversarial and blind not below start). Every earlier L0
+  S9 verdict (the DEF-15 sweep note, corrected above) is void. No other archived number changes: `reward_gate`'s CLI
+  and DEF-13's re-score already used `--def01-postfix`. Log: scratchpad/fix/def39/s9.log.
 
 ### DEF-40: an empty baseline library resolution makes the preserve-mode listing a tamper
 - **Area:** grader (tamper check). **Status:** open. **Found:** 2026-10-25, defect search (entered on triage).
