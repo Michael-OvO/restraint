@@ -775,7 +775,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
     outside DEF-12 and not done.
 
 ### DEF-13: G3 reward makes blind declining pay (RL only)
-- **Area:** reward (design defect, not a code bug). **Status:** closed 2026-10-24 (re-closed on `fix/reward` after the
+- **Area:** reward (design defect, not a code bug). **Status:** closed 2026-10-25 (re-closed on `fix/reward` after the
   reopen of 2026-10-25: with DEF-38's anchored window, the one inspection metric, S9 passes on all three inputs; see
   "Re-close" at the end of this entry). It was first closed 2026-10-24, after a repair (for RL, use `pair_table: true`;
   the default stays off so old runs re-score identically), and reopened at the integration merge (S9's read check
@@ -783,7 +783,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   tests), `627da1b` (ledger); repair `0ee7de4` (verified-blocker cap, branch-blind grid test, gate exits on
   missing task dirs) and `1e4605d` (ledger); merge `bc8a4ab`; integration fix `60a0424` (`reward_gate` calls
   `read_diagnosis.inspected`; reopened as fixing); re-close: DEF-38's `92f5fcf` (anchored window, the metric change)
-  and `5ac407e` (regression test).
+  and `5ac407e` (regression test); re-close ledger `5525fe2`.
 - **Found:** it15 diagnosis (g3-rl-dynamics), re-checked against `reward.py` and the config chain
   `grpo_it15_g3` → `grpo_it13` → `grpo_it12` → `grpo_colocate_qwen35` on 2026-10-23.
 - **Evidence:**
@@ -1502,7 +1502,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   sweep runs its checks one at a time).
 
 ### DEF-23: the sweep does not run S3 or S11
-- **Area:** tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
+- **Area:** tooling. **Status:** closed 2026-10-25. **Found:** 2026-10-24 by the DEF-15 fixer (listed as a gap), entered 2026-10-25
   on review.
 - **Evidence:** `gate.checks.L0_CHECKS` and the L1 list in `gate.sweep` contain S1, S2, S4-S10 and G1, not S3 or S11.
   S3 (metric validity per branch) runs separately through `analysis.replay_episodes` / `read_audit`. S11
@@ -1514,7 +1514,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (proposed):** add S3 to the L1 sweep through `replay_episodes`' cache and `read_audit` (cached outputs are
   re-scored in memory), and add an S11 check that exercises each guard once against the fake sandbox. Only the egress
   preflight needs a real container.
-- **Status:** closed 2026-10-24. **Commits:** `a20ae35` (S3 and S11 in the L1 sweep, `gate.guards`, tests, docs).
+- **Status:** closed 2026-10-25. **Commits:** `a20ae35` (S3 and S11 in the L1 sweep, `gate.guards`, tests, docs);
+  ledger `f6f88f4`.
 - **Fix (done):** `gate.sweep` runs two more checks at L1/L2 (after G1; `--only S3 S11` selects them).
   - **S3** (`s3_check`): a stratified sample (`--s3-sample`, default 96 per eval = 8 per surface x branch, seed 0,
     `replay_episodes.stratified_sample`) of the high_risk episodes of `S3_EVALS` (G2 s1 `it15_g2_surface4`, the
@@ -1561,7 +1562,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 ### DEF-24: the replay cache key misses imported sources and library versions
 - **Area:** tooling. **Status:** closed 2026-10-25 (the found date; the prescribed 2026-10-24 precedes it).
   **Found:** 2026-10-25, DEF-15 repair (the same gap the reviewer found in `g1_surfaces` and `gate.index`, which are
-  fixed there). **Commits:** `9b43f14` (fix with DEF-22, tests); ledger in the commit that follows it.
+  fixed there). **Commits:** `9b43f14` (fix with DEF-22, tests); ledger `5d16ee3`.
 - **Evidence:** `src/honest_agents/analysis/replay_episodes.py:74`: `SOURCE_FILES = (env.py, harness.py, grading.py)`.
   `env.py` and `grading.py` import `bank`, `mutation`, `spec`, `report`, `reward` and `verifier/*`
   (`gate.cache.import_closure` of `replay_episodes.py` lists them). The key (`replay_episodes.cache_key`) also leaves
@@ -1982,7 +1983,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   case gives `['/home/user/data/staff.db']` and the test fails on it (checked 2026-10-25).
 
 ### DEF-34: S3 audits a listing reveal as a false positive
-- **Area:** metric / tooling. **Status:** closed 2026-10-24. **Found:** 2026-10-25, while closing DEF-29 (S3 now audits `inspected`).
+- **Area:** metric / tooling. **Status:** closed 2026-10-25. **Found:** 2026-10-25, while closing DEF-29 (S3 now audits `inspected`).
 - **Evidence:** `eval/read_audit.py` `shown` is True only when a window command printed a line of `honest_variant.what`
   (or, on a `missing` empty_backup twin, named the backup and got "No such file"). `read_diagnosis.revealed` is True
   whenever the normalised outputs differ, which on empty_backup includes a bare `ls -la B` (the `empty` / `truncated`
@@ -1994,7 +1995,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   audit `revealed` against `shown` only on surfaces whose evidence is text.
 - **Closure test:** an empty_backup twin/control pair whose only window command is `ls -la B` with differing replayed
   listings is not an FP.
-- **Status:** closed 2026-10-24. **Commits:** `c9e326f` (fix, test).
+- **Status:** closed 2026-10-25. **Commits:** `c9e326f` (fix, test); ledger `f6f88f4`.
 - **Fix (done):** the first option. `read_audit.listing_shown`: with a pair row, a window command that lists or sizes
   the backup (`read_diagnosis._keeps_sizes`: `ls` / `du` / `stat` / `wc` of B or a file in it) and whose normalised
   replayed output, sizes kept, differs from the pair branch's counts as shown; rows carry `shown_by_listing_<window>`
