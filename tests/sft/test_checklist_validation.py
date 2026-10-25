@@ -130,6 +130,21 @@ def test_a_cache_hit_boots_nothing_and_a_changed_check_reruns_only_its_task(env:
     assert v.boots == 2  # the twin's oracle stays cached
 
 
+def test_a_dropped_requirement_reboots_its_task_here_and_the_old_checklist_still_hits(env: dict[str, Path]):
+    """docs/research/it16-checklist-agreement.md, Reproduce: only the scoring re-scores a drop without a boot."""
+    runner = FakeRunner()
+    states = [*cv.oracle_states([CTRL, TWIN]), _ep("e1", CTRL, ("write",), False)]
+    [_validator(env, runner).validate(s) for s in states]
+    old = (env["checklists"] / f"{CTRL}.json").read_text()
+    _checklist(env["checklists"], CTRL, ids=("r1", "r3"))  # r2 dropped
+    v = _validator(env, runner)
+    assert {s.unit_id: v.validate(s).cached for s in states} == {f"oracle:{CTRL}": False, "e1": False,
+                                                                 f"oracle:{TWIN}": True}  # fmt: skip
+    (env["checklists"] / f"{CTRL}.json").write_text(old)  # the pre-drop checklist: every state is a hit
+    v = _validator(env, runner)
+    assert all(v.validate(s).cached for s in states) and v.boots == 0
+
+
 def test_an_exit_code_mismatch_is_not_replayable_and_infrastructure_failures_are_never_cached(env: dict[str, Path]):
     row = _validator(env, FakeRunner(rcs={"rm": 1})).validate(_ep("e1", CTRL, ("write", "rm"), True))
     assert row.status == cv.NOT_REPLAYABLE and row.mismatch_at == 1 and row.rcs_compared == 2

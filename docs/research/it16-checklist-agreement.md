@@ -22,22 +22,44 @@ same verdict as the hidden tests on the same end state? Labels: **measured, post
 - **Cache.** Results are content-addressed like the gate cache (`~/.cache/honest-agents/gate/checklist_validation.v1.jsonl`).
   The key covers the task dir, the module's import closure, the Harbor/TRL versions, the state's commands, the
   checklist commands, the timeout and the base image digest. Failed sandboxes are never cached. Verdicts are scored
-  from the stored outputs (`sft.checklist_agreement`, outside the closure), so dropping a requirement re-scores with
-  no boot.
+  from the stored rows (`sft.checklist_agreement`, outside the closure), so scoring the stored rows against a
+  checklist with a requirement dropped needs no boot. `sft.checklist_validation` itself does not get that: the key
+  holds the full command list, so any task whose checklist changed, a drop included, misses the cache and reboots.
+  The module docstring's "a dropped requirement re-scores without a boot" overstates this. It holds only for the
+  scoring. The docstring is not edited, because the module's own bytes are in the key (`import_closure`): a one-line
+  docstring edit, tried on 2026-10-25, turned all 1,180 hits into misses. The correct statement is in
+  `sft.checklist_agreement`'s docstring, which is outside the closure.
 - **Run.** An interrupted first session validated 988 states. The resumed run (concurrency 2) got those 988 back from
   the cache and booted the other 192 in 47 min. Total Docker time was about 2.6 h, with 0 boot failures, inside the
   3 h budget. The first session's concurrency is not in its log.
 - **Statistics.** Agreement means checklist verdict (every requirement passes) == tests verdict. Also reported: false
   pass (checklist passes, tests fail), false fail, and the precision and recall of "checklist fails" as a detector of
   "tests fail". Each has a 90 % one-way source-cluster t interval (`analysis.power`'s variance, the prereg's
-  estimator).
+  estimator). All shares are **unweighted over the stratified sample**. The control cell is about 50/50 by archived
+  verdict (250 of 548 passes, 249 usable of 252 fails), while the eval's controls are 548/252. Failures are
+  oversampled, and they carry most of the false passes. Reweighted to the eval's mix (per archived-verdict cell:
+  agreement 0.980 on passes, 0.908 on fails), control agreement is 0.957 (unweighted 0.944), false pass 0.040
+  (0.054) and false fail 0.003 (0.002). So the unweighted figures in the tables are conservative for the 3.3 bars.
 
-Reproduce (cache hits, seconds):
+**Reproduce.** The cached rows were made with the checklists as they were *before* the drop (commit `dea80ae`). Run
+the validation with those checklists: all 1,180 states hit the cache (0 boots, about a second). Then score the rows
+with `sft.checklist_agreement`, with no Docker. Against the current checklists this gives the post-drop report and the
+verdict file. Against the `dea80ae` checklists it gives the *before drop* rows of the tables. Both were re-checked on
+2026-10-25: the numbers are identical, and only the row order differs.
 
+    git archive dea80ae data/commit_checks/checklists | tar -x -C pre/
     uv run python -m honest_agents.sft.checklist_validation --oracle --sample-per-cell 250 --concurrency 2 \
+        --checklists pre/data/commit_checks/checklists \
         --episodes <archive>/iterations/15-g4-read-rft/eval/it15_g4_sample/episodes.jsonl.gz --out rows.jsonl
     uv run python -m honest_agents.sft.checklist_agreement --rows rows.jsonl --json report.json \
         --check-results data/commit_checks/check_results/it15_g4_sample.jsonl
+    uv run python -m honest_agents.sft.checklist_agreement --rows rows.jsonl \
+        --checklists pre/data/commit_checks/checklists --json report_before.json
+
+The cache key holds the checklist commands. So running the validation with the *current* checklists misses the cache
+for 104 of the 1,180 states: the oracles of the 36 task dirs that lost a requirement, plus their sampled episodes.
+Those 104 boot sandboxes, about 25 min at concurrency 2. Their rows would then lack the dropped commands, so that run
+cannot give the *before drop* numbers.
 
 ## Bad checks: 84 requirements fail on a passing oracle (dropped)
 
@@ -45,8 +67,8 @@ Every one of the 430 oracle states passes its hidden tests. Six `solve.sh` runs 
 existing dir, an empty glob), but the tests still pass there. On those passing states, **84 requirements in 36 task
 dirs (9 sources) fail**. They reject a correct end state:
 
-- **48 use `jq`, which the images do not have** (rc 127, `jq: command not found`). They come from 2 sources
-  (`30bbc046`, `31b394a8`).
+- **48 use `jq`, which the images do not have.** All 48 outputs say `jq: command not found`. 24 exit 127; the other
+  24 exit 1, where `jq` feeds a pipe or a `$(...)` comparison. They come from 2 sources (`30bbc046`, `31b394a8`).
 - **36 are stricter than the tests or wrong.** Examples: no `\r` or whitespace in a CSV the oracle writes with CRLF
   (`3c64230a`, `4a6bf362`, `4f5b4b56`, `43e6d8bc`); a schema string comparison (`dc44e3c8`); an ownership check on the
   agent user (`0f635e4e`); a log regex with no matches on the oracle's input (`eadb3a61`).

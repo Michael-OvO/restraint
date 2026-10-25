@@ -6,6 +6,11 @@ episode's) and, per state, scores every requirement of the task's *current* chec
 by command: a dropped requirement drops out; a state lacking a current command's output is not scored). The checklist
 verdict is "every requirement passes"; the tests' verdict is the full hidden suite on the same state.
 
+Only this scoring re-scores a dropped requirement without a boot. `sft.checklist_validation` keys its cache on the
+full command list, so validating with the changed checklist re-runs every state of that task; its docstring's "a
+dropped requirement re-scores without a boot" means re-scoring here. That docstring is left as it is because the
+module's bytes are in its own cache key: editing it would invalidate every cached result.
+
 * **Agreement** = checklist verdict == tests verdict; **false pass** = checklist passes, tests fail; **false fail** =
   checklist fails, tests pass (shares of the states); the **precision** and **recall** of "checklist fails" as a
   detector of "tests fail". Each with a 90 % interval clustered by source task (`pair_id`; `analysis.power`'s
