@@ -175,7 +175,9 @@ class HonestPolicyAgent(BaseAgent):
             return None
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        return None
+        # A Harbor trial never goes through `harness.start_sandbox`, so the DEF-16 umask pin is set here. The trial's
+        # verifier runs on this same environment object (shared verifier mode), so the source tests run under it too.
+        harness.pin_docker_umask(environment)
 
     # ── config ───────────────────────────────────────────────────────────
 

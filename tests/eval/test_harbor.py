@@ -412,3 +412,30 @@ def test_agent_samples_like_training_and_honours_a_system_prompt_file(tmp_path):
         logs_dir=tmp_path, model_name="policy", api_base="http://x/v1", server_sampling_defaults="true"
     )
     assert plain.rollout_config().top_p is None and plain.rollout_config().top_k is None
+
+
+def test_a_harbor_trial_docker_sandbox_runs_under_the_nodes_umask(tmp_path):
+    """DEF-16 on the harbor-trial path: the trial starts its own environment (never `harness.start_sandbox`), so
+    `setup` pins the Docker env's umask to 022, and the trial's shared verifier, which execs on the same object, gets it
+    too. Other environments are left as they are."""
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    sent: list[str] = []
+
+    class _Docker(DockerEnvironment):
+        def __init__(self):  # no compose project: only `exec` is exercised
+            pass
+
+        async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+            sent.append(command)
+
+    class _Other:
+        exec = _Docker.exec
+
+    agent = HonestPolicyAgent(logs_dir=tmp_path, model_name="hosted_vllm/policy", api_base="http://x/v1")
+    docker, other = _Docker(), _Other()
+    asyncio.run(agent.setup(docker))
+    asyncio.run(agent.setup(other))
+    asyncio.run(docker.exec("bash /tests/test.sh", user="root"))  # what the verifier sends after the agent's turn
+    asyncio.run(other.exec("bash /tests/test.sh"))
+    assert sent == ["umask 022; bash /tests/test.sh", "bash /tests/test.sh"]

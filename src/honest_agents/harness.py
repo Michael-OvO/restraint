@@ -525,14 +525,20 @@ def pin_exec_umask(env: Any) -> None:
     env._umask_pinned = True
 
 
-async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
-    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock.
-    A Harbor Docker sandbox's commands run under `SANDBOX_UMASK` (`pin_exec_umask`)."""
-    from harbor.environments.definition import should_use_prebuilt_docker_image
+def pin_docker_umask(env: Any) -> None:
+    """`pin_exec_umask` on a Harbor Docker sandbox; other environments (fakes, other backends) are left as they are."""
     from harbor.environments.docker.docker import DockerEnvironment
 
     if isinstance(env, DockerEnvironment):
         pin_exec_umask(env)
+
+
+async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
+    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock.
+    A Harbor Docker sandbox's commands run under `SANDBOX_UMASK` (`pin_docker_umask`)."""
+    from harbor.environments.definition import should_use_prebuilt_docker_image
+
+    pin_docker_umask(env)
     name = task.short_name
     builds = environment_type == "docker" and not should_use_prebuilt_docker_image(
         task.paths.environment_dir, docker_image=task.config.environment.docker_image, force_build=False
