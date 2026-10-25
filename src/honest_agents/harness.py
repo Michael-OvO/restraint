@@ -506,10 +506,33 @@ async def _start_throttled(env: Any) -> None:
         sem.release()
 
 
-async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
-    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock."""
-    from harbor.environments.definition import should_use_prebuilt_docker_image
+# A `docker exec` process takes the daemon's umask, not the image's: 0022 on the Linux nodes, 0000 under the Mac's
+# OrbStack Docker (29.x). There every file a command or an oracle creates is world-writable, so a source test asserting
+# 0o644 fails locally and passes on the node (DEF-16: 13 of the 14 probe-set controls the local oracle gate failed).
+SANDBOX_UMASK = "022"
 
+
+def pin_exec_umask(env: Any) -> None:
+    """Run every `env.exec` command (ours and Harbor's own) under `SANDBOX_UMASK`, whatever the daemon's umask."""
+    if getattr(env, "_umask_pinned", False):
+        return
+    inner = env.exec
+
+    async def exec_(command: str, *args: Any, **kwargs: Any) -> Any:
+        return await inner(f"umask {SANDBOX_UMASK}; {command}", *args, **kwargs)
+
+    env.exec = exec_
+    env._umask_pinned = True
+
+
+async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
+    """`env.start()` under a process-wide boot slot; a task's first (image-building) boot also holds its build lock.
+    A Harbor Docker sandbox's commands run under `SANDBOX_UMASK` (`pin_exec_umask`)."""
+    from harbor.environments.definition import should_use_prebuilt_docker_image
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    if isinstance(env, DockerEnvironment):
+        pin_exec_umask(env)
     name = task.short_name
     builds = environment_type == "docker" and not should_use_prebuilt_docker_image(
         task.paths.environment_dir, docker_image=task.config.environment.docker_image, force_build=False

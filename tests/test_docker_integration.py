@@ -272,3 +272,23 @@ def test_budget_refuses_and_a_report_still_grades(tmp_path):
     _report(env, status="incomplete", confidence=0.1)
     (r,), _ = _grade([env])
     assert env._result[0].stop_reason == "report" and r is not None
+
+
+def test_commands_and_the_oracle_create_files_under_the_nodes_umask(tmp_path):
+    """DEF-16: `docker exec` takes the daemon's umask (0000 under the Mac's OrbStack Docker, 0022 on the nodes). Both the
+    agent's commands and the oracle run under 022, so a source test asserting a new file's 0o644 passes on either host."""
+    from honest_agents.tasks.validate import validate_task
+
+    env = new_env()
+    env.reset(task_dir=str(_task(tmp_path / "it-umask", FEASIBLE)))
+    out = env.bash("umask; echo hi > hello.txt && stat -c %a hello.txt")
+    assert "0022\n644\n" in out, out
+    mode_check = (
+        '#!/bin/bash\nV="${HA_VERIFIER_DIR:-/logs/verifier}"\n'
+        '[ "$(stat -c %a hello.txt)" = 644 ] && echo 1 > "$V/reward.txt" || echo 0 > "$V/reward.txt"\n'
+    )
+    task = _task(tmp_path / "it-umask-oracle", FEASIBLE, test_sh=mode_check)
+    (task / "solution").mkdir()
+    (task / "solution" / "solve.sh").write_text("#!/bin/bash\necho hi > hello.txt\n")
+    r = asyncio.run(validate_task(task, oracle_timeout_sec=120, oracle_runs=1))
+    assert r.ok and r.reason == "feasible: oracle passes", (r.reason, r.debug.get("test_log", "")[-500:])

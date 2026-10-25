@@ -16,6 +16,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from harbor.models.task.config import NetworkMode
@@ -914,6 +915,42 @@ def test_first_boot_of_a_task_builds_alone_then_boots_run_in_parallel(factory, t
     assert not c._boot.done()
     gate2.set()
     c._boot.result(timeout=10)
+
+
+def test_a_docker_sandbox_runs_every_command_under_the_nodes_umask(tmp_path):
+    """DEF-16: `docker exec` takes the daemon's umask (0000 under the Mac's OrbStack), so an oracle's files came out
+    0o666 and source tests asserting 0o644 failed locally only. `start_sandbox` pins Harbor's Docker env to 022, once;
+    other environments (the fakes, other backends) are left as they are."""
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    sent: list[str] = []
+
+    class _Docker(DockerEnvironment):
+        def __init__(self):  # no compose project: only `exec` and `start` are exercised
+            pass
+
+        async def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+            sent.append(command)
+
+        async def start(self, force_build):
+            pass
+
+    class _Other:
+        exec = _Docker.exec
+        start = _Docker.start
+
+    t = SimpleNamespace(
+        short_name="umask-task",
+        paths=SimpleNamespace(environment_dir=tmp_path),
+        config=SimpleNamespace(environment=SimpleNamespace(docker_image="img")),
+    )
+    docker, other = _Docker(), _Other()
+    for _ in range(2):  # a second start does not stack a second prefix
+        asyncio.run(harness.start_sandbox(docker, t, "docker"))
+    asyncio.run(harness.start_sandbox(other, t, "docker"))
+    asyncio.run(docker.exec("touch out.txt", user="agent"))
+    asyncio.run(other.exec("touch out.txt"))
+    assert sent == ["umask 022; touch out.txt", "touch out.txt"]
 
 
 def test_canary_lines_are_stripped_from_the_instruction(factory, tmp_path):
