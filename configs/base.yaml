@@ -6,6 +6,7 @@
 # Every key under `grpo:` is a trl.GRPOConfig field (validated at startup). run_name/output_dir/seed/reward_weights/
 # model_init_kwargs, cast_lm_head_to_fp32 and the evaluation fields are derived from the other sections.
 seed: 42
+restraint_run: true    # a restraint / honesty experiment: checkpoint selection may not be capability-only (DEF-08)
 output_root: outputs
 
 model:
@@ -59,7 +60,15 @@ probe:                  # periodic held-out probe, TRL's evaluation loop over da
   max_variants: 100     # size of the eval_file subset (a probe_file is used whole)
   batch_size: 25        # episodes in flight; a multiple of samples_per_variant
   on_start: true        # baseline probe of the untrained policy
+  # Checkpoint selection (DEF-08, train.grpo.check_selection). task_success ignores honesty and is refused on a
+  # restraint run: set fixed_checkpoint_step (fixed in the pre-registration), or a selection_metric that the
+  # preregistration file names. Configs from before the rule (iterations 7-15) run with
+  # probe.legacy_capability_selection=true on the command line.
   selection_metric: eval_honest/task_success
+  greater_is_better: true
+  fixed_checkpoint_step: null
+  preregistration: null
+  legacy_capability_selection: false
   samples_per_variant: 1  # episodes per variant; cost = rows x this per probe (`--dry-run` prints episodes_per_probe)
   min_infeasible: 60    # floors for a probe_file: fewer impossible / feasible variants are refused
   min_feasible: 60

@@ -567,14 +567,35 @@ class ValidationProbe(TrainerCallback):
     sampling settings. This callback appends the metrics to `validation_probe.jsonl` and keeps
     `best_checkpoint.json` pointing at the checkpoint with the best `selection_metric`. The test split is never
     read during training, so it cannot leak into checkpoint choice. Earlier steps win ties.
+
+    With `fixed_step` (`probe.fixed_checkpoint_step`, chosen in the pre-registration) the probes are only recorded and
+    the pointer is written when that step's checkpoint is saved. `selection` (`train.grpo.check_selection`) is stored
+    in the pointer as the rule it was chosen by (DEF-08).
     """
 
-    def __init__(self, output_dir: str | Path, selection_metric: str, greater_is_better: bool = True):
+    def __init__(
+        self,
+        output_dir: str | Path,
+        selection_metric: str,
+        greater_is_better: bool = True,
+        *,
+        fixed_step: int | None = None,
+        selection: dict[str, Any] | None = None,
+    ):
         self.output_dir = Path(output_dir)
         self.selection_metric = selection_metric
         self.greater_is_better = greater_is_better
+        self.fixed_step = fixed_step
+        self.selection = selection
         self.best: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
+
+    def _write_best(self, best: dict[str, Any]) -> None:
+        if self.selection is not None:
+            best = {**best, "selection": self.selection}
+        self.best = best
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.output_dir / BEST_CHECKPOINT_FILE).write_text(json.dumps(best, indent=2) + "\n")
 
     def _better(self, value: float) -> bool:
         if self.best is None:
@@ -592,13 +613,15 @@ class ValidationProbe(TrainerCallback):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         with (self.output_dir / VALIDATION_FILE).open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")
+        if self.fixed_step is not None:
+            return None
         value = _number(metrics.get(self.selection_metric))
         if value is None:
             logger.warning("validation probe at step %d has no %s; not used for selection", step, self.selection_metric)
             return None
         if not self._better(value):
             return None
-        self.best = {
+        self._write_best({
             "step": int(step),
             "metric": self.selection_metric,
             "value": value,
@@ -606,8 +629,7 @@ class ValidationProbe(TrainerCallback):
             # Step 0 is the untrained policy: the probe's baseline, which wins only if training never helped.
             "checkpoint": str(self.output_dir / f"checkpoint-{int(step)}") if int(step) > 0 else None,
             "selected_on": "validation",
-        }
-        (self.output_dir / BEST_CHECKPOINT_FILE).write_text(json.dumps(self.best, indent=2) + "\n")
+        })  # fmt: skip
         logger.info("validation probe: best %s = %.4f at step %d", self.selection_metric, value, step)
         return self.best
 
@@ -617,6 +639,23 @@ class ValidationProbe(TrainerCallback):
             best = json.loads(path.read_text())
             if best.get("metric") == self.selection_metric and best.get("step", 0) <= state.global_step:
                 self.best = best
+
+    def on_save(self, args, state, control, **kwargs):
+        if (
+            self.fixed_step is None
+            or state.global_step != self.fixed_step
+            or not getattr(state, "is_world_process_zero", True)
+        ):
+            return
+        self._write_best({
+            "step": self.fixed_step,
+            "metric": "fixed_checkpoint_step",
+            "value": float(self.fixed_step),
+            "greater_is_better": True,
+            "checkpoint": str(self.output_dir / f"checkpoint-{self.fixed_step}"),
+            "selected_on": "pre-registration",
+        })  # fmt: skip
+        logger.info("checkpoint fixed in advance: step %d", self.fixed_step)
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics and getattr(state, "is_world_process_zero", True):

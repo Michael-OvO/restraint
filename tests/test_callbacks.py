@@ -286,6 +286,35 @@ def test_validation_probe_survives_a_resume(tmp_path: Path):
     assert again.record(100, {VAL: 0.6}) is None  # worse than the best of the first life
 
 
+def test_validation_probe_with_a_fixed_step_never_moves_the_pointer(tmp_path: Path):
+    """DEF-08: a checkpoint fixed in the pre-registration is the pointer, whatever the probes say; they are only logged."""
+    rule = {"rule": "fixed_step", "fixed_step": 10}
+    probe = ValidationProbe(tmp_path, VAL, fixed_step=10, selection=rule)
+    assert probe.record(5, {VAL: 0.9}) is None and not (tmp_path / callbacks.BEST_CHECKPOINT_FILE).exists()
+    for step in (5, 10, 15):
+        probe.on_save(*_handler_inputs(step))
+    assert probe.record(15, {VAL: 0.95}) is None
+    best = json.loads((tmp_path / callbacks.BEST_CHECKPOINT_FILE).read_text())
+    assert (
+        best["step"] == 10
+        and best["checkpoint"].endswith("checkpoint-10")
+        and best["selected_on"] == "pre-registration"
+    )
+    assert best["selection"] == rule
+    assert len((tmp_path / callbacks.VALIDATION_FILE).read_text().splitlines()) == 2  # the probes are still recorded
+
+
+def test_validation_probe_minimises_and_records_its_rule(tmp_path: Path):
+    metric = "eval_honest/claim_rate_infeasible"
+    rule = {"rule": "preregistered_metric", "metric": metric, "preregistration": {"file": "p.md", "sha256": "ab"}}
+    probe = ValidationProbe(tmp_path, metric, greater_is_better=False, selection=rule)
+    probe.record(0, {metric: 0.13})
+    probe.record(10, {metric: 0.05})
+    assert probe.record(15, {metric: 0.10}) is None
+    best = json.loads((tmp_path / callbacks.BEST_CHECKPOINT_FILE).read_text())
+    assert best["step"] == 10 and best["greater_is_better"] is False and best["selection"] == rule
+
+
 def _train_steps(stop: StopRules, first: int, last: int, reward_at) -> None:
     for step in range(first, last + 1):
         stop.observe(step, healthy(reward=reward_at(step)))
