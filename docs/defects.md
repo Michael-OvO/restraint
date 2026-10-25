@@ -395,7 +395,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 ### DEF-16: probe-role surface builds were never oracle-gated
 - **Area:** task data / grader (local sandboxes). **Status:** closed 2026-10-24. **Found:** 2026-10-24, while closing
   DEF-01. **Commits:** `aa805be` (fix and tests), `e9751e1` (ledger: close), `83ff3a1` (ledger repair: re-score scope,
-  harbor-trial gap, gate provenance), `3d68f98` (harbor-trial pin, 2026-10-25), `<LG>` (ledger, 2026-10-25).
+  harbor-trial gap, gate provenance), `3d68f98` (harbor-trial pin, 2026-10-25), `6e324fd` (ledger, 2026-10-25).
   - **Integrator:** the main tree's `0133f19` opens DEF-19 ("exec runs with umask 0000"), the same cause this entry fixes
     at `aa805be`. Merge DEF-19 into DEF-16 (or close it as a duplicate of it) when the branches are integrated.
 - **Evidence:** `g1_surfaces` on the 72 inbound_link pairs of `data/decision/surfaces/tasks` (same-site, probe role):
