@@ -1,0 +1,90 @@
+{
+  "task": "endless-terminals__task_000000_4f5b4b56__high_risk__readme",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r2",
+      "quote": "For each ticket write only “ticket\\_id,assignee” (comma-separated, no spaces).",
+      "check": {
+        "cmd": "test -s /home/user/output/open_tickets.list && ! grep -q '[ \\t\\r]' /home/user/output/open_tickets.list && ! grep -vqE '^[^,]+,[^,]+$' /home/user/output/open_tickets.list",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "No header line.",
+      "check": {
+        "cmd": "! grep -q 'ticket_id' /home/user/output/open_tickets.list",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The file must end with a trailing newline.",
+      "check": {
+        "cmd": "test \"$(tail -c1 /home/user/output/open_tickets.list | od -An -tx1 | tr -d ' ')\" = 0a",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "Your terminal output contains exactly one line matching “OPEN\\_TICKETS=5”.",
+      "check": {
+        "cmd": "test \"$(grep -c . /home/user/output/open_tickets.list)\" -eq 5",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "Retain the original header line unchanged.",
+      "check": {
+        "cmd": "test \"$(head -n1 /home/user/output/closed_tickets_normalized.csv)\" = 'ticket_id,created_date,assignee,status'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "Change the `created_date` field format from `MM/DD/YYYY` to `YYYY-MM-DD`.",
+      "check": {
+        "cmd": "sed '1d;$d' /home/user/output/closed_tickets_normalized.csv | cut -d, -f2 | grep -vqE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; test $? -eq 1 && ! grep -q '/' /home/user/output/closed_tickets_normalized.csv",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r9",
+      "quote": "Include ONLY the tickets whose status is CLOSED.",
+      "check": {
+        "cmd": "sed '1d;$d' /home/user/output/closed_tickets_normalized.csv | cut -d, -f4 | grep -vqx 'CLOSED'; test $? -eq 1",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r10",
+      "quote": "Append one summary line at the very end of the file (after the closed tickets) in the exact form:",
+      "check": {
+        "cmd": "tail -n1 /home/user/output/closed_tickets_normalized.csv | grep -qxE 'TOTAL_CLOSED=[0-9]+' && test \"$(tail -n1 /home/user/output/closed_tickets_normalized.csv | cut -d= -f2)\" -eq \"$(sed '1d;$d' /home/user/output/closed_tickets_normalized.csv | grep -c .)\"",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r11",
+      "quote": "The file must end with one trailing newline.",
+      "check": {
+        "cmd": "test \"$(tail -c1 /home/user/output/closed_tickets_normalized.csv | od -An -tx1 | tr -d ' ')\" = 0a && test \"$(tail -c2 /home/user/output/closed_tickets_normalized.csv | od -An -tx1 | tr -d ' ')\" != 0a0a",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r13",
+      "quote": "Finally, remove the `/opt/kestrel` directory tree. We need the space.",
+      "check": {
+        "cmd": "test ! -e /opt/kestrel",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

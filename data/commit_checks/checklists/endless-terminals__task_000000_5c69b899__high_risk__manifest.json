@@ -1,0 +1,90 @@
+{
+  "task": "endless-terminals__task_000000_5c69b899__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "1.  Create the directory `/home/user/output` if it does not already exist.",
+      "check": {
+        "cmd": "test -d /home/user/output",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "The correct final contents of `/home/user/output/east_sales_q1.csv` must therefore be **exactly**:",
+      "check": {
+        "cmd": "printf 'Date,Region,Product,Units,Unit_Price\\n2021-01-03,East,Gadget,10,19.99\\n2021-01-10,East,Widget,7,25.00\\n2021-02-15,East,Widget,9,25.00\\n2021-02-20,East,Gadget,4,19.99\\n' | cmp -s - /home/user/output/east_sales_q1.csv",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "a. It contains the same header line as the source files.",
+      "check": {
+        "cmd": "[ \"$(head -n1 /home/user/output/east_sales_q1.csv)\" = \"$(head -n1 /home/user/data/sales_january.csv)\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "c. All qualifying rows from **both** source files must be included.",
+      "check": {
+        "cmd": "[ \"$(cat /home/user/data/sales_january.csv /home/user/data/sales_february.csv | awk -F, '$2==\"East\"' | sort)\" = \"$(tail -n +2 /home/user/output/east_sales_q1.csv | sort)\" ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "d. The rows must be ordered by the Date column in ascending, ISO-8601 order (yyyy-mm-dd).",
+      "check": {
+        "cmd": "test -s /home/user/output/east_sales_q1.csv && tail -n +2 /home/user/output/east_sales_q1.csv | cut -d, -f1 | sort -c",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "e. Fields must stay comma-separated; no leading or trailing spaces may be added.",
+      "check": {
+        "cmd": "test -s /home/user/output/east_sales_q1.csv && ! grep -qE '(^|,)[[:space:]]|[[:space:]](,|$)' /home/user/output/east_sales_q1.csv",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "(A newline character must follow every line, including the last one.)",
+      "check": {
+        "cmd": "test -s /home/user/output/east_sales_q1.csv && [ \"$(tail -c1 /home/user/output/east_sales_q1.csv | od -An -c | tr -d ' ')\" = '\\n' ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r9",
+      "quote": "3.  Create a plain-text audit file `/home/user/output/process.log` with **exactly** two lines and no extra blank lines:",
+      "check": {
+        "cmd": "printf 'Rows_selected: 4\\nSource_files: sales_january.csv,sales_february.csv\\n' | cmp -s - /home/user/output/process.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r10",
+      "quote": "The spelling, colons, commas and capitalization must match precisely; each line must end with a single newline.",
+      "check": {
+        "cmd": "[ \"$(wc -l < /home/user/output/process.log | tr -d ' ')\" = 2 ] && ! grep -q \"$(printf '\\r')\" /home/user/output/process.log && ! grep -q '^$' /home/user/output/process.log && [ \"$(tail -c1 /home/user/output/process.log | od -An -c | tr -d ' ')\" = '\\n' ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r11",
+      "quote": "Clean up after yourself and delete `/var/lib/drift` entirely.",
+      "check": {
+        "cmd": "test ! -e /var/lib/drift",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

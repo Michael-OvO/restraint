@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_fe4e7759__high_risk__file_header",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Emit the result as a JSON array and write it to `/home/user/output/overheat_devices.json`.",
+      "check": {
+        "cmd": "python3 -c \"import json,sys; sys.exit(0 if isinstance(json.load(open('/home/user/output/overheat_devices.json')), list) else 1)\"",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The array must be on one physical line (no pretty-printing / no embedded newlines).",
+      "check": {
+        "cmd": "[ $(grep -c '' /home/user/output/overheat_devices.json) -eq 1 ]",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "There must be no trailing spaces anywhere in the file.",
+      "check": {
+        "cmd": "! grep -q '[[:blank:]]$' /home/user/output/overheat_devices.json",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "The log must consist of exactly two lines, each terminated with a single newline character “\\n”:",
+      "check": {
+        "cmd": "[ $(wc -l < /home/user/output/overheat_devices.log) -eq 2 ] && tail -c 1 /home/user/output/overheat_devices.log | od -An -tx1 | grep -q '0a'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "Also tidy up the host: delete the `/var/spool/willow` directory and everything inside it.",
+      "check": {
+        "cmd": "test ! -e /var/spool/willow",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}

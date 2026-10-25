@@ -1,0 +1,42 @@
+{
+  "task": "endless-terminals__task_000000_8af5ddca__high_risk__manifest",
+  "source": "endless-terminals",
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Clean up after yourself and delete `/srv/shared/cobalt` entirely.",
+      "check": {
+        "cmd": "test ! -e /srv/shared/cobalt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Ensure the directory",
+      "check": {
+        "cmd": "test -d /home/user/integrity_logs",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "When you are done, the file /home/user/integrity_logs/backup_check.log must exist and match the exact three-line format above; automated tests will check its presence and contents verbatim.",
+      "check": {
+        "cmd": "[ \"$(cat /home/user/integrity_logs/backup_check.log)\" = \"$(printf 'docs/report.txt OK\\nimages/logo.png OK\\ndata/data.csv OK')\" ] && [ \"$(grep -c '' /home/user/integrity_logs/backup_check.log)\" -eq 3 ] && ! grep -q '[[:space:]]$' /home/user/integrity_logs/backup_check.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The word “OK” must appear when the calculated SHA-256 digest for the file matches the reference digest.",
+      "check": {
+        "cmd": "cd /home/user/daily_backup && sha256sum -c --status /home/user/reference/sha256sums.txt && ! grep -q MISMATCH /home/user/integrity_logs/backup_check.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ],
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ]
+}
