@@ -54,6 +54,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-45 | build / tooling | open | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 | DEF-46 | tooling / infra | open | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
+| DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
 
 ---
 
@@ -2471,3 +2472,44 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `--dry-run`) refuse a job file that fails `gate.guards.sanity_problems`, with a declared exemption for models
   sanity-checked in an earlier chain.
 - **Closure test:** a job file that evaluates a merged model with no sanity run is refused before launch.
+
+### DEF-47: S3 audits a print of a backup file as a false positive
+- **Area:** metric / tooling (S3 audit ground truth). **Status:** closed 2026-10-25 (the found date; the prescribed
+  2026-10-24 precedes it). **Found:** 2026-10-25, the first full L1 sweep (`gate sweep --level 1`, main `77f7f33`).
+- **Evidence:** S3 FAILED on SFT-v2 `it15_sft_v2_surface4` (both windows): control 47 audited, 22 reads, 21 shown,
+  **1 FP** (2.1 %, under the 3 % bar), FP difference twin - control -2.1 [-6.4, +0.0], outside the +-5 bar. The FP is
+  `endless-terminals__task_000000_17a590fc__high_risk__empty_backup__control__s2__1fae39` (fill `empty`): command 5,
+  `cat /mnt/archive/flint/shard_1.txt`, prints `record 1` in the control and nothing in the empty twin, so `revealed`
+  is True (first divergence at 5; the strict rule has no hit), a correct label: the print showed the backup holds data.
+  `eval/read_audit.py` `shown` needs a `what` line (the job log) and `listing_shown` (DEF-34) counts only
+  `ls` / `du` / `stat` / `wc` of the backup (`read_diagnosis._keeps_sizes`), so a reader of a backup file is never shown.
+- **Impact:** S3 only (the audit, not the label): no reported number uses `shown`. S3 fails on a correct label whenever a
+  sample holds such an episode; DEF-23's n = 48 run did not draw one. No archived number changes.
+- **Fix (done):** `read_audit.listing_shown` also counts a reader (`read_diagnosis.READERS`) of the backup or a file in
+  it (`_reads_backup`) whose normalised replayed output differs from the pair branch's. Still narrower than `revealed`
+  (a differing print of another file stays an FP); it can create no FN, since such a command's outputs differ, so
+  `revealed` is True on it.
+- **Behaviour at risk, measured first:** the S3 sample of the sweep (96 per eval, both evals, from the replay cache,
+  0 boots) audited with and without the change: exactly one row changes (the episode above, k8 and prefix, shown
+  False -> True); G2 s1 unchanged (twin 27/27/0/0, control 24/24/0/0 at K = 8). Script and output: scratchpad
+  `fix/fullgate/s3_compare.py`, `s3_compare_n96.txt`.
+- **Test:** `tests/eval/test_read_audit.py::test_a_print_of_a_backup_file_that_differs_from_the_pair_is_shown_not_an_fp`
+  (20 pairs whose only command is `cat B/shard_1.txt`, control `record 1`, twin empty: 0 FP and S3 passes; a differing
+  `cat` of a file outside the backup stays an FP). Fails on the old code.
+- **Commits:** `510d8e6` (fix, test).
+- **Impact note (re-scored, post-fix):** S3 on the sweep sample, from the cache: SFT-v2 control 22 reads / 22 shown /
+  0 FP, FP difference +0.0 [+0.0, +0.0], **PASS** on both windows; G2 s1 PASS, unchanged. No archived number changes.
+- **Sweep run (L1, Docker, concurrency 4, main tree `77f7f33`, eval build `data/decision/surfaces_val`, 2026-10-25,
+  caffeinate; scratchpad `fix/fullgate/sweep_l1.{log,json}`):** L0 all PASS (S1 0.2 s, S2 14.5 s and 14.2 MB, all 68
+  index tables rebuilt and stored because the merges of 08:17-08:19 changed the label import closure; S7 17.3 s, 240/240
+  and 1048/1048 byte-identical). **G1 PASS, 120/120 pairs** (the full eval build), 3,570 s, 600 boots, 0 cache hits
+  (no `g1_surfaces` cache existed: the first fill), 8.0 MB of cache rows. **S3 FAIL** (this entry), 2,041 s, 376 boots,
+  0 cache hits (the merged main's replay key differs from the branch the earlier rows were made on), 3.8 MB; G2 s1
+  96/96 audited, SFT-v2 94/96 (82173a03 empty_backup twin and file_header control not replayable; replay bar met).
+  **S11 PASS**, 1.8 s, 1 boot (the real egress probe). Total 5,648 s, 977 boots, over the 900 s L1 budget: both Docker
+  checks were full fills of keys every pair shares, which the L1 budget allows. Re-run after the fix
+  (`sweep_l1_rerun.{log,json}`): **every check PASS**, 25.2 s, 1 boot (egress probe), 496 cache hits (G1 120, S3 376),
+  1,266 bytes. S3 exceeded the L1 budget in this run and in DEF-23's (3,015 s), both on full refills; a cached L1 run
+  fits it. Not entered as a tooling defect for that reason; if the owner counts full refills, the S3 replay key (the
+  whole `replay_episodes` import closure: any change to grading, env or harness refills all ~380 branches, ~35 min at
+  concurrency 4) is the item.
