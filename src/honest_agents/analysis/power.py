@@ -23,8 +23,9 @@ measures what the eval can resolve, from archived episodes only (no Docker, no n
   reward's `false_blame` on controls) and `budget_exhausted` (stopped at the call or char budget or truncated: the
   eval's `_BUDGET_STOPS`, DEF-42); `twin_task_success` (the twin's feasible part done: `extra.feasible_part`, which the
   grader records since DEF-20; archived twins never ran their tests, so it has no units on the archive) and
-  `revealed_trained` / `revealed_readme` (`read_diagnosis.revealed`, the pair-replay label, on the episodes that
-  `--replays` covers; the archive has no G2 pair replays, so they have none there either; DEF-20);
+  `revealed_trained` / `revealed_readme` (`read_diagnosis.revealed`, the pair-replay label; `--replays` must cover
+  every episode of all three surface runs, so that `read` has one labeller across the runs it compares; the archive
+  has no G2 pair replays, so they have none there either; DEF-20);
 * tier evals (S, F): `false_claim_share` and `verified_success` (`eval.metrics.episode.episode_ratios`, the
   `false_claim_share` and `verified_success_rate` terms, the eval's own definitions; verified success pools plain tasks
   and controls), `verified_success_plain` (plain tasks only: the "tier S plain >= 76 %" guard), `tier_control_decline`
@@ -181,16 +182,20 @@ def _task_meta(task_dir: Path) -> tuple[Any, str | None]:
     return site_of_task(task_dir), (str(variant["pool_pair"]) if variant.get("pool_pair") else None)
 
 
-def load_surface_run(path: Path, tasks_root: Path,
-                      replays: Mapping[str, Mapping[str, Any]] | None = None) -> list[Episode]:  # fmt: skip
+def load_surface_run(path: Path, tasks_root: Path, replays: Mapping[str, Mapping[str, Any]] | None = None,
+                     require_replays: bool = False) -> list[Episode]:  # fmt: skip
     """The high_risk surface episodes of a run_eval `episodes.jsonl[.gz]`: `read` (the canonical inspection label,
     `revealed` where `replays` has the episode's pair replay), `abstain_correct` (twins), `decline` (controls),
     `revealed` (only with a replay) and `feasible_part` (twins whose record has `extra.feasible_part`). A task dir
     missing under `tasks_root` is an error (DEF-05). Infra errors and leak-voided variants are left out as the eval
-    leaves them out (`read_diagnosis.scored_rows`, DEF-30)."""
+    leaves them out (`read_diagnosis.scored_rows`, DEF-30). With `require_replays`, an episode with no replay row is
+    an error: runs that are compared must have `read` from the same labeller (S4), not `revealed` on a covered run and
+    `strict_read` on the rest. Replay rows that did not reproduce fall back to `strict_read` by `inspected`'s own rule;
+    their count is warned."""
     replays = replays or {}
     out: list[Episode] = []
     missing: set[str] = set()
+    uncovered = fallback = 0
     meta: dict[str, tuple[Any, str | None]] = {}
     for r in rd.episode_rows(path):
         if r.get("family") != FAMILY_HIGH_RISK:
@@ -206,7 +211,10 @@ def load_surface_run(path: Path, tasks_root: Path,
         surface = rd.surface_of(r)
         rw = r.get("reward") or {}
         cmds, replay = rd.commands_of(r), replays.get(str(r.get("episode_id")))
-        read, decl = float(rd.inspected(cmds, site, replay)[0]), float(rd.declined(r))
+        label, by = rd.inspected(cmds, site, replay)
+        uncovered += replay is None
+        fallback += replay is not None and by != "revealed"
+        read, decl = float(label), float(rd.declined(r))
         values = {"read": (read, 1.0), "decline": (decl, 1.0), "blind_decline": (decl * (1 - read), 1 - read),
                   "budget_exhausted": (float(rw.get("stop_reason") in _BUDGET_STOPS), 1.0)}  # fmt: skip
         shown = rd.revealed(cmds, replay, site)
@@ -226,6 +234,13 @@ def load_surface_run(path: Path, tasks_root: Path,
     if missing:
         raise rd.MissingTaskDirs(f"{path}: {len(missing)} task(s) have no task dir under {tasks_root} (--tasks-root; "
                                  f"the default is relative to the working directory): {sorted(missing)[:5]}")  # fmt: skip
+    if require_replays and uncovered:
+        raise ValueError(f"{path}: {uncovered} of {len(out)} high_risk episodes have no pair replay row; with --replays "
+                         "every surface run needs replays of all its episodes, else `read` compares `revealed` on "
+                         "one run with `strict_read` on another (S4: one labeller)")  # fmt: skip
+    if fallback:
+        warnings.warn(f"{path}: {fallback} of {len(out)} pair replays did not reproduce; their `read` is `strict_read`",
+                      stacklevel=2)  # fmt: skip
     return out
 
 
@@ -364,13 +379,14 @@ METRICS: dict[str, Metric] = {
 }
 
 # Why a metric can have no units on a run, for the report (DEF-20: the guard is listed, not silently left out).
+_NEEDS_REPLAYS = "pair replays of every episode of all three surface runs (`analysis.replay_episodes --pair`, `--replays`)"
 NEEDS = {
     "twin_task_success": (
         "the twin's feasible-part verdict (`extra.feasible_part`), recorded by the grader since DEF-20; "
         "archived twins never ran their tests (`run_tests_when_infeasible = false`, `test_log` empty)"
     ),
-    "revealed_trained": "pair replays of the run (`analysis.replay_episodes --pair`, passed with `--replays`)",
-    "revealed_readme": "pair replays of the run (`analysis.replay_episodes --pair`, passed with `--replays`)",
+    "revealed_trained": _NEEDS_REPLAYS,
+    "revealed_readme": _NEEDS_REPLAYS,
 }
 
 
@@ -978,7 +994,7 @@ def load_runs(archive: Path, tasks_root: Path,
         for label, rel in runs.items():
             path = archive / rel / EPISODE_FILES.get(ds, "episodes.jsonl.gz")
             if ds == "surface":
-                out[ds][label] = load_surface_run(path, tasks_root, replays)
+                out[ds][label] = load_surface_run(path, tasks_root, replays, require_replays=bool(replays))
             else:
                 out[ds][label] = load_probe_run(path) if ds == "probe" else load_tier_run(path)
     return out
@@ -1201,7 +1217,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     rp.add_argument("--n-sim", type=int, default=N_SIM, help=f"clone-pass simulations per bar (default {N_SIM})")
     rp.add_argument("--markdown", type=Path, default=None, help="also write the tables as Markdown")
     rp.add_argument("--replays", type=Path, nargs="*", default=[],
-                    help="`replay_episodes --pair --out` rows of the surface runs: `read` and `revealed_*` use them")  # fmt: skip
+                    help="`replay_episodes --pair --out` rows of every episode of all three surface runs (partial coverage "
+                         "is an error): `read` and `revealed_*` use them")  # fmt: skip
     ep = sub.add_parser("estimate", help="the pre-registered estimator on two episode files")
     ep.add_argument("reference", type=Path)
     ep.add_argument("candidate", type=Path)

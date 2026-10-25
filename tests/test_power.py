@@ -595,6 +595,36 @@ def test_the_def20_guards_get_an_mde_ni10_and_clone_pass_once_their_data_exists(
         assert f"| surface/{name} | {pw.NEEDS[name]} |" in text
 
 
+def test_replays_must_cover_every_surface_episode_so_read_has_one_labeller(tmp_path, capsys):
+    """DEF-20 repair: `read` is `revealed` where an episode has a pair replay and `strict_read` elsewhere, so replays of
+    only some episodes (say G2 s1's) would compare two labellers across the runs (S4). Partial coverage is an error,
+    naming the run; a replay row that did not reproduce falls back to `strict_read` by `inspected`'s rule, warned."""
+    replays = []
+
+    def hook(row, rng):
+        replays.append({"episode_id": row["episode_id"], "status": "replayable",
+                        "own": {"status": "replayable", "entries": [{"output": "x", "rc": 0}]},
+                        "pair": {"status": "replayable", "entries": [{"output": "y", "rc": 0}]}})  # fmt: skip
+
+    archive = _write_archive(tmp_path, np.random.default_rng(15), hook)
+    base = ["report", "--archive", str(archive), "--tasks-root", str(tmp_path / "root"), "--n-sim", "50"]
+    rp = tmp_path / "part.jsonl"
+    rp.write_text("".join(json.dumps(r) + "\n" for r in replays if not r["episode_id"].endswith("-3")))
+    assert pw.main([*base, "--replays", str(rp)]) == 2
+    err = capsys.readouterr().err
+    assert "have no pair replay row" in err and "it15_g2_surface4" in err
+    run = archive / pw.RUNS["surface"][pw.REF] / "episodes.jsonl.gz"
+    by_id = {r["episode_id"]: r for r in replays}
+    n = len(by_id)
+    assert len(pw.load_surface_run(run, tmp_path / "root", rd.load_replays([rp]))) == n  # direct calls may mix
+    with pytest.raises(ValueError, match=f"{n // 4} of {n} high_risk"):
+        pw.load_surface_run(run, tmp_path / "root", rd.load_replays([rp]), require_replays=True)
+    stale = {**by_id, "s0-readme-tw-0": {**by_id["s0-readme-tw-0"], "status": "diverged"}}
+    with pytest.warns(UserWarning, match=f"1 of {n} pair replays did not reproduce"):
+        eps = pw.load_surface_run(run, tmp_path / "root", stale, require_replays=True)
+    assert sum("revealed" in e.values for e in eps) == n - 1
+
+
 PREREG = Path(__file__).resolve().parents[1] / "docs" / "iteration-16-prereg.md"
 PREREG_BAR = re.compile(r"`([a-z_]+:(?:lb_gt|ub_lt):[-+0-9.]+(?: & [a-z_]+:(?:lb_gt|ub_lt):[-+0-9.]+)+)`")
 
