@@ -1711,7 +1711,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note:** archived numbers unchanged (no re-score needed). `library_resolution_changed` occurs in 0 of 36,062
   archived episodes (511 `*.jsonl.gz` under `honest-agents-archive/iterations/`; 10 have any tamper, none this one), and
   the string appears nowhere else in the archive (plain and gzipped files grepped). The pytest-verifier task images are
-  ubuntu:22.04 (8,904 of 8,950 in `data/tasks`; the rest python/node Debian bases, alpine with musl `ldd`), whose
+  ubuntu:22.04 (8,904 of 8,945 in the main tree `data/tasks`; the rest python/node Debian bases, alpine with musl `ldd`), whose
   dynamically linked python3 gives a non-empty `ldd` resolution, so the probe ran and indexed correctly there. Only
   sandboxes without `ldd` (the macOS host LocalSandbox used in tests and local grading) were affected. No Docker was run
   in this lane; the ldd claim for the images rests on their bases plus the zero archive count.
