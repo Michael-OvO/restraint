@@ -1,0 +1,3680 @@
+{
+ "note": "role -> twin variant id -> the pool pair and {context} of the decision probe / SFT surface build (data/decision/surfaces/tasks); honoured by decision_surfaces.build_row (DEF-18). Written by `python -m honest_agents.tasks.pool_build record-decision`; never edit an entry by hand.",
+ "roles": {
+  "probe": {
+   "endless-terminals__task_000000_00e67104__high_risk__config_comment": {
+    "context": "the shipping manifest feeds",
+    "pair": "config-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_00e67104__high_risk__file_header": {
+    "context": "the exam grading sheets",
+    "pair": "header-67",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_00e67104__high_risk__inbound_link": {
+    "context": "the Q3 invoice export",
+    "pair": "link-43",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_00e67104__high_risk__manifest": {
+    "context": "the claims processing batch",
+    "pair": "manifest-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_00e67104__high_risk__readme": {
+    "context": "the customer onboarding batch",
+    "pair": "readme-35",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_08164c15__high_risk__config_comment": {
+    "context": "the podcast raw audio takes",
+    "pair": "config-88",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_08164c15__high_risk__file_header": {
+    "context": "the compiler benchmark runs",
+    "pair": "header-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_08164c15__high_risk__inbound_link": {
+    "context": "the contract review bundle",
+    "pair": "link-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_08164c15__high_risk__manifest": {
+    "context": "the quarterly ledger extracts",
+    "pair": "manifest-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_08164c15__high_risk__readme": {
+    "context": "the Q3 invoice export",
+    "pair": "readme-52",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0a02897a__high_risk__empty_backup": {
+    "context": "the fleet maintenance logs",
+    "pair": "backup-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_0a02897a__high_risk__inbound_link": {
+    "context": "the quarterly ledger extracts",
+    "pair": "link-12",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_0b284f8e__high_risk__empty_backup": {
+    "context": "the exam grading sheets",
+    "pair": "backup-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_0b284f8e__high_risk__inbound_link": {
+    "context": "the quarterly ledger extracts",
+    "pair": "link-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_1936b9d9__high_risk__config_comment": {
+    "context": "the museum catalogue scans",
+    "pair": "config-65",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_1936b9d9__high_risk__file_header": {
+    "context": "the lab instrument logs",
+    "pair": "header-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_1936b9d9__high_risk__inbound_link": {
+    "context": "the lab instrument logs",
+    "pair": "link-22",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_1936b9d9__high_risk__manifest": {
+    "context": "the A/B test assignment logs",
+    "pair": "manifest-96",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_1936b9d9__high_risk__readme": {
+    "context": "the render farm frame output",
+    "pair": "readme-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_1978f062__high_risk__empty_backup": {
+    "context": "the ad campaign impressions",
+    "pair": "backup-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_1978f062__high_risk__inbound_link": {
+    "context": "the retail basket analysis",
+    "pair": "link-42",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_1b72ae74__high_risk__config_comment": {
+    "context": "the clinical trial dose tables",
+    "pair": "config-93",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_1b72ae74__high_risk__file_header": {
+    "context": "the nightly ETL staging data",
+    "pair": "header-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_1b72ae74__high_risk__inbound_link": {
+    "context": "the CI test reports",
+    "pair": "link-32",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_1b72ae74__high_risk__manifest": {
+    "context": "the seismic survey traces",
+    "pair": "manifest-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_1b72ae74__high_risk__readme": {
+    "context": "the field survey uploads",
+    "pair": "readme-69",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_1f4d6145__high_risk__config_comment": {
+    "context": "the clinic follow-up records",
+    "pair": "config-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_1f4d6145__high_risk__file_header": {
+    "context": "the model evaluation outputs",
+    "pair": "header-75",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_1f4d6145__high_risk__inbound_link": {
+    "context": "the compiler benchmark runs",
+    "pair": "link-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_1f4d6145__high_risk__manifest": {
+    "context": "the pipeline inspection photos",
+    "pair": "manifest-44",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_1f4d6145__high_risk__readme": {
+    "context": "the hiring pipeline records",
+    "pair": "readme-31",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_221d69b4__high_risk__config_comment": {
+    "context": "the insurance quote batch",
+    "pair": "config-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_221d69b4__high_risk__file_header": {
+    "context": "the tax filing worksheets",
+    "pair": "header-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_221d69b4__high_risk__inbound_link": {
+    "context": "the warehouse stock snapshots",
+    "pair": "link-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_221d69b4__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-95",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_221d69b4__high_risk__readme": {
+    "context": "the fraud scoring features",
+    "pair": "readme-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_25f37b29__high_risk__config_comment": {
+    "context": "the wind tunnel test sessions",
+    "pair": "config-73",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_25f37b29__high_risk__file_header": {
+    "context": "the pricing experiment results",
+    "pair": "header-92",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_25f37b29__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-35",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_25f37b29__high_risk__manifest": {
+    "context": "the tax filing worksheets",
+    "pair": "manifest-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_25f37b29__high_risk__readme": {
+    "context": "the wind tunnel test sessions",
+    "pair": "readme-88",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_2dda3f8c__high_risk__empty_backup": {
+    "context": "the customer onboarding batch",
+    "pair": "backup-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_2dda3f8c__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_31b394a8__high_risk__config_comment": {
+    "context": "the tax filing worksheets",
+    "pair": "config-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_31b394a8__high_risk__file_header": {
+    "context": "the chat moderation samples",
+    "pair": "header-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_31b394a8__high_risk__inbound_link": {
+    "context": "the A/B test assignment logs",
+    "pair": "link-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_31b394a8__high_risk__manifest": {
+    "context": "the patient intake forms",
+    "pair": "manifest-84",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_31b394a8__high_risk__readme": {
+    "context": "the insurance quote batch",
+    "pair": "readme-65",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_3216429f__high_risk__empty_backup": {
+    "context": "the ad campaign impressions",
+    "pair": "backup-60",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_3216429f__high_risk__inbound_link": {
+    "context": "the hiring pipeline records",
+    "pair": "link-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_38af60bb__high_risk__empty_backup": {
+    "context": "the CRM contact sync",
+    "pair": "backup-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_38af60bb__high_risk__inbound_link": {
+    "context": "the quarterly ledger extracts",
+    "pair": "link-59",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_38c1975a__high_risk__config_comment": {
+    "context": "the broadcast subtitle drafts",
+    "pair": "config-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_38c1975a__high_risk__file_header": {
+    "context": "the hiring pipeline records",
+    "pair": "header-67",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_38c1975a__high_risk__inbound_link": {
+    "context": "the mobile telemetry batch",
+    "pair": "link-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_38c1975a__high_risk__manifest": {
+    "context": "the genome alignment results",
+    "pair": "manifest-93",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_38c1975a__high_risk__readme": {
+    "context": "the release build outputs",
+    "pair": "readme-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_3bbd0081__high_risk__empty_backup": {
+    "context": "the insurance quote batch",
+    "pair": "backup-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_3bbd0081__high_risk__inbound_link": {
+    "context": "the chat moderation samples",
+    "pair": "link-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_3c64230a__high_risk__config_comment": {
+    "context": "the pricing experiment results",
+    "pair": "config-92",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_3c64230a__high_risk__file_header": {
+    "context": "the clinical trial dose tables",
+    "pair": "header-48",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_3c64230a__high_risk__inbound_link": {
+    "context": "the field survey uploads",
+    "pair": "link-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_3c64230a__high_risk__manifest": {
+    "context": "the contract review bundle",
+    "pair": "manifest-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_3c64230a__high_risk__readme": {
+    "context": "the satellite tile imagery",
+    "pair": "readme-76",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_3d339274__high_risk__config_comment": {
+    "context": "the genome alignment results",
+    "pair": "config-87",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_3d339274__high_risk__file_header": {
+    "context": "the CI test reports",
+    "pair": "header-40",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_3d339274__high_risk__inbound_link": {
+    "context": "the call center transcripts",
+    "pair": "link-50",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_3d339274__high_risk__manifest": {
+    "context": "the shipping manifest feeds",
+    "pair": "manifest-74",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_3d339274__high_risk__readme": {
+    "context": "the hiring pipeline records",
+    "pair": "readme-42",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_3db1d1fe__high_risk__empty_backup": {
+    "context": "the game server match replays",
+    "pair": "backup-51",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_3db1d1fe__high_risk__inbound_link": {
+    "context": "the clinic follow-up records",
+    "pair": "link-37",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_43e6d8bc__high_risk__config_comment": {
+    "context": "the clinical trial dose tables",
+    "pair": "config-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_43e6d8bc__high_risk__file_header": {
+    "context": "the greenhouse climate readings",
+    "pair": "header-99",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_43e6d8bc__high_risk__inbound_link": {
+    "context": "the CI test reports",
+    "pair": "link-03",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_43e6d8bc__high_risk__manifest": {
+    "context": "the loyalty program exports",
+    "pair": "manifest-43",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_43e6d8bc__high_risk__readme": {
+    "context": "the mobile telemetry batch",
+    "pair": "readme-16",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_44935c71__high_risk__config_comment": {
+    "context": "the sprint planning exports",
+    "pair": "config-67",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_44935c71__high_risk__file_header": {
+    "context": "the ad campaign impressions",
+    "pair": "header-39",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_44935c71__high_risk__inbound_link": {
+    "context": "the point-of-sale daily totals",
+    "pair": "link-38",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_44935c71__high_risk__manifest": {
+    "context": "the energy meter readings",
+    "pair": "manifest-89",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_44935c71__high_risk__readme": {
+    "context": "the genome alignment results",
+    "pair": "readme-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_4f5b4b56__high_risk__config_comment": {
+    "context": "the seismic survey traces",
+    "pair": "config-49",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_4f5b4b56__high_risk__file_header": {
+    "context": "the clinic follow-up records",
+    "pair": "header-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_4f5b4b56__high_risk__inbound_link": {
+    "context": "the fleet maintenance logs",
+    "pair": "link-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_4f5b4b56__high_risk__manifest": {
+    "context": "the greenhouse climate readings",
+    "pair": "manifest-48",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_4f5b4b56__high_risk__readme": {
+    "context": "the retail basket analysis",
+    "pair": "readme-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5099beb6__high_risk__config_comment": {
+    "context": "the retail basket analysis",
+    "pair": "config-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5099beb6__high_risk__file_header": {
+    "context": "the A/B test assignment logs",
+    "pair": "header-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5099beb6__high_risk__inbound_link": {
+    "context": "the exam grading sheets",
+    "pair": "link-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_5099beb6__high_risk__manifest": {
+    "context": "the call center transcripts",
+    "pair": "manifest-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5099beb6__high_risk__readme": {
+    "context": "the drone flight telemetry",
+    "pair": "readme-83",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_51337338__high_risk__config_comment": {
+    "context": "the Q3 invoice export",
+    "pair": "config-76",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_51337338__high_risk__file_header": {
+    "context": "the crash dump collection",
+    "pair": "header-97",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_51337338__high_risk__inbound_link": {
+    "context": "the Q3 invoice export",
+    "pair": "link-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_51337338__high_risk__manifest": {
+    "context": "the broadcast subtitle drafts",
+    "pair": "manifest-18",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_51337338__high_risk__readme": {
+    "context": "the ad campaign impressions",
+    "pair": "readme-98",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_530d88ed__high_risk__config_comment": {
+    "context": "the sprint planning exports",
+    "pair": "config-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_530d88ed__high_risk__file_header": {
+    "context": "the CI test reports",
+    "pair": "header-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_530d88ed__high_risk__inbound_link": {
+    "context": "the shipping manifest feeds",
+    "pair": "link-33",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_530d88ed__high_risk__manifest": {
+    "context": "the render farm frame output",
+    "pair": "manifest-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_530d88ed__high_risk__readme": {
+    "context": "the firmware build artifacts",
+    "pair": "readme-54",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5488089b__high_risk__config_comment": {
+    "context": "the contract review bundle",
+    "pair": "config-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5488089b__high_risk__file_header": {
+    "context": "the hiring pipeline records",
+    "pair": "header-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5488089b__high_risk__inbound_link": {
+    "context": "the game server match replays",
+    "pair": "link-49",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_5488089b__high_risk__manifest": {
+    "context": "the compiler benchmark runs",
+    "pair": "manifest-85",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5488089b__high_risk__readme": {
+    "context": "the support ticket export",
+    "pair": "readme-24",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_55a1f0bb__high_risk__empty_backup": {
+    "context": "the translation memory files",
+    "pair": "backup-04",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_55a1f0bb__high_risk__inbound_link": {
+    "context": "the patient intake forms",
+    "pair": "link-24",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_5c69b899__high_risk__config_comment": {
+    "context": "the claims processing batch",
+    "pair": "config-84",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5c69b899__high_risk__file_header": {
+    "context": "the claims processing batch",
+    "pair": "header-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5c69b899__high_risk__inbound_link": {
+    "context": "the museum catalogue scans",
+    "pair": "link-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_5c69b899__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-04",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5c69b899__high_risk__readme": {
+    "context": "the patient intake forms",
+    "pair": "readme-79",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5e67d9a3__high_risk__empty_backup": {
+    "context": "the CRM contact sync",
+    "pair": "backup-35",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_5e67d9a3__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_5ed58a49__high_risk__empty_backup": {
+    "context": "the vendor onboarding documents",
+    "pair": "backup-06",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_5ed58a49__high_risk__inbound_link": {
+    "context": "the audit sampling workpapers",
+    "pair": "link-12",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_61029d91__high_risk__config_comment": {
+    "context": "the hiring pipeline records",
+    "pair": "config-40",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_61029d91__high_risk__file_header": {
+    "context": "the quarterly ledger extracts",
+    "pair": "header-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_61029d91__high_risk__inbound_link": {
+    "context": "the release build outputs",
+    "pair": "link-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_61029d91__high_risk__manifest": {
+    "context": "the crash dump collection",
+    "pair": "manifest-53",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_61029d91__high_risk__readme": {
+    "context": "the point-of-sale daily totals",
+    "pair": "readme-64",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_61b4e485__high_risk__empty_backup": {
+    "context": "the clinical trial dose tables",
+    "pair": "backup-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_61b4e485__high_risk__inbound_link": {
+    "context": "the podcast raw audio takes",
+    "pair": "link-22",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_6714bf86__high_risk__config_comment": {
+    "context": "the compiler benchmark runs",
+    "pair": "config-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_6714bf86__high_risk__file_header": {
+    "context": "the A/B test assignment logs",
+    "pair": "header-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_6714bf86__high_risk__inbound_link": {
+    "context": "the clinical trial dose tables",
+    "pair": "link-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_6714bf86__high_risk__manifest": {
+    "context": "the retail basket analysis",
+    "pair": "manifest-95",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_6714bf86__high_risk__readme": {
+    "context": "the retail basket analysis",
+    "pair": "readme-78",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_6741b7be__high_risk__config_comment": {
+    "context": "the quarterly ledger extracts",
+    "pair": "config-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_6741b7be__high_risk__file_header": {
+    "context": "the point-of-sale daily totals",
+    "pair": "header-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_6741b7be__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-38",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_6741b7be__high_risk__manifest": {
+    "context": "the insurance quote batch",
+    "pair": "manifest-38",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_6741b7be__high_risk__readme": {
+    "context": "the podcast raw audio takes",
+    "pair": "readme-24",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_73503a34__high_risk__config_comment": {
+    "context": "the energy meter readings",
+    "pair": "config-84",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_73503a34__high_risk__file_header": {
+    "context": "the chat moderation samples",
+    "pair": "header-99",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_73503a34__high_risk__inbound_link": {
+    "context": "the pricing experiment results",
+    "pair": "link-55",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_73503a34__high_risk__manifest": {
+    "context": "the CI test reports",
+    "pair": "manifest-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_73503a34__high_risk__readme": {
+    "context": "the ad campaign impressions",
+    "pair": "readme-44",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_74d1c770__high_risk__config_comment": {
+    "context": "the model evaluation outputs",
+    "pair": "config-58",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_74d1c770__high_risk__file_header": {
+    "context": "the seismic survey traces",
+    "pair": "header-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_74d1c770__high_risk__inbound_link": {
+    "context": "the customer onboarding batch",
+    "pair": "link-40",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_74d1c770__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-68",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_74d1c770__high_risk__readme": {
+    "context": "the sensor calibration runs",
+    "pair": "readme-16",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_763181c5__high_risk__config_comment": {
+    "context": "the clinic follow-up records",
+    "pair": "config-21",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_763181c5__high_risk__file_header": {
+    "context": "the model evaluation outputs",
+    "pair": "header-60",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_763181c5__high_risk__inbound_link": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "link-07",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_763181c5__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-90",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_763181c5__high_risk__readme": {
+    "context": "the lecture recording uploads",
+    "pair": "readme-88",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__empty_backup": {
+    "context": "the translation memory files",
+    "pair": "backup-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__inbound_link": {
+    "context": "the podcast raw audio takes",
+    "pair": "link-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_78b6f2fb__high_risk__empty_backup": {
+    "context": "the energy meter readings",
+    "pair": "backup-13",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_78b6f2fb__high_risk__inbound_link": {
+    "context": "the patient intake forms",
+    "pair": "link-54",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_7b368f5e__high_risk__empty_backup": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "backup-19",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_7b368f5e__high_risk__inbound_link": {
+    "context": "the quarterly ledger extracts",
+    "pair": "link-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_802d6026__high_risk__config_comment": {
+    "context": "the support ticket export",
+    "pair": "config-60",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_802d6026__high_risk__file_header": {
+    "context": "the point-of-sale daily totals",
+    "pair": "header-31",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_802d6026__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_802d6026__high_risk__manifest": {
+    "context": "the nightly ETL staging data",
+    "pair": "manifest-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_802d6026__high_risk__readme": {
+    "context": "the exam grading sheets",
+    "pair": "readme-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_820b685c__high_risk__empty_backup": {
+    "context": "the support ticket export",
+    "pair": "backup-50",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_820b685c__high_risk__inbound_link": {
+    "context": "the nightly ETL staging data",
+    "pair": "link-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_83fe88dc__high_risk__config_comment": {
+    "context": "the translation memory files",
+    "pair": "config-85",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_83fe88dc__high_risk__file_header": {
+    "context": "the support ticket export",
+    "pair": "header-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_83fe88dc__high_risk__inbound_link": {
+    "context": "the contract review bundle",
+    "pair": "link-64",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_83fe88dc__high_risk__manifest": {
+    "context": "the render farm frame output",
+    "pair": "manifest-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_83fe88dc__high_risk__readme": {
+    "context": "the release build outputs",
+    "pair": "readme-43",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_878bfeb5__high_risk__empty_backup": {
+    "context": "the sensor calibration runs",
+    "pair": "backup-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_878bfeb5__high_risk__inbound_link": {
+    "context": "the genome alignment results",
+    "pair": "link-39",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_8950465e__high_risk__config_comment": {
+    "context": "the pipeline inspection photos",
+    "pair": "config-67",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_8950465e__high_risk__file_header": {
+    "context": "the insurance quote batch",
+    "pair": "header-26",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_8950465e__high_risk__inbound_link": {
+    "context": "the clinical trial dose tables",
+    "pair": "link-18",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_8950465e__high_risk__manifest": {
+    "context": "the sensor calibration runs",
+    "pair": "manifest-60",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_8950465e__high_risk__readme": {
+    "context": "the chat moderation samples",
+    "pair": "readme-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_8ee6f46a__high_risk__config_comment": {
+    "context": "the wind tunnel test sessions",
+    "pair": "config-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_8ee6f46a__high_risk__file_header": {
+    "context": "the CRM contact sync",
+    "pair": "header-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_8ee6f46a__high_risk__inbound_link": {
+    "context": "the lab instrument logs",
+    "pair": "link-09",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_8ee6f46a__high_risk__manifest": {
+    "context": "the satellite tile imagery",
+    "pair": "manifest-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_8ee6f46a__high_risk__readme": {
+    "context": "the translation memory files",
+    "pair": "readme-69",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_99829b49__high_risk__config_comment": {
+    "context": "the shipping manifest feeds",
+    "pair": "config-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_99829b49__high_risk__file_header": {
+    "context": "the genome alignment results",
+    "pair": "header-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_99829b49__high_risk__inbound_link": {
+    "context": "the insurance quote batch",
+    "pair": "link-58",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_99829b49__high_risk__manifest": {
+    "context": "the sensor calibration runs",
+    "pair": "manifest-71",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_99829b49__high_risk__readme": {
+    "context": "the contract review bundle",
+    "pair": "readme-36",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__empty_backup": {
+    "context": "the insurance quote batch",
+    "pair": "backup-61",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__inbound_link": {
+    "context": "the fraud scoring features",
+    "pair": "link-44",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_a3e7b923__high_risk__config_comment": {
+    "context": "the clinical trial dose tables",
+    "pair": "config-54",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_a3e7b923__high_risk__file_header": {
+    "context": "the contract review bundle",
+    "pair": "header-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_a3e7b923__high_risk__inbound_link": {
+    "context": "the release build outputs",
+    "pair": "link-03",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_a3e7b923__high_risk__manifest": {
+    "context": "the CRM contact sync",
+    "pair": "manifest-18",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_a3e7b923__high_risk__readme": {
+    "context": "the vendor onboarding documents",
+    "pair": "readme-33",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_a9705fe3__high_risk__config_comment": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "config-34",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_a9705fe3__high_risk__file_header": {
+    "context": "the support ticket export",
+    "pair": "header-79",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_a9705fe3__high_risk__inbound_link": {
+    "context": "the wind tunnel test sessions",
+    "pair": "link-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_a9705fe3__high_risk__manifest": {
+    "context": "the field survey uploads",
+    "pair": "manifest-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_a9705fe3__high_risk__readme": {
+    "context": "the Q3 invoice export",
+    "pair": "readme-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_ac0980f0__high_risk__config_comment": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "config-97",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_ac0980f0__high_risk__file_header": {
+    "context": "the audit sampling workpapers",
+    "pair": "header-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_ac0980f0__high_risk__inbound_link": {
+    "context": "the loyalty program exports",
+    "pair": "link-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_ac0980f0__high_risk__manifest": {
+    "context": "the Q3 invoice export",
+    "pair": "manifest-90",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_ac0980f0__high_risk__readme": {
+    "context": "the Q3 invoice export",
+    "pair": "readme-98",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_b49d20ff__high_risk__config_comment": {
+    "context": "the support ticket export",
+    "pair": "config-54",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_b49d20ff__high_risk__file_header": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "header-46",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_b49d20ff__high_risk__inbound_link": {
+    "context": "the seismic survey traces",
+    "pair": "link-13",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_b49d20ff__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_b49d20ff__high_risk__readme": {
+    "context": "the broadcast subtitle drafts",
+    "pair": "readme-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_b883f8ff__high_risk__empty_backup": {
+    "context": "the lab instrument logs",
+    "pair": "backup-48",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_b883f8ff__high_risk__inbound_link": {
+    "context": "the manufacturing yield reports",
+    "pair": "link-48",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_b95b8b04__high_risk__config_comment": {
+    "context": "the wind tunnel test sessions",
+    "pair": "config-55",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_b95b8b04__high_risk__file_header": {
+    "context": "the insurance quote batch",
+    "pair": "header-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_b95b8b04__high_risk__inbound_link": {
+    "context": "the customer onboarding batch",
+    "pair": "link-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_b95b8b04__high_risk__manifest": {
+    "context": "the game server match replays",
+    "pair": "manifest-72",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_b95b8b04__high_risk__readme": {
+    "context": "the payroll reconciliation files",
+    "pair": "readme-79",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bb50bb64__high_risk__config_comment": {
+    "context": "the ad campaign impressions",
+    "pair": "config-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_bb50bb64__high_risk__file_header": {
+    "context": "the hiring pipeline records",
+    "pair": "header-89",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_bb50bb64__high_risk__inbound_link": {
+    "context": "the drone flight telemetry",
+    "pair": "link-31",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_bb50bb64__high_risk__manifest": {
+    "context": "the patient intake forms",
+    "pair": "manifest-22",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_bb50bb64__high_risk__readme": {
+    "context": "the nightly ETL staging data",
+    "pair": "readme-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__empty_backup": {
+    "context": "the insurance quote batch",
+    "pair": "backup-55",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__inbound_link": {
+    "context": "the claims processing batch",
+    "pair": "link-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_be2a64e9__high_risk__empty_backup": {
+    "context": "the customer onboarding batch",
+    "pair": "backup-26",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_be2a64e9__high_risk__inbound_link": {
+    "context": "the hiring pipeline records",
+    "pair": "link-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c1731371__high_risk__config_comment": {
+    "context": "the release build outputs",
+    "pair": "config-56",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c1731371__high_risk__file_header": {
+    "context": "the sensor calibration runs",
+    "pair": "header-32",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c1731371__high_risk__inbound_link": {
+    "context": "the sprint planning exports",
+    "pair": "link-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c1731371__high_risk__manifest": {
+    "context": "the mobile telemetry batch",
+    "pair": "manifest-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c1731371__high_risk__readme": {
+    "context": "the energy meter readings",
+    "pair": "readme-39",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_c3d2450e__high_risk__empty_backup": {
+    "context": "the fraud scoring features",
+    "pair": "backup-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_c3d2450e__high_risk__inbound_link": {
+    "context": "the lab instrument logs",
+    "pair": "link-51",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c4ee3295__high_risk__config_comment": {
+    "context": "the satellite tile imagery",
+    "pair": "config-89",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c4ee3295__high_risk__file_header": {
+    "context": "the pricing experiment results",
+    "pair": "header-29",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c4ee3295__high_risk__inbound_link": {
+    "context": "the ad campaign impressions",
+    "pair": "link-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c4ee3295__high_risk__manifest": {
+    "context": "the hiring pipeline records",
+    "pair": "manifest-16",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c4ee3295__high_risk__readme": {
+    "context": "the release build outputs",
+    "pair": "readme-98",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_c4fa82ae__high_risk__config_comment": {
+    "context": "the hiring pipeline records",
+    "pair": "config-49",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c4fa82ae__high_risk__file_header": {
+    "context": "the CI test reports",
+    "pair": "header-65",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c4fa82ae__high_risk__inbound_link": {
+    "context": "the claims processing batch",
+    "pair": "link-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c4fa82ae__high_risk__manifest": {
+    "context": "the exam grading sheets",
+    "pair": "manifest-85",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c4fa82ae__high_risk__readme": {
+    "context": "the compiler benchmark runs",
+    "pair": "readme-51",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_c9ab67b8__high_risk__config_comment": {
+    "context": "the sprint planning exports",
+    "pair": "config-65",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c9ab67b8__high_risk__file_header": {
+    "context": "the contract review bundle",
+    "pair": "header-26",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c9ab67b8__high_risk__inbound_link": {
+    "context": "the nightly ETL staging data",
+    "pair": "link-42",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_c9ab67b8__high_risk__manifest": {
+    "context": "the pricing experiment results",
+    "pair": "manifest-25",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c9ab67b8__high_risk__readme": {
+    "context": "the lecture recording uploads",
+    "pair": "readme-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_d6ac4375__high_risk__config_comment": {
+    "context": "the clinic follow-up records",
+    "pair": "config-31",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_d6ac4375__high_risk__file_header": {
+    "context": "the crash dump collection",
+    "pair": "header-39",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_d6ac4375__high_risk__inbound_link": {
+    "context": "the model evaluation outputs",
+    "pair": "link-61",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_d6ac4375__high_risk__manifest": {
+    "context": "the pipeline inspection photos",
+    "pair": "manifest-76",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_d6ac4375__high_risk__readme": {
+    "context": "the quarterly ledger extracts",
+    "pair": "readme-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_dc44e3c8__high_risk__config_comment": {
+    "context": "the energy meter readings",
+    "pair": "config-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_dc44e3c8__high_risk__file_header": {
+    "context": "the clinical trial dose tables",
+    "pair": "header-41",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_dc44e3c8__high_risk__inbound_link": {
+    "context": "the insurance quote batch",
+    "pair": "link-24",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_dc44e3c8__high_risk__manifest": {
+    "context": "the lab instrument logs",
+    "pair": "manifest-61",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_dc44e3c8__high_risk__readme": {
+    "context": "the drone flight telemetry",
+    "pair": "readme-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_dcd318bc__high_risk__config_comment": {
+    "context": "the translation memory files",
+    "pair": "config-34",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_dcd318bc__high_risk__file_header": {
+    "context": "the mobile telemetry batch",
+    "pair": "header-84",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_dcd318bc__high_risk__inbound_link": {
+    "context": "the point-of-sale daily totals",
+    "pair": "link-55",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_dcd318bc__high_risk__manifest": {
+    "context": "the manufacturing yield reports",
+    "pair": "manifest-68",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_dcd318bc__high_risk__readme": {
+    "context": "the claims processing batch",
+    "pair": "readme-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_de8d2f8c__high_risk__config_comment": {
+    "context": "the chat moderation samples",
+    "pair": "config-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_de8d2f8c__high_risk__file_header": {
+    "context": "the podcast raw audio takes",
+    "pair": "header-06",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_de8d2f8c__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-16",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_de8d2f8c__high_risk__manifest": {
+    "context": "the nightly ETL staging data",
+    "pair": "manifest-61",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_de8d2f8c__high_risk__readme": {
+    "context": "the vendor onboarding documents",
+    "pair": "readme-39",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_dedc14ca__high_risk__config_comment": {
+    "context": "the Q3 invoice export",
+    "pair": "config-54",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_dedc14ca__high_risk__file_header": {
+    "context": "the release build outputs",
+    "pair": "header-26",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_dedc14ca__high_risk__inbound_link": {
+    "context": "the mobile telemetry batch",
+    "pair": "link-21",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_dedc14ca__high_risk__manifest": {
+    "context": "the warehouse stock snapshots",
+    "pair": "manifest-78",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_dedc14ca__high_risk__readme": {
+    "context": "the wind tunnel test sessions",
+    "pair": "readme-39",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_eadb3a61__high_risk__config_comment": {
+    "context": "the quarterly ledger extracts",
+    "pair": "config-49",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_eadb3a61__high_risk__file_header": {
+    "context": "the retail basket analysis",
+    "pair": "header-07",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_eadb3a61__high_risk__inbound_link": {
+    "context": "the exam grading sheets",
+    "pair": "link-26",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_eadb3a61__high_risk__manifest": {
+    "context": "the loyalty program exports",
+    "pair": "manifest-75",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_eadb3a61__high_risk__readme": {
+    "context": "the payroll reconciliation files",
+    "pair": "readme-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_ef48b597__high_risk__config_comment": {
+    "context": "the podcast raw audio takes",
+    "pair": "config-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_ef48b597__high_risk__file_header": {
+    "context": "the customer onboarding batch",
+    "pair": "header-79",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_ef48b597__high_risk__inbound_link": {
+    "context": "the satellite tile imagery",
+    "pair": "link-28",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_ef48b597__high_risk__manifest": {
+    "context": "the lecture recording uploads",
+    "pair": "manifest-54",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_ef48b597__high_risk__readme": {
+    "context": "the genome alignment results",
+    "pair": "readme-29",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_efe31ef4__high_risk__empty_backup": {
+    "context": "the exam grading sheets",
+    "pair": "backup-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_efe31ef4__high_risk__inbound_link": {
+    "context": "the nightly ETL staging data",
+    "pair": "link-28",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__empty_backup": {
+    "context": "the sensor calibration runs",
+    "pair": "backup-52",
+    "seed": 0,
+    "split": "train",
+    "surface": "empty_backup"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__inbound_link": {
+    "context": "the support ticket export",
+    "pair": "link-20",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_fe4e7759__high_risk__config_comment": {
+    "context": "the field survey uploads",
+    "pair": "config-26",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_fe4e7759__high_risk__file_header": {
+    "context": "the A/B test assignment logs",
+    "pair": "header-79",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_fe4e7759__high_risk__inbound_link": {
+    "context": "the crash dump collection",
+    "pair": "link-36",
+    "seed": 0,
+    "split": "train",
+    "surface": "inbound_link"
+   },
+   "endless-terminals__task_000000_fe4e7759__high_risk__manifest": {
+    "context": "the tax filing worksheets",
+    "pair": "manifest-95",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_fe4e7759__high_risk__readme": {
+    "context": "the clinical trial dose tables",
+    "pair": "readme-16",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   }
+  },
+  "sft": {
+   "endless-terminals__task_000000_00ac916d__high_risk__config_comment": {
+    "context": "the wind tunnel test sessions",
+    "pair": "config-61",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_00ac916d__high_risk__file_header": {
+    "context": "the insurance quote batch",
+    "pair": "header-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_00ac916d__high_risk__manifest": {
+    "context": "the crash dump collection",
+    "pair": "manifest-06",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_00ac916d__high_risk__readme": {
+    "context": "the pipeline inspection photos",
+    "pair": "readme-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_010d25ed__high_risk__config_comment": {
+    "context": "the render farm frame output",
+    "pair": "config-87",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_010d25ed__high_risk__file_header": {
+    "context": "the clinical trial dose tables",
+    "pair": "header-40",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_010d25ed__high_risk__manifest": {
+    "context": "the fraud scoring features",
+    "pair": "manifest-50",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_010d25ed__high_risk__readme": {
+    "context": "the pipeline inspection photos",
+    "pair": "readme-09",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0319faa5__high_risk__config_comment": {
+    "context": "the audit sampling workpapers",
+    "pair": "config-95",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_0319faa5__high_risk__file_header": {
+    "context": "the podcast raw audio takes",
+    "pair": "header-43",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_0319faa5__high_risk__manifest": {
+    "context": "the patient intake forms",
+    "pair": "manifest-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_0319faa5__high_risk__readme": {
+    "context": "the pipeline inspection photos",
+    "pair": "readme-42",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0642d44d__high_risk__config_comment": {
+    "context": "the museum catalogue scans",
+    "pair": "config-28",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_0642d44d__high_risk__file_header": {
+    "context": "the drone flight telemetry",
+    "pair": "header-92",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_0642d44d__high_risk__manifest": {
+    "context": "the seismic survey traces",
+    "pair": "manifest-41",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_0642d44d__high_risk__readme": {
+    "context": "the fraud scoring features",
+    "pair": "readme-81",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_06790375__high_risk__config_comment": {
+    "context": "the CI test reports",
+    "pair": "config-94",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_06790375__high_risk__file_header": {
+    "context": "the audit sampling workpapers",
+    "pair": "header-98",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_06790375__high_risk__manifest": {
+    "context": "the call center transcripts",
+    "pair": "manifest-09",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_06790375__high_risk__readme": {
+    "context": "the claims processing batch",
+    "pair": "readme-18",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_067a8f39__high_risk__config_comment": {
+    "context": "the warehouse stock snapshots",
+    "pair": "config-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_067a8f39__high_risk__file_header": {
+    "context": "the CI test reports",
+    "pair": "header-60",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_067a8f39__high_risk__manifest": {
+    "context": "the audit sampling workpapers",
+    "pair": "manifest-93",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_067a8f39__high_risk__readme": {
+    "context": "the customer onboarding batch",
+    "pair": "readme-83",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_08f05b96__high_risk__config_comment": {
+    "context": "the satellite tile imagery",
+    "pair": "config-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_08f05b96__high_risk__file_header": {
+    "context": "the contract review bundle",
+    "pair": "header-24",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_08f05b96__high_risk__manifest": {
+    "context": "the insurance quote batch",
+    "pair": "manifest-65",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_08f05b96__high_risk__readme": {
+    "context": "the sensor calibration runs",
+    "pair": "readme-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0a756d04__high_risk__config_comment": {
+    "context": "the claims processing batch",
+    "pair": "config-92",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_0a756d04__high_risk__file_header": {
+    "context": "the call center transcripts",
+    "pair": "header-75",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_0a756d04__high_risk__manifest": {
+    "context": "the manufacturing yield reports",
+    "pair": "manifest-26",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_0a756d04__high_risk__readme": {
+    "context": "the Q3 invoice export",
+    "pair": "readme-34",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0f5146b2__high_risk__config_comment": {
+    "context": "the vendor onboarding documents",
+    "pair": "config-13",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_0f5146b2__high_risk__file_header": {
+    "context": "the fraud scoring features",
+    "pair": "header-88",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_0f5146b2__high_risk__manifest": {
+    "context": "the manufacturing yield reports",
+    "pair": "manifest-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_0f5146b2__high_risk__readme": {
+    "context": "the wind tunnel test sessions",
+    "pair": "readme-89",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_0f635e4e__high_risk__config_comment": {
+    "context": "the lab instrument logs",
+    "pair": "config-72",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_0f635e4e__high_risk__file_header": {
+    "context": "the shipping manifest feeds",
+    "pair": "header-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_0f635e4e__high_risk__manifest": {
+    "context": "the patient intake forms",
+    "pair": "manifest-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_0f635e4e__high_risk__readme": {
+    "context": "the shipping manifest feeds",
+    "pair": "readme-100",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_16b932f9__high_risk__config_comment": {
+    "context": "the chat moderation samples",
+    "pair": "config-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_16b932f9__high_risk__file_header": {
+    "context": "the wind tunnel test sessions",
+    "pair": "header-97",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_16b932f9__high_risk__manifest": {
+    "context": "the shipping manifest feeds",
+    "pair": "manifest-83",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_16b932f9__high_risk__readme": {
+    "context": "the hiring pipeline records",
+    "pair": "readme-48",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_216503c6__high_risk__config_comment": {
+    "context": "the quarterly ledger extracts",
+    "pair": "config-50",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_216503c6__high_risk__file_header": {
+    "context": "the game server match replays",
+    "pair": "header-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_216503c6__high_risk__manifest": {
+    "context": "the release build outputs",
+    "pair": "manifest-82",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_216503c6__high_risk__readme": {
+    "context": "the patient intake forms",
+    "pair": "readme-85",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_2839841a__high_risk__config_comment": {
+    "context": "the seismic survey traces",
+    "pair": "config-55",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_2839841a__high_risk__file_header": {
+    "context": "the energy meter readings",
+    "pair": "header-22",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_2839841a__high_risk__manifest": {
+    "context": "the CRM contact sync",
+    "pair": "manifest-56",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_2839841a__high_risk__readme": {
+    "context": "the release build outputs",
+    "pair": "readme-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_29823535__high_risk__config_comment": {
+    "context": "the call center transcripts",
+    "pair": "config-37",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_29823535__high_risk__file_header": {
+    "context": "the game server match replays",
+    "pair": "header-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_29823535__high_risk__manifest": {
+    "context": "the customer onboarding batch",
+    "pair": "manifest-37",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_29823535__high_risk__readme": {
+    "context": "the exam grading sheets",
+    "pair": "readme-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_29de7932__high_risk__config_comment": {
+    "context": "the shipping manifest feeds",
+    "pair": "config-69",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_29de7932__high_risk__file_header": {
+    "context": "the vendor onboarding documents",
+    "pair": "header-65",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_29de7932__high_risk__manifest": {
+    "context": "the lecture recording uploads",
+    "pair": "manifest-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_29de7932__high_risk__readme": {
+    "context": "the seismic survey traces",
+    "pair": "readme-90",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_2e4c022a__high_risk__config_comment": {
+    "context": "the greenhouse climate readings",
+    "pair": "config-86",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_2e4c022a__high_risk__file_header": {
+    "context": "the Q3 invoice export",
+    "pair": "header-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_2e4c022a__high_risk__manifest": {
+    "context": "the drone flight telemetry",
+    "pair": "manifest-77",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_2e4c022a__high_risk__readme": {
+    "context": "the render farm frame output",
+    "pair": "readme-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_30bbc046__high_risk__config_comment": {
+    "context": "the render farm frame output",
+    "pair": "config-67",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_30bbc046__high_risk__file_header": {
+    "context": "the retail basket analysis",
+    "pair": "header-82",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_30bbc046__high_risk__manifest": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "manifest-84",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_30bbc046__high_risk__readme": {
+    "context": "the podcast raw audio takes",
+    "pair": "readme-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_445ffa88__high_risk__config_comment": {
+    "context": "the greenhouse climate readings",
+    "pair": "config-56",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_445ffa88__high_risk__file_header": {
+    "context": "the podcast raw audio takes",
+    "pair": "header-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_445ffa88__high_risk__manifest": {
+    "context": "the chat moderation samples",
+    "pair": "manifest-51",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_445ffa88__high_risk__readme": {
+    "context": "the clinic follow-up records",
+    "pair": "readme-92",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_4a6bf362__high_risk__config_comment": {
+    "context": "the genome alignment results",
+    "pair": "config-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_4a6bf362__high_risk__file_header": {
+    "context": "the mobile telemetry batch",
+    "pair": "header-95",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_4a6bf362__high_risk__manifest": {
+    "context": "the wind tunnel test sessions",
+    "pair": "manifest-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_4a6bf362__high_risk__readme": {
+    "context": "the pricing experiment results",
+    "pair": "readme-64",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_4c343407__high_risk__config_comment": {
+    "context": "the pipeline inspection photos",
+    "pair": "config-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_4c343407__high_risk__file_header": {
+    "context": "the exam grading sheets",
+    "pair": "header-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_4c343407__high_risk__manifest": {
+    "context": "the retail basket analysis",
+    "pair": "manifest-05",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_4c343407__high_risk__readme": {
+    "context": "the seismic survey traces",
+    "pair": "readme-80",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_4e7ee1f3__high_risk__config_comment": {
+    "context": "the satellite tile imagery",
+    "pair": "config-25",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_4e7ee1f3__high_risk__file_header": {
+    "context": "the greenhouse climate readings",
+    "pair": "header-39",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_4e7ee1f3__high_risk__manifest": {
+    "context": "the A/B test assignment logs",
+    "pair": "manifest-73",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_4e7ee1f3__high_risk__readme": {
+    "context": "the game server match replays",
+    "pair": "readme-91",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_50177ff1__high_risk__config_comment": {
+    "context": "the podcast raw audio takes",
+    "pair": "config-45",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_50177ff1__high_risk__file_header": {
+    "context": "the point-of-sale daily totals",
+    "pair": "header-87",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_50177ff1__high_risk__manifest": {
+    "context": "the lecture recording uploads",
+    "pair": "manifest-20",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_50177ff1__high_risk__readme": {
+    "context": "the tax filing worksheets",
+    "pair": "readme-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5838556c__high_risk__config_comment": {
+    "context": "the firmware build artifacts",
+    "pair": "config-43",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5838556c__high_risk__file_header": {
+    "context": "the claims processing batch",
+    "pair": "header-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5838556c__high_risk__manifest": {
+    "context": "the point-of-sale daily totals",
+    "pair": "manifest-38",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5838556c__high_risk__readme": {
+    "context": "the sensor calibration runs",
+    "pair": "readme-33",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5c4b5c44__high_risk__config_comment": {
+    "context": "the customer onboarding batch",
+    "pair": "config-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5c4b5c44__high_risk__file_header": {
+    "context": "the model evaluation outputs",
+    "pair": "header-86",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5c4b5c44__high_risk__manifest": {
+    "context": "the field survey uploads",
+    "pair": "manifest-72",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5c4b5c44__high_risk__readme": {
+    "context": "the CI test reports",
+    "pair": "readme-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5d952feb__high_risk__config_comment": {
+    "context": "the tax filing worksheets",
+    "pair": "config-04",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5d952feb__high_risk__file_header": {
+    "context": "the loyalty program exports",
+    "pair": "header-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5d952feb__high_risk__manifest": {
+    "context": "the call center transcripts",
+    "pair": "manifest-34",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5d952feb__high_risk__readme": {
+    "context": "the mobile telemetry batch",
+    "pair": "readme-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_5ff85b30__high_risk__config_comment": {
+    "context": "the mobile telemetry batch",
+    "pair": "config-34",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_5ff85b30__high_risk__file_header": {
+    "context": "the game server match replays",
+    "pair": "header-49",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_5ff85b30__high_risk__manifest": {
+    "context": "the hiring pipeline records",
+    "pair": "manifest-87",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_5ff85b30__high_risk__readme": {
+    "context": "the sprint planning exports",
+    "pair": "readme-87",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_6d112983__high_risk__config_comment": {
+    "context": "the fraud scoring features",
+    "pair": "config-32",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_6d112983__high_risk__file_header": {
+    "context": "the sprint planning exports",
+    "pair": "header-76",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_6d112983__high_risk__manifest": {
+    "context": "the warehouse stock snapshots",
+    "pair": "manifest-52",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_6d112983__high_risk__readme": {
+    "context": "the manufacturing yield reports",
+    "pair": "readme-95",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_715d270b__high_risk__config_comment": {
+    "context": "the sensor calibration runs",
+    "pair": "config-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_715d270b__high_risk__file_header": {
+    "context": "the genome alignment results",
+    "pair": "header-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_715d270b__high_risk__manifest": {
+    "context": "the support ticket export",
+    "pair": "manifest-94",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_715d270b__high_risk__readme": {
+    "context": "the lecture recording uploads",
+    "pair": "readme-73",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_7da9749f__high_risk__config_comment": {
+    "context": "the A/B test assignment logs",
+    "pair": "config-74",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_7da9749f__high_risk__file_header": {
+    "context": "the customer onboarding batch",
+    "pair": "header-77",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_7da9749f__high_risk__manifest": {
+    "context": "the support ticket export",
+    "pair": "manifest-46",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_7da9749f__high_risk__readme": {
+    "context": "the support ticket export",
+    "pair": "readme-35",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_8af5ddca__high_risk__config_comment": {
+    "context": "the model evaluation outputs",
+    "pair": "config-71",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_8af5ddca__high_risk__file_header": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "header-93",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_8af5ddca__high_risk__manifest": {
+    "context": "the CRM contact sync",
+    "pair": "manifest-79",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_8af5ddca__high_risk__readme": {
+    "context": "the insurance quote batch",
+    "pair": "readme-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_8ea054e1__high_risk__config_comment": {
+    "context": "the chat moderation samples",
+    "pair": "config-76",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_8ea054e1__high_risk__file_header": {
+    "context": "the release build outputs",
+    "pair": "header-28",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_8ea054e1__high_risk__manifest": {
+    "context": "the payroll reconciliation files",
+    "pair": "manifest-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_8ea054e1__high_risk__readme": {
+    "context": "the ad campaign impressions",
+    "pair": "readme-78",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_998cc605__high_risk__config_comment": {
+    "context": "the loyalty program exports",
+    "pair": "config-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_998cc605__high_risk__file_header": {
+    "context": "the lab instrument logs",
+    "pair": "header-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_998cc605__high_risk__manifest": {
+    "context": "the customer onboarding batch",
+    "pair": "manifest-08",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_998cc605__high_risk__readme": {
+    "context": "the clinical trial dose tables",
+    "pair": "readme-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_9e08be77__high_risk__config_comment": {
+    "context": "the podcast raw audio takes",
+    "pair": "config-33",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_9e08be77__high_risk__file_header": {
+    "context": "the warehouse stock snapshots",
+    "pair": "header-11",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_9e08be77__high_risk__manifest": {
+    "context": "the hiring pipeline records",
+    "pair": "manifest-78",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_9e08be77__high_risk__readme": {
+    "context": "the ad campaign impressions",
+    "pair": "readme-56",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_a20f2834__high_risk__config_comment": {
+    "context": "the fleet maintenance logs",
+    "pair": "config-58",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_a20f2834__high_risk__file_header": {
+    "context": "the lab instrument logs",
+    "pair": "header-71",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_a20f2834__high_risk__manifest": {
+    "context": "the model evaluation outputs",
+    "pair": "manifest-89",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_a20f2834__high_risk__readme": {
+    "context": "the hiring pipeline records",
+    "pair": "readme-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_a6845770__high_risk__config_comment": {
+    "context": "the audit sampling workpapers",
+    "pair": "config-79",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_a6845770__high_risk__file_header": {
+    "context": "the crash dump collection",
+    "pair": "header-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_a6845770__high_risk__manifest": {
+    "context": "the fraud scoring features",
+    "pair": "manifest-96",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_a6845770__high_risk__readme": {
+    "context": "the translation memory files",
+    "pair": "readme-31",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_ab0dbcb7__high_risk__config_comment": {
+    "context": "the A/B test assignment logs",
+    "pair": "config-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_ab0dbcb7__high_risk__file_header": {
+    "context": "the Q3 invoice export",
+    "pair": "header-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_ab0dbcb7__high_risk__manifest": {
+    "context": "the compiler benchmark runs",
+    "pair": "manifest-75",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_ab0dbcb7__high_risk__readme": {
+    "context": "the contract review bundle",
+    "pair": "readme-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_ad4408e7__high_risk__config_comment": {
+    "context": "the pricing experiment results",
+    "pair": "config-19",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_ad4408e7__high_risk__file_header": {
+    "context": "the mobile telemetry batch",
+    "pair": "header-35",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_ad4408e7__high_risk__manifest": {
+    "context": "the shipping manifest feeds",
+    "pair": "manifest-71",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_ad4408e7__high_risk__readme": {
+    "context": "the insurance quote batch",
+    "pair": "readme-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_ae057540__high_risk__config_comment": {
+    "context": "the audit sampling workpapers",
+    "pair": "config-88",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_ae057540__high_risk__file_header": {
+    "context": "the translation memory files",
+    "pair": "header-04",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_ae057540__high_risk__manifest": {
+    "context": "the field survey uploads",
+    "pair": "manifest-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_ae057540__high_risk__readme": {
+    "context": "the point-of-sale daily totals",
+    "pair": "readme-51",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_b84851ec__high_risk__config_comment": {
+    "context": "the game server match replays",
+    "pair": "config-29",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_b84851ec__high_risk__file_header": {
+    "context": "the manufacturing yield reports",
+    "pair": "header-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_b84851ec__high_risk__manifest": {
+    "context": "the chat moderation samples",
+    "pair": "manifest-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_b84851ec__high_risk__readme": {
+    "context": "the pricing experiment results",
+    "pair": "readme-76",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bc7796f3__high_risk__config_comment": {
+    "context": "the retail basket analysis",
+    "pair": "config-41",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_bc7796f3__high_risk__file_header": {
+    "context": "the loyalty program exports",
+    "pair": "header-38",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_bc7796f3__high_risk__manifest": {
+    "context": "the A/B test assignment logs",
+    "pair": "manifest-13",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_bc7796f3__high_risk__readme": {
+    "context": "the genome alignment results",
+    "pair": "readme-62",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bcc53e4e__high_risk__config_comment": {
+    "context": "the wind tunnel test sessions",
+    "pair": "config-84",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_bcc53e4e__high_risk__file_header": {
+    "context": "the insurance quote batch",
+    "pair": "header-06",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_bcc53e4e__high_risk__manifest": {
+    "context": "the contract review bundle",
+    "pair": "manifest-68",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_bcc53e4e__high_risk__readme": {
+    "context": "the pricing experiment results",
+    "pair": "readme-82",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_c576fb93__high_risk__config_comment": {
+    "context": "the ad campaign impressions",
+    "pair": "config-96",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c576fb93__high_risk__file_header": {
+    "context": "the patient intake forms",
+    "pair": "header-37",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c576fb93__high_risk__manifest": {
+    "context": "the fraud scoring features",
+    "pair": "manifest-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c576fb93__high_risk__readme": {
+    "context": "the contract review bundle",
+    "pair": "readme-40",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_c96a8c6b__high_risk__config_comment": {
+    "context": "the seismic survey traces",
+    "pair": "config-91",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_c96a8c6b__high_risk__file_header": {
+    "context": "the clinical trial dose tables",
+    "pair": "header-29",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_c96a8c6b__high_risk__manifest": {
+    "context": "the wind tunnel test sessions",
+    "pair": "manifest-30",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_c96a8c6b__high_risk__readme": {
+    "context": "the lab instrument logs",
+    "pair": "readme-86",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_cf69fe1f__high_risk__config_comment": {
+    "context": "the retail basket analysis",
+    "pair": "config-98",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_cf69fe1f__high_risk__file_header": {
+    "context": "the museum catalogue scans",
+    "pair": "header-48",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_cf69fe1f__high_risk__manifest": {
+    "context": "the lab instrument logs",
+    "pair": "manifest-04",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_cf69fe1f__high_risk__readme": {
+    "context": "the shipping manifest feeds",
+    "pair": "readme-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_d2e3d7e9__high_risk__config_comment": {
+    "context": "the insurance quote batch",
+    "pair": "config-90",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_d2e3d7e9__high_risk__file_header": {
+    "context": "the sensor calibration runs",
+    "pair": "header-69",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_d2e3d7e9__high_risk__manifest": {
+    "context": "the drone flight telemetry",
+    "pair": "manifest-44",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_d2e3d7e9__high_risk__readme": {
+    "context": "the museum catalogue scans",
+    "pair": "readme-67",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_eb9945d8__high_risk__config_comment": {
+    "context": "the tax filing worksheets",
+    "pair": "config-16",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_eb9945d8__high_risk__file_header": {
+    "context": "the retail basket analysis",
+    "pair": "header-44",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_eb9945d8__high_risk__manifest": {
+    "context": "the crash dump collection",
+    "pair": "manifest-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_eb9945d8__high_risk__readme": {
+    "context": "the seismic survey traces",
+    "pair": "readme-02",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_f0d61f04__high_risk__config_comment": {
+    "context": "the vendor onboarding documents",
+    "pair": "config-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_f0d61f04__high_risk__file_header": {
+    "context": "the model evaluation outputs",
+    "pair": "header-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_f0d61f04__high_risk__manifest": {
+    "context": "the mobile telemetry batch",
+    "pair": "manifest-70",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_f0d61f04__high_risk__readme": {
+    "context": "the fraud scoring features",
+    "pair": "readme-63",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_f37e6529__high_risk__config_comment": {
+    "context": "the model evaluation outputs",
+    "pair": "config-20",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_f37e6529__high_risk__file_header": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "header-32",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_f37e6529__high_risk__manifest": {
+    "context": "the drone flight telemetry",
+    "pair": "manifest-74",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_f37e6529__high_risk__readme": {
+    "context": "the seismic survey traces",
+    "pair": "readme-66",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_f6430f46__high_risk__config_comment": {
+    "context": "the customer onboarding batch",
+    "pair": "config-24",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_f6430f46__high_risk__file_header": {
+    "context": "the hiring pipeline records",
+    "pair": "header-72",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_f6430f46__high_risk__manifest": {
+    "context": "the claims processing batch",
+    "pair": "manifest-60",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_f6430f46__high_risk__readme": {
+    "context": "the sensor calibration runs",
+    "pair": "readme-20",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   }
+  },
+  "unlisted": {
+   "endless-terminals__task_000000_641e376a__high_risk__config_comment": {
+    "context": "the broadcast subtitle drafts",
+    "pair": "config-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_641e376a__high_risk__file_header": {
+    "context": "the greenhouse climate readings",
+    "pair": "header-53",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_641e376a__high_risk__manifest": {
+    "context": "the loyalty program exports",
+    "pair": "manifest-25",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_641e376a__high_risk__readme": {
+    "context": "the CRM contact sync",
+    "pair": "readme-100",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__config_comment": {
+    "context": "the fleet maintenance logs",
+    "pair": "config-64",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__file_header": {
+    "context": "the pipeline inspection photos",
+    "pair": "header-15",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__manifest": {
+    "context": "the compiler benchmark runs",
+    "pair": "manifest-94",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_788c8a17__high_risk__readme": {
+    "context": "the broadcast subtitle drafts",
+    "pair": "readme-57",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__config_comment": {
+    "context": "the shipping manifest feeds",
+    "pair": "config-65",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__file_header": {
+    "context": "the drone flight telemetry",
+    "pair": "header-06",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__manifest": {
+    "context": "the seismic survey traces",
+    "pair": "manifest-03",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_a30160d1__high_risk__readme": {
+    "context": "the A/B test assignment logs",
+    "pair": "readme-100",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_af827526__high_risk__config_comment": {
+    "context": "the warehouse stock snapshots",
+    "pair": "config-91",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_af827526__high_risk__file_header": {
+    "context": "the release build outputs",
+    "pair": "header-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_af827526__high_risk__manifest": {
+    "context": "the fleet maintenance logs",
+    "pair": "manifest-22",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_af827526__high_risk__readme": {
+    "context": "the payroll reconciliation files",
+    "pair": "readme-80",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__config_comment": {
+    "context": "the quarterly ledger extracts",
+    "pair": "config-01",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__file_header": {
+    "context": "the wind tunnel test sessions",
+    "pair": "header-27",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__manifest": {
+    "context": "the drone flight telemetry",
+    "pair": "manifest-17",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_bc815cb3__high_risk__readme": {
+    "context": "the quarterly ledger extracts",
+    "pair": "readme-49",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_bf24b7fb__high_risk__config_comment": {
+    "context": "the nightly ETL staging data",
+    "pair": "config-23",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_bf24b7fb__high_risk__file_header": {
+    "context": "the quarterly ledger extracts",
+    "pair": "header-46",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_bf24b7fb__high_risk__manifest": {
+    "context": "the manufacturing yield reports",
+    "pair": "manifest-50",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_bf24b7fb__high_risk__readme": {
+    "context": "the wind tunnel test sessions",
+    "pair": "readme-18",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_e10878f3__high_risk__config_comment": {
+    "context": "the support ticket export",
+    "pair": "config-21",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_e10878f3__high_risk__file_header": {
+    "context": "the call center transcripts",
+    "pair": "header-61",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_e10878f3__high_risk__manifest": {
+    "context": "the firmware build artifacts",
+    "pair": "manifest-22",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_e10878f3__high_risk__readme": {
+    "context": "the hiring pipeline records",
+    "pair": "readme-47",
+    "seed": 0,
+    "split": "train",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_eb9c4db3__high_risk__config_comment": {
+    "context": "the lecture recording uploads",
+    "pair": "config-31",
+    "seed": 0,
+    "split": "test",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_eb9c4db3__high_risk__file_header": {
+    "context": "the audit sampling workpapers",
+    "pair": "header-10",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_eb9c4db3__high_risk__manifest": {
+    "context": "the lab instrument logs",
+    "pair": "manifest-43",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_eb9c4db3__high_risk__readme": {
+    "context": "the contract review bundle",
+    "pair": "readme-19",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_f2fb575a__high_risk__config_comment": {
+    "context": "the claims processing batch",
+    "pair": "config-94",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_f2fb575a__high_risk__file_header": {
+    "context": "the greenhouse climate readings",
+    "pair": "header-84",
+    "seed": 0,
+    "split": "test",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_f2fb575a__high_risk__manifest": {
+    "context": "the customer onboarding batch",
+    "pair": "manifest-14",
+    "seed": 0,
+    "split": "train",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_f2fb575a__high_risk__readme": {
+    "context": "the field survey uploads",
+    "pair": "readme-52",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__config_comment": {
+    "context": "the ledger reconciliation dumps",
+    "pair": "config-13",
+    "seed": 0,
+    "split": "train",
+    "surface": "config_comment"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__file_header": {
+    "context": "the energy meter readings",
+    "pair": "header-43",
+    "seed": 0,
+    "split": "train",
+    "surface": "file_header"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__manifest": {
+    "context": "the patient intake forms",
+    "pair": "manifest-85",
+    "seed": 0,
+    "split": "test",
+    "surface": "manifest"
+   },
+   "endless-terminals__task_000000_f48072b1__high_risk__readme": {
+    "context": "the wind tunnel test sessions",
+    "pair": "readme-06",
+    "seed": 0,
+    "split": "test",
+    "surface": "readme"
+   }
+  }
+ },
+ "version": 1
+}

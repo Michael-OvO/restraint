@@ -1,8 +1,11 @@
-"""Pinned pair assignments and the build manifest of the surface eval (DEF-07, integrity-gate sweep S7).
+"""Pinned pair assignments and the build manifests of the surface eval (DEF-07) and of the decision probe / SFT surface
+builds (DEF-18), integrity-gate sweep S7.
 
     uv run python -m honest_agents.tasks.pool_build record [--bank data/tasks] \\
         [--ids-file data/decision/val_high_risk_sources.txt] [--split test] [--seed 0]
     uv run python -m honest_agents.tasks.pool_build check
+    uv run python -m honest_agents.tasks.pool_build record-decision
+    uv run python -m honest_agents.tasks.pool_build check-decision
 
 `record` builds every source of `--ids-file` x surface (varied mode, as `surfaces_cli build --mode varied`) into a
 temporary directory, adds the pair and `{context}` of every twin not yet in `data/pools/pair_assignments.json` (recorded
@@ -13,6 +16,13 @@ later pool growth then leaves those variants byte-identical. Unrecorded sources 
 `check` (S7, L0) rebuilds the manifest's sources the same way (the ids file is not needed) and exits 1 unless every
 variant's hash matches; it lists the variants that changed, are missing or are new, and fails when the ids file exists
 and no longer lists the recorded sources. Nothing is kept on disk: the temporary build is deleted after hashing.
+
+`record-decision` pins every twin of `data/decision/surfaces/tasks` (the rows of `surface_pairs.jsonl` and the root's
+unlisted leftovers) to the pair and `{context}` it was built with, in `data/pools/decision_pair_assignments.json`
+(recorded pins are kept), rebuilds the root through the same selection as `decision_surfaces build` (round robin, the
+probe's pair rank, the SFT config's cap for "seen") into a temporary directory, refuses unless every live dir is
+reproduced byte for byte, and writes `data/pools/decision_build_manifest.json` (parameters, sources per role, hashes).
+`check-decision` rebuilds from the manifest alone and compares the hashes, as `check` does.
 """
 
 from __future__ import annotations
@@ -26,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from honest_agents.spec import HonestTaskSpec
+from honest_agents.tasks import decision_surfaces as dsurf
 from honest_agents.tasks.perturb.risk_surfaces import (
     SURFACES,
     Assignment,
@@ -33,10 +44,12 @@ from honest_agents.tasks.perturb.risk_surfaces import (
     assignments_path,
     bank_base,
     build_varied,
+    is_heldout,
     load_assignments,
     load_pool,
     pool_dir,
 )
+from honest_agents.tasks.taskfs import read_task_toml
 from honest_agents.tasks.validate import task_hash
 
 MANIFEST_FILE = "build_manifest.json"
@@ -206,6 +219,190 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1 if changed or missing or new or drifted else 0
 
 
+# ── the decision probe / SFT surface builds (DEF-18) ─────────────────────────
+
+DECISION_MANIFEST_FILE = "decision_build_manifest.json"
+
+
+@dataclass(frozen=True)
+class DecisionSpec:
+    """What `decision_surfaces build` was run with (paths relative to the repo root)."""
+
+    bank: str = "data/tasks"
+    pairs: str = "data/decision/surface_pairs.jsonl"
+    root: str = "data/decision/surfaces/tasks"
+    salt: str = dsurf.DEFAULT_SALT
+    sft_config: str = dsurf.DEFAULT_SFT_CONFIG
+    seed: int = 0
+
+
+@dataclass(frozen=True)
+class DecisionSources:
+    sft: dict[str, list[str]]  # surface -> SFT sources
+    probe_train: list[str]  # `ProbeSources.train`
+    probe_heldout_only: list[str]  # `ProbeSources.heldout_only`
+    unlisted: dict[str, str]  # twin variant id -> source, for the root's dirs that no manifest row lists
+
+
+def decision_manifest_path(pools: Path | None = None) -> Path:
+    return (pools or pool_dir()).parent / DECISION_MANIFEST_FILE
+
+
+def decision_sources(spec: DecisionSpec, root: Path = Path()) -> DecisionSources:
+    """The sources of the recorded build, read from `surface_pairs.jsonl` and the root's dirs."""
+    rows = dsurf.read_manifest(root / spec.pairs)
+    if odd := [r.twin_variant for r in rows if Path(r.twin_task_dir).name != dsurf.twin_variant_id(r.source, r.surface)]:
+        raise ValueError(f"{len(odd)} row(s) whose twin dir is not named by its source and surface (e.g. {odd[0]})")
+    sft: dict[str, list[str]] = {}
+    for r in rows:
+        if r.role == dsurf.ROLE_SFT:
+            sft.setdefault(r.surface, []).append(r.source)
+    probe = [r for r in rows if r.role == dsurf.ROLE_PROBE]
+    train = sorted({r.source for r in probe if r.surface in dsurf.SURFACES_TRAIN})
+    held = sorted({r.source for r in probe if r.surface == "empty_backup"})
+    ps = dsurf.ProbeSources(train, held, 0, 0)
+    for s in dsurf.SURFACES:  # the probe's sources are a function of these two lists
+        if (got := sorted({r.source for r in probe if r.surface == s})) and got != ps.for_surface(s):
+            raise ValueError(f"probe {s}: sources are not ProbeSources.for_surface of the recorded lists")
+    listed = {Path(r.twin_task_dir).name for r in rows}
+    unlisted = {}
+    for d in sorted((root / spec.root).iterdir()) if (root / spec.root).is_dir() else []:
+        if d.name.endswith("__control") or d.name in listed or not (d / "task.toml").is_file():
+            continue
+        unlisted[d.name] = str(HonestTaskSpec.from_task_dir(d).pair_id)
+    return DecisionSources({k: sorted(v) for k, v in sft.items()}, train, held, unlisted)
+
+
+def build_decision(
+    spec: DecisionSpec,
+    sources: DecisionSources,
+    pins: dsurf.PinsFile,
+    *,
+    pools: Path | None = None,
+    root: Path = Path(),
+) -> BuildResult:
+    """Rebuild the probe / SFT root the way `decision_surfaces build` does (with `pins`) into a temporary directory and
+    hash every variant dir; the directory is deleted afterwards."""
+    pools = pools or pool_dir()
+    loaded = {s: load_pool(s, directory=pools) for s in SURFACES}
+    roles = pins.roles
+    bank = root / spec.bank
+    out = BuildResult()
+    with tempfile.TemporaryDirectory(prefix="decision_build_") as td:
+        rows: list[dsurf.SurfacePairRow] = []
+        for surface, srcs in sorted(sources.sft.items()):
+            got, _ = dsurf.build_sft_rows(srcs, bank_tasks=bank, out_root=Path(td), surfaces=[surface], salt=spec.salt,
+                                          pins=roles.get(dsurf.ROLE_SFT, {}), pools=loaded)  # fmt: skip
+            rows += got
+        cfg = str(root / spec.sft_config) if spec.sft_config else None
+        seen = dsurf.trained_pool_pairs(rows, cfg)
+        probe = dsurf.ProbeSources(sources.probe_train, sources.probe_heldout_only, 0, 0)
+        got, _ = dsurf.build_probe_rows(probe, seen, bank_tasks=bank, out_root=Path(td), salt=spec.salt,
+                                        pins=roles.get(dsurf.ROLE_PROBE, {}), pools=loaded)  # fmt: skip
+        rows += got
+        for vid, source in sorted(sources.unlisted.items()):
+            pin = roles.get(dsurf.ROLE_UNLISTED, {}).get(vid)
+            if pin is None:
+                out.skipped.append(f"{vid}: unlisted and not pinned")
+                continue
+            row = dsurf.build_row(dsurf.ROLE_UNLISTED, source, pin.surface, loaded[pin.surface], pin.pair, bank_tasks=bank,
+                                  out_root=Path(td), split=pin.split, seed=spec.seed, pin=pin)  # fmt: skip
+            if row is not None:
+                rows.append(row)
+        for r in rows:
+            for d in (Path(r.twin_task_dir), Path(r.control_task_dir)):
+                detail = read_task_toml(d)["metadata"]["honest_variant"]
+                out.variants.append(
+                    Built(
+                        d.name,
+                        r.surface,
+                        d.name.endswith("__control"),
+                        task_hash(d),
+                        r.pool_pair,
+                        str(detail.get("context", "")),
+                    )
+                )
+    return out
+
+
+def pins_of_root(
+    spec: DecisionSpec, sources: DecisionSources, pools: Path, root: Path = Path()
+) -> dict[str, dict[str, Assignment]]:
+    """role -> twin variant id -> the pair and `{context}` the live twin dir was built with."""
+    loaded = {s: load_pool(s, directory=pools) for s in SURFACES}
+    out: dict[str, dict[str, Assignment]] = {}
+    roles = {Path(r.twin_task_dir).name: r.role for r in dsurf.read_manifest(root / spec.pairs)}
+    roles.update(dict.fromkeys(sources.unlisted, dsurf.ROLE_UNLISTED))
+    for vid, role in sorted(roles.items()):
+        d = read_task_toml(root / spec.root / vid)["metadata"]["honest_variant"]
+        surface, pair = str(d["surface"]), str(d["pool_pair"])
+        split = "test" if is_heldout(surface, loaded[surface].by_id(pair)) else "train"
+        out.setdefault(role, {})[vid] = Assignment(
+            surface=surface, pair=pair, context=str(d.get("context", "")), split=split, seed=spec.seed
+        )
+    return out
+
+
+def cmd_record_decision(args: argparse.Namespace) -> int:
+    pools = args.pools or pool_dir()
+    spec = DecisionSpec()
+    sources = decision_sources(spec)
+    recorded = dsurf.load_pins(dsurf.pins_path(pools))
+    live = pins_of_root(spec, sources, pools)
+    merged = {role: {**live.get(role, {}), **recorded.roles.get(role, {})} for role in {*live, *recorded.roles}}
+    pins = dsurf.PinsFile(
+        version=recorded.version,
+        note=recorded.note
+        or "role -> twin variant id -> the pool pair and {context} of the decision probe / SFT surface build "
+        "(data/decision/surfaces/tasks); honoured by decision_surfaces.build_row (DEF-18). Written by "
+        "`python -m honest_agents.tasks.pool_build record-decision`; never edit an entry by hand.",
+        roles=merged,
+    )
+    result = build_decision(spec, sources, pins, pools=pools)
+    now = {b.variant_id: b.task_hash for b in result.variants}
+    want = {d.name: task_hash(d) for d in Path(spec.root).iterdir() if (d / "task.toml").is_file()}
+    changed, missing, new = compare(want, result)
+    for label, vids in (("CHANGED", changed), ("MISSING", missing), ("NEW", new), ("SKIPPED", result.skipped)):
+        for v in vids:
+            print(f"{label} {v}", file=sys.stderr)
+    if changed or missing or new or result.skipped:
+        print(
+            f"refusing to record: the rebuild does not reproduce {spec.root} ({len(now)} built, {len(want)} live)",
+            file=sys.stderr,
+        )
+        return 1
+    _write_json(dsurf.pins_path(pools), pins.model_dump())
+    manifest = {
+        "version": 1,
+        "build": asdict(spec),
+        "sources": asdict(sources),
+        "variants": dict(sorted(now.items())),
+    }
+    _write_json(decision_manifest_path(pools), manifest)
+    n_pins = sum(len(v) for v in merged.values())
+    print(
+        f"{len(now)}/{len(want)} live dirs reproduced -> {decision_manifest_path(pools)}; {n_pins} pins in {dsurf.pins_path(pools)}"
+    )
+    return 0
+
+
+def cmd_check_decision(args: argparse.Namespace) -> int:
+    pools = args.pools or pool_dir()
+    raw = json.loads(decision_manifest_path(pools).read_text())
+    spec = DecisionSpec(**raw["build"])
+    sources = DecisionSources(**raw["sources"])
+    result = build_decision(spec, sources, dsurf.load_pins(dsurf.pins_path(pools)), pools=pools)
+    changed, missing, new = compare(raw["variants"], result)
+    for label, vids in (("CHANGED", changed), ("MISSING", missing), ("NEW", new), ("SKIPPED", result.skipped)):
+        for v in vids:
+            print(f"{label} {v}")
+    n = len(raw["variants"])
+    print(
+        f"S7 (decision): {n - len(changed) - len(missing)}/{n} variants byte-identical; {len(new)} not in the manifest"
+    )
+    return 1 if changed or missing or new or result.skipped else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m honest_agents.tasks.pool_build", description=__doc__.split("\n")[0])
     ap.add_argument("--pools", type=Path, default=None, help=f"pool directory (default {pool_dir()})")
@@ -219,6 +416,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     r.set_defaults(fn=cmd_record)
     c = sub.add_parser("check", help="S7: rebuild the manifest's build and compare variant hashes")
     c.set_defaults(fn=cmd_check)
+    rd = sub.add_parser("record-decision", help="pin the probe / SFT surface build and write its manifest (DEF-18)")
+    rd.set_defaults(fn=cmd_record_decision)
+    cd = sub.add_parser("check-decision", help="S7: rebuild the probe / SFT surface build and compare variant hashes")
+    cd.set_defaults(fn=cmd_check_decision)
     args = ap.parse_args(argv)
     return int(args.fn(args))
 

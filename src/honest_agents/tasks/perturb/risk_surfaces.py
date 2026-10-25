@@ -74,7 +74,9 @@ Build modes
   context, written by `python -m honest_agents.tasks.pool_build record`) keeps that pair and context whatever is added to
   the pool; a variant not recorded there draws over the whole split as before, so the new sources of one build spread
   over every pair (drawing only from unheld pairs piled 48 of the 68-source eval's inbound_link twins onto its one
-  unheld pair). Without the file, a build draws as before. A pair forced with `pool_pair` ignores the record.
+  unheld pair). Without the file, a build draws as before. A pair forced with `pool_pair` ignores the record; the
+  decision probe and SFT builds pin their own pair and context (`pool_context`, DEF-18) from
+  `data/pools/decision_pair_assignments.json` (`decision_surfaces.load_pins`).
 
 Variant ids are `<pair>__high_risk__<surface>` and `<pair>__high_risk__<surface>__control`, so they never collide with
 the iteration-3 `<pair>__high_risk[__control]`.
@@ -773,7 +775,7 @@ def link_violation_labels(link: str, real: str, violation_details: Iterable[str]
 
 
 def _pick_pair(
-    pool: SurfacePool, pair_id: str, seed: int, split: str, pool_pair: str | None
+    pool: SurfacePool, pair_id: str, seed: int, split: str, pool_pair: str | None, pool_context: str | None = None
 ) -> tuple[Pair, str] | None:
     rng = _rng(pair_id, f"{FAMILY}_{pool.surface}", seed)
     pairs = pool.pairs_for(split)
@@ -794,7 +796,8 @@ def _pick_pair(
         if is_heldout(pool.surface, forced) != (split == "test"):  # a forced pair never crosses the holdout
             side = "held out for the test split" if is_heldout(pool.surface, forced) else "a training pair"
             raise PoolError(f"{pool.surface} pair {pool_pair!r} is {side}; it cannot be built for split={split!r}")
-        return forced, context
+        # the drawn context follows the pool size (randrange above), so a recorded forced build passes its own (DEF-18)
+        return forced, context if pool_context is None else pool_context
     return chosen, context
 
 
@@ -832,9 +835,10 @@ def _make_plan(
     corpus: str,
     mode: str,
     pool_pair: str | None = None,
+    pool_context: str | None = None,
     phrasing_heldout: bool = False,
 ) -> SurfacePlan | None:
-    picked = _pick_pair(pool, pair_id, seed, split, pool_pair)
+    picked = _pick_pair(pool, pair_id, seed, split, pool_pair, pool_context)
     if picked is None:
         return None
     pair, context = picked
@@ -1108,10 +1112,12 @@ def build_same_site(
     seed: int = 0,
     split: str = "train",
     pool_pair: str | None = None,
+    pool_context: str | None = None,
 ) -> tuple[Variant, Variant] | None:
     """The `surface` twin and control for one bank high_risk variant (`ident` is a variant id of the pair, its source id
     or its slug): same source, path, request and position, so the instruction is the bank twin's byte for byte (with
-    `empty_backup`, plus the sentence that names the backup). Returns None when the pool has no pair for the split."""
+    `empty_backup`, plus the sentence that names the backup). Returns None when the pool has no pair for the split.
+    `pool_context` (with `pool_pair`) is a recorded `{context}` to use instead of the draw."""
     pool = pool or get_pool(surface)
     bank = _bank_site(bank_root, ident)
     facts = TaskFacts.load(bank.feasible_dir)
@@ -1128,6 +1134,7 @@ def build_same_site(
         corpus=corpus,
         mode="same_site",
         pool_pair=pool_pair,
+        pool_context=pool_context,
         phrasing_heldout=bank.request in {t.format(path=bank.path) for t in RISK_PHRASINGS.test},
     )
     if plan is None:
