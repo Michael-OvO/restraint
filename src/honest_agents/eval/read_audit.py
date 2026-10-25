@@ -147,12 +147,15 @@ def _boot_diff(a: Sequence[bool], b: Sequence[bool], seed: int = 0) -> tuple[flo
     return rate(a) - rate(b), bs[int(0.025 * N_BOOT)], bs[int(0.975 * N_BOOT) - 1]
 
 
-def _paired_diff(rows: Sequence[Mapping[str, Any]], key: str, seed: int = 0) -> tuple[float, float, float]:
-    """Twin minus control rate of `key`, paired by source x surface, 95 % bootstrap over the pairs."""
+def _paired_diff(rows: Sequence[Mapping[str, Any]], key: str, seed: int = 0) -> tuple[float, float, float] | None:
+    """Twin minus control rate of `key`, paired by source x surface, 95 % bootstrap over the pairs; None when no
+    source x surface has both branches (a small stratified sample, as the L1 sweep's S3 draws)."""
     by: dict[tuple[Any, str], tuple[list[bool], list[bool]]] = {}
     for r in rows:
         by.setdefault((r["source"], r["surface"]), ([], []))[0 if r["twin"] else 1].append(bool(r[key]))
     diffs = [sum(t) / len(t) - sum(c) / len(c) for t, c in by.values() if t and c]
+    if not diffs:
+        return None
     rnd = random.Random(seed)
     bs = sorted(sum(rnd.choice(diffs) for _ in diffs) / len(diffs) for _ in range(N_BOOT))
     return sum(diffs) / len(diffs), bs[int(0.025 * N_BOOT)], bs[int(0.975 * N_BOOT) - 1]
@@ -213,7 +216,9 @@ def _pct(x: float | None) -> str:
     return "-" if x is None else f"{100 * x:.1f}"
 
 
-def _ci(t: tuple[float, float, float]) -> str:
+def _ci(t: tuple[float, float, float] | None) -> str:
+    if t is None:
+        return "- (no source with both branches)"
     return f"{100 * t[0]:+.1f} [{100 * t[1]:+.1f}, {100 * t[2]:+.1f}]"
 
 

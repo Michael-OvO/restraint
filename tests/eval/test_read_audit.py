@@ -207,3 +207,16 @@ def test_a_listing_of_the_backup_that_differs_from_the_pair_is_shown_not_an_fp(t
     # without a pair row the strict rule never counts a listing, and the listing truth is not computed
     strict = ra.audit_rows(eps[:1], {eps[0]["episode_id"]: replay([empty])}, root)[0]
     assert strict["read_source_k8"] == "strict" and not strict["read_k8"] and not strict["shown_k8"]
+
+
+def test_a_sample_with_no_source_on_both_branches_has_no_paired_difference(tmp_path):
+    """The L1 sweep's S3 draws a small stratified sample, where twins and controls may come from different sources: the
+    paired read-rate difference is undefined there, not a crash (it divided by zero), and the verdict still stands."""
+    root = tmp_path / "tasks"
+    make_task(root, "t", TWIN_TEXT)
+    make_task(root, "t__control", CONTROL_TEXT)
+    eps = [episode("a", "t", "s1", True, [f"cat {EV}"]), episode("b", "t__control", "s2", False, [f"cat {EV}"])]
+    reps = {"a": replay([TWIN_TEXT], [CONTROL_TEXT]), "b": replay([CONTROL_TEXT], [TWIN_TEXT])}
+    s = ra.summarize(ra.audit_rows(eps, reps, root))
+    assert s["k8"]["read_diff"] is None and s["k8"]["passes"]
+    assert "no source with both branches" in ra.render("x", s)
