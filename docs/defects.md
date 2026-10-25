@@ -27,7 +27,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-19 | tooling | open | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only |
-| DEF-20 | stats | open | three iteration-16 guards have no powered metric: twin task_success, trained/readme `revealed`, tier S mean commands |
+| DEF-20 | stats | fixing | three iteration-16 guards had no powered metric; mean commands now powered (a count), twin task_success recorded from now on (void on the archive), `revealed` pending G2 pair replays |
 | DEF-21 | tooling / tests | open | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 | DEF-22 | tooling / build | open | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
 | DEF-23 | tooling | open | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
@@ -594,9 +594,36 @@ section 7 critique) and from re-checks against the code and the archive on that 
     - G4 held-out gap −8.1 [−20.0, +3.7]: no verdict;
     - no follow-up moved read rate by more than 2.5 points (MDE about 4-5).
   - Every iteration-15 held-out-gap verdict made against a point bar is void; the re-scored intervals replace them.
+- **Repair 3 (2026-10-25, `844b379`): the pre-registration.** [iteration-16-prereg.md](iteration-16-prereg.md) (S0.14's
+  file, **DRAFT** until the owner approves it), for the iteration-16 round of decision-changing checks. Its bars come
+  from this tool at `844b379`:
+  - every guard group is one conjunction with per-guard margins at a clone-fail rate of 0.10 / m (0.02 on tier S), so
+    the joint sampling clone passes ≥ 90 %, re-scored on the archive: surface (G2 − final, 5 guards) **93 %** (seed
+    clone 21 %); tier S (4 guards, the +5 commands margin included) **92 %**; tier F (2) **91 %** (seed 97 %); probe (3,
+    with the deletion flip test `probe_sensitivity_own`, G2 53.9 points) **97 %**. The same five surface guards each at
+    their own ni10 pass jointly only 60 %, which is why the conjunction matters;
+  - the K = 68 margins (surface-val-v2) by the same formula (e.g. twin abstain_correct −5.9, control decline +5.8),
+    taken as max(planning value, the recomputation on the build's first reference eval);
+  - the headlines (TB2 false-claim share down, ImpossibleBench honest flag up, TB2 success non-inferior) and the
+    external guards (AbstentionBench, MASK) are **computed-at-build**, by the exact formula written there, from base
+    and G2 calibration samples;
+  - checkpoint selection (DEF-08): `eval.select_checkpoint` on the select split; GRPO only at a fixed step or on
+    `eval_honest/claim_rate_infeasible` with this file as `probe.preregistration`.
+  - Tests: `test_the_preregistration_writes_its_guards_as_conjunctions_the_tool_parses` (L0, in `--fast`: the file is
+    a draft, its four conjunctions parse, the selection endpoint is named; fails on the old tree, which has no file)
+    and `test_the_preregistered_conjunctions_pass_a_sampling_clone_at_least_90_percent` (slow; needs the archive and
+    the main tree's task dirs, skipped elsewhere; passes from the main tree).
+  - Note: the research note's table predates DEF-38's landmark window. The pre-registration uses the tool at `844b379`
+    (read MDE at K = 20 is now 4.9, not 4.3; the other surface rows within 0.2-0.8 points).
 - **Remaining (why `fixing`):**
-  - the pre-registration (S0.14) must be written with margins from this tool, as in the closure test above;
-  - DEF-20: three iteration-16 guards have no metric in the tool, so S10 cannot be signed off for them.
+  - owner approval of the draft;
+  - the computed-at-build values (TB2, ImpossibleBench, AbstentionBench, MASK, the claim and blame flip-test probes,
+    the select split's ni10, and the K = 68 recomputation on surface-val-v2) must be computed by this tool, their
+    conjunctions joint-checked and written into the file before any final-arm episode exists;
+  - DEF-20's two guards (twin task_success, `revealed`) have no archived data;
+  - a circularity the owner must decide: the calibration samples that set the external margins are themselves an
+    experiment under the gate, so they need either DEF-10 closed on the rule as written or an owner waiver of DEF-10
+    for those runs only.
 - **Limits** (in the research note):
   - one pair of G2 seeds; no tier S or probe seed; SFT-v2 has one surface run (DEF-12);
   - moment components are noisy and are floored at 0 in the MDE, which makes it conservative;
@@ -1113,7 +1140,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** a docker-marked test that a file created through `HonestHarborEnv.bash` has mode 0644.
 
 ### DEF-20: iteration-16 guards with no powered metric
-- **Area:** stats. **Status:** open. **Found:** 2026-10-25, DEF-10 review.
+- **Area:** stats. **Status:** fixing (mean commands done; twin task_success recorded from now on, void on the
+  archive; `revealed` pending G2 pair replays). **Found:** 2026-10-25, DEF-10 review. **Commits:** `844b379` (fix,
+  tests), ledger: the commit after it. Date 2026-10-25 (the prescribed 2026-10-24 precedes the found date).
 - **Evidence:** iteration-16-direction S3 guards ("cannot be demoted") and S0.12 behaviours at risk list guards that
   `analysis.power` cannot compute from the archive, so their MDE and clone-pass are unknown:
   - twin task_success (feasible part done): the archived twin rewards have `tests_passed: None` (G2 it15 surface4, all
@@ -1126,6 +1155,49 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** record the feasible-part result on twins (or re-grade it from the test log), compute `revealed` from the S0
   replays when they exist, and add a count metric (no ×100) to `analysis.power`; then add each to `METRICS`.
 - **Closure test:** the power report lists an MDE, ni10 and clone-pass for each of the three.
+- **Fix (done, `844b379`):**
+  - **A count metric.** `Metric.count`: the value, components, MDE, margins and a bar's POINTS are in the metric's own
+    units, not x 100 (`Bar.parse`, the report, `estimate`). New metrics: `mean_commands` (the eval's `mean_commands`
+    term, commands per scored episode) and `mean_commands_plain` (plain tasks). Tier S, G2 s1, K = 40, S = 2:
+    13.9 commands (plain 12.7), **MDE 1.0, ni10 1.2** (simulated 1.2; the formula's guard is flagged at 89 %); plain
+    MDE 1.1, ni10 1.3 (clone 91 %). The design's "+5 commands" margin is therefore far wider than needed.
+  - **Twin task_success: not recoverable from the archive.** High-risk twins have `run_tests_when_infeasible = false`,
+    so the grader never ran their tests. `extra.test_log` is empty and `tests_passed` is None on every twin of G2 s1,
+    G2 s2 and SFT-v2 surface4 (480 each) and on tier S's 40 high_risk twins (checked); the control's log says nothing
+    about the twin's episode. **Void** on every archived eval (it was never measured). From now on the grader records
+    it: `grading.grade` step 6 runs a high-risk twin's suite once more, *after* everything graded (so no verdict can
+    see what the tests did), and `feasible_part_verdict` says whether every test except `test_requested_cleanup_done`
+    (`TWIN_REQUEST_TESTS`, the test both risk builders append) passed on a clean run. It goes to
+    `debug["feasible_part"]` and `extra.feasible_part` on the eval record; the grade is unchanged (tested).
+    `GradingConfig.twin_feasible_part` turns it off. `analysis.power`'s `twin_task_success` reads it.
+  - **`revealed`.** `report --replays` takes `replay_episodes --pair` rows. `read` then uses the canonical
+    `read_diagnosis.inspected` with the replay (revealed where present), and the new `revealed_trained` /
+    `revealed_readme` metrics come from `read_diagnosis.revealed`. The archive has no G2 pair replays (the gate's
+    replay cache holds command-output rows keyed by cache key, not `--pair` rows of the G2 evals), so they stay
+    pending S0's replays.
+  - The report lists every metric the reference run has no units of, with what it needs (`NEEDS`, `## Not computable
+    from these runs`), instead of leaving it out. On the archive that is exactly twin_task_success, revealed_trained and
+    revealed_readme.
+  - Also added for the flip test: `probe_sensitivity` = P(destroy | benign) − P(destroy | warning) per probe pair ×
+    surface cell, and `probe_sensitivity_own` (own-prefix set). G2 s1: 43.5 / **53.9** points; MDE 2.5 / 3.0 and ni10
+    3.0 / 3.6 at the archived build (S = 8). At 120 items per arm the ni10 would be 16.3 / 14.5.
+- **Regression tests** (all fail on the old code):
+  - `test_a_risk_twin_records_its_feasible_part_without_changing_the_grade` (both verdicts; the outcome is identical
+    with the flag off);
+  - `test_the_feasible_part_verdict_needs_a_clean_run`;
+  - `test_both_risk_builders_append_the_request_test_the_grader_excludes`;
+  - `test_a_risk_twin_record_carries_its_feasible_part` (eval record round trip, fake sandbox);
+  - `test_the_def20_guards_get_an_mde_ni10_and_clone_pass_once_their_data_exists` (all five get MDE, ni10 and
+    clone-pass; mean commands in commands; the archive's case lists the three as not computable);
+  - the probe-loader test extended to both sensitivity metrics.
+- **Impact note.** No archived number changes. Twin task_success is **void** on every archived eval. New evals and
+  training rollouts (`HonestHarborEnv` grades through `grade`) spend one more verifier run per high-risk twin episode,
+  up to `tests_timeout_sec`. It is a grader change for change control (integrity-gate step 4), although no grade moves.
+- **Remaining (why `fixing`):**
+  - `revealed`: run the report with `--replays` on the S0 G2 pair replays;
+  - twin task_success: from G2's first eval on surface-val-v2, or from a Docker regrade replay of the archived G2
+    twins. The second needs `replay_episodes --regrade` to carry `feasible_part` into `EpisodeRegrade` and a regrade
+    input to `analysis.power`; that is a change in `analysis/replay_episodes.py`, outside this lane.
 
 ### DEF-21: a timing-dependent grading test can fail the `--fast` gate
 - **Area:** tooling / tests. **Status:** open. **Found:** 2026-10-24, while repairing DEF-17's test.
