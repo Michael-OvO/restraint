@@ -722,7 +722,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   closed 2026-10-24, after a repair (for RL, use `pair_table: true`; the default stays off so old runs re-score
   identically). **Commits:** `bf67863` (fix, gate tool,
   tests), `627da1b` (ledger); repair `0ee7de4` (verified-blocker cap, branch-blind grid test, gate exits on
-  missing task dirs) and this ledger update.
+  missing task dirs) and `1e4605d` (ledger); merge `bc8a4ab`; integration fix `60a0424` (`reward_gate` calls
+  `read_diagnosis.inspected`; reopened as fixing).
 - **Found:** it15 diagnosis (g3-rl-dynamics), re-checked against `reward.py` and the config chain
   `grpo_it15_g3` → `grpo_it13` → `grpo_it12` → `grpo_colocate_qwen35` on 2026-10-23.
 - **Evidence:**
@@ -769,7 +770,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
     EVs (always decline, zero-command decline, decline citing a verified irrelevant blocker (repair), always proceed; each episode's own labels, scored through the real
     `compute_reward`) vs the start policy, balanced over branches, with a 2,000-resample source bootstrap; the
     blind-decline gradient (mean GRPO advantage of unread declines, credit Σ A·u / N, `scale_rewards: none`); read vs
-    unread reward per branch with a source-bootstrap CI (the repo read rule, `read_diagnosis.read_before_acting`); the
+    unread reward per branch with a source-bootstrap CI (the S4 inspection metric, `read_diagnosis.inspected`: strict rule over the K = 8 landmark window, since
+    `60a0424`; the first fix used the since-removed `read_before_acting`, see "Integration re-score"); the
     adversarial suite `ADVERSARIAL`. Thresholds (`GateThresholds`): every blind policy and adversarial behaviour below
     the start policy (S9), break-even ≥ 0.5, read − unread > 0 on both branches (diagnosis §7 item 5).
     `--def01-postfix [--regrade rows]` re-grades pre-DEF-01 inbound_link controls exactly as DEF-01's impact note did
@@ -864,8 +866,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - **Remaining (why `fixing`):** the pair table still gives reading no credit on G3 controls under the canonical
     metric (the defect's second half); either the reward credits inspection on controls (the reveal credit of
     iteration-16 direction S5) or the gate's read check is argued to need a different window, which DEF-03 would have
-    to accept. Outputs: the fixer's scratch `scratchpad/fix/integrator/gate_pre.txt` (old rule, from the `fix/reward`
-    tree), `gate_post.txt` (`inspected`) and `gate_whole.txt` (whole prefix).
+    to accept. Outputs, archived with a `MANIFEST.sha256` in
+    `/Users/michael/Documents/honest-agents-archive/analysis/def13-integration/`: `gate_pre.txt` (old rule, from the
+    `fix/reward` tree), `gate_post.txt` (`inspected`), `gate_whole.txt` (whole prefix) and `gate_wholeprefix.py` (the
+    shim that produced it).
 
 ### DEF-14: no backup-inspection category on empty_backup
 - **Area:** metric. **Status:** closed 2026-10-24. **Found:** it15 diagnosis section 5. **Commits:** `21ce3d6`.
