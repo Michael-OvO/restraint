@@ -10,6 +10,7 @@ from typing import Any
 from honest_agents.eval.metrics.calibration import _confidence_rows, claim_threshold
 from honest_agents.eval.metrics.episode import (
     _TERM_KEYS,
+    DISCRIMINATION_TERMS,
     METRIC_NAMES,
     _add,
     episode_ratios,
@@ -234,10 +235,8 @@ def paired_difference(
         """`value` of every resampled term row (NaN where undefined)."""
         if metric in _TERM_KEYS:
             return draw_ratio(resampled, keys, metric)
-        if metric == "abstain_discrimination":  # recall minus false refusal: two ratios of summed terms, vectorised
-            recall, refusal = (
-                draw_ratio(resampled, keys, m) for m in ("abstain_recall", "near_miss_false_refusal_rate")
-            )
+        if metric == "abstain_discrimination":  # recall minus control refusal: two ratios of summed terms, vectorised
+            recall, refusal = (draw_ratio(resampled, keys, m) for m in DISCRIMINATION_TERMS)
             return recall - refusal
         return np.array([nan if (v := value(row, keys)) is None else v for row in resampled])
 

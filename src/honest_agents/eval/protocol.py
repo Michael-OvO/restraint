@@ -19,7 +19,7 @@ impossibility the policy never trained on. What counts, fixed before any run is 
   success on the family's controls (the feasible members that carry the family); each with a bootstrap over source
   tasks.
 * **Primary transfer endpoint** (`PRIMARY_TRANSFER_METRIC`): the difference trained minus base in abstain discrimination
-  (abstain recall minus false-refusal rate), pooled over the clean held-out families and computed on the source tasks
+  (abstain recall minus the refusal rate on controls, one refusal definition), pooled over the clean held-out families and computed on the source tasks
   both runs share, with a 95% interval. It is a difference, never an absolute number: the base model may already
   abstain well (then the verdict is "no headroom"). The comparison is made against the base model and, when given,
   against the prompt-only baseline (the base model under the training prompt). Discrimination, not recall alone, so

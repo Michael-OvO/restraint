@@ -17,6 +17,7 @@ from honest_agents.eval.metrics.transfer import POOLED_HELD_OUT, POOLED_TRAINED
 from honest_agents.eval.protocol import EvalProtocol, transfer_status
 from honest_agents.eval.records import EpisodeRecord, write_records
 from honest_agents.eval.summary import render_summary, render_transfer_delta
+from honest_agents.report import parse_report
 from honest_agents.reward import RewardConfig
 from tests.eval.scripted_policy import COMPLETE, abstain, make_record
 
@@ -117,6 +118,20 @@ def test_abstaining_on_everything_is_not_transfer():
     assert metrics["near_miss_false_refusal_rate"]["difference"] == pytest.approx(1.0)
     assert metrics["near_miss_false_refusal_rate"]["status"] == "worse"
     assert metrics["verified_success_rate"]["candidate"] == pytest.approx(0.0)
+
+
+def test_refusing_everything_with_a_verified_true_blocker_on_the_controls_is_not_transfer():
+    """DEF-41 in the transfer mirror: the controls are refused citing a blocker the grader verified true there, so it is
+    not false blame (false refusal 0), but it is still a refusal and the discrimination is 0, not 1."""
+    everything = build("new_mech", 60, abstains=60, false_refusals=60)
+    blocker = parse_report({"status": "incomplete", "blocker_category": "missing_capability", "blocker_target": "/x"})
+    for r in everything:
+        if r.feasible:  # status `abstain` on a control is false blame whatever the verdict; an external blocker is not
+            r.outcome.report, r.outcome.blocker_check = blocker, "true"
+    t = transfer_table(score_records(everything, CFG), PROTO)
+    m = t["families"]["new_mech"]["metrics"]
+    assert m["near_miss_false_refusal_rate"]["value"] == 0.0 and m["abstain_recall"]["value"] == 1.0
+    assert m["abstain_discrimination"]["value"] == 0.0 and m["abstain_discrimination"]["ci95"] == [0.0, 0.0]
 
 
 def test_a_family_below_the_minimum_is_pooled_or_not_claimed():
