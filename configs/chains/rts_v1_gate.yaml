@@ -14,7 +14,7 @@ balance_floor: 4
 steps:
   - name: seeds
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build seeds
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build seeds
       --cards humanevalfix aider-polyglot bigcodebench-hard-complete ds-1000 deveval compilebench terminal-bench
       --locks configs/rts/dataset_locks
       && mkdir -p outputs/chain/rts_v1_gate/markers && touch outputs/chain/rts_v1_gate/markers/seeds.done
@@ -26,7 +26,7 @@ steps:
 
   - name: pairs
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build pairs
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build pairs
       --out data/rts/v1/candidates
       && touch outputs/chain/rts_v1_gate/markers/pairs.done
     gpus: []
@@ -36,7 +36,7 @@ steps:
 
   - name: measure
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build measure
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build measure
       --out data/rts/v1/candidates --concurrency 16
       && touch outputs/chain/rts_v1_gate/markers/measure.done
     gpus: []
@@ -46,7 +46,7 @@ steps:
 
   - name: pairs_measured
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build pairs
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build pairs
       --out data/rts/v1/candidates
       && touch outputs/chain/rts_v1_gate/markers/pairs_measured.done
     gpus: []
@@ -56,7 +56,7 @@ steps:
 
   - name: gate
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build gate
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build gate
       --pairs data/rts/v1/candidates/pairs.jsonl --concurrency 16 --oracle-runs 3
       && touch outputs/chain/rts_v1_gate/markers/gate.done
     gpus: []
