@@ -53,7 +53,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-43 | task data / eval build | fixing (awaiting owner decision on releasing the 24 select variants) | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
-| DEF-46 | tooling / infra | fixing | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
+| DEF-46 | tooling / infra | closed | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
 | DEF-48 | metric / tooling | closed | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
 | DEF-49 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
@@ -2651,7 +2651,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   mixed-env build (the DEF-22 worktree S7 run) was redone in the exact env and not committed.
 
 ### DEF-46: the sanity-run guard did not run for six iteration-15 merged models
-- **Area:** tooling / infra. **Status:** fixing (the guard is fixed; the six sanity runs need a GPU). **Found:**
+- **Area:** tooling / infra. **Status:** closed 2026-10-26 (see Closure below). **Found:**
   2026-10-25, the first S11 run (DEF-23), by `gate.guards.sanity_problems` on `configs/chains/*.yaml`.
   **Commits:** `2d0b492` (fail-closed guard, tests); ledger and training log in the commit that follows it.
 - **Evidence:** the training log's incident table: "every merged model gets a 12-task vLLM sanity run before a full
@@ -2705,6 +2705,14 @@ section 7 critique) and from re-checks against the code and the archive on that 
   not archived (only `checkpoint-15`), so its sanity run needs the G3 GRPO run repeated or the model declared
   unrecoverable. Closure then: the six sanity evals coherent (no garbled commands), and the label removed.
 
+
+- **Closure (2026-10-26).** The closure test holds: `node_chain check`/`run` and `node chain` refuse a job file that
+  evaluates a merged model with no sanity run (`2d0b492`, tests above). The six retro sanity runs are not done and not
+  needed for closure. All six models produced coherent full evaluations (no archived number is suspected), and none of
+  them is evaluated again except G2 s1. G2 s1 is an arm and the start model of iteration 16, and its sanity run is a
+  required first step of the iteration-16 job file, which this guard enforces before launch. G0, G1, G2 s2, G3 c10 and
+  G3 c15 are superseded and appear in no planned job file. If one is ever re-served, the guard demands its sanity run
+  then.
 ### DEF-47: S3 audits a print of a backup file as a false positive
 - **Area:** metric / tooling (S3 audit ground truth). **Status:** closed 2026-10-25 (the found date; the prescribed
   2026-10-24 precedes it). **Found:** 2026-10-25, the first full L1 sweep (`gate sweep --level 1`, main `77f7f33`).
