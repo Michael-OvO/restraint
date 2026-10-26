@@ -20,7 +20,7 @@ the start model needs a GPU. No experiment may start before the owner signs off.
 | Where L1 ran | Vast VM 57730801 (Ubuntu 22.04 VM template, Docker 29.0.3, x86_64, 19 vCPU, 49 GB), a copy of `8d45d25` plus the two S3 evals from the archive, `--concurrency 12`. G1 and S3+S11 ran as two parallel processes. Local Docker on the Mac is limited to a few sandboxes by owner rule; a full refill overheated it on 2026-10-25. Destroyed after the run |
 | L1 budget | both runs were over the 900 s L1 budget because the cache was empty, which is a full refill. A cached re-run on the same platform takes seconds |
 | 12-task sanity run of the start model | pending (needs GPU) |
-| Waivers in force | none |
+| Waivers in force | DEF-10, covers it16a (owner, 2026-10-26) |
 
 Results and cache rows: `~/Documents/honest-agents-archive/staging/gate-node-20261026/` (`gate_g1.json`,
 `gate_s3.json`, `summary.txt`, `g1_surfaces.v1.jsonl`, `replay_episodes.v1.jsonl`). The cache keys include the base
@@ -42,24 +42,24 @@ green) and `final_benchmark check`, not an L1 check.
 
 ## Ledger status (60 entries)
 
-54 `closed`. Not closed (each blocks sign-off; `gate.ledger check` exits 1 on all six):
+57 `closed`, 1 `waived` for `it16a` only, 2 `fixing`. `gate.ledger check --experiment it16a` exits 1 on DEF-20 and
+DEF-50.
 
 | ID | Status | What remains | Needs |
 |---|---|---|---|
-| DEF-10 | fixing | the pre-registration (`docs/iteration-16-prereg.md`) is a DRAFT; its computed-at-build bars and DEF-20's guards are open; the calibration-sample circularity | owner approval (and a DEF-10 waiver for `it16a` only) |
-| DEF-20 | fixing | twin task_success: recorded from now on, void on the archive, and its validity check on real twins is pending; `revealed` needs pair replays of all three surface runs. The 2026-10-26 node run was refused (see the morning brief); a node rented by the orchestrating session at 07:32 UTC (Vast 57781978) was coming up when this was written | remote Docker batch (CPU node) |
-| DEF-43 | fixing | release of the 24 select variants that failed only under the old umask (the tracked 8-entry `data/select_quarantine.txt`, already on main, is the proposal) | owner decision |
-| DEF-50 | fixing | the AbstentionBench export must run on a node, then freeze and check on the Mac | CPU node |
-| DEF-58 | open | the pre-registration promises per-(task, sample, turn) sampling seeds; no rollout sends one | code fix or a pre-registration amendment (owner) |
-| DEF-60 | open | the AbstentionBench (and MASK) guard margin has no calibration source | owner decision (state m in the pre-registration, or add AbstentionBench to stage (a)) |
+| DEF-10 | waived (owner, 2026-10-26; covers it16a) | pre-registration approved 2026-10-26 with the DEF-58 and DEF-60 amendments; the computed-at-build values come from stage (a) | stage (a); still open for it16b-d |
+| DEF-20 | fixing | twin task_success's MDE, which only the stage-(a) eval supplies | an owner waiver for it16a (it cannot close before (a) runs) |
+| DEF-50 | fixing | the AbstentionBench export stopped at the gated GPQA subset | an HF token with GPQA access, or an amendment to freeze without GPQA; AbstentionBench runs only in (d), so a waiver for it16a is also consistent |
 
-DEF-46 (`0ff3cf0`) and DEF-59 (`4077af4`) closed since the last draft. DEF-20: the node batch of 2026-10-26 did the pair replays and the twin validity check (`ffa9cc3`); only twin task_success's MDE remains, from the stage-(a) eval. DEF-50: the node export is blocked by the gated GPQA subset (`58018f9`).
+Closed on 2026-10-26 on the owner's "Approve and continue": DEF-43 (release of the 24 select variants), DEF-58
+(pre-registration amended to independent sampling) and DEF-60 (AbstentionBench and MASK margins stated, m = 7.5 points).
+DEF-46 and DEF-59 closed earlier the same night.
 
 ## What blocks sign-off, exactly
 
-1. The 7 ledger entries above, or an owner waiver of each, in writing, by ID.
+1. The 3 ledger entries above, or an owner waiver of each for the stage being launched, in writing, by ID.
 2. The 12-task sanity run of the start model on the eval build (GPU).
-3. Owner approval of the pre-registration and of the GPU spend.
+3. Owner approval of each stage's GPU spend (the pre-registration was approved on 2026-10-26).
 
 If none of the gated files change (grader, verifier, harness, task builds, metric code), the L1 results above stay
 valid for the commit that closes the ledger: integrity-gate.md step 4.

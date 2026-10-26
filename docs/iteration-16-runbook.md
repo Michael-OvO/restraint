@@ -1,8 +1,9 @@
 # Iteration 16 node runbook: the four paid stages
 
-**Status: prepared, not launched, not approved.** The integrity gate is shut: DEF-10 (the pre-registration is a
-DRAFT) and DEF-43 (owner decision) are open, with DEF-20, DEF-50 and the two entries this runbook's lane added
-(DEF-58, DEF-59). No stage below may run until [integrity-gate.md](integrity-gate.md) step 3 is signed off in
+**Status: prepared, not launched.** The pre-registration is approved (2026-10-26) and DEF-10 is waived for `it16a`
+only; DEF-43, DEF-58, DEF-59 and DEF-60 are closed. Open as of 2026-10-26: DEF-20 (its last item comes from stage (a)
+itself) and DEF-50 (the gated GPQA subset), so `gate.ledger check --experiment it16a` still exits 1 until each is
+closed or waived for `it16a`. No stage below may run until [integrity-gate.md](integrity-gate.md) step 3 is signed off in
 [iteration-16-signoff.md](iteration-16-signoff.md) and the owner approves that stage's spend. The job files enforce
 this themselves: the first step of each one is `python -m honest_agents.gate.ledger check`, which exits 1 while any
 ledger entry is open, and every other step depends on it.
@@ -158,8 +159,8 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
 ## 7. After each stage (Mac, $0)
 
 - **(a):** the units files `runs/final/it16a/{base,g2}_{tb2_units,ib_summary}.json`. Add the `RUNS` entries for
-  `analysis.power.load_tier_run` (prereg 6.1). Compute m3, the MDEs of P1 and P2 and the external margins from the base
-  arm, and write them into the pre-registration before any final-arm episode exists. Re-cost (d) from the Harbor job
+  `analysis.power.load_tier_run` (prereg 6.1). Compute m3 and the MDEs of P1 and P2 from the base
+  arm (the external margins are stated in prereg 6.3, DEF-60), and write them into the pre-registration before any final-arm episode exists. Re-cost (d) from the Harbor job
   times.
 - **(b):** `sft.commit_checks build` and `sft.claim_splice` (commit-data lane) on `iterations/16-it16b-claim-rollouts`
   (episodes, bank) and the pulled checklist-validation cache. Then the agreement bar (prereg 3.3) and the coverage report

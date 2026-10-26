@@ -206,3 +206,31 @@ def test_the_final_eval_scores_every_benchmark_it_runs_for_every_arm() -> None:
             assert f"units --single --bench {bench} " in " ".join(units.split()), (tag, bench)
         assert f"runs/abstentionbench/it16d_{tag}/responses.jsonl" in units
         assert f"runs/harbor/it16d_{tag}_aa/agentic_abstention_immediate__*/agentic_abstention_summary.json" in units
+
+
+PREREG = REPO / "docs" / "iteration-16-prereg.md"
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    end = text.find("\n## ", start + len(heading))
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_the_preregistration_does_not_claim_seeded_sampling() -> None:
+    """DEF-58: no rollout sends a sampling seed, so the arms section must say they are independently sampled."""
+    arms = _section(PREREG.read_text(), "## 2. Arms")
+    assert "independently sampled" in arms
+    assert "seeds" not in arms.replace("sampling seed", "")
+
+
+def test_every_external_guard_states_its_margin() -> None:
+    """DEF-60: stage (a) runs neither external benchmark of prereg 6.3, so each guard must state its m."""
+    text = PREREG.read_text()
+    block = text[text.index("**External guards, final − base**") : text.index("### 6.4")]
+    guards = [line for line in block.splitlines() if line.startswith("- ")]
+    assert {g.split(" ")[1] for g in guards} == {"AbstentionBench", "MASK"}
+    calibration = _chain("a").step("base_calibration").command
+    assert "abstentionbench" not in calibration.lower() and "mask" not in calibration.lower()
+    for g in guards:
+        assert "**m = " in g, g

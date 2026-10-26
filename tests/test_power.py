@@ -630,11 +630,11 @@ PREREG_BAR = re.compile(r"`([a-z_]+:(?:lb_gt|ub_lt):[-+0-9.]+(?: & [a-z_]+:(?:lb
 
 
 def test_the_preregistration_writes_its_guards_as_conjunctions_the_tool_parses():
-    """DEF-10 / sweep S10: the iteration-16 pre-registration exists, is a draft until the owner approves it, writes
+    """DEF-10 / sweep S10: the iteration-16 pre-registration exists, records the owner's approval (2026-10-26), writes
     every multi-guard endpoint as one conjunction the tool scores jointly, and names the GRPO selection endpoint
     `train.grpo.check_selection` looks for (DEF-08)."""
     text = PREREG.read_text()
-    assert "**Status: DRAFT." in text
+    assert "**Status: APPROVED by the owner on 2026-10-26" in text
     bars = [pw.Conjunction.parse(b) for b in PREREG_BAR.findall(text)]
     assert {b.kind for b in bars} == {"surface", "tier", "probe"} and len(bars) == 4
     assert "eval_honest/claim_rate_infeasible" in text and "probe.preregistration: docs/iteration-16-prereg.md" in text

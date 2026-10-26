@@ -1,7 +1,9 @@
 # Iteration 16 pre-registration: decision-changing checks at every commitment point
 
-**Status: DRAFT. Not approved by the owner. Nothing in it binds until the owner approves it in writing, and no GPU is
-rented, no data are built for training and no arm is evaluated on the final benchmark before then.**
+**Status: APPROVED by the owner on 2026-10-26 ("Approve and continue", answering the morning brief's Decision 1),
+with two amendments: arms are independently sampled (section 2, DEF-58), and the AbstentionBench over-abstention margin
+is a stated m = 7.5 points (section 6.3, DEF-60). The computed-at-build values are still written into this file before
+any episode of the final arm exists. DEF-10 is waived for the calibration samples (`it16a`) only.**
 
 Written 2026-10-25 (lane `fix/power-prereg`, ledger DEF-10 and DEF-20). The design is the owner-approved concept for
 iteration 16 (decision-changing checks at every commitment point). Where this file and
@@ -60,8 +62,9 @@ These facts come from the owner's design brief. The coverage report re-measures 
 | **G2** | the iteration-15 G2 seed-1 model (merged SFT-v2 e3 + G2 adapter), rebuilt on CPU | the previous model: the reference for the destructive-step guards |
 | **final** | the iteration-16 model: SFT from G2 s1 on the matched-pair data of section 3, plus optional DPO on the fail branch; checkpoint chosen by section 7 | the candidate |
 
-All arms run in one eval session per benchmark. They use the same items, harness, system prompt, sampling settings
-and per-(task, sample, turn) seeds. Each arm uses its own vLLM server, which never shares the training GPU.
+All arms run in one eval session per benchmark. They use the same items, harness, system prompt and sampling settings,
+and are independently sampled: no request carries a sampling seed, which is what the bars' power assumes (amended
+2026-10-26, DEF-58). Each arm uses its own vLLM server, which never shares the training GPU.
 Contamination: the base model may post-date Terminal-Bench ([evaluation.md](evaluation.md)), so only deltas between
 arms are reported, never absolute levels.
 
@@ -267,10 +270,11 @@ none either, so these two conjunctions have no seed-clone rate). The conjunction
 - At the 120-items-per-arm design the deletion sensitivity's ni10 would be 14.5 points (MDE 12.3). So the probe runs
   on the full archived build, not the 120-item one.
 
-**External guards, final − base** (all computed-at-build from the calibration samples, ni10 rule, one conjunction per
-benchmark):
-- AbstentionBench over-abstention (abstaining on answerable items): UB < +m;
-- MASK honesty (1 − lie rate): LB > −m.
+**External guards, final − base** (one conjunction per benchmark; margins stated here, amended 2026-10-26, DEF-60:
+no calibration stage runs these benchmarks, so neither margin can be computed-at-build):
+- AbstentionBench over-abstention (abstaining on answerable items): UB < +m, **m = 7.5 points** (stated, like P3's cap);
+- MASK honesty (1 − lie rate): LB > −m, **m = 7.5 points** (stated). MASK is not run in stage (d): it needs a paid
+  judge, which needs separate owner approval. Until then this guard is not evaluated and is reported as not run.
 
 ### 6.4 Reported, not gated
 

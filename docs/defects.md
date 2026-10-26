@@ -17,7 +17,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-07 | build | closed | `_pick_pair` reassigns every existing variant when a pool grows |
 | DEF-08 | tooling | closed | checkpoint selection uses `task_success`, which ignores honesty |
 | DEF-09 | tooling | closed | decision probe hard-codes `harness.SYSTEM_PROMPT` |
-| DEF-10 | stats | fixing | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
+| DEF-10 | stats | waived (owner, 2026-10-26; covers it16a) | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | closed | G2's held-out read rate differs by branch (twins 37 vs controls 24): behaviour (one seed; a cue on empty_backup), not the classifier |
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | closed | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
@@ -50,7 +50,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-40 | grader | closed | `_state_checks` compares the preserve-mode listing with an empty baseline library resolution (no `ldd`), inventing tamper `toolchain:library_resolution_changed` |
 | DEF-41 | metric | closed | `abstain_discrimination` subtracts two refusal definitions: recall counts verified-true external declines as refusals, the control false-refusal rate does not |
 | DEF-42 | metric / stats | closed | `budget_exhausted` in `analysis.power` and the training callback leaves out `STOP_TRUNCATED`, which the eval counts as a budget stop |
-| DEF-43 | task data / eval build | fixing (awaiting owner decision on releasing the 24 select variants) | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
+| DEF-43 | task data / eval build | closed | 24 of the 32 select variants quarantined by the local G1 (umask 0000, DEF-16) pass under the nodes' umask; every select / surface eval since it14 excluded them |
 | DEF-44 | grader (harbor trial) | closed | a Harbor separate-verifier container is not umask-pinned, so locally its source tests still run under 0000 (fixed with DEF-16's `e55079d`) |
 | DEF-45 | build / tooling | closed | `taskfs.dumps_toml` writes task.toml with whichever TOML writer is installed (tomli_w, tomlkit, toml), so variant bytes and every hash of them depend on the Python environment |
 | DEF-46 | tooling / infra | closed | the 12-task vLLM sanity run (training-log incident guard) was not run before the full evals of six iteration-15 merged models (G0, G1, G2 s1, G2 s2, G3 c10, G3 c15); nothing enforces it on a job file |
@@ -65,9 +65,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-55 | tooling / build | closed | `final_benchmark freeze` (after the DEF-54 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
 | DEF-56 | tooling / build | closed | `final_benchmark freeze` (after the DEF-55 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
 | DEF-57 | tooling / build | closed | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
-| DEF-58 | recording / eval harness | open | the pre-registration (section 2) runs every arm with the same per-(task, sample, turn) vLLM seeds, but no rollout path sends a seed: `run_eval` and the Harbor agent sample unseeded |
+| DEF-58 | recording / eval harness | closed | the pre-registration (section 2) runs every arm with the same per-(task, sample, turn) vLLM seeds, but no rollout path sends a seed: `run_eval` and the Harbor agent sample unseeded |
 | DEF-59 | tooling / build | closed | the never-trained check's repo scope (`REPO_TRAINING_GLOBS`) does not match `data/commit_checks/builds/`, so the iteration-16 training build (the claim-point examples and DPO pairs) is never checked against the frozen benchmarks |
-| DEF-60 | stats | open | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
+| DEF-60 | stats | closed | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
 
 ---
 
@@ -513,8 +513,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   prompt (S0.5) is not frozen yet.
 
 ### DEF-10: bars at a point estimate, no power check
-- **Area:** stats. **Status:** fixing (tool done; the pre-registration exists as a DRAFT, `844b379`, not yet approved by
-  the owner; its computed-at-build bars and DEF-20's guards are still open, see Remaining).
+- **Area:** stats. **Status:** waived (owner, 2026-10-26; covers it16a). The owner approved the pre-registration with
+  the DEF-58 and DEF-60 amendments on 2026-10-26 ("Approve and continue", answering the morning brief's Decision 1, whose
+  recommended answer was this waiver for the calibration samples only). Still open for it16b, it16c and it16d: the
+  computed-at-build values and DEF-20's twin task_success guard, see Remaining.
   **Found:** it15 diagnosis (noise-and-power). Marked closed 2026-10-24, reopened 2026-10-25 on review.
   **Commits:** `8a83083` (tool, tests, `docs/research/it16-power.md`); `0b95777` (repair 2026-10-25: conjunctive bars, own-CI
   rule, probe and guard metrics, simulated ni10); ledger `7db3f36`; `91a64d5` (repair 2, 2026-10-25: the iteration-15
@@ -1312,8 +1314,10 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `record-decision`, as DEF-07's `record` after an eval build.
 
 ### DEF-43: the select quarantine holds variants that only failed under the local umask
-- **Area:** task data / eval build. **Status:** fixing (awaiting owner decision on releasing the 24 select
-  variants). The code fix, its tests, the re-gate and the re-score are done; what is not done is the owner's decision.
+- **Area:** task data / eval build. **Status:** closed 2026-10-26: the owner approved the release ("Approve and
+  continue", answering the morning brief's Decision 2, recommended answer yes); the tracked 8-entry
+  `data/select_quarantine.txt` on `main` is the list in force. Before that it was fixing (awaiting owner decision on
+  releasing the 24 select variants). The code fix, its tests, the re-gate and the re-score are done; what is not done is the owner's decision.
   The entry at `3d7bf08` reserved the release for the owner, since it changes the select eval set, and no owner message
   approves it (the workflow's assignment is not that decision). Until the owner confirms, the tracked 8-entry
   `data/select_quarantine.txt` on this branch is the proposed list: merging it enacts the release. **Found:**
@@ -3151,7 +3155,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged); nothing void.
 
 ### DEF-58: the arms' per-(task, sample, turn) sampling seeds do not exist
-- **Area:** recording / eval harness. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, writing the stage (a) and
+- **Area:** recording / eval harness. **Status:** closed 2026-10-26 (amended: the owner approved the pre-registration
+  with section 2 changed to independent sampling; no code change). **Found:** 2026-10-26, lane it16-jobs, writing the stage (a) and
   (d) job files (`configs/chains/it16_a_calibration.yaml`, `it16_d_final_eval.yaml`).
 - **Evidence:** `docs/iteration-16-prereg.md` L63-64: "All arms ... use the same items, harness, system prompt, sampling
   settings and per-(task, sample, turn) seeds" (also `docs/iteration-16-direction.md` L138). No request carries a seed:
@@ -3170,6 +3175,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** a stub OpenAI client records the requests of two episodes of the same (task, sample) and asserts the
   same seed per turn and different seeds across samples (or, if amended, a test that the pre-registration no longer
   claims seeds).
+- **Fix (done, 2026-10-26):** the amendment. `docs/iteration-16-prereg.md` section 2 says the arms are independently
+  sampled. Test `tests/test_it16_chains.py::test_the_preregistration_does_not_claim_seeded_sampling`. Impact: none
+  re-scored (no number assumed seeds).
 
 ### DEF-59: the never-trained check does not read the iteration-16 training build
 - **Area:** tooling / build. **Status:** closed 2026-10-26. **Found:** 2026-10-26, lane it16-jobs, writing the stage (c) data gates
@@ -3194,7 +3202,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
   (the one committed build, `claim_splice_v1`, is empty).
 
 ### DEF-60: the AbstentionBench guard's margin has no calibration data
-- **Area:** stats. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, wiring the AbstentionBench and Agentic
+- **Area:** stats. **Status:** closed 2026-10-26 (the owner approved the pre-registration with m = 7.5 points stated for
+  the AbstentionBench guard, and likewise for MASK, which stays out of stage (d)). **Found:** 2026-10-26, lane it16-jobs, wiring the AbstentionBench and Agentic
   Abstention units into stage (d)'s `compute` (review of `e32ed26`: (d) ran both benchmarks but never scored them).
 - **Evidence:** `docs/iteration-16-prereg.md` L270-273: "External guards, final − base (all computed-at-build from the
   calibration samples, ni10 rule ...): AbstentionBench over-abstention ...: UB < +m; MASK honesty ...: LB > −m". L196-198
@@ -3209,3 +3218,6 @@ section 7 critique) and from re-checks against the code and the archive on that 
   now (a stated number, e.g. a cap like P3's), before it is approved. The (d) job file needs no change either way.
 - **Closure test:** a check that every external guard of prereg 6.3 has its margin either stated or computed from a
   benchmark the calibration chain runs (`tests/test_it16_chains.py`).
+- **Fix (done, 2026-10-26):** prereg 6.3 states m = 7.5 points for AbstentionBench over-abstention and for MASK honesty;
+  the runbook's stage-(a) step no longer computes external margins. Test
+  `tests/test_it16_chains.py::test_every_external_guard_states_its_margin`. Impact: none re-scored (nothing has run).
