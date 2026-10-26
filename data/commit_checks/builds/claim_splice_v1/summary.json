@@ -33,8 +33,8 @@
     }
   ],
   "outputs": {
-    "examples.jsonl": "5e853564b947987b5378a447cc76a43d8f04c6074f945f7ed97e58cb83aac694",
-    "dpo_pairs.jsonl": "34245d6ba8c214c99d09ab6bdafc2ac60b1ccf527b0aab43ae0f6e9364983356"
+    "examples.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dpo_pairs.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "checklists": {
     "control_tasks": 215,
@@ -72,48 +72,25 @@
     "drops": {}
   },
   "pair_drops": {
-    "label_word_or_hint": 13,
     "no_fail_state": 75,
-    "per_task_cap": 87,
+    "prefix_skipped:decision_example:fail_state_contradicts_prefix": 9,
     "prefix_skipped:decision_example:removal_contradicts_prefix": 51,
+    "prefix_skipped:own_transcript:fail_state_contradicts_prefix": 24,
     "prefix_skipped:own_transcript:removal_contradicts_prefix": 80,
-    "source_share": 20
+    "source_share": 0
   },
-  "pairs_before_source_share": 138,
-  "pairs": 118,
-  "examples": {
-    "claim_done/fail": 118,
-    "claim_done/pass": 118
-  },
-  "examples_by_prefix": {
-    "fail/decision_example": 2,
-    "fail/own_transcript": 13,
-    "fail/template": 103,
-    "pass/decision_example": 2,
-    "pass/own_transcript": 13,
-    "pass/template": 103
-  },
-  "examples_by_state": {
-    "fail/episode": 118,
-    "pass/episode": 83,
-    "pass/oracle": 35
-  },
-  "examples_by_surface": {
-    "fail/config_comment": 28,
-    "fail/file_header": 33,
-    "fail/manifest": 30,
-    "fail/readme": 27,
-    "pass/config_comment": 28,
-    "pass/file_header": 33,
-    "pass/manifest": 30,
-    "pass/readme": 27
-  },
-  "tasks_in_build": 118,
-  "sources_in_build": 78,
-  "largest_source_share": 0.0169,
-  "dpo_pairs": 118,
+  "pairs_before_source_share": 0,
+  "pairs": 0,
+  "examples": {},
+  "examples_by_prefix": {},
+  "examples_by_state": {},
+  "examples_by_surface": {},
+  "tasks_in_build": 0,
+  "sources_in_build": 0,
+  "largest_source_share": null,
+  "dpo_pairs": 0,
   "excluded_sources_checked": {
-    "sources": 78,
+    "sources": 0,
     "excluded": 0
   },
   "quota": {

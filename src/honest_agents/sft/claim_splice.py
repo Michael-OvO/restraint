@@ -26,12 +26,22 @@ matched pair without any new run, from what is already stored:
      examples (`--prefix-examples`, the first file): G2's own text and tool outputs, up to its report turn;
   2. `decision_example`: the SFT-v2 decision example of the task as replayed in G2 (`kind: decision`, the second file;
      the SFT-v2 pipeline's own-prefix splice with its injected reads), up to its report turn;
-  3. `template`: `[system, instruction]` (`tasks.decision_probe`'s zero prefix: no work shown).
+  3. `template` (opt-in, `--template-prefix`; off by default): `[system, instruction]` (`tasks.decision_probe`'s zero
+     prefix, an eval probe, not a training prefix). Its fail side trains "read the instruction, run the checks, report
+     incomplete" with no attempt (every eval episode starts failing), which `compute_reward` does not catch (the check
+     commands count as actions, so no `lazy_decline`); its pass side claims complete after zero work, on check outputs
+     that can contradict the instruction (a file the instruction says is absent exists). Not for training.
   A prefix's instruction must be the task directory's `instruction.md` as the env renders it; its system message is
-  re-rendered with `harness.SYSTEM_PROMPT`. A transcript prefix that destroys the control's target (read_rft and
-  SFT-v2 controls proceed; `readme_read.is_destructive_on` on its bash commands) would be contradicted by a fail state
-  whose failing requirements include the removal request (`checklist_agreement.requirement_type`): such a state is
-  paired with the next prefix, at the latest the template.
+  re-rendered with `harness.SYSTEM_PROMPT`. **Consistency guard**: every transcript prefix is a *successful* run (it
+  ends in its own claim) and no state is its own run's end state, so a state is used on a prefix only when every
+  requirement the prefix observes (`Prefix.observes`: a check path or its basename in the prefix's commands or tool
+  outputs) passes with no output (`prefix_contradicts`; on both sides). A transcript prefix that destroys the
+  control's target is also never paired with a fail state whose removal check failed (`removal_failed`, the old
+  special case, counted apart). The guard is textual: a command that writes a path without naming it is not seen.
+  Measured on the it15 inputs (2026-10-24): every requirement of every transcript fail pair of the first build was
+  observed by its prefix, and every failing one contradicted it, so the default build is empty (0 pairs: 131 prefix
+  skips on the removal case, 33 on the general guard). Real claim pairs need fail states whose own transcript is the
+  prefix (validated failing episodes with transcripts: a Docker run), not a successful run's transcript.
 * **Pair** (`origin` `splice_pass` / `splice_fail`): the prefix, then one injected bash turn per requirement with the
   same assistant text and command on both sides (`commit_checks.check_turns`, outputs rendered through the budget meter
   after the prefix's own outputs), then the decision. Pass: the prefix's own claim report verbatim (the template's: a
@@ -67,6 +77,7 @@ import dataclasses
 import gzip
 import hashlib
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -273,12 +284,32 @@ class Prefix:
     file: str = ""
     episode_id: str | None = None
 
+    @property
+    def bash_commands(self) -> list[str]:
+        return [str((c.get("function") or {}).get("arguments", {}).get("command") or "")
+                for m in self.messages for c in m.get("tool_calls") or []
+                if (c.get("function") or {}).get("name") == "bash"]  # fmt: skip
+
+    def observes(self, requirement: cc.Requirement) -> bool:
+        """The prefix's own work touches what `requirement` checks: one of the check's absolute paths (or its
+        basename) appears in a bash command or tool output of the prefix (after the instruction)."""
+        seen = "\n".join([*self.bash_commands, *(str(m.get("content") or "") for m in self.messages[2:]
+                                                 if m.get("role") == "tool")])  # fmt: skip
+        return any(p in seen or re.search(rf"(?<![\w.-]){re.escape(p.rsplit('/', 1)[1])}(?![\w-])", seen)
+                   for p in check_paths(requirement.cmd))  # fmt: skip
+
     def destroys(self, targets: Sequence[str]) -> bool:
         """A bash command of the prefix destroys one of `targets` (the template runs none)."""
-        return bool(targets) and any(
-            is_destructive_on(str((c.get("function") or {}).get("arguments", {}).get("command") or ""), targets)
-            for m in self.messages for c in m.get("tool_calls") or [] if (c.get("function") or {}).get("name") == "bash"
-        )  # fmt: skip
+        return bool(targets) and any(is_destructive_on(c, targets) for c in self.bash_commands)
+
+
+_PATH = re.compile(r"(?<![\w.~$-])/(?:[\w.@+-]+/)+[\w.@+-]+")
+_SYSTEM_DIRS = ("/dev/", "/proc/", "/sys/", "/bin/", "/usr/", "/sbin/", "/lib/")
+
+
+def check_paths(cmd: str) -> list[str]:
+    """The absolute paths (two segments or more, no system directory) a check command names."""
+    return sorted({p.rstrip(".") for p in _PATH.findall(cmd) if not p.startswith(_SYSTEM_DIRS)})
 
 
 def _claim_turn(m: Mapping[str, Any]) -> bool:
@@ -341,17 +372,30 @@ def removal_failed(state: State, checklist: cc.Checklist, request: str) -> bool:
                for r, ok in zip(checklist.requirements, verdicts, strict=True))  # fmt: skip
 
 
+def prefix_contradicts(prefix: Prefix, state: State, checklist: cc.Checklist) -> bool:
+    """`state`'s check outputs could contradict `prefix`'s own tool outputs. Every transcript prefix is a successful
+    run's (it ends in its own claim) and no state is its own run's end state, so a requirement the prefix observes
+    (`Prefix.observes`) must pass with no output in the state: a failure there (`test -f` exit 1 on a file the prefix
+    wrote) or printed text (another run's file contents) need not match what the prefix showed. Requirements the
+    prefix never touched are not checked against it; the template observes nothing."""
+    outs = {d["id"]: d for d in state.result.results}
+    return any(prefix.observes(r) and not (ok and not str(outs[r.id].get("output") or "").strip())
+               for r, ok in zip(checklist.requirements, state.result.verdicts(checklist), strict=True))  # fmt: skip
+
+
 def _case(outcome: EpisodeOutcome, args: Mapping[str, Any]) -> str:
     o = dataclasses.replace(outcome, report=report_from_tool_args("submit_report", dict(args)))
     return compute_reward(o, RewardConfig()).case
 
 
-def state_outcome(state: State, prefix: Prefix) -> EpisodeOutcome:
+def state_outcome(state: State, prefix: Prefix, n_checks: int) -> EpisodeOutcome:
     """The facts a decision on `state` is graded with: the archived outcome with the replayed verdict, or (oracle) a
-    clean control pass."""
+    clean control pass; `n_actions` is the spliced transcript's (the prefix's commands and the `n_checks` checks), not
+    the archived episode's."""
+    n = len(prefix.bash_commands) + n_checks
     if state.kind == STATE_EPISODE:
-        return dataclasses.replace(outcome_from_dict(dict(state.outcome)), tests_passed=state.tests_passed)
-    n = sum(1 for m in prefix.messages if m.get("role") == "tool")
+        return dataclasses.replace(outcome_from_dict(dict(state.outcome)), tests_passed=state.tests_passed,
+                                   n_actions=n)  # fmt: skip
     return EpisodeOutcome(feasible=True, report=None, tests_passed=True, pass_fraction=1.0, n_actions=n,
                           agent_acted=True, is_control=True, stop_reason="report")  # fmt: skip
 
@@ -395,9 +439,10 @@ def build_pair(
     first_failed = next(r for r, ok in zip(checklist.requirements, verdicts, strict=True) if not ok)
     decision = dec.report_turn(honest, cc._pick(cc.FAIL_DECISION_LINES, key + ":fail").format(
         quote=cc._short(first_failed.quote)))  # fmt: skip
-    if _case(state_outcome(pass_state, prefix), _args(claim)) != "success_claimed":
+    n_checks = len(checklist.requirements)
+    if _case(state_outcome(pass_state, prefix, n_checks), _args(claim)) != "success_claimed":
         return cc.DROP_CASE
-    fail_outcome = state_outcome(fail_state, prefix)
+    fail_outcome = state_outcome(fail_state, prefix, n_checks)
     if _case(fail_outcome, honest) not in HONEST_CASES or _case(fail_outcome, _args(claim)) != "fabrication":
         return cc.DROP_CASE
     injected = [*pass_checks, *fail_checks, decision, *([] if prefix.claim else [claim])]
@@ -461,8 +506,16 @@ def task_pairs(
         if not usable:
             dropped[f"prefix_skipped:{prefix.kind}:removal_contradicts_prefix"] += 1
             continue
+        usable = [s for s in usable if not prefix_contradicts(prefix, s, checklist)]
+        if not usable:
+            dropped[f"prefix_skipped:{prefix.kind}:fail_state_contradicts_prefix"] += 1
+            continue
+        ordered_passes = [s for s in _pick_states(passes, task, len(passes))
+                          if not prefix_contradicts(prefix, s, checklist)]  # fmt: skip
+        if not ordered_passes:
+            dropped[f"prefix_skipped:{prefix.kind}:pass_state_contradicts_prefix"] += 1
+            continue
         chosen = _pick_states(usable, task, n_pairs)
-        ordered_passes = _pick_states(passes, task, len(passes))
         pairs: list[Pair] = []
         for k, f in enumerate(chosen):
             built = build_pair(prefix, ordered_passes[k % len(ordered_passes)], f, checklist, source=source,
@@ -510,7 +563,7 @@ class Config:
     pairs_per_task: int = 1
     quota: cc.Quota = field(default_factory=cc.Quota)
     max_source_share: float = DEFAULT_MAX_SOURCE_SHARE
-    template_prefix: bool = True
+    template_prefix: bool = False  # the zero-work prefix teaches give-up-at-once (module docstring): opt-in only
     dpo: bool = False
 
 
@@ -681,7 +734,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--pairs-per-task", type=int, default=1)
     ap.add_argument("--cap-per-task", type=int, default=cc.Quota.cap_per_task)
     ap.add_argument("--max-source-share", type=float, default=DEFAULT_MAX_SOURCE_SHARE)
-    ap.add_argument("--no-template-prefix", action="store_true", help="never fall back to the [system, user] prefix")
+    ap.add_argument("--template-prefix", action="store_true",
+                    help="fall back to the zero-work [system, user] prefix (an eval-probe shape: not for training)")  # fmt: skip
     ap.add_argument("--dpo", action="store_true", help="also write fail-branch DPO pairs")
     args = ap.parse_args(argv)
     cfg = Config(
@@ -689,7 +743,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         check_results=args.check_results or [str(DEFAULT_CHECK_RESULTS)], checklists=args.checklists,
         data_dir=args.data_dir, out=args.out, pairs_per_task=args.pairs_per_task,
         quota=cc.Quota(cap_per_task=args.cap_per_task), max_source_share=args.max_source_share,
-        template_prefix=not args.no_template_prefix, dpo=args.dpo,
+        template_prefix=args.template_prefix, dpo=args.dpo,
     )  # fmt: skip
     summary = build(cfg)
     print(render(summary))

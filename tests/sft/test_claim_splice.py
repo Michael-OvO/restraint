@@ -75,8 +75,12 @@ def _record(eid: str) -> dict[str, Any]:
     }  # fmt: skip
 
 
-def _prefix_example(eid: str = "own1", *, destroys: bool = True, instruction: str = INSTRUCTION) -> dict[str, Any]:
-    cmds = ["python3 parse.py > /app/out.json", *(["rm -rf /srv/junk"] if destroys else [])]
+def _prefix_example(
+    eid: str = "own1", *, destroys: bool = True, instruction: str = INSTRUCTION, names_output: bool = False
+) -> dict[str, Any]:
+    # `python3 parse.py` writes /app/out.json without naming it, so the prefix does not observe r1 by default.
+    cmds = ["python3 parse.py" + (" > /app/out.json" if names_output else ""),
+            *(["rm -rf /srv/junk"] if destroys else [])]  # fmt: skip
     msgs: list[dict[str, Any]] = [{"role": "system", "content": "an older system prompt"},
                                   {"role": "user", "content": instruction}]  # fmt: skip
     for c in cmds:
@@ -193,8 +197,9 @@ def test_a_state_that_disagrees_or_does_not_reproduce_is_no_label(env: dict[str,
     _write_jsonl(env["episodes"], recs)
     summary = cs.build(_cfg(env))
     assert summary["states"]["episode/fail:archived_replayed_disagree"] == 1
-    # Without e_content the only fail state fails the removal, which the own prefix contradicts: the template pairs.
-    assert summary["examples_by_prefix"] == {"fail/template": 1, "pass/template": 1}
+    # Without e_content the only fail state fails the removal, which the own prefix contradicts: no pair (the
+    # template is opt-in).
+    assert summary["pairs"] == 0
 
 
 # ── pairs ────────────────────────────────────────────────────────────────────
@@ -234,7 +239,7 @@ def test_matched_pair_same_prefix_and_checks_different_output_and_decision(env: 
 def test_a_removal_failure_pairs_with_the_template_when_the_prefix_removed_the_target(env: dict[str, Any]):
     recs = {r["episode_id"]: r for r in cs.read_jsonl(env["results"])}
     _write_jsonl(env["results"], [recs["e_pass"], recs["e_removal"]])
-    cs.build(_cfg(env))
+    cs.build(_cfg(env, template_prefix=True))
     ex = {e["meta"]["outcome"]: e for e in _examples(env["tmp"] / "out")}
     assert {e["meta"]["prefix_kind"] for e in ex.values()} == {cs.PREFIX_TEMPLATE}
     assert ex["fail"]["meta"]["state"] == "e_removal"
@@ -243,20 +248,58 @@ def test_a_removal_failure_pairs_with_the_template_when_the_prefix_removed_the_t
     assert pa["status"] == "complete" and pa["completed"] == [WRITE_QUOTE, REQUEST]  # the template's claim
     # A prefix that never removed the target is not contradicted: it is used.
     _write_jsonl(env["prefixes"], [_prefix_example("own2", destroys=False)])
-    cs.build(_cfg(env))
+    cs.build(_cfg(env, template_prefix=True))
     assert {e["meta"]["prefix_id"] for e in _examples(env["tmp"] / "out")} == {"own2"}
-    # Without the template fallback the contradicted task has no pair.
+    # Without the template fallback (the default) the contradicted task has no pair.
     _write_jsonl(env["prefixes"], [_prefix_example()])
-    summary = cs.build(_cfg(env, template_prefix=False))
+    summary = cs.build(_cfg(env))
     assert summary["pairs"] == 0
     assert summary["pair_drops"]["prefix_skipped:own_transcript:removal_contradicts_prefix"] == 1
 
 
 def test_a_prefix_on_another_instruction_is_refused(env: dict[str, Any]):
     _write_jsonl(env["prefixes"], [_prefix_example(instruction="Another task.\n")])
-    summary = cs.build(_cfg(env))
+    summary = cs.build(_cfg(env, template_prefix=True))
     assert summary["prefixes"]["drops"] == {cs.DROP_PREFIX_INSTRUCTION: 1}
     assert summary["examples_by_prefix"] == {"fail/template": 1, "pass/template": 1}
+
+
+def test_template_prefix_is_off_by_default(env: dict[str, Any]):
+    """The zero-work prefix would train 'read the instruction, run the checks, report incomplete' with no attempt."""
+    assert cs.Config(tasks_roots=[], episodes=[], prefix_examples=[]).template_prefix is False
+    _write_jsonl(env["prefixes"], [])
+    assert cs.build(_cfg(env))["pairs"] == 0
+    assert cs.build(_cfg(env, template_prefix=True))["examples_by_prefix"] == {"fail/template": 1, "pass/template": 1}
+
+
+def test_a_fail_state_on_a_requirement_the_prefix_observed_is_refused(env: dict[str, Any]):
+    """A prefix that wrote /app/out.json (and showed it) cannot be followed by `test -s /app/out.json` exiting 1."""
+    _write_jsonl(env["prefixes"], [_prefix_example(names_output=True)])
+    summary = cs.build(_cfg(env))
+    assert summary["pairs"] == 0
+    assert summary["pair_drops"]["prefix_skipped:own_transcript:fail_state_contradicts_prefix"] == 1
+    cls, _, eps, _ = _states(env)
+    pre = cs.load_prefixes([env["prefixes"]], [TASK], {TASK: INSTRUCTION})[0][TASK][0]
+    assert cs.prefix_contradicts(pre, eps["e_content"], cls[TASK])  # r1 observed and failing
+    assert not cs.prefix_contradicts(pre, eps["e_pass"], cls[TASK])  # observed, passing, no output
+    assert not cs.prefix_contradicts(cs.template_prefix(TASK, INSTRUCTION), eps["e_content"], cls[TASK])
+
+
+def test_a_state_printing_text_on_an_observed_requirement_is_refused(env: dict[str, Any]):
+    """Another run's printed file contents need not match what the prefix showed, even on a passing check."""
+    cls, _, eps, _ = _states(env)
+    pre = cs.load_prefixes([env["prefixes"]], [TASK], {TASK: INSTRUCTION})[0][TASK][0]
+    s = eps["e_pass"]
+    results = [{**d, "output": "3 -rw-r--r--\n"} if d["id"] == "r2" else d for d in s.result.results]
+    printed = cs.State(**{**s.__dict__, "result": cc.CheckResult(s.unit_id, s.task, s.result.checklist_sha, results)})
+    assert cs.prefix_contradicts(pre, printed, cls[TASK])  # r2 (/srv/junk) observed by the prefix's rm
+
+
+def test_decisions_are_graded_with_the_spliced_transcripts_actions(env: dict[str, Any]):
+    _, _, eps, _ = _states(env)
+    pre = cs.load_prefixes([env["prefixes"]], [TASK], {TASK: INSTRUCTION})[0][TASK][0]
+    assert cs.state_outcome(eps["e_content"], pre, 2).n_actions == len(pre.bash_commands) + 2 == 4
+    assert cs.state_outcome(eps["e_content"], cs.template_prefix(TASK, INSTRUCTION), 0).n_actions == 0
 
 
 def test_oracle_is_the_pass_state_without_a_passing_episode(env: dict[str, Any]):
@@ -357,9 +400,15 @@ def test_committed_build_matches_its_manifest(committed: dict[str, Any]):
 
 def test_committed_build_has_no_eval_source(committed: dict[str, Any]):
     sources = {e.source for e in committed["manifest"].examples} | {e["meta"]["source"] for e in committed["examples"]}
-    assert sources and not sources & load_select_sources(Path("data"))
+    assert len(sources) == committed["summary"]["sources_in_build"]
+    assert not sources & load_select_sources(Path("data"))
     if (Path("data") / "split_seeds.json").is_file():  # untracked: present on the Mac, not in a fresh clone
         assert not sources & excluded_from_training("data")
+
+
+def test_committed_build_has_no_zero_work_prefix(committed: dict[str, Any]):
+    assert not any(e["meta"]["prefix_kind"] == cs.PREFIX_TEMPLATE for e in committed["examples"])
+    assert all(e["meta"]["n_prefix_messages"] > 2 for e in committed["examples"])
 
 
 def test_committed_pairs_share_a_prefix_and_never_claim_on_a_fail(committed: dict[str, Any]):
