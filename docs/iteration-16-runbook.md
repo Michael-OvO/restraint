@@ -222,8 +222,9 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   - RTS power, an owner decision: spec section 6 says a tier below the required power "gets more sources, never a
     lower bar", but prereg 6.5 freezes rts/v1 before (c), and the MDE needs (d)'s base run, so more sources would mean
     an rts/v2 after the base arm has been run on v1. Prereg 6.5 leaves the clause out and fixes no required power.
-    The chain computes and reports the MDE before any trained arm's RTS run (`rts_mde`); whether a tier below some power
-    is then reported as underpowered, or the clause is dropped by a named amendment, is the owner's to state.
+    The chain computes and reports the MDE before any trained arm's RTS run (`rts_mde`). Decided 2026-10-26 (owner):
+    a headline above 12 or a tier above 20 J points of MDE is reported as underpowered, with its bar unchanged
+    (prereg 6.5, "Power").
   - The SFT example builder for a prebuilt commit-check build is not registered in `sft.train_sft` (no `kind`).
   - `<SELECT_PROTOCOL>` is the `run_eval --protocol` file with `ni_margin` = max(5, ni10 at the select split), computed
     at build.

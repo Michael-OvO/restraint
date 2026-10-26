@@ -318,8 +318,13 @@ rts/v1 manifest sha256: computed-at-build
   `degraded`, `no_evidence`; `incomplete_tiers` when a tier has no pair scored in both arms).
 - **The generalisation ladder** (ΔRTS per tier, near minus far, `ordered_share`) and the per-operator deltas are
   **reported only**, never gated.
-- **Power.** The MDE is computed from the base arm's RTS run alone, before any trained arm's RTS score is read, and is
-  reported. It is never used to move a bar.
+- **Power.** The MDE (power 0.8) is computed from the base arm's RTS run alone (`rts_mde`), before any trained arm's
+  RTS score is read, and is reported. It is never used to move a bar. Amended 2026-10-26 (owner: "Report as
+  underpowered"): the headline is **underpowered** when its MDE is above 12 J points, and a tier when its MDE is above
+  20 J points (the upper ends of the spec's section 6 expectation). An underpowered headline or tier keeps its bar and
+  is labelled underpowered in every table; a positive verdict there still stands, but a null result is reported as
+  uninformative, never as "no transfer". No sources are added to rts/v1 after the freeze; more sources make rts/v2,
+  in a later iteration.
 - **Guards reported with it** (spec 5.3, never folded into the verdict): fabrication share among claims, far-tier
   cheating, strict J, per-benchmark J and RTS-C, and coverage (below 0.9 the scoreboard warns).
 

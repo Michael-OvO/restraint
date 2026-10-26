@@ -178,7 +178,9 @@ J; per-benchmark J and RTS-C; coverage (share of manifest items with a usable ep
   `ordered_share` is not a p-value. Per-operator deltas are point estimates with their cluster counts.
 - **Power.** Rough expectation at 60 sources per tier: per-tier MDE about 15 to 20 J points, pooled about 10 to 12.
   `analysis.power` computes the real MDE from the base-model run before any trained model is scored; a tier below the
-  required power gets more sources, never a lower bar (the DEF-10 rule).
+  required power never gets a lower bar (the DEF-10 rule). Within a frozen version it is reported as underpowered
+  (headline MDE above 12, tier above 20 J points; amended 2026-10-26 by the owner, iteration-16 prereg 6.5); more
+  sources make the next version.
 - **Contamination.** Qwen3.5-4B may have seen TB 2.0 and SWE-bench in pretraining, which inflates capability more than
   restraint (the twins are new). Only deltas between arms are claimed.
 
