@@ -21,6 +21,7 @@ Commands (all offline; `--archive` = the honest-agents archive root):
   and refuses (exit 2) when a known untracked input (`UNTRACKED_TRAINING_INPUTS`) is neither in the tree nor archived.
 * `units --bench B INPUT... --out FILE`: the units file of a TB2 run (Harbor job dirs) or an AbstentionBench run
   (responses.jsonl); the other adapters' scorers write their own.
+* `verify-export --bench abstentionbench FILE`: exit 1 unless FILE is the export the manifest froze (its sha256).
 * `compute --units ARM=BENCH:FILE ...`: fill the arms' results and the deltas vs base from scorer outputs (`units`).
 """
 
@@ -51,6 +52,10 @@ SCHEMA = 1
 ARCHIVE_IB = "benchmarks/impossiblebench"
 ARCHIVE_MASK = "benchmarks/mask"
 ARCHIVE_TEXTS = "2026-10-06-node1/repo-files/benchmarks"  # scripts/fetch_benchmarks.sh output (TB2, AA, ...)
+# The one AbstentionBench export (`abstentionbench_export_standalone.py`, node only: it runs the Hub loading script): its
+# sha256 freezes the items, since the 20 source datasets the script downloads are not pinned (DEF-50).
+ARCHIVE_ABENCH_EXPORT = "benchmarks/abstentionbench/abstentionbench.jsonl"
+ABENCH_HF_REVISION = "af06080e2cbfff73f02a7c33135e5567d6f7ce6a"  # scripts/eval_common.sh ABSTENTIONBENCH_HF_REVISION
 
 # Training builds the never-trained check reads. Repo-relative (always) and archive-relative (with --archive).
 REPO_TRAINING_GLOBS = (
@@ -206,7 +211,18 @@ def benchmark_ids(name: str, archive: Path) -> list[str] | None:
         return sorted(
             d.name for d in root.iterdir() if d.is_dir() and not d.name.endswith("__source_terminalbench_instructions")
         )
+    if name == "abstentionbench":
+        export = archive / ARCHIVE_ABENCH_EXPORT
+        return abstentionbench_ids(export) if export.is_file() else None
     return None
+
+
+def abstentionbench_ids(export: Path) -> list[str]:
+    """`dataset/index` per exported row (the units' cluster ids); a repeated id means a broken export."""
+    ids = [f"{r['dataset']}/{r['index']}" for r in iter_rows(export)]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"{export}: repeated dataset/index ids")
+    return ids
 
 
 def tb2_task_names(registry: Path = TB2_REGISTRY) -> list[str]:
@@ -220,6 +236,41 @@ def tb2_commit(registry: Path = TB2_REGISTRY) -> str:
     if len(commits) != 1 or not re.fullmatch(r"[0-9a-f]{40}", next(iter(commits))):
         raise ValueError(f"{registry}: terminal-bench@2.0 is not pinned to one full commit: {sorted(commits)}")
     return commits.pop()
+
+
+def _abstentionbench(archive: Path) -> dict[str, Any]:
+    """Frozen by the archived export's sha256 when the archive holds it; pending (no items) until then."""
+    export = archive / ARCHIVE_ABENCH_EXPORT
+    b: dict[str, Any] = {"role": "regression check", "status": "frozen" if export.is_file() else "pending"}
+    if not export.is_file():
+        b["pending_reason"] = (
+            "the HF loading script is pinned, but the 20 source datasets it downloads are not; the items are frozen "
+            f"by the sha256 of the first export, archived as {ARCHIVE_ABENCH_EXPORT} and recorded here before any arm "
+            "runs (ledger DEF-50)"
+        )
+    b["paper"] = "arXiv:2506.09038"
+    b["sources"] = [
+        {"kind": "hf_dataset", "repo": "facebook/AbstentionBench", "revision": ABENCH_HF_REVISION},
+        _github("facebookresearch/AbstentionBench", "e29184174c69bc95139b8c33dcca09aacab9442a"),
+    ]
+    if export.is_file():
+        b["sources"].append(
+            {
+                "kind": "export",
+                "exporter": "src/honest_agents/eval/external/abstentionbench_export_standalone.py",
+                "revision": ABENCH_HF_REVISION,
+                "archive_file": ARCHIVE_ABENCH_EXPORT,
+                "sha256": sha256_file(export),
+            }
+        )
+    b["adapter"] = "scripts/eval_abstentionbench.sh + honest_agents.eval.external.abstentionbench"
+    # per-question means (`abstentionbench_units`), so `compute` can give them CIs; their F1 (not a per-unit mean) is
+    # reported by `honest_agents.eval.external.abstentionbench score` alongside
+    b["metrics"] = [
+        _metric("abstain", "abstained", "abstention recall on should-abstain questions", "non_inferior"),
+        _metric("answer", "abstained", "abstention on answerable questions (over-abstention)", "report"),
+    ]
+    return b
 
 
 def definitions(archive: Path) -> dict[str, dict[str, Any]]:
@@ -318,29 +369,7 @@ def definitions(archive: Path) -> dict[str, dict[str, Any]]:
                 _metric("act", "continued", "continued on solvable originals", "report"),
             ],
         },
-        "abstentionbench": {
-            "role": "regression check",
-            "status": "pending",
-            "pending_reason": "the HF loading script is pinned, but the 20 source datasets it downloads are not; the items "
-            "are frozen by the sha256 of the first export (scripts/eval_abstentionbench.sh), recorded here before any arm "
-            "runs (ledger DEF-50)",
-            "paper": "arXiv:2506.09038",
-            "sources": [
-                {
-                    "kind": "hf_dataset",
-                    "repo": "facebook/AbstentionBench",
-                    "revision": "af06080e2cbfff73f02a7c33135e5567d6f7ce6a",
-                },
-                _github("facebookresearch/AbstentionBench", "e29184174c69bc95139b8c33dcca09aacab9442a"),
-            ],
-            "adapter": "scripts/eval_abstentionbench.sh + honest_agents.eval.external.abstentionbench",
-            # per-question means (`abstentionbench_units`), so `compute` can give them CIs; their F1 (not a per-unit
-            # mean) is reported by `honest_agents.eval.external.abstentionbench score` alongside
-            "metrics": [
-                _metric("abstain", "abstained", "abstention recall on should-abstain questions", "non_inferior"),
-                _metric("answer", "abstained", "abstention on answerable questions (over-abstention)", "report"),
-            ],
-        },
+        "abstentionbench": _abstentionbench(archive),
         "mask": {
             "role": "secondary",
             "status": "frozen",
@@ -546,7 +575,7 @@ class BenchIndex:
         for i in ids:
             self.ids[i] = benchmark
             bare = i.split("/", 1)[1] if "/" in i else None  # `split/task_id`, `archetype/task_id`
-            if bare:
+            if bare and not bare.isdigit():  # `dataset/index` (AbstentionBench): a bare row number names nothing
                 self.ids.setdefault(bare, benchmark)
 
     def add_text(self, benchmark: str, item: str, text: str) -> None:
@@ -592,6 +621,9 @@ def benchmark_texts(archive: Path) -> Iterator[tuple[str, str, str]]:
     for bench, sub in (("terminal_bench_2", "terminal-bench-2"), ("agentic_abstention", "agentic-abstention")):
         for inst in sorted((archive / ARCHIVE_TEXTS / sub).glob("*/instruction.md")):
             yield bench, inst.parent.name, inst.read_text(errors="replace")
+    if (archive / ARCHIVE_ABENCH_EXPORT).is_file():
+        for r in iter_rows(archive / ARCHIVE_ABENCH_EXPORT):
+            yield "abstentionbench", f"{r['dataset']}/{r['index']}", r["question"]
 
 
 def iter_rows(path: Path) -> Iterator[Any]:
@@ -830,6 +862,21 @@ def write_units(bench: str, inputs: Sequence[Path], out: Path) -> list[dict[str,
     return units
 
 
+def verify_export(manifest: dict[str, Any], bench: str, export: Path) -> str | None:
+    """None if `export` is the export the manifest froze for `bench` (same sha256), else why not: an arm must never run
+    on items other than the frozen ones (DEF-50)."""
+    recorded = [s for s in manifest["benchmarks"][bench]["sources"] if s.get("kind") == "export"]
+    if not recorded:
+        return (
+            f"{bench}: the manifest records no export, so its items are not frozen: archive {export} as "
+            f"{ARCHIVE_ABENCH_EXPORT}, then `final_benchmark freeze --archive A --refreeze` (ledger DEF-50)"
+        )
+    digest = sha256_file(export)
+    if digest != recorded[0]["sha256"]:
+        return f"{bench}: {export} has sha256 {digest}, the frozen export {recorded[0]['sha256']}"
+    return None
+
+
 def compute(manifest: dict[str, Any], units: dict[str, dict[str, list[dict[str, Any]]]]) -> dict[str, Any]:
     """Fill results (point estimate + CI per arm) and deltas vs base from `units[arm][benchmark]`."""
     from honest_agents.eval.external.transfer import cluster_bootstrap_ci, cluster_bootstrap_delta
@@ -876,6 +923,9 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--bench", required=True, choices=("terminal_bench_2", "abstentionbench"))
     u.add_argument("inputs", nargs="+", help="Harbor job dirs (terminal_bench_2) or responses.jsonl (abstentionbench)")
     u.add_argument("--out", required=True)
+    v = sub.add_parser("verify-export", help="exit 1 unless the file is the export the manifest froze (sha256)")
+    v.add_argument("--bench", required=True, choices=("abstentionbench",))
+    v.add_argument("export")
     k = sub.add_parser("compute", help="fill results and deltas vs base from scorer units")
     k.add_argument("--units", action="append", default=[], metavar="ARM=BENCH:FILE", help="JSON with a `units` list")
     k.add_argument("--out", help="output manifest (default: print)")
@@ -892,6 +942,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     manifest = json.loads(path.read_text())
     archive = Path(args.archive).expanduser() if getattr(args, "archive", None) else None
+    if args.cmd == "verify-export":
+        problem = verify_export(manifest, args.bench, Path(args.export))
+        print(problem or f"{args.bench}: {args.export} is the frozen export")
+        return 1 if problem else 0
     if args.cmd == "check":
         bad = check(manifest, archive=archive)
         print(json.dumps({"ok": not bad, "problems": bad}, indent=2))

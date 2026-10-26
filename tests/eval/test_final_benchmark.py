@@ -77,8 +77,124 @@ def test_abstentionbench_export_pins_the_dataset_revision(manifest):
     assert re.search(rf"ABSTENTIONBENCH_HF_REVISION={rev}\b", (REPO / "scripts" / "eval_common.sh").read_text())
     assert '--revision "$ABSTENTIONBENCH_HF_REVISION"' in (REPO / "scripts" / "eval_abstentionbench.sh").read_text()
     pinned = [s for s in manifest["benchmarks"]["abstentionbench"]["sources"] if s["kind"] == "hf_dataset"]
-    assert pinned[0]["revision"] == rev
+    assert pinned[0]["revision"] == rev == fb.ABENCH_HF_REVISION
     assert manifest["benchmarks"]["abstentionbench"]["status"] == "pending"  # until the export's hash is recorded
+
+
+def _abench_export(archive: Path, rows: list[tuple[str, int, str]]) -> Path:
+    """A small synthetic export in the exporter's row format (the real one runs the Hub loading script: node only)."""
+    path = archive / fb.ARCHIVE_ABENCH_EXPORT
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "dataset": d,
+                    "index": i,
+                    "question": q,
+                    "reference_answers": None if i % 2 else ["x"],
+                    "should_abstain": bool(i % 2),
+                    "metadata_json": "{}",
+                }
+            )
+            + "\n"
+            for d, i, q in rows
+        )
+    )
+    return path
+
+
+def test_abstentionbench_frozen_ids_rederive_from_the_archived_export(manifest, tmp_path, monkeypatch):
+    """DEF-50: `freeze` could not ingest an export (no ids, no export source, status hardcoded pending)."""
+    monkeypatch.setattr(fb, "definitions", lambda archive: {"abstentionbench": fb._abstentionbench(archive)})
+    # without the export: pending, no items, and the definition is the committed manifest's
+    assert fb.benchmark_ids("abstentionbench", tmp_path) is None
+    committed = manifest["benchmarks"]["abstentionbench"]
+    pending = fb._abstentionbench(tmp_path)
+    assert pending["status"] == "pending" and committed["items"] is None
+    assert all(pending[f] == committed[f] for f in ("role", "sources", "metrics"))
+
+    rows = [("gsm8k", 0, "q0"), ("gsm8k", 1, "q1"), ("squad2", 0, "q2")]
+    export = _abench_export(tmp_path, rows)
+    out, items = tmp_path / "manifest.json", tmp_path / "items"
+    out.write_text(json.dumps({"frozen": "2026-10-25", "refrozen": [], "benchmarks": {"abstentionbench": committed}}))
+    with pytest.raises(ValueError, match="abstentionbench: items, sources changed"):  # pending -> frozen: --refreeze
+        fb.freeze(tmp_path, out=out, items_dir=items)
+    m = fb.freeze(tmp_path, out=out, items_dir=items, refreeze=True)
+    b = m["benchmarks"]["abstentionbench"]
+    assert b["status"] == "frozen" and "pending_reason" not in b
+    assert b["items"]["n"] == 3
+    assert (items / "abstentionbench.txt").read_text().split() == ["gsm8k/0", "gsm8k/1", "squad2/0"]
+    (src,) = [s for s in b["sources"] if s["kind"] == "export"]
+    assert src == {
+        "kind": "export",
+        "exporter": "src/honest_agents/eval/external/abstentionbench_export_standalone.py",
+        "revision": fb.ABENCH_HF_REVISION,
+        "archive_file": fb.ARCHIVE_ABENCH_EXPORT,
+        "sha256": fb.sha256_file(export),
+    }
+    assert fb.check(m, archive=tmp_path) == []  # the frozen ids re-derive from the archived export
+    # the frozen ids are the units' cluster ids
+    responses = [{**json.loads(x), "is_abstention": True} for x in export.read_text().splitlines()]
+    assert sorted(u["cluster"] for u in fb.abstentionbench_units(responses)) == ["gsm8k/0", "gsm8k/1", "squad2/0"]
+    # a different export (one row changed) fails check --archive on the hash and on the item derivation
+    _abench_export(tmp_path, [*rows[:2], ("squad2", 7, "q2")])
+    assert fb.check(m, archive=tmp_path) == [
+        "abstentionbench: sources changed from the definitions (freeze --refreeze to accept and log)",
+        "abstentionbench: the item ids no longer derive from the pinned sources",
+        f"abstentionbench: {fb.ARCHIVE_ABENCH_EXPORT} changed",
+    ]
+    _abench_export(tmp_path, [*rows, ("gsm8k", 1, "dup")])
+    with pytest.raises(ValueError, match="repeated"):
+        fb.benchmark_ids("abstentionbench", tmp_path)
+
+
+def test_eval_abstentionbench_refuses_an_export_other_than_the_frozen_one(tmp_path, capsys):
+    """DEF-50: the eval script ran on whatever `$DATA` held; it now checks its sha256 against the manifest first."""
+    script = (REPO / "scripts" / "eval_abstentionbench.sh").read_text()
+    verify = '"${UV_RUN[@]}" python -m honest_agents.eval.final_benchmark verify-export --bench abstentionbench "$DATA"'
+    assert verify in script and script.index(verify) < script.index("honest_agents.eval.external.abstentionbench run")
+    assert "set -euo pipefail" in (REPO / "scripts" / "eval_common.sh").read_text()  # a refusal stops the script
+
+    export = _abench_export(tmp_path / "archive", [("gsm8k", 0, "q0"), ("gsm8k", 1, "q1")])
+    path = tmp_path / "m.json"
+    cmd = ["--manifest", str(path), "verify-export", "--bench", "abstentionbench"]
+    path.write_text(json.dumps({"benchmarks": {"abstentionbench": fb._abstentionbench(tmp_path / "none")}}))
+    assert fb.main([*cmd, str(export)]) == 1
+    assert "records no export" in capsys.readouterr().out  # before the freeze no arm runs
+    path.write_text(json.dumps({"benchmarks": {"abstentionbench": fb._abstentionbench(tmp_path / "archive")}}))
+    assert fb.main([*cmd, str(export)]) == 0
+    other = tmp_path / "other.jsonl"
+    other.write_text(export.read_text().replace('"q1"', '"q1 "'))
+    assert fb.main([*cmd, str(other)]) == 1
+    assert "the frozen export" in capsys.readouterr().out.splitlines()[-1]
+
+
+def test_a_bare_row_index_is_not_indexed_as_a_benchmark_id():
+    """DEF-50: `add_ids` indexed the part after the first `/`; for `dataset/index` that is an integer, which would flag
+    every numeric training identifier (a seed, a row number) as an AbstentionBench item."""
+    idx = fb.BenchIndex()
+    idx.add_ids("abstentionbench", ["gsm8k/12"])
+    idx.add_ids("impossiblebench_lcb", ["conflicting/lcbhard_0"])
+    assert idx.ids == {
+        "gsm8k/12": "abstentionbench",
+        "conflicting/lcbhard_0": "impossiblebench_lcb",
+        "lcbhard_0": "impossiblebench_lcb",  # other benchmarks keep their bare forms
+    }
+    assert fb.check_row({"seed": "12", "id": "row/12"}, idx) == []
+    assert [h["value"] for h in fb.check_row({"id": "gsm8k/12"}, idx)] == ["gsm8k/12"]
+
+
+def test_abstentionbench_questions_are_benchmark_texts(tmp_path, monkeypatch):
+    """With the export archived, the never-trained text containment covers its questions."""
+    from honest_agents.eval.external import impossiblebench, mask
+
+    monkeypatch.setattr(impossiblebench, "load_items", lambda root: [])  # an archive holding only the export
+    monkeypatch.setattr(mask, "load_rows", lambda root: [])
+    q = " ".join(f"word{i}" for i in range(30))
+    _abench_export(tmp_path, [("gsm8k", 0, q)])
+    texts = [t for t in fb.benchmark_texts(tmp_path) if t[0] == "abstentionbench"]
+    assert texts == [("abstentionbench", "gsm8k/0", q)]
 
 
 # ── freeze ───────────────────────────────────────────────────────────────────────────────────────────────────────────
