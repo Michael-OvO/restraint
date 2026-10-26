@@ -5,6 +5,9 @@ On the pairs the gate kept (and whose task dirs still hash as gated):
 * label-leak scan of twin and control against their seed (`analysis.label_leaks`, words of `labels.LABEL_RE`);
 * no Terminal-Bench canary anywhere in either task dir (`dedup.canary_files`);
 * not a near-duplicate of a training source (`dedup.Deduplicator` over the training task dirs given);
+* each tier capped at `sample.TARGET_PAIRS_PER_TIER` kept pairs (seeded and balance-aware: `sample.select_balanced`,
+  which also holds every benchmark at or below the protocol's share of the tier's sources), so a frozen version has a
+  stable size; the cue check below runs on exactly the capped set, and an operator it drops frees its places;
 * per operator with `instruction_identical`, the env-text cue AUC (`analysis.envtext.env_text_classifiers`) of every
   enforced entry within 0.5 +- `CUE_AUC_TOLERANCE`; the operator's `carrier_channels` are reported, not enforced. An
   operator that fails, or has too few pairs for the grouped cross-validation, is dropped whole;
@@ -31,8 +34,9 @@ from pathlib import Path
 from typing import Any
 
 from honest_agents.eval.rts.candidates import PairRow
-from honest_agents.eval.rts.manifest import ManifestItem, pair_problems, write_manifest
+from honest_agents.eval.rts.manifest import TIERS, ManifestItem, pair_problems, write_manifest
 from honest_agents.eval.rts.protocol import RtsProtocol, balance_problems
+from honest_agents.eval.rts.sample import TARGET_PAIRS_PER_TIER, Candidate, select_tier
 from honest_agents.tasks.analysis import TaskFacts, label_leaks
 from honest_agents.tasks.analysis.envtext import appended_text, env_text_classifiers, environment_text
 from honest_agents.tasks.dedup import Deduplicator, canary_files, load_benchmark_tasks
@@ -55,6 +59,8 @@ class FreezePlan:
     balance: list[str] = field(default_factory=list)
     items: list[ManifestItem] = field(default_factory=list)
     oracle: dict[str, dict[str, Any]] = field(default_factory=dict)  # benchmark -> `oracle_pass_rates` row
+    target_per_tier: int | None = None  # the cap on kept pairs per tier (`sample.TARGET_PAIRS_PER_TIER`)
+    cap_notes: dict[str, str] = field(default_factory=dict)  # tier -> why its share cap was not applied
 
     @property
     def ok(self) -> bool:
@@ -165,8 +171,10 @@ def plan_freeze(
     *,
     train_dirs: Sequence[Path],
     proto: RtsProtocol,
+    target_per_tier: int | None = TARGET_PAIRS_PER_TIER,
+    seed: int = 0,
 ) -> FreezePlan:
-    """Every check, nothing written."""
+    """Every check, nothing written. `target_per_tier` caps each tier's kept pairs (None: no cap)."""
     plan = FreezePlan()
     bench = [b for d in train_dirs for b in load_benchmark_tasks(d)]
     if train_dirs and not bench:
@@ -203,24 +211,61 @@ def plan_freeze(
             plan.dropped[row.pair_id] = "; ".join(problems)
             continue
         survivors.append(row)
-    by_op: dict[str, list[PairRow]] = defaultdict(list)
+    # Cap each tier at the target (seeded, balance-aware: `sample.select_balanced`), then run the cue check on exactly
+    # what is kept. An operator that fails it is dropped whole and the tier is capped again without it, so the cue
+    # check always describes the frozen set.
+    failed: set[str] = set()
+    while True:
+        capped, why, notes = cap_tiers([r for r in survivors if r.operator not in failed], target_per_tier, proto, seed)
+        by_op: dict[str, list[PairRow]] = defaultdict(list)
+        for r in capped:
+            by_op[r.operator].append(r)
+        cue: dict[str, dict[str, Any]] = {}
+        for op, rows in sorted(by_op.items()):
+            spec = operators[op]
+            if not spec.instruction_identical:
+                cue[op] = {"ok": True, "skipped": "instruction differs by construction (reported with that caveat)"}
+            else:
+                cue[op] = cue_check(rows, spec)
+        newly = {op for op, c in cue.items() if not c["ok"]}
+        plan.cue.update({op: c for op, c in cue.items() if op in newly})
+        if not newly:
+            plan.cue.update(cue)
+            break
+        failed |= newly
     for r in survivors:
-        by_op[r.operator].append(r)
-    for op, rows in sorted(by_op.items()):
-        spec = operators[op]
-        if not spec.instruction_identical:
-            plan.cue[op] = {"ok": True, "skipped": "instruction differs by construction (reported with that caveat)"}
-            plan.kept += rows
-            continue
-        plan.cue[op] = cue_check(rows, spec)
-        if plan.cue[op]["ok"]:
-            plan.kept += rows
-        else:
-            for r in rows:
-                plan.dropped[r.pair_id] = f"cue check of {op}: " + "; ".join(plan.cue[op]["problems"])
+        if r.operator in failed:
+            plan.dropped[r.pair_id] = f"cue check of {r.operator}: " + "; ".join(plan.cue[r.operator]["problems"])
+        elif r.pair_id in why:
+            plan.dropped[r.pair_id] = why[r.pair_id]
+    plan.kept = sorted(capped, key=lambda r: r.pair_id)
+    plan.target_per_tier = target_per_tier
+    plan.cap_notes = notes
     plan.items = [i for r in plan.kept for i in manifest_items(r)]
     plan.balance = [*pair_problems(plan.items), *balance_problems(plan.items, proto)]
     return plan
+
+
+def cap_tiers(
+    rows: Sequence[PairRow], target: int | None, proto: RtsProtocol, seed: int
+) -> tuple[list[PairRow], dict[str, str], dict[str, str]]:
+    """At most `target` pairs per tier, chosen by `sample.select_tier` (seeded, at most one pair per source and
+    operator, no benchmark above the protocol's share of the tier's sources unless the tier is short of sources
+    anyway); the others with their reasons, and per tier a note when the share cap was not applied."""
+    if target is None:
+        return list(rows), {}, {}
+    by_id = {r.pair_id: r for r in rows}
+    kept: list[PairRow] = []
+    why: dict[str, str] = {}
+    notes: dict[str, str] = {}
+    for tier in TIERS:
+        cands = [Candidate(r.pair_id, r.source_task, r.operator, r.benchmark, r.tier) for r in rows if r.tier == tier]
+        picked, dropped, note = select_tier(cands, target, proto, seed=seed)
+        kept += [by_id[c.pair_id] for c in picked]
+        why.update({pid: f"tier cap ({target} pairs per tier): {w}" for pid, w in dropped.items()})
+        if note:
+            notes[tier] = note
+    return kept, why, notes
 
 
 def yield_report(pairs: Sequence[PairRow], gate: Mapping[str, Mapping[str, Any]], plan: FreezePlan) -> dict[str, Any]:
@@ -239,6 +284,9 @@ def yield_report(pairs: Sequence[PairRow], gate: Mapping[str, Mapping[str, Any]]
     for op, s in per.items():
         s["rejections"] = dict(reasons[op].most_common())
     return {
+        "target_pairs_per_tier": plan.target_per_tier,
+        "kept_per_tier": dict(Counter(r.tier for r in plan.kept)),
+        "cap_notes": plan.cap_notes,
         "operators": dict(sorted(per.items())),
         "cue": plan.cue,
         "balance_problems": plan.balance,

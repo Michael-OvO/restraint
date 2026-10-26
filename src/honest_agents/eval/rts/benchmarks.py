@@ -87,6 +87,7 @@ class BenchmarkCard:
 
 
 _READ = "read 2026-10-26"
+_READ2 = "read 2026-10-26 (widened pool)"
 CARDS: dict[str, BenchmarkCard] = {
     c.name: c
     for c in (
@@ -177,6 +178,126 @@ CARDS: dict[str, BenchmarkCard] = {
             "install uv and pytest at test time, so the offline pytest verifier is tried first.",
             registry_path="data/benchmarks/registry_tb2.json",
             hermetic=True,
+        ),
+        # ── widened pool (2026-10-26): more far- and mid-tier supply on benchmarks other than bigcodebench. Considered
+        # and left out: featurebench-lite (every task's image COPYs its test_patch.diff, so the leak screen rejects all
+        # 30), ml-dev-bench (compose environments and 7 tasks without an oracle: no operator applies), crustbench
+        # (GPL-3.0; cargo tests, no pytest file and no service, so no far or mid operator applies), livecodebench
+        # (iteration 16's P2), bird-bench's 20 GB is already a card that v1 does not download.
+        BenchmarkCard(
+            "swebench-verified",
+            "swebench-verified@1.0",
+            "repository issue fixing (Python)",
+            "MIT",
+            f"GitHub API licence of SWE-bench/SWE-bench (MIT), {_READ2}; the Harbor adapter README (adapters/swebench) "
+            "says 'Apache 2.0 (benchmark and dataset)' and the HF card princeton-nlp/SWE-bench_Verified states none; "
+            "both licences are permissive",
+            cpu_only=True,
+            note="500 tasks on swebench/sweb.eval.x86_64.* images (several GB each, pulled at gate time only). The "
+            "graded tests are a patch inside tests/test.sh applied to the repository, not a tests/test_*.py file, so "
+            "the far-tier operators (ImpossibleBench's construction on SWE-bench) do not apply yet; on 2026-10-26 only "
+            "mem_limit (after `measure`) does.",
+        ),
+        BenchmarkCard(
+            "quixbugs",
+            "quixbugs@1.0",
+            "bug fixing (Python, Java)",
+            "MIT",
+            f"GitHub API licence of jkoppel/QuixBugs (the adapter README's original repo), {_READ2}",
+            cpu_only=True,
+            note="80 tasks (40 Python, 40 Java), one buggy program each.",
+        ),
+        BenchmarkCard(
+            "evoeval",
+            "evoeval@1.0",
+            "code generation (Python)",
+            "Apache-2.0",
+            f"GitHub API licence of evo-eval/evoeval (the adapter README: 'Follows the original EvoEval project "
+            f"license'), {_READ2}",
+            cpu_only=True,
+            note="100 tasks, pytest tests/test_outputs.py.",
+        ),
+        BenchmarkCard(
+            "terminal-bench-pro",
+            "terminal-bench-pro@1.0",
+            "shell, ops",
+            "Apache-2.0",
+            f"README of alibaba/terminal-bench-pro ('released under the Apache-2.0 License') and HF dataset card "
+            f"alibabagroup/terminal-bench-pro (`license: apache-2.0`), {_READ2}",
+            cpu_only=True,
+            note="200 tasks (public set); base images on an Alibaba Cloud registry (skylensage-registry.cn-hangzhou). "
+            "Tests install uv and pytest at test time, so the offline pytest verifier is tried first.",
+            hermetic=True,
+        ),
+        BenchmarkCard(
+            "openthoughts-tblite",
+            "openthoughts-tblite@2.0",
+            "shell, ops",
+            "Apache-2.0",
+            f"README of open-thoughts/OpenThoughts-TBLite ('## License: Apache 2.0') and HF dataset card "
+            f"open-thoughts/OpenThoughts-TBLite (`license: apache-2.0`), {_READ2}",
+            cpu_only=True,
+            note="100 difficulty-calibrated terminal tasks. Tests install uv and pytest at test time, so the offline "
+            "pytest verifier is tried first.",
+            hermetic=True,
+        ),
+        BenchmarkCard(
+            "ade-bench",
+            "ade-bench@1.0",
+            "analytics engineering (dbt, DuckDB)",
+            "Apache-2.0",
+            f"GitHub API licence of dbt-labs/ade-bench (the adapter README's source), {_READ2}",
+            cpu_only=True,
+            note="48 dbt tasks on DuckDB files.",
+        ),
+        BenchmarkCard(
+            "spider2-dbt",
+            "spider2-dbt@1.0",
+            "analytics engineering (dbt, DuckDB)",
+            "MIT",
+            f"Harbor adapter README (adapters/spider2-dbt: 'Spider2 is licensed under MIT License') and GitHub API "
+            f"licence of xlang-ai/Spider2, {_READ2}",
+            cpu_only=True,
+            note="64 dbt tasks on DuckDB files.",
+        ),
+        BenchmarkCard(
+            "otel-bench",
+            "otel-bench@1.0",
+            "observability instrumentation (several languages)",
+            "Apache-2.0",
+            f"GitHub API licence of QuesmaOrg/otel-bench, {_READ2}",
+            cpu_only=True,
+            note="26 OpenTelemetry instrumentation tasks, pytest tests/test_outputs.py.",
+        ),
+        BenchmarkCard(
+            "autocodebench",
+            "autocodebench@lite200",
+            "code generation (20 languages)",
+            "Apache-2.0",
+            f"LICENSE of Tencent-Hunyuan/AutoCodeBenchmark ('AutoCodeBenchmark is licensed under the Apache License "
+            f"Version 2.0'; the GitHub API reports NOASSERTION for its custom header), {_READ2}",
+            cpu_only=True,
+            note="200 tasks (10 per language), pytest tests/test_outputs.py driving the language's toolchain.",
+        ),
+        BenchmarkCard(
+            "swesmith",
+            "swesmith@1.0",
+            "repository bug fixing (Python)",
+            "MIT",
+            f"Harbor adapter README (adapters/swesmith: 'SWE-smith repository (MIT License)') and GitHub API licence of "
+            f"SWE-bench/SWE-smith, {_READ2}",
+            cpu_only=True,
+            note="100 tasks on jyangballin/swesmith.x86_64.* images.",
+        ),
+        BenchmarkCard(
+            "legacy-bench",
+            "legacy-bench@1.0",
+            "legacy code maintenance (COBOL, C, Fortran, Java 7)",
+            "Apache-2.0",
+            f"GitHub API licence and README of Factory-AI/legacy-bench (the Harbor-format source of the registry "
+            f"entry), {_READ2}",
+            cpu_only=True,
+            note="10 tasks.",
         ),
     )
 }

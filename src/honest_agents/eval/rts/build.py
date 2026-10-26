@@ -2,14 +2,17 @@
 
   python -m honest_agents.eval.rts.build seeds [--cards humanevalfix terminal-bench ...] [--limit N] [--cache DIR]
   python -m honest_agents.eval.rts.build pairs [--seeds-index FILE] [--out data/rts/v1/candidates] [--operators ...]
-  python -m honest_agents.eval.rts.build measure [--out data/rts/v1/candidates] --concurrency 2   # Docker; then pairs again
-  python -m honest_agents.eval.rts.build gate --pairs data/rts/v1/candidates/pairs.jsonl --concurrency 8   # Docker
+  python -m honest_agents.eval.rts.build sample [--out data/rts/v1/candidates] [--target 100] [--oversample 1.6]
+  python -m honest_agents.eval.rts.build measure --selection data/rts/v1/candidates/selection.json   # Docker; then pairs
+  python -m honest_agents.eval.rts.build gate --selection data/rts/v1/candidates/selection.json --concurrency 8   # Docker
   python -m honest_agents.eval.rts.build freeze --train-tasks DIR [--train-tasks DIR ...] [--check]
 
 `seeds` downloads the pinned Harbor datasets (network, no Docker), checks each download against its card's committed
 content lock (`--locks`, default `configs/rts/dataset_locks/`; written when missing) and writes `<cache>/index.jsonl`. `pairs` logs every
 operator's applicability on every seed to `<out>/applicability.jsonl` and writes the built pairs to `<out>/pairs.jsonl`
-(no Docker). `measure` runs the seed's oracle for the verdicts `pairs` logged as stage `measure` (`disk_quota`,
+(no Docker). `sample` picks, per tier, a seeded and balance-aware selection of `--target` x `--oversample`
+candidates (`eval.rts.sample`) into `<out>/selection.json`, with every dropped candidate and its reason; `measure` and
+`gate` given `--selection` run only those. `measure` runs the seed's oracle for the verdicts `pairs` logged as stage `measure` (`disk_quota`,
 `mem_limit` size their pair from it; Docker); `pairs` run again builds them. `gate` runs on a Linux node: resumable, one row per pair with its rejection
 reason in `<out>/gate.jsonl`. `freeze` writes `data/rts/v1/` (manifest, sha256 sidecar, task dirs, protocol, yield);
 `--check` writes the report only; a freeze takes the pre-registered protocol only (`protocol.PREREGISTERED`), and
@@ -29,7 +32,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from honest_agents.eval.rts import benchmarks, candidates, freeze, gate, measure, protocol
+from honest_agents.eval.rts import benchmarks, candidates, freeze, gate, measure, protocol, sample
 from honest_agents.eval.rts.protocol import RtsProtocol
 from honest_agents.tasks.perturb.rts.base import RTSOperatorSpec
 
@@ -93,6 +96,27 @@ def cmd_pairs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sample(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out)
+    rows = [json.loads(ln) for ln in (out_dir / candidates.APPLICABILITY_NAME).read_text().splitlines() if ln.strip()]
+    doc = sample.sample(rows, target=args.target, oversample=args.oversample, seed=args.seed)
+    path = Path(args.selection) if args.selection else out_dir / sample.SELECTION_NAME
+    sample.write_selection(doc, path)
+    for tier, t in doc["tiers"].items():
+        print(
+            f"{tier}: {t['pairs']}/{t['candidates']} candidates selected ({t['sources']} sources, "
+            f"{t['awaiting_measurement']} awaiting a measurement)"
+        )
+        print("    operators: " + ", ".join(f"{k} {v}" for k, v in t["operators"].items()))
+        print("    benchmark sources: " + ", ".join(f"{k} {v}" for k, v in t["benchmark_sources"].items()))
+        for p in t["projected_problems"]:
+            print(f"    projected: {p}")
+    reasons = Counter(why.split(":")[0].split(" (")[0] for why in doc["dropped"].values())
+    print("dropped: " + ", ".join(f"{n} {why}" for why, n in reasons.most_common()))
+    print(f"wrote {len(doc['selected'])} selected of {len(doc['selected']) + len(doc['dropped'])} to {path}")
+    return 0
+
+
 def cmd_measure(args: argparse.Namespace) -> int:
     from functools import partial
 
@@ -102,6 +126,9 @@ def cmd_measure(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     rows = [json.loads(ln) for ln in (out_dir / candidates.APPLICABILITY_NAME).read_text().splitlines() if ln.strip()]
     todo = measure.pending(rows)
+    if args.selection:
+        chosen = sample.read_selection(Path(args.selection))
+        todo = [r for r in todo if candidates.pair_id_of(r["source_task"], r["operator"]) in chosen]
     if args.operators:
         todo = [r for r in todo if r["operator"] in set(args.operators)]
     if args.limit is not None:
@@ -133,6 +160,14 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
     pairs_path = Path(args.pairs)
     rows = candidates.read_pairs(pairs_path)
+    if args.selection:
+        chosen = sample.read_selection(Path(args.selection))
+        missing = chosen - {r.pair_id for r in rows}
+        rows = [r for r in rows if r.pair_id in chosen]
+        print(
+            f"selection {args.selection}: {len(rows)} built pairs to gate"
+            + (f"; {len(missing)} selected candidates are not built (measurement failed or missing)" if missing else "")
+        )
     if args.operators:
         rows = [r for r in rows if r.operator in set(args.operators)]
     out = Path(args.out) if args.out else pairs_path.parent / "gate.jsonl"
@@ -182,7 +217,11 @@ def cmd_freeze(args: argparse.Namespace) -> int:
     report_path = Path(args.report) if args.report else pairs_path.parent / freeze.REPORT_NAME
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, default=str) + "\n")
-    print(f"{len(plan.kept)} pairs pass the static checks ({len(plan.dropped)} dropped); report {report_path}")
+    per_tier = ", ".join(f"{t} {n}" for t, n in sorted(Counter(r.tier for r in plan.kept).items()))
+    print(
+        f"{len(plan.kept)} pairs kept, at most {plan.target_per_tier} per tier ({per_tier or 'none'}; "
+        f"{len(plan.dropped)} dropped); report {report_path}"
+    )
     for p in plan.balance:
         print(f"  balance: {p}")
     if args.check:
@@ -216,10 +255,19 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--out", default=str(candidates.DEFAULT_OUT))
     pr.add_argument("--seed", type=int, default=0)
     pr.add_argument("--measurements", help="default: measurements.jsonl in --out")
+    sa = sub.add_parser("sample", help="seeded, balance-aware selection of candidates per tier for measure and gate")
+    sa.add_argument("--out", default=str(candidates.DEFAULT_OUT), help="the `pairs` --out dir")
+    sa.add_argument("--selection", help="default: selection.json in --out")
+    sa.add_argument("--target", type=int, default=sample.TARGET_PAIRS_PER_TIER, help="kept pairs wanted per tier")
+    sa.add_argument(
+        "--oversample", type=float, default=sample.OVERSAMPLE, help="candidates selected per wanted pair (gate losses)"
+    )
+    sa.add_argument("--seed", type=int, default=0)
     m = sub.add_parser("measure", help="run the seed's oracle for operators that need a measured quantity (Docker)")
     m.add_argument("--out", default=str(candidates.DEFAULT_OUT), help="the `pairs` --out dir")
     m.add_argument("--measurements", help="default: measurements.jsonl in --out")
     m.add_argument("--operators", nargs="+")
+    m.add_argument("--selection", help="`sample`'s selection.json: measure only the selected candidates")
     m.add_argument("--limit", type=int, help="measure at most this many verdicts")
     m.add_argument("--concurrency", type=int, default=2, help="sandboxes at once")
     m.add_argument("--oracle-timeout", type=int, default=900)
@@ -228,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--pairs", default=str(candidates.DEFAULT_OUT / candidates.PAIRS_NAME))
     g.add_argument("--out", help="results jsonl (default: gate.jsonl next to --pairs; appended)")
     g.add_argument("--operators", nargs="+")
+    g.add_argument("--selection", help="`sample`'s selection.json: gate only the selected pairs")
     g.add_argument("--concurrency", type=int, default=8, help="pairs at once (each runs one sandbox at a time)")
     g.add_argument("--oracle-runs", type=int, default=3)
     g.add_argument("--oracle-timeout", type=int, default=900)
@@ -251,9 +300,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
-    return {"seeds": cmd_seeds, "pairs": cmd_pairs, "measure": cmd_measure, "gate": cmd_gate, "freeze": cmd_freeze}[
-        args.cmd
-    ](args)
+    cmds = {
+        "seeds": cmd_seeds,
+        "pairs": cmd_pairs,
+        "sample": cmd_sample,
+        "measure": cmd_measure,
+        "gate": cmd_gate,
+        "freeze": cmd_freeze,
+    }
+    return cmds[args.cmd](args)
 
 
 if __name__ == "__main__":

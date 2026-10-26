@@ -1,9 +1,11 @@
 # RTS v1 gate on a CPU-only node (docs/iteration-16-runbook.md section 2.1; owner-approved rental, 2026-10-26).
 # No GPU and no model: every step is Docker or static. The seeds are rebuilt here from the committed content locks
 # (configs/rts/dataset_locks/), so the node builds byte-for-byte the seeds the Mac built, or refuses. Then the static
-# pairs, the oracle-peak and output-size measurements for disk_quota and mem_limit, the pairs again with those
-# measurements, and the gate (oracle on twin and control, do-nothing on both, blocker probe; 3 oracle runs). The freeze
+# pairs, the sample, the oracle-peak and output-size measurements for disk_quota and mem_limit, the pairs again with
+# those measurements, and the gate (oracle on twin and control, do-nothing on both, blocker probe; 3 oracle runs). The freeze
 # runs on the Mac from the pulled candidates and gate rows (runbook 2.1 step 3), after its --check report is read.
+# Only the seeded, balance-aware `sample` selection (160 candidates per tier for 100 kept; spec 3.2) is measured and
+# gated: the same seeds give the same selection here as on the Mac.
 # Preconditions: the verifier bundle is built (`PATH=.venv/bin bash scripts/build_verifier_bundle.sh`) and Docker's
 # default-address-pools is widened (node setup notes); bird-bench is not in v1 (about 20 GB).
 name: rts_v1_gate
@@ -16,6 +18,8 @@ steps:
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build seeds
       --cards humanevalfix aider-polyglot bigcodebench-hard-complete ds-1000 deveval compilebench terminal-bench
+      swebench-verified quixbugs evoeval terminal-bench-pro openthoughts-tblite ade-bench spider2-dbt otel-bench
+      autocodebench swesmith legacy-bench
       --locks configs/rts/dataset_locks
       && mkdir -p outputs/chain/rts_v1_gate/markers && touch outputs/chain/rts_v1_gate/markers/seeds.done
     gpus: []
@@ -34,10 +38,20 @@ steps:
     timeout_min: 60
     on_failure: stop
 
+  - name: sample
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build sample
+      --out data/rts/v1/candidates
+      && touch outputs/chain/rts_v1_gate/markers/sample.done
+    gpus: []
+    done: outputs/chain/rts_v1_gate/markers/sample.done
+    timeout_min: 30
+    on_failure: stop
+
   - name: measure
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build measure
-      --out data/rts/v1/candidates --concurrency 16
+      --out data/rts/v1/candidates --selection data/rts/v1/candidates/selection.json --concurrency 16
       && touch outputs/chain/rts_v1_gate/markers/measure.done
     gpus: []
     done: outputs/chain/rts_v1_gate/markers/measure.done
@@ -57,7 +71,8 @@ steps:
   - name: gate
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.rts.build gate
-      --pairs data/rts/v1/candidates/pairs.jsonl --concurrency 16 --oracle-runs 3
+      --pairs data/rts/v1/candidates/pairs.jsonl --selection data/rts/v1/candidates/selection.json
+      --concurrency 16 --oracle-runs 3
       && touch outputs/chain/rts_v1_gate/markers/gate.done
     gpus: []
     done: outputs/chain/rts_v1_gate/markers/gate.done

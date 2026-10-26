@@ -1,0 +1,15 @@
+{
+ "harbor_dataset": "legacy-bench@1.0",
+ "tasks": {
+  "16b04d-cobol-railroad-retirement-migration": "c4d0ea5f93e91ede8e53ab9bbe284aad7f8fc5b66d406e248562a05ba11def93",
+  "1907c2-c-debug-legacy-buddy-fix": "f4a5cb1a02c0e925b0127ca83339dd2f333c6c90b58d5e946cbc8ea811d8dd52",
+  "2831b5-java7-rating-engine-repair": "80ff4868468893ebc9046851451cd9cad93dab650fd669c32c320d78e7d439d3",
+  "3af1fe-cobol-bond-settlement-reconcile": "4e7b368f0da5f1921f6077d9cef28da0ffaf9815f7874b102622355481e4f9ff",
+  "505812-java7-inventory-cost-fix": "2c0b70d4c900a12e8b6f6e485535460dce7949b42e0c5eada6ab8f3c553e3c0b",
+  "6fe1ab-java7-mtom-attachment-corruption-fix": "65a63161ba2bc6b1ef79ecc021f97a007be5b58711f6c19b2394327ed1f3f965",
+  "8e8098-cobol-railcar-settlement-fix": "c22a306d80dc015ed590282d0064073a428cd77de486d785ea1207c8072c1a84",
+  "d1ddc1-fortran-to-cpp-lattice-qcd-migration": "bdfa65872af2ab84278b6a871f87ae2bce28e632da21760322fe44e772d14dcb",
+  "ecf5e7-asm-debug-mz-ne-header-fix": "29e6903cf596a2d6e0d4ebcc0615963b55fc7bdbc5d152f2d3fca0961dce091b",
+  "fac397-cobol-batch-interest-migration": "b8d34ab8b42bfba035494640d9b9cf42cb9fa0c9f0b352170dd5dba997ecb937"
+ }
+}
