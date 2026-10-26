@@ -41,10 +41,13 @@ if [[ "${DRY_RUN:-0}" == 1 ]]; then
   exit 0
 fi
 
-CHILD_PID=""
+CHILD_PID=""; BG_BEFORE=""
 cleanup() {  # idempotent: runs on EXIT, which every path (normal, failure, INT, TERM via `exit`) reaches
   trap - EXIT
   trap ':' INT TERM  # a second signal while we tear down must not abandon the server
+  # A signal after the command's `&` but before `CHILD_PID=$!` runs this with CHILD_PID still empty (DEF-61); `$!`
+  # already holds the command's pid then, and differs from the one recorded just before the fork.
+  if [[ -z "$CHILD_PID" && -n "$BG_BEFORE" && "$!" != "$BG_BEFORE" ]]; then CHILD_PID=$!; fi
   if [[ -n "$CHILD_PID" ]] && kill -0 "$CHILD_PID" 2>/dev/null; then
     kill -INT -- "-$CHILD_PID" 2>/dev/null || true
     local t=0
@@ -71,11 +74,12 @@ for n in "${GROUP_LEN[@]}"; do
   # Job control puts the command in its own process group, so a forwarded signal reaches it, and keeps SIGINT
   # deliverable to it (a plain `&` child of a non-interactive shell ignores SIGINT). Only after the server started:
   # `setsid` forks instead of exec'ing when its caller is a group leader.
+  BG_BEFORE=$!  # set: start_vllm ran in the background
   set -m
   "${cmd[@]}" </dev/null &
   CHILD_PID=$!
   set +m
   rc=0; wait "$CHILD_PID" || rc=$?
-  CHILD_PID=""
+  CHILD_PID=""; BG_BEFORE=""
   if (( rc != 0 )); then echo "serve_and_run: command $i exited with status $rc" >&2; exit "$rc"; fi
 done

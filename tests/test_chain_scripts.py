@@ -146,6 +146,27 @@ def test_serve_and_run_stops_the_server_on_sigint_and_sigterm(sandbox, sig, stat
     assert _wait_for(lambda: not _alive(cmd_pid)), "the running command was left behind"
 
 
+@pytest.mark.parametrize(("sig", "status"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
+def test_serve_and_run_stops_a_command_signalled_before_its_pid_was_recorded(sandbox, sig, status):
+    # DEF-61: a signal that lands after the command's `&` but before `CHILD_PID=$!` ran the trap with no child to stop,
+    # so the command (and its hold on the caller's stdout) outlived the script. The copy spins in that window until
+    # the signal comes, so the trap runs exactly there.
+    tmp, env = sandbox
+    script = tmp / "scripts" / "serve_and_run.sh"
+    launch = '  "${cmd[@]}" </dev/null &\n'
+    src = script.read_text()
+    assert src.count(launch) == 1
+    script.write_text(src.replace(launch, launch + "  while :; do sleep 0.1; done\n"))
+    p = _serve(tmp, env, "--", "bash", "-c", "echo $$ > cmd.pid; sleep 120")
+    assert _wait_for(lambda: (tmp / "cmd.pid").exists()), "the command never started"
+    cmd_pid = int((tmp / "cmd.pid").read_text())
+    p.send_signal(sig)
+    out, _ = p.communicate(timeout=60)
+    assert p.returncode == status, out
+    assert _server_stopped(tmp)
+    assert _wait_for(lambda: not _alive(cmd_pid)), "the running command was left behind"
+
+
 def test_serve_and_run_stops_the_server_on_a_signal_while_it_waits_for_health(sandbox):
     tmp, env = sandbox
     env["VLLM_PORT"] = str(_free_port())
