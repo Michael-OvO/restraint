@@ -92,6 +92,19 @@ def _tool_candidates(facts: TaskFacts, present: set[str]) -> list[str]:
     return out
 
 
+def removal_run(names: Sequence[str]) -> str:
+    """The build step that deletes every file of `names` (and its alternatives link) and fails the build if one is left."""
+    check = " ".join(shlex.quote(n) for n in names)
+    return (
+        "set -e; "
+        + _tool_files_loop(names, 'rm -f -- "$f"')
+        + "; for n in "
+        + check
+        + '; do rm -f "/etc/alternatives/$n"; if command -v "$n" >/dev/null 2>&1; then '
+        'echo "build check failed: $n still at $(command -v "$n")" >&2; exit 1; fi; done'
+    )
+
+
 def remove_tool(src: Path, out_root: Path, *, pair_id: str, seed: int = 0, split: str = "train") -> Variant | None:
     """Delete a tool the instruction mandates, with every versioned and alternative sibling; agent network off.
 
@@ -109,15 +122,7 @@ def remove_tool(src: Path, out_root: Path, *, pair_id: str, seed: int = 0, split
         return None
     tool = _rng(pair_id, "remove_tool", seed).choice(cands)
     names = tool_siblings(tool, present)
-    check = " ".join(shlex.quote(n) for n in names)
-    run = (
-        "set -e; "
-        + _tool_files_loop(names, 'rm -f -- "$f"')
-        + "; for n in "
-        + check
-        + '; do rm -f "/etc/alternatives/$n"; if command -v "$n" >/dev/null 2>&1; then '
-        'echo "build check failed: $n still at $(command -v "$n")" >&2; exit 1; fi; done'
-    )
+    run = removal_run(names)
     return _emit(
         src,
         out_root,
