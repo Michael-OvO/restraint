@@ -190,3 +190,11 @@ def test_freeze_caps_each_tier_at_the_target_and_logs_why():
     again, _, _ = freeze.cap_tiers(list(reversed(rows)), 100, PROTO, 0)
     assert sorted(r.pair_id for r in again) == sorted(r.pair_id for r in kept)
     assert freeze.cap_tiers(rows, None, PROTO, 0)[0] == rows
+
+
+def test_a_built_only_resample_selects_no_pair_awaiting_a_measurement():
+    """The re-sample after `measure`: slots of verdicts still awaiting a measurement go to built pairs."""
+    mid = _cands("mid", {("m", "x"): 40}, stage="measure") + _cands("mid", {("s", "z"): 30, ("t", "y"): 30})
+    doc = sample.sample(_rows(mid), target=100, oversample=1.6, built_only=True)
+    assert doc["tiers"]["mid"]["awaiting_measurement"] == 0 and doc["tiers"]["mid"]["pairs"] == 60
+    assert all(doc["dropped"][c.pair_id].startswith("awaiting a measurement") for c in mid if c.stage == "measure")

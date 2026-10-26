@@ -68,6 +68,18 @@ steps:
     timeout_min: 60
     on_failure: stop
 
+  # The re-sample: built pairs only, so slots whose measurement failed (mem_limit below its floor) go to pairs the
+  # gate can run instead of to a second measure-and-gate pass.
+  - name: sample_built
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build sample
+      --out data/rts/v1/candidates --built-only
+      && touch outputs/chain/rts_v1_gate/markers/sample_built.done
+    gpus: []
+    done: outputs/chain/rts_v1_gate/markers/sample_built.done
+    timeout_min: 30
+    on_failure: stop
+
   - name: gate
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.rts.build gate

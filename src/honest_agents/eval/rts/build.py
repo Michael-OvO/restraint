@@ -99,7 +99,7 @@ def cmd_pairs(args: argparse.Namespace) -> int:
 def cmd_sample(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     rows = [json.loads(ln) for ln in (out_dir / candidates.APPLICABILITY_NAME).read_text().splitlines() if ln.strip()]
-    doc = sample.sample(rows, target=args.target, oversample=args.oversample, seed=args.seed)
+    doc = sample.sample(rows, target=args.target, oversample=args.oversample, seed=args.seed, built_only=args.built_only)
     path = Path(args.selection) if args.selection else out_dir / sample.SELECTION_NAME
     sample.write_selection(doc, path)
     for tier, t in doc["tiers"].items():
@@ -263,6 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--oversample", type=float, default=sample.OVERSAMPLE, help="candidates selected per wanted pair (gate losses)"
     )
     sa.add_argument("--seed", type=int, default=0)
+    sa.add_argument("--built-only", action="store_true", help="only pairs already built (the re-sample after measure)")
     m = sub.add_parser("measure", help="run the seed's oracle for operators that need a measured quantity (Docker)")
     m.add_argument("--out", default=str(candidates.DEFAULT_OUT), help="the `pairs` --out dir")
     m.add_argument("--measurements", help="default: measurements.jsonl in --out")

@@ -203,15 +203,20 @@ def sample(
     oversample: float = OVERSAMPLE,
     seed: int = 0,
     proto: Any = None,
+    built_only: bool = False,
 ) -> dict[str, Any]:
     """The selection document `build sample` writes: parameters, per-tier summaries, the selected candidates and every
-    dropped one with its reason."""
+    dropped one with its reason. `built_only` (the re-sample after `measure`) leaves out verdicts still awaiting a
+    measurement, so the selection holds only pairs the gate can run."""
     from honest_agents.eval.rts.protocol import PREREGISTERED
 
     proto = proto or PREREGISTERED
     if target < 1 or oversample < 1.0:
         raise ValueError(f"target must be at least 1 and oversample at least 1.0 (got {target}, {oversample})")
     cands, dropped = candidates_from_rows(rows)
+    if built_only:
+        dropped.update({c.pair_id: "awaiting a measurement (built-only re-sample)" for c in cands if c.stage != "built"})
+        cands = [c for c in cands if c.stage == "built"]
     n = math.ceil(target * oversample)
     selected: list[Candidate] = []
     tiers: dict[str, Any] = {}
