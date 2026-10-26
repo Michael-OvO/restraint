@@ -2,7 +2,7 @@
 
 Draft written under [integrity-gate.md](integrity-gate.md) step 3. **Every automated check passes**: the full L1 run
 (oracle gate, S3, S11) on `8d45d25`, and tests and L0 again on `ad4be54` (2026-10-26 morning; the L1 result carries
-over, see "L1 validity" below). Sign-off still waits on 7 ledger entries (4 `fixing`, 3 `open`). The sanity run of
+over, see "L1 validity" below). Sign-off still waits on 6 ledger entries (4 `fixing`, 2 `open`). The sanity run of
 the start model needs a GPU. No experiment may start before the owner signs off.
 
 ## Recorded
@@ -42,7 +42,7 @@ green) and `final_benchmark check`, not an L1 check.
 
 ## Ledger status (60 entries)
 
-53 `closed`. Not closed (each blocks sign-off; `gate.ledger check` exits 1 on all seven):
+54 `closed`. Not closed (each blocks sign-off; `gate.ledger check` exits 1 on all six):
 
 | ID | Status | What remains | Needs |
 |---|---|---|---|
@@ -51,10 +51,9 @@ green) and `final_benchmark check`, not an L1 check.
 | DEF-43 | fixing | release of the 24 select variants that failed only under the old umask (the tracked 8-entry `data/select_quarantine.txt`, already on main, is the proposal) | owner decision |
 | DEF-50 | fixing | the AbstentionBench export must run on a node, then freeze and check on the Mac | CPU node |
 | DEF-58 | open | the pre-registration promises per-(task, sample, turn) sampling seeds; no rollout sends one | code fix or a pre-registration amendment (owner) |
-| DEF-59 | open | `final_benchmark never-trained` does not scan `data/commit_checks/builds/`, so stage (c) would not check its own build | local code fix, $0 |
 | DEF-60 | open | the AbstentionBench (and MASK) guard margin has no calibration source | owner decision (state m in the pre-registration, or add AbstentionBench to stage (a)) |
 
-DEF-46 closed since the last draft (`0ff3cf0`).
+DEF-46 (`0ff3cf0`) and DEF-59 (`4077af4`) closed since the last draft. DEF-20: the node batch of 2026-10-26 did the pair replays and the twin validity check (`ffa9cc3`); only twin task_success's MDE remains, from the stage-(a) eval. DEF-50: the node export is blocked by the gated GPQA subset (`58018f9`).
 
 ## What blocks sign-off, exactly
 
