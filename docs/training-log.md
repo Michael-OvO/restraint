@@ -1335,17 +1335,24 @@ dir; bars at a point estimate). From now on no experiment starts while any defec
 and each iteration begins with the integrity sweep and a written sign-off ([integrity-gate.md](integrity-gate.md)).
 Numbers above that a defect affected keep their original value here; their re-scored values go in the defect entry.
 
-## Iteration 16 preparation - integrity fix round, new data pipeline, frozen benchmark (2026-10-23/25)
+## Iteration 16 preparation - integrity fix round, new data pipeline, frozen benchmark (2026-10-23/26)
 
-No GPU, no training, $0. Everything ran on the Mac (pure Python and local Docker).
-- **Defects.** The ledger ([defects.md](defects.md)) has 57 entries: 49 closed, 8 not (DEF-48, DEF-51 open; DEF-10,
-  DEF-20, DEF-43, DEF-46, DEF-50, DEF-57 fixing). Archived numbers each defect moved are in its entry, labelled
-  `re-scored, post-fix` or `void`.
+No GPU, no training. Everything ran on the Mac (pure Python and local Docker) except the full L1 sweep, which ran on a
+CPU-only use of a rented Vast VM (57730801, 2026-10-25 23:18 to 2026-10-26 00:00 UTC, **$1.04**: $0.90 compute,
+$0.14 storage). A first try at the 2026-10-26 node batch (instance 57779753, 07:09-07:32 UTC) never came up and was
+destroyed ($0.06 storage).
+- **Defects.** The ledger ([defects.md](defects.md)) has 60 entries on `ad4be54`: 53 closed, 7 not (DEF-10, DEF-20,
+  DEF-43, DEF-50 fixing; DEF-58, DEF-59, DEF-60 open, found 2026-10-26 while writing the iteration-16 job files).
+  Archived numbers each defect moved are in its entry, labelled `re-scored, post-fix` or `void`.
 - **Gate.** First full L1 sweep on `77f7f33` (+ DEF-47's `510d8e6`): S1-S11 pass and the oracle gate 120/120 over the
-  eval build. On `1b490a5` L0 passes (S1, S2, S4-S10; 33 s). The cached L1 re-run could not boot a sandbox (the
-  Docker engine stopped answering). Its cache also missed, because `taskfs.py` (DEF-45) and `validate.py` (DEF-43)
-  changed after `77f7f33`, so G1 and S3 need a full re-boot. `scripts/test.sh --fast` is green (4603 passed,
-  36 skipped, with Docker unreachable). **Not signed off**: [iteration-16-signoff.md](iteration-16-signoff.md).
+  eval build. Full L1 again on `8d45d25` on the node above: oracle gate 120/120, S3 and S11 pass. On `ad4be54`
+  (2026-10-26) L0 passes (S1, S2, S4-S10; 22.5 s) and `scripts/test.sh --fast` is green (4726 passed, 36 skipped);
+  no gated file changed since `8d45d25`, so that L1 holds. **Not signed off**:
+  [iteration-16-signoff.md](iteration-16-signoff.md).
+- **Job files.** The four paid stages are written and checked, not launched
+  ([iteration-16-runbook.md](iteration-16-runbook.md)): (a) calibration, (b) G2 claim rollouts, (c) SFT, (d) final
+  eval; about $85 in all at $1.46/h. Each job's first step is `gate.ledger check`, which refuses while any entry is
+  open.
 - **New pipeline (commit-data).** Instruction-only requirement checklists per task (`data/commit_checks`), checked in
   Docker against the hidden tests (`sft.checklist_validation`, `sft.checklist_agreement`), feed the claim-point build
   (`sft.commit_checks build`, `commit_points.coverage`). 84 requirements that fail on a passing oracle were dropped.
@@ -1360,8 +1367,10 @@ No GPU, no training, $0. Everything ran on the Mac (pure Python and local Docker
 - **Pre-registration.** [iteration-16-prereg.md](iteration-16-prereg.md) is a DRAFT (`844b379`, `f1c39be`): arms,
   frozen data, one estimator, bars with computed MDE and clone-pass (`analysis.power`), checkpoint selection, stopping
   rules and a decision table.
-- **Needs owner approval:** the pre-registration, the GPU spend (sanity runs, DEF-46's six models, the iteration-16
-  arms), and DEF-43's release of the 24 select variants.
+- **Needs owner approval:** the pre-registration (with DEF-58 and DEF-60 settled in it, and a DEF-10 waiver for
+  stage (a) only), DEF-43's release of the 24 select variants, and the GPU spend per stage. DEF-46 closed: the five
+  other iteration-15 models are superseded and never served again, so no sanity runs are owed for them.
+  [morning-brief-2026-10-26.md](morning-brief-2026-10-26.md) has the questions and the recommended answers.
 
 ## Infrastructure incidents (and the guard each one left behind)
 
