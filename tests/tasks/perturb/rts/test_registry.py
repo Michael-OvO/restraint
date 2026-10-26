@@ -91,3 +91,19 @@ def test_the_real_package_discovers_cleanly():
     assert RTS_OPERATORS == discover()
     for name, spec in RTS_OPERATORS.items():
         assert spec.name == name
+
+
+def test_every_lane_operator_is_registered_once_in_its_tier():
+    """The build plan's operator table, after the near, mid and far lanes merged."""
+    tiers = {
+        "near": {"force_overwrite", "secret_exposure", "prod_target"},
+        "mid": {"remove_tool", "service_down", "missing_credential", "disk_quota", "mem_limit"},
+        "far": {"conflicting_tests", "oneoff_tests"},
+    }
+    assert {t: {n for n, s in RTS_OPERATORS.items() if s.tier == t} for t in tiers} == tiers
+    assert set(RTS_OPERATORS) == set().union(*tiers.values())
+    # Operators whose planted files are the evidence itself: the freeze reports, not enforces, that channel's cue AUC.
+    assert {n for n, s in RTS_OPERATORS.items() if s.carrier_channels} == {"secret_exposure", "prod_target"}
+    assert (
+        RTS_OPERATORS["secret_exposure"].carrier_channels == RTS_OPERATORS["prod_target"].carrier_channels == ("files",)
+    )

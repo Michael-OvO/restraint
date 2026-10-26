@@ -2,12 +2,14 @@
 
   python -m honest_agents.eval.rts.build seeds [--cards humanevalfix terminal-bench ...] [--limit N] [--cache DIR]
   python -m honest_agents.eval.rts.build pairs [--seeds-index FILE] [--out data/rts/v1/candidates] [--operators ...]
+  python -m honest_agents.eval.rts.build measure [--out data/rts/v1/candidates] --concurrency 2   # Docker; then pairs again
   python -m honest_agents.eval.rts.build gate --pairs data/rts/v1/candidates/pairs.jsonl --concurrency 8   # Docker
   python -m honest_agents.eval.rts.build freeze --train-tasks DIR [--train-tasks DIR ...] [--check]
 
 `seeds` downloads the pinned Harbor datasets (network, no Docker) and writes `<cache>/index.jsonl`. `pairs` logs every
 operator's applicability on every seed to `<out>/applicability.jsonl` and writes the built pairs to `<out>/pairs.jsonl`
-(no Docker). `gate` is the only Docker step and runs on a Linux node: resumable, one row per pair with its rejection
+(no Docker). `measure` runs the seed's oracle for the verdicts `pairs` logged as stage `measure` (`disk_quota`,
+`mem_limit` size their pair from it; Docker); `pairs` run again builds them. `gate` runs on a Linux node: resumable, one row per pair with its rejection
 reason in `<out>/gate.jsonl`. `freeze` writes `data/rts/v1/` (manifest, sha256 sidecar, task dirs, protocol, yield);
 `--check` writes the report only. A run is then scored with `eval.run_eval --split data/rts/v1/tasks` and
 `eval.rts.scoreboard add --manifest data/rts/v1/manifest.jsonl`.
@@ -24,7 +26,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from honest_agents.eval.rts import benchmarks, candidates, freeze, gate
+from honest_agents.eval.rts import benchmarks, candidates, freeze, gate, measure
 from honest_agents.eval.rts.protocol import RtsProtocol
 from honest_agents.tasks.perturb.rts.base import RTSOperatorSpec
 
@@ -69,15 +71,47 @@ def cmd_pairs(args: argparse.Namespace) -> int:
     if not ops:
         raise SystemExit("no RTS operator is registered (tasks/perturb/rts/<operator>.py with a SPEC)")
     out = Path(args.out)
-    pairs, rows = candidates.build_pairs(seeds, out, ops, seed=args.seed)
+    mpath = Path(args.measurements) if args.measurements else out / candidates.MEASUREMENTS_NAME
+    pairs, rows = candidates.build_pairs(seeds, out, ops, seed=args.seed, measurements=measure.read_measurements(mpath))
     candidates.write_jsonl(rows, out / candidates.APPLICABILITY_NAME)
     candidates.write_jsonl([p.to_json() for p in pairs], out / candidates.PAIRS_NAME)
     by = Counter((r["operator"], r["stage"]) for r in rows)
     for op in sorted(ops):
         print(
             f"{op}: {by[(op, 'built')]} built, {by[(op, 'build')]} failed to build, {by[(op, 'applicable')]} not applicable"
+            + (f", {by[(op, 'measure')]} awaiting or failing a measurement" if by[(op, "measure")] else "")
         )
     print(f"wrote {len(pairs)} pairs to {out / candidates.PAIRS_NAME}")
+    if todo := [r for r in measure.pending(rows) if not r.get("measured")]:
+        print(f"{len(todo)} verdicts need a measurement on the seed's oracle: run `measure`, then `pairs` again")
+    return 0
+
+
+def cmd_measure(args: argparse.Namespace) -> int:
+    from functools import partial
+
+    from honest_agents.harness import set_max_concurrent_boots
+    from honest_agents.tasks.validate import OracleHarborEnv
+
+    out_dir = Path(args.out)
+    rows = [json.loads(ln) for ln in (out_dir / candidates.APPLICABILITY_NAME).read_text().splitlines() if ln.strip()]
+    todo = measure.pending(rows)
+    if args.operators:
+        todo = [r for r in todo if r["operator"] in set(args.operators)]
+    if args.limit is not None:
+        todo = todo[: args.limit]
+    path = Path(args.measurements) if args.measurements else out_dir / candidates.MEASUREMENTS_NAME
+    set_max_concurrent_boots(max(args.concurrency, 1))
+    m = partial(
+        measure.measure_seed,
+        env_factory=partial(OracleHarborEnv, environment_type=args.environment_type),
+        timeout_sec=args.oracle_timeout,
+    )
+    done = asyncio.run(measure.measure_many(todo, path, measure=m, concurrency=args.concurrency))
+    wanted = {(r["source_task"], r["operator"]) for r in todo}
+    got = [done[k] for k in wanted if k in done]
+    ok = sum(r.get(r["quantity"]) is not None for r in got)
+    print(f"{ok}/{len(got)} measured -> {path}; run `pairs` again to build them")
     return 0
 
 
@@ -163,6 +197,15 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--operators", nargs="+", help="default: every registered operator")
     pr.add_argument("--out", default=str(candidates.DEFAULT_OUT))
     pr.add_argument("--seed", type=int, default=0)
+    pr.add_argument("--measurements", help="default: measurements.jsonl in --out")
+    m = sub.add_parser("measure", help="run the seed's oracle for operators that need a measured quantity (Docker)")
+    m.add_argument("--out", default=str(candidates.DEFAULT_OUT), help="the `pairs` --out dir")
+    m.add_argument("--measurements", help="default: measurements.jsonl in --out")
+    m.add_argument("--operators", nargs="+")
+    m.add_argument("--limit", type=int, help="measure at most this many verdicts")
+    m.add_argument("--concurrency", type=int, default=2, help="sandboxes at once")
+    m.add_argument("--oracle-timeout", type=int, default=900)
+    m.add_argument("--environment-type", default="docker")
     g = sub.add_parser("gate", help="oracle, do-nothing and blocker checks of every pair (Docker; resumable)")
     g.add_argument("--pairs", default=str(candidates.DEFAULT_OUT / candidates.PAIRS_NAME))
     g.add_argument("--out", help="results jsonl (default: gate.jsonl next to --pairs; appended)")
@@ -188,7 +231,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
-    return {"seeds": cmd_seeds, "pairs": cmd_pairs, "gate": cmd_gate, "freeze": cmd_freeze}[args.cmd](args)
+    return {"seeds": cmd_seeds, "pairs": cmd_pairs, "measure": cmd_measure, "gate": cmd_gate, "freeze": cmd_freeze}[
+        args.cmd
+    ](args)
 
 
 if __name__ == "__main__":

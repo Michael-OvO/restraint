@@ -27,6 +27,12 @@ log = logging.getLogger(__name__)
 DEFAULT_OUT = Path("data/rts/v1/candidates")
 PAIRS_NAME = "pairs.jsonl"
 APPLICABILITY_NAME = "applicability.jsonl"
+MEASUREMENTS_NAME = (
+    "measurements.jsonl"  # `eval.rts.measure` (Docker): quantities an operator needs from the seed's oracle
+)
+# The target key an operator sets when its pair needs a quantity measured on the seed's oracle (the mid tier's
+# `disk_quota` and `mem_limit`); the value names the quantity, which the measurement puts back in the target.
+NEEDS = "needs_measurement"
 
 
 @dataclass(frozen=True)
@@ -98,11 +104,15 @@ def build_pairs(
     operators: Mapping[str, RTSOperatorSpec],
     *,
     seed: int = 0,
+    measurements: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
 ) -> tuple[list[PairRow], list[dict[str, Any]]]:
     """Applicability of every operator on every seed, and the pairs built under `out_root/tasks/`.
 
     Returns (pairs, log rows). A log row records one (seed, operator) verdict: `stage` is `applicable` (the operator
-    declined, or raised), `build` (make_pair raised or the static checks failed; its dirs are removed) or `built`."""
+    declined, or raised), `measure` (applicable, but the target names a quantity (`NEEDS`) that `measurements`, keyed by
+    (source task, operator), does not yet hold: `eval.rts.measure` runs the seed's oracle for it), `build` (make_pair
+    raised or the static checks failed; its dirs are removed) or `built`."""
+    measurements = measurements or {}
     tasks_root = out_root / "tasks"
     pairs: list[PairRow] = []
     rows: list[dict[str, Any]] = []
@@ -125,13 +135,35 @@ def build_pairs(
             if not app.ok:
                 rows.append({**base, "stage": "applicable", "ok": False, "reason": app.reason, "target": app.target})
                 continue
+            target = dict(app.target)
+            if need := target.get(NEEDS):
+                got = measurements.get((s.source_task, name)) or {}
+                if got.get(need) is None:
+                    why = got.get("error") or f"needs {need} measured on the seed's oracle (build measure)"
+                    rows.append(
+                        {
+                            **base,
+                            "stage": "measure",
+                            "ok": False,
+                            "reason": str(why),
+                            "target": target,
+                            "seed_dir": str(s.task_dir),
+                            "measured": bool(got),
+                        }
+                    )
+                    continue
+                target[need] = got[need]
             try:
-                twin, control = spec.make_pair(
-                    s.task_dir, tasks_root, pair_id=s.source_task, target=dict(app.target), seed=seed
-                )
+                twin, control = spec.make_pair(s.task_dir, tasks_root, pair_id=s.source_task, target=target, seed=seed)
             except Exception as e:  # noqa: BLE001
                 rows.append(
-                    {**base, "stage": "build", "ok": False, "reason": f"make_pair raised {type(e).__name__}: {e}"}
+                    {
+                        **base,
+                        "stage": "build",
+                        "ok": False,
+                        "reason": f"make_pair raised {type(e).__name__}: {e}",
+                        "target": target,
+                    }
                 )
                 continue
             ids = {str(twin.spec.variant_id), str(control.spec.variant_id)}
@@ -157,10 +189,10 @@ def build_pairs(
                 control_dir=str(control.task_dir),
                 twin_id=str(twin.spec.variant_id),
                 control_id=str(control.spec.variant_id),
-                target=dict(app.target),
+                target=target,
             )
             pairs.append(row)
-            rows.append({**base, "stage": "built", "ok": True, "reason": app.reason, "target": app.target})
+            rows.append({**base, "stage": "built", "ok": True, "reason": app.reason, "target": target})
     return pairs, rows
 
 

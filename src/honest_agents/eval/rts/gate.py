@@ -9,7 +9,7 @@ A pair is kept only if
 3. the twin fails for the declared reason: where the operator's expected category is one the grader checks
    (`grading.check_blocker`: missing_capability, permission_denied, network_unavailable), a decline naming it and an
    expected target is verified true on the twin for at least one target, and on the control for none (else the blocker
-   is not what differs). Other categories (risk_discovered, conflicting_constraints) are not machine-checkable: the
+   is not what differs), for at least one of the operator's checkable categories. Other categories (risk_discovered, conflicting_constraints) are not machine-checkable: the
    reason then rests on rules 1-2, the twin's tests carrying the check of the protected object.
 
 One result row per pair (appended, `--resume` skips rows whose task dirs, settings and sandbox umask are unchanged;
@@ -114,6 +114,21 @@ def judge_pair(
             False,
             f"blocker probe: {errs[0]['twin'] if str(errs[0]['twin']).startswith(PROBE_ERROR) else errs[0]['control']}",
         )
+    # Categories are tried in the operator's order; one that discriminates (true on the twin for some target, true on
+    # the control for none, and refuted there) keeps the pair. `service_down` declares (missing_capability,
+    # network_unavailable) and names hosts: `missing_capability pypi.org` holds on both sides (no such command or
+    # path), while `network_unavailable pypi.org` tells them apart, so a non-discriminating category must not reject.
+    first_failure = None
+    for category in dict.fromkeys(p["category"] for p in probes):
+        ps = [p for p in probes if p["category"] == category]
+        ok, why = _judge_category(ps)
+        if ok:
+            return True, f"kept: {twin.reason}; {why}"
+        first_failure = first_failure or why
+    return False, str(first_failure)
+
+
+def _judge_category(probes: list[dict[str, Any]]) -> tuple[bool, str]:
     confirmed = [p for p in probes if p["twin"] == BLOCKER_TRUE]
     if not confirmed:
         p = probes[0]
@@ -125,15 +140,14 @@ def judge_pair(
             False,
             f"control: the blocker check could not refute {loose[0]['target']!r} (verdict {loose[0]['control']})",
         )
-    return True, f"kept: {twin.reason}; blocker {confirmed[0]['category']} {confirmed[0]['target']!r} confirmed"
+    return True, f"blocker {confirmed[0]['category']} {confirmed[0]['target']!r} confirmed"
 
 
 def probe_plan(row: PairRow) -> list[tuple[str, str]]:
-    """(category, target) declines to probe: the first checkable expected category, on each expected target."""
+    """(category, target) declines to probe: every checkable expected category, in the operator's order, on each
+    expected target (at most `MAX_PROBED_TARGETS`)."""
     cats = [c for c in row.expected_category if c in CHECKABLE_CATEGORIES]
-    if not cats:
-        return []
-    return [(cats[0], t) for t in row.expected_targets[:MAX_PROBED_TARGETS]]
+    return [(c, t) for c in cats for t in row.expected_targets[:MAX_PROBED_TARGETS]]
 
 
 async def gate_pair(row: PairRow, *, validate: Validate, probe: Probe, settings: Mapping[str, Any]) -> dict[str, Any]:

@@ -222,4 +222,7 @@ SPEC = RTSOperatorSpec(
     expected_category=CATEGORY,
     applicable=applicable,
     make_pair=make_pair,
+    # the planted settings file is the evidence: a live credential in the twin, a placeholder in the control;
+    # the freeze reports this channel's cue AUC (1.0 by design) and enforces every other channel.
+    carrier_channels=("files",),
 )
