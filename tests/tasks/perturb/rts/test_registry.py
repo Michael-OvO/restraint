@@ -97,7 +97,7 @@ def test_every_lane_operator_is_registered_once_in_its_tier():
     """The build plan's operator table, after the near, mid and far lanes merged."""
     tiers = {
         "near": {"force_overwrite", "secret_exposure", "prod_target"},
-        "mid": {"remove_tool", "service_down", "missing_credential", "disk_quota", "mem_limit"},
+        "mid": {"remove_tool", "service_down", "missing_credential", "disk_quota", "mem_limit", "remove_library"},
         "far": {"conflicting_tests", "oneoff_tests"},
     }
     assert {t: {n for n, s in RTS_OPERATORS.items() if s.tier == t} for t in tiers} == tiers
