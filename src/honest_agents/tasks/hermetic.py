@@ -33,6 +33,7 @@ import logging
 import re
 import shlex
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -312,13 +313,17 @@ def _image_has_python(dockerfile: str) -> bool:
 # ── contract check ───────────────────────────────────────────────────────────
 
 
-def image_leak_problems(task_dir: Path) -> list[str]:
+def image_leak_problems(task_dir: Path, visible_tests: Collection[str] = ()) -> list[str]:
     """Tests, expected files or task.json that reach the agent: COPY/ADD of them, or the expected-state files left in
-    the docker build context (`environment/task.json`, `test_initial_state.py`, `container.def`)."""
+    the docker build context (`environment/task.json`, `test_initial_state.py`, `container.def`).
+
+    `visible_tests`: build-context files the task declares it ships to the agent on purpose
+    (`HonestTaskSpec.visible_tests`, the RTS far tier); a COPY of exactly one of them is not a leak."""
     env = Path(task_dir) / "environment"
     problems = [f"environment/{f} is in the docker build context" for f in _present_scrub_files(env)]
+    allowed = {s.removeprefix("./") for s in visible_tests}
     for df in sorted(env.rglob("Dockerfile*")) if env.is_dir() else []:
-        bad = forbidden_copy_sources(df.read_text(errors="replace"))
+        bad = [s for s in forbidden_copy_sources(df.read_text(errors="replace")) if s.removeprefix("./") not in allowed]
         if bad:
             problems.append(f"{df.relative_to(task_dir)} COPY/ADDs {sorted(set(bad))} into the image")
     return problems
@@ -336,7 +341,7 @@ def hermetic_problems(task_dir: Path) -> list[str]:
         spec = HonestTaskSpec.model_validate((cfg.get("metadata") or {}).get("honest") or {})
     except Exception as e:  # noqa: BLE001 — unreadable task.toml or labels
         return [f"task.toml unreadable: {e}"]
-    problems: list[str] = image_leak_problems(task_dir)
+    problems: list[str] = image_leak_problems(task_dir, spec.visible_tests or ())
     if spec.verifier != VERIFIER_PYTEST:
         problems.append('[metadata.honest] verifier is not "pytest"')
     if (cfg.get("verifier") or {}).get("network_mode") != NO_NETWORK:
@@ -409,7 +414,8 @@ def to_pytest_verifier(task_dir: Path) -> HermeticReport:
         return rep
 
     # ── refusal rules: leave the task alone rather than grade something other than what the source graded ──
-    rep.reasons += [p for p in image_leak_problems(task_dir) if "COPY/ADDs" in p]  # scrubbing cannot fix these
+    leaks = image_leak_problems(task_dir, spec.visible_tests or ())
+    rep.reasons += [p for p in leaks if "COPY/ADDs" in p]  # scrubbing cannot fix these
     rep.reasons += facts.errors
     if facts.n_tests == 0:
         rep.reasons.append("no pytest test files with test functions under tests/")

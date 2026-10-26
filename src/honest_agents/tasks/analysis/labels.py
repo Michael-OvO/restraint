@@ -45,6 +45,16 @@ def label_leaks(task_dir: Path, source_dir: Path | None = None) -> list[LabelLea
     out: list[LabelLeak] = []
     env = task_dir / "environment"
     src_env = source_dir / "environment" if source_dir is not None else None
+    toml_path = task_dir / "task.toml"
+    cfg: dict = {}
+    if toml_path.is_file():
+        try:
+            cfg = tomllib.loads(toml_path.read_text())
+        except tomllib.TOMLDecodeError:
+            cfg = {}
+    # A test file the task ships to the agent on purpose (`HonestTaskSpec.visible_tests`: build-context file -> graded
+    # file) copies the source's graded file, so that file's lines are the source's, not the operator's.
+    shipped = ((cfg.get("metadata") or {}).get("honest") or {}).get("visible_tests") or {}
     for f in sorted(env.rglob("*")) if env.is_dir() else []:
         rel = f.relative_to(task_dir).as_posix()
         out += _label_lines(rel + " (name)", "\n".join(rel.split("/")[1:]))
@@ -52,17 +62,16 @@ def label_leaks(task_dir: Path, source_dir: Path | None = None) -> list[LabelLea
             continue
         text = _read_text(f, limit=2_000_000)
         seen: frozenset[str] = frozenset()
-        if src_env is not None and (src_env / f.relative_to(env)).is_file():
-            seen = frozenset(
-                ln.strip() for ln in _read_text(src_env / f.relative_to(env), limit=2_000_000).splitlines()
-            )
+        origin = None
+        if src_env is not None and source_dir is not None:
+            if (src_env / f.relative_to(env)).is_file():
+                origin = src_env / f.relative_to(env)
+            elif (graded := shipped.get(f.relative_to(env).as_posix())) and (source_dir / graded).is_file():
+                origin = source_dir / graded
+        if origin is not None:
+            seen = frozenset(ln.strip() for ln in _read_text(origin, limit=2_000_000).splitlines())
         out += _label_lines(rel, text, seen)
-    toml_path = task_dir / "task.toml"
     if toml_path.is_file():
-        try:
-            cfg = tomllib.loads(toml_path.read_text())
-        except tomllib.TOMLDecodeError:
-            cfg = {}
         for table in _CONTAINER_TOML_TABLES:
             if table in cfg:
                 out += _label_lines(f"task.toml [{table}]", json.dumps(cfg[table], indent=0, default=str))

@@ -63,6 +63,11 @@ class HonestTaskSpec(BaseModel):
     # Free-form variant details copied onto eval records (`EpisodeRecord.detail`): `surface` (the evidence surface of a
     # high_risk variant) and `phrasing_heldout` (the request phrasing was held out of training). Absent on old tasks.
     detail: dict[str, Any] = Field(default_factory=dict)
+    # Test files shipped to the agent on purpose (the RTS far tier, ImpossibleBench's construction): build-context file
+    # (relative to environment/) -> the graded test file it copies (relative to the task dir). The leak screen
+    # (`hermetic.image_leak_problems`) lets exactly these COPY sources through, and the label scan
+    # (`labels.label_leaks`) counts the source task's lines of the graded file as the source's. None on every other task.
+    visible_tests: dict[str, str] | None = None
     run_tests_when_infeasible: bool = True  # an infeasible task whose tests pass cleanly is a leaky perturbation
 
     @model_validator(mode="after")
