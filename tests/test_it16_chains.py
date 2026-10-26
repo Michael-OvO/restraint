@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import itertools
 import json
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,7 +32,7 @@ PENDING = {
     "a": set(),
     "b": set(),
     "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>"},
-    "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>"},
+    "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>", "<RTS_MANIFEST>"},
 }
 
 
@@ -234,3 +237,118 @@ def test_every_external_guard_states_its_margin() -> None:
     assert "abstentionbench" not in calibration.lower() and "mask" not in calibration.lower()
     for g in guards:
         assert "**m = " in g, g
+
+
+# The RTS secondary endpoint (prereg 6.5): arm tag -> (served model, board label, adapter).
+RTS_ARMS = {
+    "base": ("Qwen/Qwen3.5-4B", "base", None),
+    "g2": ("outputs/it15/g2_merged", "it15-g2-s1", "data/weights/it15/g2-s1-final"),
+    "final": ("outputs/it16/final_merged", "it16-final", "data/weights/it16/final-selected"),
+}
+RTS_BOARD = "--board runs/rts/it16d/scoreboard.json"
+
+
+def _scoreboard_calls(command: str) -> list[list[str]]:
+    words = shlex.split(command.replace("<RTS_MANIFEST>", "M"))
+    calls = []
+    for i, w in enumerate(words):
+        if w == "honest_agents.eval.rts.scoreboard":
+            end = next((j for j in range(i + 1, len(words)) if words[j] == "&&"), len(words))
+            calls.append(words[i + 1 : end])
+    return calls
+
+
+def test_every_arm_runs_rts_once_and_is_added_to_the_board_base_first() -> None:
+    chain = _chain("d")
+    order = [s.name for s in chain.steps]
+    for x, (tag, (model, label, adapter)) in enumerate(RTS_ARMS.items()):
+        step = chain.step(f"{tag}_rts")
+        assert served_model(step.command, REPO) == model
+        assert step.gpus == (0,) and step.on_failure == "stop"
+        assert {f"{tag}_sanity", "rts_freeze_check"} <= _ancestors(chain, step.name)
+        assert f"eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_{tag}_rts --n-samples 1" in step.command
+        assert "--train-config configs/grpo_it13_2gpu.yaml" in step.command
+        (add,) = _scoreboard_calls(step.command)
+        want = ["add", "--run", f"runs/eval/it16d_{tag}_rts", "--manifest", "M", "--label", label, "--order", str(x)]
+        assert add[: len(want)] == want
+        assert " ".join(add).endswith(f"{RTS_BOARD} --units-dir runs/rts/it16d/units")
+        assert (f"--adapter {adapter}" in " ".join(add)) if adapter else "--adapter" not in add
+        # scored after the server stopped: the `add` follows serve_and_run, outside its command groups
+        assert step.command.index("&& env -u VIRTUAL_ENV") > step.command.index("--n-samples 1")
+        assert f"runs/eval/it16d_{tag}_rts" in chain.watch["archives"][0]["eval"]
+    # base is scored before any step of a trained arm starts (its MDE comes from the base run alone)
+    assert order.index("base_rts") < min(order.index(s) for s in order if s.startswith(("g2_", "final_")))
+    assert order.index("g2_rts") < order.index("final_sanity")
+
+
+def test_the_rts_endpoint_compares_final_and_g2_to_base_and_plots_to_wandb() -> None:
+    chain = _chain("d")
+    step = chain.step("rts_endpoint")
+    assert step.gpus == () and {f"{t}_rts" for t in RTS_ARMS} <= _ancestors(chain, "rts_endpoint")
+    calls = _scoreboard_calls(step.command)
+    deltas = {(c[c.index("--base") + 1], c[c.index("--trained") + 1]) for c in calls if c[0] == "delta"}
+    assert deltas == {("base", "it16-final"), ("base", "it15-g2-s1")}
+    (plot,) = [c for c in calls if c[0] == "plot"]
+    assert "--wandb" in plot and step.env["WANDB_PROJECT"] == "honest-agents"
+    assert all(RTS_BOARD in " ".join(c) for c in calls)
+    assert "runs/rts/it16d" in chain.watch["pull_paths"]
+
+
+def test_the_rts_commands_parse_with_the_scoreboard_cli(capsys: pytest.CaptureFixture[str]) -> None:
+    """Every flag a stage-(d) RTS step passes is one the scoreboard's subcommand accepts (its --help lists it)."""
+    from honest_agents.eval.rts import scoreboard
+
+    calls = [c for s in _chain("d").steps for c in _scoreboard_calls(s.command)]
+    assert sorted(c[0] for c in calls) == ["add", "add", "add", "delta", "delta", "plot"]
+    for call in calls:
+        with pytest.raises(SystemExit):
+            scoreboard.main([call[0], "--help"])
+        accepted = capsys.readouterr().out
+        for flag in (w for w in call if w.startswith("--")):
+            assert flag in accepted, (call[0], flag)
+
+
+def test_the_rts_freeze_check_needs_the_digest_in_the_prereg(tmp_path: Path) -> None:
+    """`rts_freeze_check` passes only when the manifest matches its sidecar and the prereg line holds that digest."""
+    if shutil.which("sha256sum") is None:
+        pytest.skip("needs sha256sum")
+    chain = _chain("d")
+    assert "rts_freeze_check" in _ancestors(chain, "base_sanity")
+    command = chain.step("rts_freeze_check").command.replace("<RTS_MANIFEST>", "data/rts/v1/manifest.jsonl")
+    manifest = tmp_path / "data/rts/v1/manifest.jsonl"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"item_id": "a"}\n')
+    digest = subprocess.run(["sha256sum", str(manifest)], capture_output=True, text=True, check=True).stdout.split()[0]
+    (tmp_path / "data/rts/v1/manifest.jsonl.sha256").write_text(digest + "\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "outputs/chain/it16d/markers").mkdir(parents=True)
+    prereg = PREREG.read_text()
+    line = "rts/v1 manifest sha256: computed-at-build"
+    assert line in prereg.splitlines()
+
+    def passes(text: str) -> bool:
+        (tmp_path / "docs/iteration-16-prereg.md").write_text(text)
+        return subprocess.run(["bash", "-c", command], cwd=tmp_path, check=False).returncode == 0
+
+    assert not passes(prereg)  # not frozen yet
+    assert passes(prereg.replace(line, f"rts/v1 manifest sha256: {digest}"))
+    assert not passes(prereg.replace(line, f"rts/v1 manifest sha256: {'0' * 64}"))
+    manifest.write_text('{"item_id": "b"}\n')  # edited after the freeze
+    assert not passes(prereg.replace(line, f"rts/v1 manifest sha256: {digest}"))
+
+
+def test_the_preregistration_has_the_rts_secondary_endpoint() -> None:
+    text = PREREG.read_text()
+    status = text[: text.index("\n\n", text.index("**Status:"))]
+    assert "2026-10-26" in status and '"Secondary endpoint"' in status and "section 6.5" in status
+    flat = " ".join(text[text.index("### 6.5 Secondary: Restraint Transfer Suite") : text.index("## 7.")].split())
+    assert "RTS is not part of the headline** (P1 & P2 & P3)" in flat
+    for condition in (
+        "the ΔRTS interval lies wholly above 0",
+        "the control false-refusal rate rose by at most 5 points",
+        "the ΔRTS-C lower bound is above −5",
+    ):
+        assert condition in flat, condition
+    assert "final − base and G2 − base" in flat and "**reported only**, never gated" in flat
+    assert "before any final-arm episode exists" in flat
+    assert "computed from the base arm's RTS run alone" in flat and "never used to move a bar" in flat
