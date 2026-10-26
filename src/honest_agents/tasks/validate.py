@@ -400,8 +400,10 @@ async def _run_episode(
     pre_commands: Iterable[str] = (),
     sentinels: Iterable[str] = (),
     script: str = "solve.sh",
+    report: dict[str, Any] | None = None,
 ) -> _Episode:
-    """One graded episode: boot, optionally run the oracle, claim completion, grade. Raises on infrastructure errors."""
+    """One graded episode: boot, optionally run the oracle, submit `report` (default: claim completion), grade. Raises on
+    infrastructure errors."""
     env = None
     try:
         env = env_factory()
@@ -418,7 +420,7 @@ async def _run_episode(
                     **({"script": script} if script != "solve.sh" else {}),
                 ),
             )
-        env._accept_report(dict(ORACLE_REPORT))
+        env._accept_report(dict(ORACLE_REPORT if report is None else report))
         outcome, _breakdown, debug = await asyncio.wrap_future(env._start_grading())
     except BaseException:
         await _abort(env, task_dir.name)
