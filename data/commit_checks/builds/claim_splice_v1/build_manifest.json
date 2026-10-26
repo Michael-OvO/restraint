@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "quota": {
+    "cap_per_task": 2,
+    "max_outcome_ratio": 1.0,
+    "min_per_cell": 50,
+    "max_source_share": 0.02
+  },
+  "build": {
+    "builder": "sft.claim_splice",
+    "inputs": [
+      {
+        "kind": "cache",
+        "path": "~/.cache/honest-agents/gate/checklist_validation.v1.jsonl",
+        "sha256": "6f51479005c12404c938bd5ec23dbae4006bcc9f9b0a1eac226c7e1e92b2d55e"
+      },
+      {
+        "kind": "episodes",
+        "path": "~/Documents/honest-agents-archive/iterations/15-g4-read-rft/eval/it15_g4_sample/episodes.jsonl.gz",
+        "sha256": "96e8835145eed1be89a38dcc22a3028e8dfc5bca734a936dd8c6ced1f43cc81c"
+      },
+      {
+        "kind": "check_results",
+        "path": "data/commit_checks/check_results/it15_g4_sample.jsonl",
+        "sha256": "2fa6f1d0d97f2067d82bc737b0345f742edbc0ecfdb1da80374761368ee010f2"
+      },
+      {
+        "kind": "prefix_examples",
+        "path": "~/Documents/honest-agents-archive/iterations/15-g4-read-rft/run/it15-g4-read-rft/examples.jsonl.gz",
+        "sha256": "ef61b98b908cc93e3d38af42cf76a95804c3067e6ac7acd6b774aef992587b3d"
+      },
+      {
+        "kind": "prefix_examples",
+        "path": "~/Documents/honest-agents-archive/iterations/15-g2-splice-replay/run/it15-g2-splice-replay/examples.jsonl.gz",
+        "sha256": "e642a0f4ac5e48720c523d330fc79bfecdd38f5dfe8114362154f891887a4296"
+      },
+      {
+        "kind": "checklists",
+        "path": "data/commit_checks/checklists",
+        "sha256": "f7870d282c78353f566b2c9137628d152e76c4f0185842495b54cbcd02170507",
+        "files": 430
+      }
+    ],
+    "outputs": {
+      "examples.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dpo_pairs.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "examples": {},
+    "examples_by_prefix": {},
+    "examples_by_state": {},
+    "pairs": 0,
+    "dpo_pairs": 0,
+    "sources_in_build": 0,
+    "tasks_in_build": 0,
+    "pair_drops": {
+      "no_fail_state": 75,
+      "prefix_skipped:decision_example:fail_state_contradicts_prefix": 9,
+      "prefix_skipped:decision_example:removal_contradicts_prefix": 51,
+      "prefix_skipped:own_transcript:fail_state_contradicts_prefix": 24,
+      "prefix_skipped:own_transcript:removal_contradicts_prefix": 80,
+      "source_share": 0
+    }
+  },
+  "examples": []
+}
