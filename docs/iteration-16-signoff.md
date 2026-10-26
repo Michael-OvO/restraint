@@ -20,7 +20,7 @@ the start model needs a GPU. No experiment may start before the owner signs off.
 | Where L1 ran | Vast VM 57730801 (Ubuntu 22.04 VM template, Docker 29.0.3, x86_64, 19 vCPU, 49 GB), a copy of `8d45d25` plus the two S3 evals from the archive, `--concurrency 12`. G1 and S3+S11 ran as two parallel processes. Local Docker on the Mac is limited to a few sandboxes by owner rule; a full refill overheated it on 2026-10-25. Destroyed after the run |
 | L1 budget | both runs were over the 900 s L1 budget because the cache was empty, which is a full refill. A cached re-run on the same platform takes seconds |
 | 12-task sanity run of the start model | pending (needs GPU) |
-| Waivers in force | DEF-10, covers it16a (owner, 2026-10-26) |
+| Waivers in force | DEF-10, DEF-20, DEF-50, each covering it16a-it16d (owner, 2026-10-26: "Waive everything") |
 
 Results and cache rows: `~/Documents/honest-agents-archive/staging/gate-node-20261026/` (`gate_g1.json`,
 `gate_s3.json`, `summary.txt`, `g1_surfaces.v1.jsonl`, `replay_episodes.v1.jsonl`). The cache keys include the base
@@ -42,8 +42,8 @@ green) and `final_benchmark check`, not an L1 check.
 
 ## Ledger status (60 entries)
 
-57 `closed`, 1 `waived` for `it16a` only, 2 `fixing`. `gate.ledger check --experiment it16a` exits 1 on DEF-20 and
-DEF-50.
+57 `closed`, 3 `waived` (DEF-10, DEF-20, DEF-50; each covers it16a-it16d). `gate.ledger check --experiment` exits 0
+for every stage. What each waived entry still owes is in the table.
 
 | ID | Status | What remains | Needs |
 |---|---|---|---|
