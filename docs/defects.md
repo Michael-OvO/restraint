@@ -2878,6 +2878,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact (ingest commit):** none. No AbstentionBench run or export is archived, the committed manifest is byte
   identical, and the never-trained index is unchanged (no all-digit bare forms).
 
+- **Node export attempt (2026-10-26, Vast VM 57781978):** the export ran and stopped at
+  `load_dataset("Idavidrein/gpqa")`: "Dataset 'Idavidrein/gpqa' is a gated dataset on the Hub". The Mac has no
+  Hugging Face token configured (`node run` forwarded only `WANDB_API_KEY`). Log:
+  `~/Documents/honest-agents-archive/staging/def20-def50-node-20261026/abench.log`. **Needs the owner:** a Hugging Face
+  token with GPQA access (`~/.cache/huggingface/token`; `node run` forwards it over stdin), or a decision to freeze
+  AbstentionBench without its GPQA subset. That changes the frozen benchmark, so it is a pre-registration amendment.
+
 ### DEF-51: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
   **Found:** 2026-10-25, build:bench (writing the final benchmark's arms). **Commits:** `d187316` (fix, tests),
