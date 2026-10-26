@@ -2771,7 +2771,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-50: AbstentionBench is not frozen
 - **Area:** tooling / build. **Status:** fixing. **Found:** 2026-10-25, build:bench. **Commits:** `7ca6e12` (revision
-  pin, test), `aaae57f` (computable metric).
+  pin, test), `aaae57f` (computable metric), `bc12de7` (export ingest, verify-export, tests).
 - **Evidence:** `src/honest_agents/eval/external/abstentionbench_export_standalone.py` (~L26, before the fix)
   `datasets.load_dataset_builder(args.repo, trust_remote_code=True)`: no `revision`, so the Hub's current loading script
   runs; that script (`AbstentionBench.py`) downloads its 20 source datasets from their own hosts at export time, none
@@ -2781,7 +2781,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (done so far):** the exporter takes `--revision` (default `af06080e`, the Hub's revision on 2026-10-25, last
   modified 2025-08-06) and `scripts/eval_abstentionbench.sh` passes `ABSTENTIONBENCH_HF_REVISION` from
   `scripts/eval_common.sh`; the manifest lists the benchmark as `pending` with that revision.
-- **Ingest code (done, 2026-10-24, commit `COMMIT_PENDING`):** `final_benchmark` can now freeze an export.
+- **Ingest code (done, 2026-10-24, commit `bc12de7`):** `final_benchmark` can now freeze an export.
   - `definitions()` builds the entry with `_abstentionbench(archive)`. With no `benchmarks/abstentionbench/
     abstentionbench.jsonl` in the archive it is the committed `pending` entry, unchanged (role, sources, metrics
     equal; tested). With the export it is `frozen` and gains a source `{kind: export, exporter, revision,
