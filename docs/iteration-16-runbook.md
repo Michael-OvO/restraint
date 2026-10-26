@@ -78,14 +78,21 @@ runs on a rented **CPU-only** node, which the owner approves like any rental. Th
    `data/rts/v1/candidates/`, so `node sync --with-data` sends them. The first `seeds` writes one content lock per
    card to `configs/rts/dataset_locks/` (every raw task's sha256): commit them. A later download that resolves to other
    content (Harbor's registry is mutable, `ds-1000@head` moves) is then refused instead of building other seeds.
-   `measure` (Docker, for `disk_quota` and `mem_limit`) and then `pairs` again; a measurement of a seed that has
-   changed since is not reused.
-2. CPU node: `python -m honest_agents.eval.rts.build gate --concurrency N`. It is resumable, so a lost node costs only
-   the pairs in flight. Arm a watcher for it like any paid job (section 5) and pull its result rows.
+   Then `sample`: a seeded, balance-aware selection of 160 candidates per tier (target 100 kept pairs per tier, so
+   about 600 episodes per arm, times an oversample of 1.6 for the gate's rejections; spec 3.2) into
+   `data/rts/v1/candidates/selection.json`, which also lists every dropped candidate with its reason. Read its per-tier
+   summary and projected problems before any rental. `measure --selection ...` (Docker, for `disk_quota` and
+   `mem_limit`, only the selected candidates) and then `pairs` again; a measurement of a seed that has changed since is
+   not reused.
+2. CPU node: `python -m honest_agents.eval.rts.build gate --selection data/rts/v1/candidates/selection.json
+   --concurrency N`, which gates only the selected pairs. It is resumable, so a lost node costs only the pairs in
+   flight. Arm a watcher for it like any paid job (section 5) and pull its result rows.
 3. Mac, $0: `python -m honest_agents.eval.rts.build freeze`. It writes `data/rts/v1/manifest.jsonl`, its `.sha256`
    sidecar, `data/rts/v1/tasks/` and `data/rts/v1/protocol.json`, and it refuses to overwrite a frozen v1. It freezes
    under the pre-registered protocol only (`--protocol` is for `--check` reports), and it drops a benchmark whose seed
-   oracle passes the gate on under 90 % of its gated seeds (spec 3.2; the rates are in `yield.json`).
+   oracle passes the gate on under 90 % of its gated seeds (spec 3.2; the rates are in `yield.json`). It keeps at most
+   100 pairs per tier, chosen by the same seeded rule as `sample`, so the frozen set has a stable size (the cap's drops
+   are in the report with their reasons).
 4. Write the sidecar's digest into prereg section 6.5 (the line `rts/v1 manifest sha256: ...`, in place of
    `computed-at-build`). Replace `<RTS_MANIFEST>` in the (c) and (d) job files by `data/rts/v1/manifest.jsonl`. Commit
    them before (c) is synced. `rts_freeze_check` (`python -m honest_agents.eval.rts.verify`) refuses either chain

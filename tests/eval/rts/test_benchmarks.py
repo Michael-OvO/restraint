@@ -26,6 +26,18 @@ V1 = {
     "deveval@1.0",
     "compilebench@1.0",
     "terminal-bench@2.0",
+    # the widened pool (2026-10-26)
+    "swebench-verified@1.0",
+    "quixbugs@1.0",
+    "evoeval@1.0",
+    "terminal-bench-pro@1.0",
+    "openthoughts-tblite@2.0",
+    "ade-bench@1.0",
+    "spider2-dbt@1.0",
+    "otel-bench@1.0",
+    "autocodebench@lite200",
+    "swesmith@1.0",
+    "legacy-bench@1.0",
 }
 PLAIN = BenchmarkCard("plain", "plain@1.0", "test", "MIT", "fixture", cpu_only=True)
 
@@ -40,6 +52,10 @@ def test_cards_are_the_v1_candidates_with_recorded_licences():
     assert CARDS["terminal-bench"].registry_path == "data/benchmarks/registry_tb2.json"
     assert (B.REPO_ROOT / "data" / "benchmarks" / "registry_tb2.json").is_file()
     assert not replace(PLAIN, license="unknown: none stated").license_known
+    # every card the build downloads has its committed content lock (bird-bench, about 20 GB, is not downloaded)
+    locked = {p.stem for p in B.LOCK_DIR.glob("*.json")}
+    assert set(CARDS) - locked == {"bird-bench"}, set(CARDS) - locked
+    assert not any("endless" in c.harbor_dataset.lower() for c in CARDS.values())
 
 
 def test_normalize_strips_the_canary_and_loads(tmp_path):
