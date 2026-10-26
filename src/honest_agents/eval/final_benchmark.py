@@ -66,6 +66,8 @@ REPO_TRAINING_GLOBS = (
     "data/judgment/*.jsonl",
     "data/pools/decision_build_manifest.json",  # the SFT decision build (build_manifest.json is the test build)
     "data/pools/surfaces/*.json",
+    "data/commit_checks/builds/*/examples.jsonl",  # iteration-16 commit-check SFT builds (DEF-59)
+    "data/commit_checks/builds/*/dpo_pairs.jsonl",
 )
 ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/run/*/examples.jsonl*",  # every SFT / DPO build
@@ -78,6 +80,7 @@ ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/files/data/decision/*.jsonl.gz",
     "iterations/11-teacher-data/episodes.jsonl.gz",  # teacher episodes (SFT source)
     "iterations/*/run/*/completions/*.parquet",  # GRPO rollouts (prompt, completion, group)
+    "iterations/*/files/data/commit_checks/builds/*/*.jsonl*",  # archived commit-check builds (DEF-59)
     "iterations/*/bank/*.jsonl*",  # trajectory banks (SFT sources)
     "iterations/03-passk-bank/eval/passk/bank/*.jsonl*",
     "iterations/15-g4-read-rft/eval/it15_g4_sample/episodes.jsonl.gz",  # training-pool own episodes (it16 source)

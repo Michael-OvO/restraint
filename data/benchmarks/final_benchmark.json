@@ -539,7 +539,7 @@
     }
   },
   "never_trained": {
-    "date": "2026-10-25",
+    "date": "2026-10-26",
     "scope": "repo+archive",
     "verdict": "pass",
     "n_rows": 62559,
@@ -695,6 +695,18 @@
         "build": "repo:data/pools/surfaces/readme.json",
         "sha256": "19e43371a9eeb12a5e2b0152fbadd2b4db3f77855fa0f1f6dda691045a3ac387",
         "n_rows": 1,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/commit_checks/builds/claim_splice_v1/examples.jsonl",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "n_rows": 0,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/commit_checks/builds/claim_splice_v1/dpo_pairs.jsonl",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "n_rows": 0,
         "n_hits": 0
       },
       {

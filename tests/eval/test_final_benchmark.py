@@ -627,3 +627,18 @@ def test_units_single_refuses_two_runs(tmp_path, capsys):
     assert fb.main(["units", "--single", "--bench", "agentic_abstention", *files, "--out", str(out)]) == 2
     assert not out.exists() and "--single needs one input, got 2" in capsys.readouterr().err
     assert fb.main(["units", "--bench", "agentic_abstention", *files, "--out", str(out)]) == 0
+
+
+def test_a_commit_check_build_is_in_the_never_trained_scope(tmp_path):
+    """DEF-59: the iteration-16 training builds under data/commit_checks/builds/ are read; a benchmark id there fails."""
+    root = tmp_path / "repo"
+    for name in ("examples.jsonl", "dpo_pairs.jsonl"):
+        p = root / "data/commit_checks/builds/x" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({**CLEAN, "variant": "fix-git"}) + "\n")
+    builds = fb.training_builds(root=root)
+    assert {label for label, _ in builds} == {
+        "repo:data/commit_checks/builds/x/examples.jsonl",
+        "repo:data/commit_checks/builds/x/dpo_pairs.jsonl",
+    }
+    assert fb.never_trained(builds, fb.load_index())["verdict"] == "fail"
