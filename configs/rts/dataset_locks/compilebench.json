@@ -1,0 +1,20 @@
+{
+ "harbor_dataset": "compilebench@1.0",
+ "tasks": {
+  "coreutils": "7334cb2e7007ec43aa04f6446b74597d3f62625fad62aafed4ab006a9be2e286",
+  "coreutils-old-version": "449be00a31460c5bde0233a891e107e80a3ff5ebb16a858d9bb8f52d8fabd5be",
+  "coreutils-old-version-alpine": "844cbba7a5b234c1155b71f890c8843ff6c7479255f02ce2e59219fcbe0c9d99",
+  "coreutils-static": "94e2e045699e7cba18e0118d264d3b3ce553e5ef12048a7482b57918bfff57ca",
+  "coreutils-static-alpine": "242fad3e2a3ac8a2b173a5c945a5fd536568975d1d9ae03a16d714ab3e52f4fb",
+  "cowsay": "911b5c98ab3207ff332cf4252efb596a036b2d26f90c901685c8eac140da0e8a",
+  "curl": "519c0468f6f9691418f9a0c8304dce30f698ab1ac560649fdd083c1a08a5fd52",
+  "curl-ssl": "5e285c4a02ab251e50707b9ce20a55549493cd84fd76c072ddc9c7290197014b",
+  "curl-ssl-arm64-static": "c3e6d82ce0189eb28441ca82d2a36f019936e67a75aae24caf9e68fe8b10712f",
+  "curl-ssl-arm64-static2": "2a7d89906cabf6399eeee5ea1cf8b2d55fc253ad0f9a11b633b537ebfe412236",
+  "jq": "2a053ff66943de1acb54a21fff7f00d26cb59d78ccd57bd9b9df334fc543f2d2",
+  "jq-static": "6897a9a661b8bbd851ca2cc103fea7b55282fd7e3195983d4edf7588dc0388a1",
+  "jq-static-musl": "8852e712c2fe8b8cf039eba4f3ee92e28844f171560f5832f1c7265ee61099dc",
+  "jq-windows": "65f049bc6dc07dca2a3cbeda73f5c74d2234c771f8de20ac4b560f9a153ae08b",
+  "jq-windows2": "421106e4fa5ef8f37a86c92a9d3cfad1a09fc3964158a0427fc2b9c1d7e6ab8d"
+ }
+}
