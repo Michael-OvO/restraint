@@ -6,6 +6,8 @@
   python -m honest_agents.eval.rts.scoreboard delta --base base --trained it15-g2-s1 [--out delta.json]
   python -m honest_agents.eval.rts.scoreboard plot --out runs/rts/scoreboard.html [--wandb]
 
+`add` scores only a frozen version (`eval.rts.verify`: the manifest's sidecar, every item's task dir as hashed at the
+freeze, no other dir under tasks/) and under the protocol the freeze wrote next to the manifest (`protocol.json`).
 Each row keeps its units (`--units-dir`, default `runs/rts/units/`), so `delta` pairs two models without re-reading
 their episodes. Episodes are scored with the run's stored reward config (config.json), as `run_eval` does.
 """
@@ -168,7 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--order", type=int, required=True, help="x position: base 0, then iterations in order")
     add.add_argument("--adapter")
     add.add_argument("--units-dir", default=str(DEFAULT_UNITS))
-    add.add_argument("--n-boot", type=int, default=DEFAULT_PROTOCOL.n_boot)
+    add.add_argument(
+        "--n-boot", type=int, help="must equal the frozen protocol's (protocol.json next to the manifest), if given"
+    )
     show = sub.add_parser("show", help="print the board as a markdown table")
     delta = sub.add_parser("delta", help="the pre-registered endpoint: trained minus base")
     delta.add_argument("--base", required=True)
@@ -182,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     board = load_board(args.board)
     if args.cmd == "add":
+        from honest_agents.eval.rts.verify import frozen_problems, read_protocol
+
+        # the items scored are the frozen ones (task dirs as hashed at the freeze), under the frozen protocol
+        if problems := frozen_problems(args.manifest, require_default_protocol=False):
+            raise SystemExit("not the frozen version:\n  " + "\n  ".join(problems))
+        proto = read_protocol(Path(args.manifest))
+        if args.n_boot is not None and args.n_boot != proto.n_boot:
+            raise SystemExit(f"--n-boot {args.n_boot} differs from the frozen protocol's {proto.n_boot}")
         try:
             row = add_row(
                 board,
@@ -191,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest=args.manifest,
                 units_dir=args.units_dir,
                 adapter=args.adapter,
-                proto=RtsProtocol(n_boot=args.n_boot),
+                proto=proto,
             )
         except ValueError as e:
             raise SystemExit(str(e)) from e

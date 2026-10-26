@@ -57,6 +57,10 @@ DEFAULT_CACHE = Path("~/.cache/honest-agents/rts/seeds").expanduser()
 INDEX_NAME = "index.jsonl"
 REJECTED_NAME = "_rejected.jsonl"
 _DOWNLOADED = ".downloaded"  # marker in a dataset's raw dir: the download finished (a partial one is redone)
+# Committed content locks, one per card: the sha256 of every raw task the pinned dataset resolved to. Harbor's hosted
+# registry is mutable and a label such as `ds-1000@head` moves, so the label alone pins nothing; the lock makes a
+# download that resolves to other content (another machine, another day) fail instead of silently differing.
+LOCK_DIR = REPO_ROOT / "configs" / "rts" / "dataset_locks"
 _UNKNOWN = "unknown"
 
 
@@ -126,7 +130,8 @@ CARDS: dict[str, BenchmarkCard] = {
             f"GitHub API licence of xlang-ai/DS-1000 and HF dataset card xlangai/DS-1000 (`cc-by-sa-4.0`), {_READ}",
             cpu_only=True,
             note="1000 tasks on one image (CPU torch and tensorflow-cpu: a large build). `@head` is what the registry "
-            "lists; its tasks are pinned to harbor-datasets commit c3fe2cf. Deliverable path and prebuilt image fixed "
+            "lists (read on 2026-10-26 at harbor-datasets commit c3fe2cf); the label moves, so the content is held by the "
+            "committed lock (`LOCK_DIR`, `check_lock`), not by the label. Deliverable path and prebuilt image fixed "
             "(`ds1000_paths`).",
             fixups=("ds1000_paths",),
         ),
@@ -405,6 +410,47 @@ def raw_tasks(raw_dir: Path) -> dict[str, Path]:
     return out
 
 
+class DatasetDrift(ValueError):
+    """A download whose content differs from the card's committed lock."""
+
+
+def raw_digests(raw_dir: Path) -> dict[str, str]:
+    """Task name -> `tasks.validate.task_hash` of its raw dir, for every task of a download."""
+    from honest_agents.tasks.validate import task_hash
+
+    return {name: task_hash(d) for name, d in raw_tasks(raw_dir).items()}
+
+
+def check_lock(card: BenchmarkCard, raw_dir: Path, lock_dir: Path) -> Path:
+    """Compare the download with `<lock_dir>/<card>.json`; write the lock when there is none (commit it). Raises
+    `DatasetDrift` on any added, missing or changed task, or another dataset label. Returns the lock's path."""
+    path = lock_dir / f"{slug(card.name)}.json"
+    got = {"harbor_dataset": card.harbor_dataset, "tasks": raw_digests(raw_dir)}
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(got, indent=1, sort_keys=True) + "\n")
+        log.warning("%s: wrote the dataset lock %s (%d tasks); commit it", card.name, path, len(got["tasks"]))
+        return path
+    want = json.loads(path.read_text())
+    problems = []
+    if want.get("harbor_dataset") != card.harbor_dataset:
+        problems.append(f"locked as {want.get('harbor_dataset')}, the card pins {card.harbor_dataset}")
+    w, g = dict(want.get("tasks") or {}), got["tasks"]
+    if missing := sorted(set(w) - set(g)):
+        problems.append(f"{len(missing)} locked tasks missing ({', '.join(missing[:3])})")
+    if added := sorted(set(g) - set(w)):
+        problems.append(f"{len(added)} tasks not in the lock ({', '.join(added[:3])})")
+    if changed := sorted(n for n in set(w) & set(g) if w[n] != g[n]):
+        problems.append(f"{len(changed)} tasks changed ({', '.join(changed[:3])})")
+    if problems:
+        raise DatasetDrift(
+            f"{card.name}: the download of {card.harbor_dataset} in {raw_dir} differs from {path}: "
+            + "; ".join(problems)
+            + ". Delete the raw dir to download again, or make a new version (and lock) on purpose."
+        )
+    return path
+
+
 def load_seeds(
     card: BenchmarkCard,
     cache_root: Path,
@@ -413,13 +459,17 @@ def load_seeds(
     seed: int = 0,
     download: Callable[[BenchmarkCard, Path], None] | None = None,  # default: `harbor_download`
     rejected: list[SeedReject] | None = None,
+    lock_dir: Path | None = None,
 ) -> list[RTSSeed]:
     """Download (once) and normalise a pinned dataset into `cache_root/<benchmark>/<task>/`.
 
     `limit` draws a seeded sample of task names. Dropped tasks are appended to `rejected` and written, with their
-    reasons, to `cache_root/<benchmark>/_rejected.jsonl`."""
+    reasons, to `cache_root/<benchmark>/_rejected.jsonl`. With `lock_dir` (the build CLI passes `LOCK_DIR`) the
+    download is checked against the card's content lock first (`check_lock`)."""
     raw_dir = cache_root / "raw" / slug(card.harbor_dataset)
     (download or harbor_download)(card, raw_dir)
+    if lock_dir is not None:
+        check_lock(card, raw_dir, lock_dir)
     tasks = raw_tasks(raw_dir)
     names = sample_ids(sorted(tasks), limit, seed)
     out_root = cache_root / slug(card.name)

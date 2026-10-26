@@ -21,6 +21,7 @@ from honest_agents.tasks.analysis import label_leaks
 from honest_agents.tasks.perturb.core import Variant
 from honest_agents.tasks.perturb.rts.base import RTSOperatorSpec
 from honest_agents.tasks.taskfs import slug
+from honest_agents.tasks.validate import task_hash
 
 log = logging.getLogger(__name__)
 
@@ -51,11 +52,16 @@ class PairRow:
     twin_id: str  # the variant ids: the manifest's item ids and the episodes' `variant_key`
     control_id: str
     target: dict[str, Any] = field(default_factory=dict)
+    # the expected targets the gate probes (`RTSOperatorSpec.targets_to_probe`); None (a row written before the field
+    # existed) probes them all
+    probe_targets: tuple[str, ...] | None = None
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
         d["expected_category"] = list(self.expected_category)
         d["expected_targets"] = list(self.expected_targets)
+        if self.probe_targets is not None:
+            d["probe_targets"] = list(self.probe_targets)
         return d
 
     @classmethod
@@ -63,6 +69,8 @@ class PairRow:
         d = dict(d)
         d["expected_category"] = tuple(d["expected_category"])
         d["expected_targets"] = tuple(d["expected_targets"])
+        if d.get("probe_targets") is not None:
+            d["probe_targets"] = tuple(d["probe_targets"])
         return cls(**d)
 
 
@@ -110,7 +118,8 @@ def build_pairs(
 
     Returns (pairs, log rows). A log row records one (seed, operator) verdict: `stage` is `applicable` (the operator
     declined, or raised), `measure` (applicable, but the target names a quantity (`NEEDS`) that `measurements`, keyed by
-    (source task, operator), does not yet hold: `eval.rts.measure` runs the seed's oracle for it), `build` (make_pair
+    (source task, operator), does not yet hold, or holds for a seed whose task hash has changed since: `eval.rts.measure`
+    runs the seed's oracle for it), `build` (make_pair
     raised or the static checks failed; its dirs are removed) or `built`."""
     measurements = measurements or {}
     tasks_root = out_root / "tasks"
@@ -138,6 +147,11 @@ def build_pairs(
             target = dict(app.target)
             if need := target.get(NEEDS):
                 got = measurements.get((s.source_task, name)) or {}
+                stale = bool(got) and got.get("seed_hash") != task_hash(s.task_dir)
+                if stale:
+                    # measured on another version of the seed (a fix-up or normalisation changed it): the size or
+                    # limit would be the old seed's, so it is measured again (`measure` reruns rows whose hash differs)
+                    got = {"error": "seed changed since measured (build measure)"}
                 if got.get(need) is None:
                     why = got.get("error") or f"needs {need} measured on the seed's oracle (build measure)"
                     rows.append(
@@ -148,7 +162,7 @@ def build_pairs(
                             "reason": str(why),
                             "target": target,
                             "seed_dir": str(s.task_dir),
-                            "measured": bool(got),
+                            "measured": bool(got) and not stale,
                         }
                     )
                     continue
@@ -165,6 +179,13 @@ def build_pairs(
                         "target": target,
                     }
                 )
+                continue
+            try:
+                probe = spec.targets_to_probe(target, list(twin.spec.expected_targets))
+            except ValueError as e:
+                for v in (twin, control):
+                    shutil.rmtree(v.task_dir, ignore_errors=True)
+                rows.append({**base, "stage": "build", "ok": False, "reason": str(e), "target": target})
                 continue
             ids = {str(twin.spec.variant_id), str(control.spec.variant_id)}
             if ids & used:  # the second pair has overwritten the first one's dirs: an id scheme bug, not a seed's
@@ -190,6 +211,7 @@ def build_pairs(
                 twin_id=str(twin.spec.variant_id),
                 control_id=str(control.spec.variant_id),
                 target=target,
+                probe_targets=probe,
             )
             pairs.append(row)
             rows.append({**base, "stage": "built", "ok": True, "reason": app.reason, "target": target})

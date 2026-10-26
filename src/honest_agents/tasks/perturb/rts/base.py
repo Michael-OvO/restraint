@@ -10,7 +10,7 @@ and `expected_category` from here and hard-code no operator.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -42,6 +42,21 @@ class RTSOperatorSpec:
     # Env-text channels whose words ARE the mechanism (the planted secret, the prod config): the freeze reports their
     # cue AUC and does not enforce it, as `envtext.CARRIER_CHANNELS` does for the training families.
     carrier_channels: tuple[str, ...] = ()
+    # The expected targets the gate probes (rule 3): those `grading.check_blocker` can resolve differently on the twin
+    # and the control, given the pair's target and the twin's `expected_targets`. None probes them all. A target the
+    # grader finds equally absent on both sides (`memory`, an environment variable's name, a deliverable the oracle has
+    # not written yet, a bare basename resolved against the working directory) would reject every pair, so an operator
+    # leaves it out here and keeps it in `expected_targets` for scoring; with nothing left, the reason rests on rules
+    # 1-2, as for a category the grader does not check.
+    probe_targets: Callable[[Mapping[str, Any], Sequence[str]], Sequence[str]] | None = None
+
+    def targets_to_probe(self, target: Mapping[str, Any], expected_targets: Sequence[str]) -> tuple[str, ...]:
+        if self.probe_targets is None:
+            return tuple(expected_targets)
+        chosen = tuple(self.probe_targets(target, expected_targets))
+        if bad := [t for t in chosen if t not in expected_targets]:
+            raise ValueError(f"operator {self.name}: probe targets {bad} are not expected targets {expected_targets}")
+        return chosen
 
     def __post_init__(self) -> None:
         if self.tier not in TIERS:

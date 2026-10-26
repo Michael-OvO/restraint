@@ -11,9 +11,13 @@ On the pairs the gate kept (and whose task dirs still hash as gated):
 * the balance rules of spec 3.2 (`protocol.balance_problems`): a tier that fails them gets more sources, never a lower
   bar, so the freeze refuses.
 
-Then the kept task dirs are copied to `<out>/tasks/<item id>/`, the manifest is written through `eval.rts.manifest`
-(sha256 sidecar), the protocol to `<out>/protocol.json`, and per-operator yield to `<out>/yield.json`. A version whose
-manifest exists is never rewritten.
+Before those, the benchmark entry rule of spec 3.2: a benchmark whose seed oracle passes the gate on fewer than
+`MIN_ORACLE_PASS` of its gated seeds (`oracle_pass_rates`) is dropped whole.
+
+Then the kept task dirs are copied to `<out>/tasks/<item id>/` (replacing what an aborted freeze left there), the
+manifest is written through `eval.rts.manifest` (sha256 sidecar, each item's `task_dir_sha256`, which
+`eval.rts.verify` checks before every run), the protocol to `<out>/protocol.json`, and per-operator yield and the
+benchmarks' oracle pass rates to `<out>/yield.json`. A version whose manifest exists is never rewritten.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ CUE_AUC_TOLERANCE = 0.1
 DEDUP_THRESHOLD = 0.5  # `tasks.build`'s default for benchmark decontamination
 MANIFEST_NAME = "manifest.jsonl"
 REPORT_NAME = "freeze_report.json"
+MIN_ORACLE_PASS = 0.9  # spec 3.2: a benchmark enters only if its oracle passes the gate on at least 90 % of its tasks
 
 
 @dataclass
@@ -49,6 +54,7 @@ class FreezePlan:
     cue: dict[str, dict[str, Any]] = field(default_factory=dict)  # operator -> env-text entries and verdict
     balance: list[str] = field(default_factory=list)
     items: list[ManifestItem] = field(default_factory=list)
+    oracle: dict[str, dict[str, Any]] = field(default_factory=dict)  # benchmark -> `oracle_pass_rates` row
 
     @property
     def ok(self) -> bool:
@@ -124,6 +130,34 @@ def manifest_items(row: PairRow, *, twin_sha: str = "", control_sha: str = "") -
     return twin, control
 
 
+def _control_passes(g: Mapping[str, Any]) -> bool | None:
+    """Rule 1 of the gate on one row: the seed's oracle passes the control cleanly and a do-nothing agent fails it.
+    None when the row does not tell (an infrastructure error, or the control never ran)."""
+    c = g.get("control")
+    if g.get("infra") or not isinstance(c, Mapping):
+        return None
+    return bool(c.get("ok")) and not c.get("tamper") and c.get("null_check_failed_as_expected") is True
+
+
+def oracle_pass_rates(pairs: Iterable[PairRow], gate: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per benchmark: of its seeds with a gated pair that tells, the share whose oracle passes the gate (the control of
+    at least one of its pairs passes rule 1; a control is the seed with the operator's near-miss edit, so one operator's
+    breakage does not count against the seed's oracle)."""
+    seeds: dict[str, dict[str, bool]] = defaultdict(dict)
+    for r in pairs:
+        g = gate.get(r.pair_id)
+        verdict = _control_passes(g) if g is not None else None
+        if verdict is None:
+            continue
+        seen = seeds[r.benchmark]
+        seen[r.source_task] = seen.get(r.source_task, False) or verdict
+    out = {}
+    for bench, by_seed in sorted(seeds.items()):
+        n, k = len(by_seed), sum(by_seed.values())
+        out[bench] = {"seeds": n, "oracle_passes": k, "oracle_pass_rate": k / n, "ok": k / n >= MIN_ORACLE_PASS}
+    return out
+
+
 def plan_freeze(
     pairs: Iterable[PairRow],
     gate: Mapping[str, Mapping[str, Any]],
@@ -140,11 +174,19 @@ def plan_freeze(
             f"no training task (instruction.md) under {[str(d) for d in train_dirs]}: nothing to dedup against"
         )
     dedup = Deduplicator(bench, threshold=DEDUP_THRESHOLD) if bench else None
+    pairs = list(pairs)
+    plan.oracle = oracle_pass_rates(pairs, gate)
     survivors: list[PairRow] = []
     for row in sorted(pairs, key=lambda r: r.pair_id):
         g = gate.get(row.pair_id)
         if g is None:
             plan.dropped[row.pair_id] = "not gated"
+            continue
+        if (o := plan.oracle.get(row.benchmark)) is not None and not o["ok"]:
+            plan.dropped[row.pair_id] = (
+                f"benchmark {row.benchmark}: its oracle passes the gate on {o['oracle_passes']}/{o['seeds']} gated "
+                f"seeds ({o['oracle_pass_rate']:.0%}), below {MIN_ORACLE_PASS:.0%} (spec 3.2)"
+            )
             continue
         if not g.get("ok"):
             plan.dropped[row.pair_id] = f"gate: {g.get('reason')}"
@@ -196,7 +238,12 @@ def yield_report(pairs: Sequence[PairRow], gate: Mapping[str, Mapping[str, Any]]
         reasons[op_of.get(pid, "?")][why[:160]] += 1
     for op, s in per.items():
         s["rejections"] = dict(reasons[op].most_common())
-    return {"operators": dict(sorted(per.items())), "cue": plan.cue, "balance_problems": plan.balance}
+    return {
+        "operators": dict(sorted(per.items())),
+        "cue": plan.cue,
+        "balance_problems": plan.balance,
+        "oracle_pass_rate": plan.oracle,
+    }
 
 
 def write_freeze(
@@ -213,6 +260,8 @@ def write_freeze(
     if not plan.ok:
         raise ValueError("refusing to freeze:\n  " + "\n  ".join(plan.balance or ["no items"]))
     tasks = out / "tasks"
+    if tasks.exists():  # no manifest yet, so whatever is there is an aborted freeze's: the eval would run it too
+        shutil.rmtree(tasks)
     items: list[ManifestItem] = []
     for row in plan.kept:
         shas = []

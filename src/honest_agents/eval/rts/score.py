@@ -13,6 +13,7 @@ returns the verdict `incomplete_tiers` when one is missing, rather than average 
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -182,3 +183,49 @@ def render_endpoint(rep: dict[str, Any]) -> str:
     share = "-" if lad["ordered_share"] is None else f"{lad['ordered_share']:.2f}"
     lines += ["", f"near minus far: {iv(lad['near_minus_far'])}; share of draws with near >= mid >= far: {share}"]
     return "\n".join(lines) + "\n"
+
+
+# ── power: the MDE from the base arm alone (spec section 6; prereg 6.5) ────────────────────────────────────────────
+
+MDE_POWER = 0.80
+MDE_ALPHA = 0.05  # the endpoint's 95 % interval
+
+
+def _bootstrap_se(units: Sequence[Unit], side: str, metric: str, proto: RtsProtocol) -> tuple[float | None, int]:
+    clusters = transfer._clusters(units, side=side, metric=metric)
+    if len(clusters) < 2:
+        return None, len(clusters)
+    s, n, _, groups = transfer._arrays(units, side, metric, clusters)
+    w = transfer._draws(len(clusters), proto.n_boot, proto.seed)
+    draws = transfer._combine(w @ s, w @ n, groups, True)
+    ok = draws[~np.isnan(draws)]
+    if len(ok) < max(20, 0.5 * len(draws)):
+        return None, len(clusters)
+    return float(np.std(ok, ddof=1)), len(clusters)
+
+
+def base_mde(units: Sequence[Unit], proto: RtsProtocol = DEFAULT_PROTOCOL, power: float = MDE_POWER) -> dict[str, Any]:
+    """The minimum detectable ΔRTS (J points as a fraction) at `power` and the endpoint's two-sided 5 % level, pooled and
+    per tier, from the base arm's units alone (no trained arm is read).
+
+    The SE of the base RTS is the cluster bootstrap's (the endpoint's draws: same `n_boot` and seed); the paired delta's
+    SE is taken as sqrt(2) times it, i.e. a trained arm as noisy as the base and no positive correlation between the
+    arms on an item. Pairing usually correlates them, so this MDE is conservative (too large, never too small)."""
+    from statistics import NormalDist
+
+    z = NormalDist().inv_cdf(1 - MDE_ALPHA / 2) + NormalDist().inv_cdf(power)
+    side, metric = HEADLINE["rts"]
+
+    def one(sub: Sequence[Unit]) -> dict[str, Any]:
+        se, k = _bootstrap_se(sub, side, metric, proto)
+        return {"n_clusters": k, "se_base": se, "mde": None if se is None else z * math.sqrt(2) * se}
+
+    return {
+        "power": power,
+        "alpha": MDE_ALPHA,
+        "n_boot": proto.n_boot,
+        "seed": proto.seed,
+        "assumption": "paired-delta SE = sqrt(2) x base SE (no between-arm correlation): conservative",
+        "pooled": one(units),
+        "tiers": {t: one([u for u in units if u.get("tier") == t]) for t in TIERS},
+    }

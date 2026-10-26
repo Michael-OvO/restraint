@@ -91,6 +91,9 @@ class ScriptFacts:
     mutated: list[str] = field(
         default_factory=list
     )  # paths an rm/mv/chmod/sed -i/redirect/... operand names (superset of written)
+    # paths the script writes whole, replacing what was there: `>`, `cp`/`mv`/`install`/`rsync` onto it, `tee` without
+    # `-a`, an output flag, `dd of=` without `conv=notrunc` (subset of written; not `>>`, `sed -i`, `touch`, `chmod`)
+    replaced: list[str] = field(default_factory=list)
 
 
 def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, _depth: int = 0) -> ScriptFacts:
@@ -101,6 +104,7 @@ def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, 
     commands: list[str] = []
     written: list[str] = []
     mutated: list[str] = []
+    replaced: list[str] = []
     expect_cmd, skip_until_sep, wrapper = True, False, None
     cmd: str | None = None
     args: list[str] = []
@@ -110,6 +114,7 @@ def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, 
         if cmd is not None:
             written.extend(_writes_of(cmd, args, home, cwd))
             mutated.extend(_mutates_of(cmd, args, home, cwd))
+            replaced.extend(_replaces_of(cmd, args, home, cwd))
             if cmd == "cd" and args:
                 cwd = _resolve(args[0], home, cwd) or cwd
             if cmd in ("bash", "sh", "dash") and "-c" in args and _depth < 3:
@@ -119,6 +124,7 @@ def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, 
                     commands.extend(sub.commands)
                     written.extend(sub.written)
                     mutated.extend(sub.mutated)
+                    replaced.extend(sub.replaced)
         cmd, args = None, []
 
     i = 0
@@ -135,6 +141,8 @@ def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, 
                 if p:
                     written.append(p)
                     mutated.append(p)
+                    if t not in (">>", "&>>"):
+                        replaced.append(p)
             i += 2
             continue
         if skip_until_sep:
@@ -183,6 +191,7 @@ def analyse_script(script: str, *, home: str = "/root", cwd: str | None = None, 
         written=_unique([w for w in written if "{" not in w]),
         mentioned=extract_paths(script, home=home),
         mutated=_unique([m for m in [*written, *mutated] if "{" not in m]),
+        replaced=_unique([r for r in replaced if "{" not in r]),
     )
 
 
@@ -214,6 +223,24 @@ def _writes_of(cmd: str, args: list[str], home: str, cwd: str | None) -> list[st
         targets.append(plain[-1])
     elif cmd in ("chmod", "chown") and len(plain) >= 2:
         targets += plain[1:]
+    out = []
+    for t in targets:
+        p = _resolve(t, home, cwd)
+        if p:
+            out.append(p)
+    return out
+
+
+def _replaces_of(cmd: str, args: list[str], home: str, cwd: str | None) -> list[str]:
+    """Paths a command writes whole (see `ScriptFacts.replaced`)."""
+    plain = [a for a in args if not a.startswith("-")]
+    targets: list[str] = [args[i + 1] for i, a in enumerate(args[:-1]) if a in _OUTPUT_FLAGS]
+    if cmd == "tee" and not any(a in ("-a", "--append") for a in args):
+        targets += plain
+    elif cmd in ("cp", "mv", "install", "rsync") and len(plain) >= 2:
+        targets.append(plain[-1])
+    elif cmd == "dd" and not any(a.startswith("conv=") and "notrunc" in a for a in args):
+        targets += [a[3:] for a in args if a.startswith("of=")]
     out = []
     for t in targets:
         p = _resolve(t, home, cwd)

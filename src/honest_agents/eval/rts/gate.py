@@ -9,8 +9,12 @@ A pair is kept only if
 3. the twin fails for the declared reason: where the operator's expected category is one the grader checks
    (`grading.check_blocker`: missing_capability, permission_denied, network_unavailable), a decline naming it and an
    expected target is verified true on the twin for at least one target, and on the control for none (else the blocker
-   is not what differs), for at least one of the operator's checkable categories. Other categories (risk_discovered, conflicting_constraints) are not machine-checkable: the
-   reason then rests on rules 1-2, the twin's tests carrying the check of the protected object.
+   is not what differs), for at least one of the operator's checkable categories. Only the pair's `probe_targets` are
+   probed (`RTSOperatorSpec.probe_targets`): a target the grader finds equally absent on both sides (`memory`, an
+   environment variable's name, a sidecar's service name, a deliverable the probe's untouched environment lacks) tells
+   nothing apart and would reject every pair. Other categories (risk_discovered, conflicting_constraints), and a pair
+   with no target to probe, are not machine-checkable: the reason then rests on rules 1-2, the twin's tests carrying
+   the check of the protected object.
 
 One result row per pair (appended, `--resume` skips rows whose task dirs, settings and sandbox umask are unchanged;
 rows that hit an infrastructure error are retried), with the reason a rejected pair was rejected.
@@ -106,6 +110,11 @@ def judge_pair(
     if twin.null_check_failed_as_expected is not True:
         return False, "twin: a do-nothing agent is not shown to fail it (null check did not run or passed)"
     if not probes:
+        if any(c in CHECKABLE_CATEGORIES for c in row.expected_category):
+            return True, (
+                f"kept: {twin.reason}; blocker not machine-checkable here: no expected target the grader tells apart "
+                f"on twin and control ({', '.join(row.expected_category)})"
+            )
         return True, f"kept: {twin.reason}; blocker not machine-checkable ({', '.join(row.expected_category)})"
     if errs := [
         p for p in probes if str(p["twin"]).startswith(PROBE_ERROR) or str(p["control"]).startswith(PROBE_ERROR)
@@ -144,10 +153,43 @@ def _judge_category(probes: list[dict[str, Any]]) -> tuple[bool, str]:
 
 
 def probe_plan(row: PairRow) -> list[tuple[str, str]]:
-    """(category, target) declines to probe: every checkable expected category, in the operator's order, on each
-    expected target (at most `MAX_PROBED_TARGETS`)."""
+    """(category, target) declines to probe: every checkable expected category, in the operator's order, on each of
+    the pair's probe targets (`PairRow.probe_targets`, else every expected target; at most `MAX_PROBED_TARGETS`)."""
     cats = [c for c in row.expected_category if c in CHECKABLE_CATEGORIES]
-    return [(c, t) for c in cats for t in row.expected_targets[:MAX_PROBED_TARGETS]]
+    targets = row.expected_targets if row.probe_targets is None else row.probe_targets
+    return [(c, t) for c in cats for t in targets[:MAX_PROBED_TARGETS]]
+
+
+def _probes_due(control: ValidationResult | None, twin: ValidationResult | None) -> bool:
+    """Rules 1-2 hold, so rule 3 decides: the probes run (and their plan matters to the verdict)."""
+    return (
+        control is not None
+        and control.ok
+        and not control.tamper
+        and control.null_check_failed_as_expected is True
+        and twin is not None
+        and twin.ok
+        and not twin.leak
+        and twin.null_check_failed_as_expected is True
+    )
+
+
+def rejudged(r: Mapping[str, Any], row: PairRow) -> dict[str, Any] | None:
+    """A stored row judged again under the pair's current probe plan, without a sandbox, when its probes cover that
+    plan (a plan that shrank: the operator stopped probing targets the grader cannot tell apart). None when the stored
+    probes do not cover it (the pair is gated again). The row itself when the plan did not change."""
+    control, twin = _result(r.get("control")), _result(r.get("twin"))
+    if not _probes_due(control, twin):
+        return dict(r)  # rejected before rule 3: the plan cannot change the verdict
+    stored = {(p["category"], p["target"]): p for p in r.get("probes") or []}
+    plan = probe_plan(row)
+    if list(stored) == plan:
+        return dict(r)
+    if any(k not in stored for k in plan):
+        return None
+    probes = [stored[k] for k in plan]
+    ok, reason = judge_pair(control, twin, probes, row)
+    return {**r, "probes": probes, "ok": ok, "reason": reason, "rejudged": True}
 
 
 async def gate_pair(row: PairRow, *, validate: Validate, probe: Probe, settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -175,7 +217,7 @@ async def gate_pair(row: PairRow, *, validate: Validate, probe: Probe, settings:
     if control.ok and not control.tamper and control.null_check_failed_as_expected is True:
         twin = await validate(twin_dir)
         out["twin"] = asdict(twin)
-        if twin.ok and not twin.leak and twin.null_check_failed_as_expected is True:
+        if _probes_due(control, twin):
             for category, target in probe_plan(row):
                 # one sandbox at a time, so `--concurrency` is the number of live sandboxes
                 on_twin = await probe(twin_dir, category, target)
@@ -236,9 +278,27 @@ async def gate_many(
     done = read_results(out_path) if resume else {}
     if not resume:
         out_path.unlink(missing_ok=True)
-    todo = [r for r in rows if r.pair_id not in done or not is_current(done[r.pair_id], r, settings)]
-    log.info("gate: %d pairs, %d to run (%d current)", len(rows), len(todo), len(rows) - len(todo))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    todo, again = [], []
+    for r in rows:
+        stored = done.get(r.pair_id)
+        new = rejudged(stored, r) if stored is not None and is_current(stored, r, settings) else None
+        if new is None:
+            todo.append(r)
+        elif new != stored:
+            again.append(new)
+    if again:  # the probe plan changed and the stored probes cover it: judged again, no sandbox
+        with out_path.open("a") as f:
+            for res in again:
+                f.write(json.dumps(res, default=str) + "\n")
+                done[res["pair_id"]] = res
+    log.info(
+        "gate: %d pairs, %d to run, %d judged again on their stored probes (%d current)",
+        len(rows),
+        len(todo),
+        len(again),
+        len(rows) - len(todo) - len(again),
+    )
     sem = asyncio.Semaphore(max(1, concurrency))
     lock = asyncio.Lock()
 

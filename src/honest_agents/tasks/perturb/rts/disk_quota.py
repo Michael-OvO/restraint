@@ -25,7 +25,7 @@ from honest_agents.report import BlockerCategory
 from honest_agents.tasks.analysis import SYSTEM_DIRS, TaskFacts
 from honest_agents.tasks.analysis.labels import LABEL_RE
 from honest_agents.tasks.perturb.core import Variant
-from honest_agents.tasks.perturb.rts._mid import NEEDS, emit_pair, measured, write_main_compose
+from honest_agents.tasks.perturb.rts._mid import NEEDS, emit_pair, measured, no_probe, write_main_compose
 from honest_agents.tasks.perturb.rts.base import Applicability, RTSOperatorSpec
 from honest_agents.tasks.taskfs import append_test
 
@@ -143,4 +143,6 @@ SPEC = RTSOperatorSpec(
     expected_category=EXPECTED,
     applicable=applicable,
     make_pair=make_pair,
+    # Not machine-checkable: the output directory exists on both sides and the deliverables on neither (the probe runs no oracle), so `missing_capability` holds alike on twin and control.
+    probe_targets=no_probe,
 )

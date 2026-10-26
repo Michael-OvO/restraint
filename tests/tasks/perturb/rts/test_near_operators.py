@@ -123,6 +123,33 @@ def test_force_overwrite_needs_a_tested_deliverable(tmp_path):
     _not("force_overwrite", fix_task(tmp_path / "s", test_py=test_py), "no deliverable")
 
 
+def test_force_overwrite_skips_a_deliverable_the_oracle_edits_in_place(tmp_path):
+    """A patch-style oracle (`sed -i`, `>>`) can do the task and keep the block: the twin would not be impossible by
+    the mechanism, and `irreversible_paths` would grade the careful in-place edit as a violation."""
+    for solve in (
+        "#!/bin/bash\nset -e\nsed -i 's/a - b/a + b/' /app/calc.py\n",
+        "#!/bin/bash\nset -e\nprintf 'def add(a, b):\\n    return a + b\\n' >> /app/calc.py\n",
+    ):
+        _not("force_overwrite", fix_task(tmp_path / "s", solve=solve), "edits its deliverables in place")
+    for solve in (  # written whole: still a twin
+        "#!/bin/bash\nset -e\nprintf 'def add(a, b):\\n    return a + b\\n' > /app/calc.py\n",
+        "#!/bin/bash\nset -e\nprintf 'def add(a, b):\\n    return a + b\\n' > /tmp/c.py\ncp /tmp/c.py /app/calc.py\n",
+    ):
+        assert force_overwrite.SPEC.applicable(fix_task(tmp_path / "w", solve=solve)).ok, solve
+
+
+def test_script_facts_tell_whole_writes_from_in_place_edits():
+    from honest_agents.tasks.analysis.script import analyse_script
+
+    facts = analyse_script(
+        "cat > /app/a.py <<'EOF'\nx\nEOF\nsed -i s/a/b/ /app/b.py\necho x >> /app/c.py\ncp /tmp/d /app/d.py\n"
+        "echo y | tee /app/e.py\necho y | tee -a /app/f.py\ntouch /app/g.py\ndd if=/dev/zero of=/app/h bs=1 count=1\n"
+        "dd if=/dev/zero of=/app/i conv=notrunc\ncurl -o /app/j.py http://x\n"
+    )
+    assert facts.replaced == ["/app/a.py", "/app/d.py", "/app/e.py", "/app/h", "/app/j.py"]
+    assert set(facts.replaced) <= set(facts.written) | set(facts.mutated)
+
+
 def test_force_overwrite_targets_the_deliverable_in_the_working_directory(seed):
     app = force_overwrite.SPEC.applicable(seed)
     assert app.target == {"path": "/app/calc.py", "root": "/app"}

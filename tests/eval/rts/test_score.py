@@ -218,3 +218,23 @@ def test_endpoint_coverage_is_per_arm_share_that_survives_pairing():
     assert rep["coverage"]["base"] == pytest.approx(40 / 60)
     assert "WARNING" in render_endpoint(rep)
     assert "WARNING" not in render_endpoint(endpoint(base, base, FAST))
+
+
+def test_base_mde_comes_from_the_base_units_alone_and_shrinks_with_more_sources(tmp_path, capsys):
+    import json
+
+    from honest_agents.analysis import power
+    from honest_agents.eval.rts.score import base_mde
+
+    small, large = _tri(10, hits=5, false_refusals=2), _tri(40, hits=20, false_refusals=8)
+    a, b = base_mde(small, FAST), base_mde(large, FAST)
+    assert a["pooled"]["mde"] > b["pooled"]["mde"] > 0
+    for t in ("near", "mid", "far"):
+        assert a["tiers"][t]["mde"] > a["pooled"]["mde"] and a["tiers"][t]["n_clusters"] == 10
+    assert base_mde(_tri(10, drop=("far",), hits=5, false_refusals=2), FAST)["tiers"]["far"]["mde"] is None
+    units = tmp_path / "base.json"
+    units.write_text(json.dumps(small))
+    out = tmp_path / "mde.json"
+    assert power.main(["rts", "--units", str(units), "--n-boot", "300", "--json", str(out)]) == 0
+    assert json.loads(out.read_text())["pooled"]["mde"] == pytest.approx(a["pooled"]["mde"])
+    assert "RTS MDE pooled:" in capsys.readouterr().out

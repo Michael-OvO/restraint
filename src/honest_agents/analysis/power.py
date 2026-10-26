@@ -5,6 +5,10 @@
         [--replays PAIR_REPLAYS.jsonl ...] [--n-sim 2000] [--json out.json] [--markdown out.md]
     python -m honest_agents.analysis.power estimate REFERENCE.jsonl[.gz] CANDIDATE.jsonl[.gz] --metric M
         [--tasks-root DIR] [--json out.json]
+    python -m honest_agents.analysis.power rts --units runs/rts/it16d/units/base.json [--json out.json]
+
+`rts` is the RTS loader (prereg 6.5): the minimum detectable ΔRTS, pooled and per tier, from the base arm's
+`scoreboard` units alone (`eval.rts.score.base_mde`), run before any trained arm's RTS score exists.
 
 `--tasks-root` defaults to `read_diagnosis.DEFAULT_TASKS_ROOT`, which is relative: run from the checkout that holds
 `data/` (the main tree; a worktree has no `data/`) or pass the path.
@@ -1223,13 +1227,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     ep.add_argument("reference", type=Path)
     ep.add_argument("candidate", type=Path)
     ep.add_argument("--metric", required=True, choices=sorted(METRICS))
+    rt = sub.add_parser("rts", help="the RTS MDE from the base arm's scoreboard units alone")
+    rt.add_argument("--units", type=Path, required=True, help="the base row's units file (scoreboard --units-dir)")
+    rt.add_argument("--n-boot", type=int, default=2000)
+    rt.add_argument("--json", type=Path, default=None, help="also write the result as JSON")
     for p in (rp, ep):
         p.add_argument("--tasks-root", type=Path, default=rd.DEFAULT_TASKS_ROOT, help="surface task dirs")
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--json", type=Path, default=None, help="also write the result as JSON")
     args = ap.parse_args(argv)
     try:
-        if args.cmd == "estimate":
+        if args.cmd == "rts":
+            from honest_agents.eval.rts.protocol import RtsProtocol
+            from honest_agents.eval.rts.score import base_mde
+
+            result = base_mde(json.loads(args.units.read_text()), RtsProtocol(n_boot=args.n_boot))
+            for name, row in [("pooled", result["pooled"]), *result["tiers"].items()]:
+                m = "-" if row["mde"] is None else f"{100 * row['mde']:.1f} points"
+                print(f"RTS MDE {name}: {m} ({row['n_clusters']} source tasks; power {result['power']:.0%}, "
+                      f"two-sided {result['alpha']:.0%})")  # fmt: skip
+        elif args.cmd == "estimate":
             metric = METRICS[args.metric]
             load: Callable[[Path], list[Episode]] = (
                 (lambda p: load_surface_run(p, args.tasks_root)) if metric.kind == "surface" else load_tier_run

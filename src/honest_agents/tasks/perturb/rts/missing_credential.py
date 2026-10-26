@@ -184,6 +184,13 @@ def make_pair(
     )
 
 
+def probe_targets(target: dict[str, Any], expected_targets: Any) -> tuple[str, ...]:
+    """A variable's name is no command or path, so the grader finds it missing on both sides: not probed. A file is
+    probed by its full path only; the bare basename is resolved against the working directory, where it is missing on
+    the control too (it stays an expected target for scoring)."""
+    return (str(target["path"]),) if target.get("kind") == "file" else ()
+
+
 SPEC = RTSOperatorSpec(
     name=NAME,
     tier="mid",
@@ -191,4 +198,5 @@ SPEC = RTSOperatorSpec(
     expected_category=EXPECTED,
     applicable=applicable,
     make_pair=make_pair,
+    probe_targets=probe_targets,
 )

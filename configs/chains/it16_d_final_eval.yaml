@@ -14,7 +14,8 @@
 # The secondary RTS endpoint (prereg section 6.5, amended 2026-10-26): after its units, each arm is served once more
 # for the frozen rts/v1 items (S = 1) and scored onto the stage's own board (`scoreboard add`), base first; last,
 # `scoreboard delta` (final vs base, G2 vs base) and `scoreboard plot --wandb`. `rts_freeze_check` refuses the stage
-# unless the manifest matches its sidecar and that digest is the one written into the prereg.
+# unless the manifest matches its sidecar, that digest is the one written into the prereg and the task dirs and
+# protocol are the frozen ones; `rts_mde` computes the RTS MDE from the base arm alone before any trained arm's run.
 # Runbook: docs/iteration-16-runbook.md. NOT LAUNCHABLE YET (placeholders, refused by `node chain` and `run`):
 #   <SURFACE_VAL_V2>: the frozen held-out surface build (68+ sources x 6 surfaces), task dir; frozen at sign-off.
 #   <BLIND_FAMILY_SPLIT>: the blind held-out family's split (fixed at build, never opened before this eval).
@@ -54,12 +55,13 @@ steps:
     timeout_min: 20
     on_failure: stop
 
-  # The RTS manifest is the frozen one: it matches its sidecar, and that digest is the one prereg 6.5 records.
+  # The RTS manifest is the frozen one (eval.rts.verify): it matches its sidecar, that digest is the one prereg 6.5
+  # records, every item's task dir under data/rts/v1/tasks still hashes as frozen and no other dir is there, and
+  # protocol.json is the pre-registered one. Stage (c) runs the same check before its first final-arm episode.
   - name: rts_freeze_check
     command: >-
-      D="$(cat <RTS_MANIFEST>.sha256)" && test "${#D}" -eq 64
-      && test "$(sha256sum <RTS_MANIFEST> | cut -d ' ' -f 1)" = "$D"
-      && grep -qxF "rts/v1 manifest sha256: $D" docs/iteration-16-prereg.md
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.verify
+      --manifest <RTS_MANIFEST> --prereg docs/iteration-16-prereg.md
       && touch outputs/chain/it16d/markers/rts_freeze_check.done
     gpus: []
     done: outputs/chain/it16d/markers/rts_freeze_check.done
@@ -192,6 +194,18 @@ steps:
     on_failure: stop
     stall_min: 45
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # RTS power (prereg 6.5, spec section 6): the MDE from the base arm's units alone, before any trained arm's RTS run
+  # exists (every g2_* and final_* step comes after this one). Reported; it never moves a bar.
+  - name: rts_mde
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.analysis.power rts
+      --units runs/rts/it16d/units/base.json --json runs/rts/it16d/mde_base.json
+      && touch outputs/chain/it16d/markers/rts_mde.done
+    gpus: []
+    done: outputs/chain/it16d/markers/rts_mde.done
+    timeout_min: 10
+    on_failure: stop
 
   - name: g2_sanity
     command: >-
@@ -428,5 +442,5 @@ watch:
               runs/eval/it16d_base_rts, runs/eval/it16d_g2_rts, runs/eval/it16d_final_rts],
        file: [runs/final/it16d/final_benchmark.json, outputs/chain/it16d/never_trained.json,
               runs/rts/it16d/scoreboard.json, runs/rts/it16d/delta_final_base.json, runs/rts/it16d/delta_g2_base.json,
-              runs/rts/it16d/scoreboard.html],
+              runs/rts/it16d/scoreboard.html, runs/rts/it16d/mde_base.json],
        note: "iteration 16 stage (d): final eval of base, G2 s1 and final (one look)"}

@@ -15,7 +15,7 @@ separate job file, launched and watched on its own:
 |---|---|---|---|
 | (a) | `configs/chains/it16_a_calibration.yaml` | calibration samples: base and G2 s1 on TB2 and ImpossibleBench LCB, S = 2, after a 12-task sanity run of each served model | yes, once the gate opens |
 | (b) | `configs/chains/it16_b_claim_rollouts.yaml` | G2 s1 own runs on the 400 training-pool surface tasks (`data/decision/read_rft_tasks.jsonl`), S = 4, transcripts (bank) and tool outputs kept; then the checklist validation of the new end states | yes, once the gate opens |
-| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>` |
+| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>`, `<RTS_MANIFEST>` |
 | (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK, plus the RTS secondary endpoint (prereg 6.5) | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>`, `<RTS_MANIFEST>` |
 
 A `<PLACEHOLDER>` is refused by `python -m honest_agents.node chain` (without `--dry-run`) and by `node_chain run`. Each
@@ -25,8 +25,10 @@ one stands for an input that is built later (prereg sections 3-7 "computed-at-bu
 
 Order: (a) and (b) are independent and can share one rental. (c) needs the claim-point build. The commit-data lane
 makes that build from (b)'s transcripts on the Mac, at $0. (d) needs (c)'s selected adapter and the frozen eval build.
-The base and G2 numbers of (a) are not reused in (d) (prereg 6.1). (d) also needs the frozen RTS manifest, which needs
-the RTS gate: a Docker job on a rented CPU node (section 2.1), independent of (a)-(c).
+The base and G2 numbers of (a) are not reused in (d) (prereg 6.1). (c) and (d) both need the frozen RTS manifest, which
+needs the RTS gate: a Docker job on a rented CPU node (section 2.1), independent of (a) and (b). Prereg 6.5 puts its
+digest in the prereg before any final-arm episode exists, and (c)'s select-split runs of the epoch candidates are the
+first ones, so the RTS freeze comes before (c): `rts_freeze_check` is (c)'s second step as well as (d)'s.
 
 ## 1. Node
 
@@ -66,22 +68,30 @@ uv run --extra eval python -m honest_agents.eval.final_benchmark check --archive
 (cd data/ext/impossiblebench && shasum -a 256 -c MANIFEST.sha256)             # the step on the node repeats this
 ```
 
-### 2.1 RTS: the gate on a CPU node, then the freeze (before (d))
+### 2.1 RTS: the gate on a CPU node, then the freeze (before (c))
 
 The RTS gate ([RTS build plan](superpowers/plans/2026-10-26-rts-build.md), core lane) runs every candidate pair's
 oracle and a do-nothing agent in Docker. It needs no GPU, and the Mac must not run it (at most 2 local sandboxes). It
 runs on a rented **CPU-only** node, which the owner approves like any rental. The steps:
 
 1. Mac, $0: `python -m honest_agents.eval.rts.build seeds`, then `pairs` (no Docker). The candidates land under
-   `data/rts/v1/candidates/`, so `node sync --with-data` sends them.
+   `data/rts/v1/candidates/`, so `node sync --with-data` sends them. The first `seeds` writes one content lock per
+   card to `configs/rts/dataset_locks/` (every raw task's sha256): commit them. A later download that resolves to other
+   content (Harbor's registry is mutable, `ds-1000@head` moves) is then refused instead of building other seeds.
+   `measure` (Docker, for `disk_quota` and `mem_limit`) and then `pairs` again; a measurement of a seed that has
+   changed since is not reused.
 2. CPU node: `python -m honest_agents.eval.rts.build gate --concurrency N`. It is resumable, so a lost node costs only
    the pairs in flight. Arm a watcher for it like any paid job (section 5) and pull its result rows.
 3. Mac, $0: `python -m honest_agents.eval.rts.build freeze`. It writes `data/rts/v1/manifest.jsonl`, its `.sha256`
-   sidecar, `data/rts/v1/tasks/` and `data/rts/v1/protocol.json`, and it refuses to overwrite a frozen v1.
+   sidecar, `data/rts/v1/tasks/` and `data/rts/v1/protocol.json`, and it refuses to overwrite a frozen v1. It freezes
+   under the pre-registered protocol only (`--protocol` is for `--check` reports), and it drops a benchmark whose seed
+   oracle passes the gate on under 90 % of its gated seeds (spec 3.2; the rates are in `yield.json`).
 4. Write the sidecar's digest into prereg section 6.5 (the line `rts/v1 manifest sha256: ...`, in place of
-   `computed-at-build`). Replace `<RTS_MANIFEST>` in the (d) job file by `data/rts/v1/manifest.jsonl`. Commit both
-   before (d) is synced. `rts_freeze_check`, the step after `freeze_checks`, refuses the chain unless the manifest
-   matches its sidecar and the prereg line holds that digest.
+   `computed-at-build`). Replace `<RTS_MANIFEST>` in the (c) and (d) job files by `data/rts/v1/manifest.jsonl`. Commit
+   them before (c) is synced. `rts_freeze_check` (`python -m honest_agents.eval.rts.verify`) refuses either chain
+   unless the manifest matches its sidecar, the prereg line holds that digest, every item's dir under
+   `data/rts/v1/tasks/` hashes as frozen with no other dir there, and `protocol.json` is the pre-registered one.
+   `scoreboard add` repeats the task-dir check and scores under that `protocol.json`.
 
 The gate is not costed here. Its job count is about four runs per candidate pair (oracle on twin and control, do-nothing
 on both), and the candidate count is known only after `pairs`. Cost it from P1's gate timings and ask for it
@@ -200,16 +210,20 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   RTS (prereg 6.5): the stage's own board `runs/rts/it16d/scoreboard.json` (rows `base`, `it15-g2-s1`, `it16-final`;
   units under `runs/rts/it16d/units/`), the endpoints `runs/rts/it16d/delta_{final,g2}_base.json` (verdict, the three
   conditions, the ladder) and the page `runs/rts/it16d/scoreboard.html`, also on W&B (project `honest-agents`, run
-  `rts-scoreboard`). Compute the RTS MDE from the base row's units alone and write it into prereg 6.5 before reading
-  either delta. It is reported and never moves a bar. RTS is not in the decision table.
+  `rts-scoreboard`). The RTS MDE (`runs/rts/it16d/mde_base.json`, pooled and per tier) comes from the base row's units
+  alone: the `rts_mde` step computes it right after `base_rts`, before any trained arm's RTS run. It is reported and
+  never moves a bar. RTS is not in the decision table.
 
 ## 8. What is not settled yet
 
 - The placeholders of (c) and (d) (table at the top).
   - `<RTS_MANIFEST>` waits for the RTS freeze (section 2.1), which waits for the core and operator lanes and the
     CPU-node gate.
-  - `analysis.power` has no RTS loader yet, so the RTS MDE of prereg 6.5 has no tool. The tool must work on the base
-    row's units (`runs/rts/it16d/units/base.json`) before (d)'s RTS numbers are read.
+  - RTS power, an owner decision: spec section 6 says a tier below the required power "gets more sources, never a
+    lower bar", but prereg 6.5 freezes rts/v1 before (c), and the MDE needs (d)'s base run, so more sources would mean
+    an rts/v2 after the base arm has been run on v1. Prereg 6.5 leaves the clause out and fixes no required power.
+    The chain computes and reports the MDE before any trained arm's RTS run (`rts_mde`); whether a tier below some power
+    is then reported as underpowered, or the clause is dropped by a named amendment, is the owner's to state.
   - The SFT example builder for a prebuilt commit-check build is not registered in `sft.train_sft` (no `kind`).
   - `<SELECT_PROTOCOL>` is the `run_eval --protocol` file with `ni_margin` = max(5, ni10 at the select split), computed
     at build.

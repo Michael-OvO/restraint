@@ -16,11 +16,29 @@ from tests.eval.rts.helpers import episodes, pairs
 FAST = RtsProtocol(n_boot=200)
 
 
+def freeze_fixture(items, manifest, proto):
+    """What `freeze` writes: a task dir per item, hashed into the manifest, and the protocol next to it."""
+    from dataclasses import replace
+
+    from honest_agents.tasks.validate import task_hash
+
+    hashed = []
+    for i in items:
+        i = replace(i, item_id=i.item_id.replace("/", "__").replace(":", "_"))  # path-safe, as the freeze's are
+        d = manifest.parent / "tasks" / i.item_id
+        d.mkdir(parents=True)
+        (d / "instruction.md").write_text(f"{i.item_id}\n")
+        hashed.append(replace(i, task_dir_sha256=task_hash(d)))
+    write_manifest(hashed, manifest)
+    (manifest.parent / "protocol.json").write_text(json.dumps(proto.to_json()))
+    return hashed
+
+
 @pytest.fixture
 def setup(tmp_path):
     items = [*pairs("tb2", "near", "op_a", 4), *pairs("swe", "mid", "op_b", 4), *pairs("quix", "far", "op_c", 4)]
     manifest = tmp_path / "rts" / "v1" / "manifest.jsonl"
-    write_manifest(items, manifest)
+    items = freeze_fixture(items, manifest, FAST)
     runs = {}
     for name, hits in (("base", 2), ("trained", 10)):
         run = tmp_path / "runs" / name
@@ -173,3 +191,26 @@ def test_board_row_with_a_blank_headline_renders(setup):
         row["scores"]["headline"][name].update(value=None, lo=None, hi=None)
     assert "| 0 | base | - |" in render_table(board)
     assert "base" in render_html(board)
+
+
+def test_cli_add_scores_only_the_frozen_version_under_its_protocol(setup):
+    tmp, manifest, runs = setup
+    board = str(tmp / "board.json")
+    base = ["add", "--run", str(runs["base"]), "--manifest", str(manifest), "--label", "base", "--order", "0"]
+    common = ["--board", board, "--units-dir", str(tmp / "u")]
+    with pytest.raises(SystemExit, match="differs from the frozen protocol"):
+        main([*base, *common, "--n-boot", "300"])
+    task_dir = manifest.parent / "tasks"
+    item = min(task_dir.iterdir())
+    (item / "instruction.md").write_text("edited after the freeze\n")
+    with pytest.raises(SystemExit, match="task dir hashes to"):
+        main([*base, *common])
+    (item / "instruction.md").write_text(f"{item.name}\n")
+    (task_dir / "stray").mkdir()  # an aborted freeze's leftover would be run by the eval too
+    with pytest.raises(SystemExit, match="not in the manifest"):
+        main([*base, *common])
+    (task_dir / "stray").rmdir()
+    (manifest.parent / "protocol.json").unlink()
+    with pytest.raises(SystemExit, match="protocol.json"):
+        main([*base, *common])
+    assert not (tmp / "board.json").exists()

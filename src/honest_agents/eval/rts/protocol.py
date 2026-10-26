@@ -36,6 +36,10 @@ class RtsProtocol:
         return cls(**d)
 
 
+# The protocol prereg 6.5 adopts ("the RTS protocol defaults"): the only one a version is frozen and scored under.
+PREREGISTERED = RtsProtocol()
+
+
 def balance_problems(items: Sequence[ManifestItem], proto: RtsProtocol) -> list[str]:
     """Why a candidate manifest may not be frozen; empty when every tier meets the balance rules."""
     twins = [i for i in items if i.role == "twin"]

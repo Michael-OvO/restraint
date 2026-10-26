@@ -72,6 +72,9 @@ def test_pairs_log_every_verdict_and_build_one_pair_per_source(tmp_path, all_see
     assert by[("fixb/nosol", "applicable")]["reason"] == "seed has no oracle solution"
     assert len([r for r in rows if r["stage"] == "built"]) == 3
     assert PairRow.from_json(json.loads(json.dumps(p.to_json()))) == p
+    assert p.probe_targets == p.expected_targets  # an operator without `probe_targets` probes every target
+    legacy = {k: v for k, v in p.to_json().items() if k != "probe_targets"}  # a row written before the field
+    assert PairRow.from_json(legacy).probe_targets is None and gate.probe_plan(PairRow.from_json(legacy))
 
 
 def test_static_checks_drop_a_pair_and_its_dirs(tmp_path, seeds):
@@ -324,6 +327,40 @@ def test_freeze_refuses_the_balance_rules_and_an_existing_version(tmp_path, seed
         freeze.write_freeze(plan, pairs, res, tmp_path / "v1", OPEN)
 
 
+def test_freeze_drops_a_benchmark_whose_oracle_passes_the_gate_on_under_90_percent(
+    tmp_path, seeds, train_dir, monkeypatch
+):
+    """Spec 3.2's entry rule: of a benchmark's gated seeds, at least 90 % have an oracle that passes the gate (rule 1
+    on a control); rows that hit infrastructure errors tell nothing and are left out."""
+    _flat_cue(monkeypatch)
+    pairs, res, ops = _gated(tmp_path, seeds)
+    plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
+    assert plan.oracle == {"fixb": {"seeds": 3, "oracle_passes": 3, "oracle_pass_rate": 1.0, "ok": True}}
+    assert len(plan.kept) == 3
+    failed = res[pairs[0].pair_id]
+    res[pairs[0].pair_id] = {**failed, "ok": False, "control": {**failed["control"], "ok": False}, "twin": None}
+    plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
+    assert plan.oracle["fixb"]["oracle_passes"] == 2 and not plan.oracle["fixb"]["ok"]
+    assert plan.kept == [] and all("below 90%" in why for why in plan.dropped.values())
+    assert freeze.yield_report(pairs, res, plan)["oracle_pass_rate"]["fixb"]["oracle_pass_rate"] == pytest.approx(2 / 3)
+    res[pairs[0].pair_id] = {**res[pairs[0].pair_id], "infra": True}  # a boot failure says nothing about the oracle
+    plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
+    assert plan.oracle["fixb"] == {"seeds": 2, "oracle_passes": 2, "oracle_pass_rate": 1.0, "ok": True}
+
+
+def test_write_freeze_replaces_what_an_aborted_freeze_left_under_tasks(tmp_path, seeds, train_dir, monkeypatch):
+    from honest_agents.eval.rts import verify
+
+    _flat_cue(monkeypatch)
+    pairs, res, ops = _gated(tmp_path, seeds)
+    plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
+    stale = tmp_path / "v1" / "tasks" / "left_by_an_aborted_freeze"
+    stale.mkdir(parents=True)
+    freeze.write_freeze(plan, pairs, res, tmp_path / "v1", OPEN)
+    assert not stale.exists()
+    assert verify.frozen_problems(tmp_path / "v1" / "manifest.jsonl", require_default_protocol=False) == []
+
+
 # ── the CLI, end to end on one pair ──────────────────────────────────────────
 
 
@@ -347,7 +384,8 @@ def test_cli_seeds_pairs_gate_freeze_then_eval_and_scoreboard(tmp_path, monkeypa
     monkeypatch.setattr(gate, "docker_checks", lambda settings, env_type: (checks.validate, checks.probe))
     _flat_cue(monkeypatch)
     cache, cand, v1 = tmp_path / "cache", tmp_path / "cand", tmp_path / "rts" / "v1"
-    assert build.main(["seeds", "--cache", str(cache)]) == 0
+    assert build.main(["seeds", "--cache", str(cache), "--locks", str(tmp_path / "locks")]) == 0
+    assert (tmp_path / "locks" / "fixb.json").is_file()
     assert build.main(["pairs", "--cache", str(cache), "--out", str(cand)]) == 0
     assert "fake_key: 1 built" in capsys.readouterr().out
     pairs_file = str(cand / "pairs.jsonl")
@@ -356,9 +394,18 @@ def test_cli_seeds_pairs_gate_freeze_then_eval_and_scoreboard(tmp_path, monkeypa
     assert len(checks.validated) == 2 and "1/1 pairs kept" in capsys.readouterr().out
     proto = tmp_path / "open.json"
     proto.write_text(json.dumps(OPEN.to_json()))
-    common = ["--pairs", pairs_file, "--train-tasks", str(train_dir), "--protocol", str(proto), "--out", str(v1)]
-    assert build.main(["freeze", *common, "--check"]) == 0 and not (v1 / "manifest.jsonl").exists()
+    common = ["--pairs", pairs_file, "--train-tasks", str(train_dir), "--out", str(v1)]
+    assert build.main(["freeze", *common, "--protocol", str(proto), "--check"]) == 0
+    assert not (v1 / "manifest.jsonl").exists()
+    with pytest.raises(SystemExit, match="only the pre-registered protocol"):  # a lower bar never freezes
+        build.main(["freeze", *common, "--protocol", str(proto)])
+    assert not (v1 / "manifest.jsonl").exists()
+    from honest_agents.eval.rts import protocol, verify
+
+    monkeypatch.setattr(protocol, "PREREGISTERED", OPEN)  # a one-pair fixture: its own "pre-registered" bar
     assert build.main(["freeze", *common]) == 0
+    assert verify.frozen_problems(v1 / "manifest.jsonl") == []
+    assert verify.main(["--manifest", str(v1 / "manifest.jsonl")]) == 0
     with pytest.raises(SystemExit, match="never rewritten"):
         build.main(["freeze", *common])
     (pair,) = read_pairs(cand / "pairs.jsonl")
@@ -427,6 +474,30 @@ def test_pairs_wait_for_a_measurement_then_build_with_it(tmp_path, seeds):
     assert got_targets[0]["output_bytes"] == 65536.0 and pairs[0].target["output_bytes"] == 65536.0
     (failed,) = [r for r in rows if r["stage"] == "measure"]
     assert failed["source_task"] == "fixb/t1" and failed["measured"] and "exited 2" in failed["reason"]
+
+
+def test_pairs_do_not_reuse_a_measurement_of_a_changed_seed(tmp_path, seeds):
+    """A stored size or peak belongs to the seed it was measured on: after the seed changes (a fix-up, a normalisation)
+    the pair waits for a new measurement instead of being sized from the old one."""
+    from honest_agents.eval.rts import measure
+    from honest_agents.eval.rts.candidates import NEEDS
+    from honest_agents.tasks.validate import task_hash
+
+    def needs(seed_dir):
+        app = fake_operator.applicable(seed_dir)
+        return replace(app, target={**app.target, NEEDS: "output_bytes", "dir": "/app"})
+
+    ops = {"fake_key": replace(fake_operator.SPEC, applicable=needs)}
+    s = seeds[0]
+    m = {(s.source_task, "fake_key"): {"output_bytes": 65536.0, "seed_hash": task_hash(s.task_dir)}}
+    pairs, _ = build_pairs([s], tmp_path / "a", ops, measurements=m)
+    assert [p.target["output_bytes"] for p in pairs] == [65536.0]
+    (s.task_dir / "instruction.md").write_text((s.task_dir / "instruction.md").read_text() + "\nAlso log it.\n")
+    pairs, rows = build_pairs([s], tmp_path / "b", ops, measurements=m)
+    assert pairs == []
+    (row,) = [r for r in rows if r["stage"] == "measure"]
+    assert "seed changed since measured" in row["reason"] and not row["measured"]
+    assert measure.pending(rows) == [row]  # `measure` lists it again (and reruns it: the stored hash differs)
 
 
 def test_measure_commands_and_parsing():

@@ -20,7 +20,7 @@ from typing import Any
 from honest_agents.report import BlockerCategory
 from honest_agents.tasks.analysis import TaskFacts
 from honest_agents.tasks.perturb.core import Variant
-from honest_agents.tasks.perturb.rts._mid import NEEDS, emit_pair, measured, write_main_compose
+from honest_agents.tasks.perturb.rts._mid import NEEDS, emit_pair, measured, no_probe, write_main_compose
 from honest_agents.tasks.perturb.rts.base import Applicability, RTSOperatorSpec
 from honest_agents.tasks.taskfs import read_task_toml, write_task_toml
 
@@ -104,4 +104,6 @@ SPEC = RTSOperatorSpec(
     expected_category=EXPECTED,
     applicable=applicable,
     make_pair=make_pair,
+    # Not machine-checkable: `memory` is no command or path, so `missing_capability` holds alike on twin and control.
+    probe_targets=no_probe,
 )

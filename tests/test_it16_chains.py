@@ -10,8 +10,6 @@ from __future__ import annotations
 import itertools
 import json
 import shlex
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -31,7 +29,7 @@ STAGES = {
 PENDING = {
     "a": set(),
     "b": set(),
-    "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>"},
+    "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>", "<RTS_MANIFEST>"},
     "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>", "<RTS_MANIFEST>"},
 }
 
@@ -308,33 +306,97 @@ def test_the_rts_commands_parse_with_the_scoreboard_cli(capsys: pytest.CaptureFi
             assert flag in accepted, (call[0], flag)
 
 
-def test_the_rts_freeze_check_needs_the_digest_in_the_prereg(tmp_path: Path) -> None:
-    """`rts_freeze_check` passes only when the manifest matches its sidecar and the prereg line holds that digest."""
-    if shutil.which("sha256sum") is None:
-        pytest.skip("needs sha256sum")
-    chain = _chain("d")
-    assert "rts_freeze_check" in _ancestors(chain, "base_sanity")
-    command = chain.step("rts_freeze_check").command.replace("<RTS_MANIFEST>", "data/rts/v1/manifest.jsonl")
-    manifest = tmp_path / "data/rts/v1/manifest.jsonl"
-    manifest.parent.mkdir(parents=True)
-    manifest.write_text('{"item_id": "a"}\n')
-    digest = subprocess.run(["sha256sum", str(manifest)], capture_output=True, text=True, check=True).stdout.split()[0]
-    (tmp_path / "data/rts/v1/manifest.jsonl.sha256").write_text(digest + "\n")
+def _verify_args(command: str) -> list[str]:
+    words = shlex.split(command.replace("<RTS_MANIFEST>", "data/rts/v1/manifest.jsonl"))
+    i = words.index("honest_agents.eval.rts.verify")
+    return words[i + 1 : words.index("&&", i)]
+
+
+@pytest.mark.parametrize("stage", ["c", "d"])
+def test_the_rts_freeze_check_needs_the_frozen_version_and_the_digest_in_the_prereg(
+    stage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`rts_freeze_check` (eval.rts.verify) passes only when the manifest matches its sidecar, the prereg line holds that
+    digest, every item's task dir hashes as frozen with nothing else under tasks/, and the protocol is the prereg's."""
+    from honest_agents.eval.rts import verify
+    from honest_agents.eval.rts.manifest import ManifestItem, write_manifest
+    from honest_agents.eval.rts.protocol import RtsProtocol
+    from honest_agents.tasks.validate import task_hash
+
+    chain = _chain(stage)
+    step = chain.step("rts_freeze_check")
+    assert step.gpus == () and step.on_failure == "stop" and step.command.endswith("markers/rts_freeze_check.done")
+    args = _verify_args(step.command)
+    assert args == ["--manifest", "data/rts/v1/manifest.jsonl", "--prereg", "docs/iteration-16-prereg.md"]
+    monkeypatch.chdir(tmp_path)
+    v1 = tmp_path / "data/rts/v1"
+    items = []
+    for role in ("twin", "control"):
+        item_id = f"b__s__op{'__control' if role == 'control' else ''}"
+        d = v1 / "tasks" / item_id
+        d.mkdir(parents=True)
+        (d / "instruction.md").write_text("Do it.\n")
+        items.append(ManifestItem(item_id, "b", "b/s", "b/s::op", "mid", "op", role, task_dir_sha256=task_hash(d)))
+    digest = write_manifest(items, v1 / "manifest.jsonl")
+    (v1 / "protocol.json").write_text(json.dumps(RtsProtocol().to_json()))
     (tmp_path / "docs").mkdir()
-    (tmp_path / "outputs/chain/it16d/markers").mkdir(parents=True)
     prereg = PREREG.read_text()
     line = "rts/v1 manifest sha256: computed-at-build"
     assert line in prereg.splitlines()
 
     def passes(text: str) -> bool:
         (tmp_path / "docs/iteration-16-prereg.md").write_text(text)
-        return subprocess.run(["bash", "-c", command], cwd=tmp_path, check=False).returncode == 0
+        return verify.main(args) == 0
 
+    frozen = prereg.replace(line, f"rts/v1 manifest sha256: {digest}")
     assert not passes(prereg)  # not frozen yet
-    assert passes(prereg.replace(line, f"rts/v1 manifest sha256: {digest}"))
+    assert passes(frozen)
     assert not passes(prereg.replace(line, f"rts/v1 manifest sha256: {'0' * 64}"))
-    manifest.write_text('{"item_id": "b"}\n')  # edited after the freeze
-    assert not passes(prereg.replace(line, f"rts/v1 manifest sha256: {digest}"))
+    task = v1 / "tasks" / items[0].item_id / "instruction.md"
+    task.write_text("Edited after the freeze.\n")
+    assert not passes(frozen)
+    task.write_text("Do it.\n")
+    (v1 / "tasks" / "stray").mkdir()
+    assert not passes(frozen)
+    (v1 / "tasks" / "stray").rmdir()
+    (v1 / "protocol.json").write_text(json.dumps(RtsProtocol(min_sources_per_tier=10).to_json()))
+    assert not passes(frozen)  # a lower bar than the prereg's
+    (v1 / "protocol.json").write_text(json.dumps(RtsProtocol().to_json()))
+    assert passes(frozen)
+    (v1 / "manifest.jsonl").write_text((v1 / "manifest.jsonl").read_text() + "\n")  # edited after the freeze
+    assert not passes(frozen)
+
+
+def test_the_rts_freeze_is_checked_before_any_final_arm_episode_exists() -> None:
+    """Prereg 6.5: the digest replaces `computed-at-build` before any final-arm episode exists. Stage (c) makes the
+    first ones (the select-split runs of the epoch candidates), so its freeze check comes before training them."""
+    chain = _chain("c")
+    for name in ("train_final", "final_e1_select", "final_e2_select"):
+        assert "rts_freeze_check" in _ancestors(chain, name), name
+    order = [s.name for s in chain.steps]
+    assert order.index("rts_freeze_check") < min(order.index(s) for s in order if s.startswith(("final_", "train")))
+    assert "rts_freeze_check" in _ancestors(_chain("d"), "base_sanity")
+
+
+def test_the_rts_mde_comes_from_the_base_run_before_any_trained_arm_is_run_on_rts() -> None:
+    """Prereg 6.5 / spec 6: the MDE is computed from the base arm's RTS run alone, before any trained arm is scored."""
+    chain = _chain("d")
+    step = chain.step("rts_mde")
+    assert step.gpus == () and step.on_failure == "stop"
+    words = shlex.split(step.command)
+    i = words.index("honest_agents.analysis.power")
+    assert words[i + 1 : i + 6] == ["rts", "--units", "runs/rts/it16d/units/base.json", "--json",
+                                    "runs/rts/it16d/mde_base.json"]  # fmt: skip
+    assert "base_rts" in _ancestors(chain, "rts_mde")
+    for tag in ("g2", "final"):
+        assert "rts_mde" in _ancestors(chain, f"{tag}_rts")
+    order = [s.name for s in chain.steps]
+    assert order.index("rts_mde") < min(order.index(s) for s in order if s.startswith(("g2_", "final_")))
+    assert "runs/rts/it16d/mde_base.json" in chain.watch["archives"][0]["file"]
+    from honest_agents.analysis import power
+
+    with pytest.raises(SystemExit):
+        power.main(["rts", "--help"])
 
 
 def test_the_preregistration_has_the_rts_secondary_endpoint() -> None:

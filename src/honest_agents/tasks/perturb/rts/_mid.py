@@ -83,6 +83,11 @@ def write_main_compose(task_dir: Path, main: dict[str, Any]) -> Path:
     return path
 
 
+def no_probe(target: Any, expected_targets: Sequence[str]) -> tuple[str, ...]:
+    """`RTSOperatorSpec.probe_targets` of an operator whose targets the grader cannot tell apart on the two sides."""
+    return ()
+
+
 def measured(target: dict[str, Any], key: str) -> float:
     """The gate's measurement `key` from `target`; a clear error when the pair builder is called without it."""
     value = target.get(key)

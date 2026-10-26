@@ -6,12 +6,15 @@
   python -m honest_agents.eval.rts.build gate --pairs data/rts/v1/candidates/pairs.jsonl --concurrency 8   # Docker
   python -m honest_agents.eval.rts.build freeze --train-tasks DIR [--train-tasks DIR ...] [--check]
 
-`seeds` downloads the pinned Harbor datasets (network, no Docker) and writes `<cache>/index.jsonl`. `pairs` logs every
+`seeds` downloads the pinned Harbor datasets (network, no Docker), checks each download against its card's committed
+content lock (`--locks`, default `configs/rts/dataset_locks/`; written when missing) and writes `<cache>/index.jsonl`. `pairs` logs every
 operator's applicability on every seed to `<out>/applicability.jsonl` and writes the built pairs to `<out>/pairs.jsonl`
 (no Docker). `measure` runs the seed's oracle for the verdicts `pairs` logged as stage `measure` (`disk_quota`,
 `mem_limit` size their pair from it; Docker); `pairs` run again builds them. `gate` runs on a Linux node: resumable, one row per pair with its rejection
 reason in `<out>/gate.jsonl`. `freeze` writes `data/rts/v1/` (manifest, sha256 sidecar, task dirs, protocol, yield);
-`--check` writes the report only. A run is then scored with `eval.run_eval --split data/rts/v1/tasks` and
+`--check` writes the report only; a freeze takes the pre-registered protocol only (`protocol.PREREGISTERED`), and
+`python -m honest_agents.eval.rts.verify --manifest data/rts/v1/manifest.jsonl` checks a frozen version before any run.
+A run is then scored with `eval.run_eval --split data/rts/v1/tasks` and
 `eval.rts.scoreboard add --manifest data/rts/v1/manifest.jsonl`.
 """
 
@@ -26,7 +29,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from honest_agents.eval.rts import benchmarks, candidates, freeze, gate, measure
+from honest_agents.eval.rts import benchmarks, candidates, freeze, gate, measure, protocol
 from honest_agents.eval.rts.protocol import RtsProtocol
 from honest_agents.tasks.perturb.rts.base import RTSOperatorSpec
 
@@ -53,7 +56,10 @@ def cmd_seeds(args: argparse.Namespace) -> int:
         card = benchmarks.CARDS[name]
         if not card.license_known and not args.allow_unknown_license:
             raise SystemExit(f"{name}: licence not known ({card.license}); pass --allow-unknown-license")
-        seeds = benchmarks.load_seeds(card, cache, limit=args.limit, seed=args.seed)
+        try:
+            seeds = benchmarks.load_seeds(card, cache, limit=args.limit, seed=args.seed, lock_dir=Path(args.locks))
+        except benchmarks.DatasetDrift as e:
+            raise SystemExit(str(e)) from e
         print(f"{name}: {len(seeds)} seeds ({sum(s.has_oracle for s in seeds)} with an oracle)")
         all_seeds += seeds
     index = Path(args.index) if args.index else cache / benchmarks.INDEX_NAME
@@ -154,7 +160,14 @@ def cmd_freeze(args: argparse.Namespace) -> int:
     pairs = candidates.read_pairs(pairs_path)
     gate_path = Path(args.gate) if args.gate else pairs_path.parent / "gate.jsonl"
     results = gate.read_results(gate_path)
-    proto = RtsProtocol.from_json(json.loads(Path(args.protocol).read_text())) if args.protocol else RtsProtocol()
+    pre = protocol.PREREGISTERED
+    proto = RtsProtocol.from_json(json.loads(Path(args.protocol).read_text())) if args.protocol else pre
+    if proto != pre and not args.check:
+        # prereg 6.5 adopts the defaults; a tier that fails them gets more sources, never a lower bar
+        raise SystemExit(
+            f"refusing to freeze under {proto.to_json()}: only the pre-registered protocol {pre.to_json()} freezes "
+            "(--protocol is for --check reports)"
+        )
     out = Path(args.out)
     if (out / freeze.MANIFEST_NAME).exists() and not args.check:
         raise SystemExit(f"{out / freeze.MANIFEST_NAME} exists: a frozen version is never rewritten")
@@ -191,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--index", help="seeds index (default: <cache>/index.jsonl)")
     s.add_argument("--allow-unknown-license", action="store_true")
+    s.add_argument(
+        "--locks",
+        default=str(benchmarks.LOCK_DIR),
+        help="dataset content locks, one <card>.json each (written when missing: commit them)",
+    )
     pr = sub.add_parser("pairs", help="applicability of every operator on every seed, and the pairs (no Docker)")
     pr.add_argument("--seeds-index", help="default: <cache>/index.jsonl")
     pr.add_argument("--benchmarks", nargs="+")
@@ -220,7 +238,9 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--gate", help="gate results (default: gate.jsonl next to --pairs)")
     f.add_argument("--train-tasks", nargs="+", required=True, help="training task dirs to dedup against")
     f.add_argument("--out", default=str(freeze.DEFAULT_OUT))
-    f.add_argument("--protocol", help="RtsProtocol JSON (default: the pre-registered defaults)")
+    f.add_argument(
+        "--protocol", help="RtsProtocol JSON for a --check report; a freeze takes the pre-registered defaults only"
+    )
     f.add_argument("--report", help="default: freeze_report.json next to --pairs")
     f.add_argument("--check", action="store_true", help="write the report only; exit 1 if the freeze would refuse")
     for sp in (s, pr):

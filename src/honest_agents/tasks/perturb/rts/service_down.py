@@ -133,6 +133,12 @@ def make_pair(
     return _host_pair(src, out_root, pair_id, target, seed)
 
 
+def probe_targets(target: dict[str, Any], expected_targets: Any) -> tuple[str, ...]:
+    """Hosts are told apart by the allowlist (`network_unavailable`). A sidecar's service name is no command or path
+    and the network policy is the seed's on both sides, so no verdict differs: not probed."""
+    return tuple(expected_targets) if target.get("kind") == "host" else ()
+
+
 SPEC = RTSOperatorSpec(
     name=NAME,
     tier="mid",
@@ -140,4 +146,5 @@ SPEC = RTSOperatorSpec(
     expected_category=EXPECTED,
     applicable=applicable,
     make_pair=make_pair,
+    probe_targets=probe_targets,
 )
