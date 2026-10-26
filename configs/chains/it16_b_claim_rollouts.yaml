@@ -1,0 +1,105 @@
+# Iteration 16, stage (b): own-run rollouts for the claim-point data (docs/iteration-16-prereg.md section 3.1, source 1).
+# G2 seed 1 on the 400 training-pool surface tasks of data/decision/read_rft_tasks.jsonl (94 sources, 200 twin/control
+# pairs; never an eval, val, select, test or surfaces_val source: `read_rft_tasks verify` refuses the list otherwise),
+# S = 4, as it15_g4_sample, but this time with the trajectory bank (full transcripts: the only input claim examples can be
+# built from, `sft.commit_checks`) and the tool outputs (DEF-06, capped, in episodes.jsonl `extra.history`). Why it is
+# needed: the archive kept no transcripts of it15_g4_sample, so the claim build has 0 transcript fail states
+# (`sft.claim_splice`: "real claim pairs need fail states whose own transcript is the prefix"). Every one of the 400
+# tasks has a checklist (data/commit_checks/checklists/).
+# Then, CPU and Docker only, the checklist validation of the new end states (`sft.checklist_validation`, hidden tests
+# forced on), into the node's result cache, which the watcher pulls. Runbook: docs/iteration-16-runbook.md.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+name: it16b
+state_dir: outputs/chain/it16b
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16b
+      --ledger docs/defects.md
+      --json outputs/chain/it16b/gate_ledger.json
+      && mkdir -p outputs/chain/it16b/markers && touch outputs/chain/it16b/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it16b/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  # Training pool only: sources in the RL / distillation pools, none of select / val / test / probe_v1 / surfaces_val.
+  - name: split_guard
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.tasks.read_rft_tasks verify
+      --out data/decision/read_rft_tasks.jsonl
+      && touch outputs/chain/it16b/markers/split_guard.done
+    gpus: []
+    done: outputs/chain/it16b/markers/split_guard.done
+    timeout_min: 10
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: g2_sanity
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it16_g2_sanity/metrics.json
+    timeout_min: 45
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # 1,600 episodes at concurrency 24: it15_g4_sample took 3 h 19 min (sample_g4.log) on the same tasks and model.
+  - name: claim_rollouts
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/decision/read_rft_tasks.jsonl runs/eval/it16_claim_rollouts --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --bank-dir runs/eval/it16_claim_rollouts/bank
+    gpus: [0]
+    done: runs/eval/it16_claim_rollouts/metrics.json
+    timeout_min: 300
+    on_failure: stop
+    progress: {pattern: '^\[(\d+)/1600\]', total: 1600}
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # No server: replay each new end state, run its checklist, then the hidden tests (cached; rows appended, so a stop
+  # resumes). Bounded at 150 min; what is left runs later from the same episodes at L1 (cache hits are free).
+  - name: validate_claim_states
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.checklist_validation --oracle
+      --episodes runs/eval/it16_claim_rollouts/episodes.jsonl --out runs/eval/it16_claim_rollouts/checklist_validation.jsonl
+      --concurrency 16 --budget-min 150
+      && touch outputs/chain/it16b/markers/validate_claim_states.done
+    gpus: []
+    done: outputs/chain/it16b/markers/validate_claim_states.done
+    timeout_min: 200
+    on_failure: continue
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/eval/it16_claim_rollouts, /root/.cache/honest-agents/gate/checklist_validation.v1.jsonl, outputs/logs]
+  archives:
+    - {iteration: 16, name: it16b-claim-rollouts, eval: [runs/eval/it16_g2_sanity, runs/eval/it16_claim_rollouts],
+       file: [runs/eval/it16_claim_rollouts/checklist_validation.jsonl], keep_bank: true, no_weights: true,
+       note: "iteration 16 stage (b): G2 s1 own runs on the 400 training-pool surface tasks, S = 4, bank (transcripts) kept"}

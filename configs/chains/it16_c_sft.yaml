@@ -1,0 +1,163 @@
+# Iteration 16, stage (c): the SFT run of the final arm (docs/iteration-16-prereg.md sections 2, 3 and 7). From G2
+# seed 1 (rebuilt on CPU), on the frozen matched-pair build of section 3 (loss on the check commands and the post-check
+# decision, tool outputs masked). One GPU, used by one tenant at a time: the trainer runs alone, the select-split servers
+# before and after it (no server ever shares the training GPU). W&B: project honest-agents, group it16 (the run's
+# dashboard). Gradient checkpointing on (overridden here, whatever the config says). Two epochs, one checkpoint per
+# epoch; each epoch is merged, sanity-checked (12 tasks) and evaluated on the select split, then `eval.select_checkpoint
+# --require-split select` (gate: verified success non-inferior to base; then the lowest claim_rate_infeasible) picks it.
+# No epoch passes the gate: the selection step fails and the chain stops (prereg section 8: no default action; report to
+# the owner). The selected epoch's adapter is named in best_checkpoint.json so the archive keeps it (stage (d) rebuilds
+# the final model from it on any node). Runbook: docs/iteration-16-runbook.md.
+# NOT LAUNCHABLE YET (placeholders, which `node chain` and `node_chain run` refuse):
+#   <SFT_CONFIG>: the frozen SFT config. Its example builder (a `kind` that trains a prebuilt commit-check build) is not
+#     registered in sft.train_sft yet; the commit-data lane delivers it with the build.
+#   <SFT_BUILD_MANIFEST>: the frozen build's build_manifest.json (commit_points.coverage reads it).
+#   <SELECT_PROTOCOL>: a run_eval --protocol file whose ni_margin is max(5, the ni10 of verified_success at the select
+#     split's K and S), computed at build (prereg section 7); the runs record it and select_checkpoint applies it.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+name: it16c
+state_dir: outputs/chain/it16c
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16c
+      --ledger docs/defects.md
+      --json outputs/chain/it16c/gate_ledger.json
+      && mkdir -p outputs/chain/it16c/markers && touch outputs/chain/it16c/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it16c/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  # Data gates before the model is loaded: no benchmark item, source or canary in any training build of this tree
+  # (final_benchmark never-trained), the coverage report's quotas and balance (prereg 3.4: fail share in [0.40, 0.60],
+  # i.e. outcome ratio <= 1.5; excluded sources refused), then the trainer's own dry run (examples, labels, lengths).
+  - name: data_gates
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark never-trained
+      --out outputs/chain/it16c/never_trained.json
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.commit_points.coverage
+      --manifest <SFT_BUILD_MANIFEST> --strict --max-outcome-ratio 1.5 --json outputs/chain/it16c/coverage.json
+      && DRY_RUN=1 scripts/run_sft.sh <SFT_CONFIG> model.name=outputs/it15/g2_merged run_name=it16-commit-checks
+      train.extra.run_name=it16-commit-checks train.num_train_epochs=2 train.extra.save_strategy=epoch
+      train.extra.save_total_limit=2 train.gradient_checkpointing=true train.report_to=wandb
+      && touch outputs/chain/it16c/markers/data_gates.done
+    gpus: []
+    done: outputs/chain/it16c/markers/data_gates.done
+    timeout_min: 45
+    on_failure: stop
+
+  # The base arm's select-split reference, before training (the GPU is free; a serving fault shows before 2 h of training).
+  - name: base_select
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_base_select --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol <SELECT_PROTOCOL>
+    gpus: [0]
+    done: runs/eval/it16_base_select/metrics.json
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # G2: 3,102 examples x 2 epochs took 2 h 2 min (train_runtime 7306 s, it15); the build's size sets this one.
+  - name: train_final
+    command: >-
+      scripts/run_sft.sh <SFT_CONFIG> model.name=outputs/it15/g2_merged run_name=it16-commit-checks
+      train.extra.run_name=it16-commit-checks train.num_train_epochs=2 train.extra.save_strategy=epoch
+      train.extra.save_total_limit=2 train.gradient_checkpointing=true train.report_to=wandb
+    gpus: [0]
+    done: outputs/sft/it16-commit-checks/final/adapter_config.json
+    timeout_min: 360
+    on_failure: stop
+    stall_min: 30
+    env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it16, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: merge_epochs
+    command: >-
+      scripts/merge_epochs.sh outputs/sft/it16-commit-checks outputs/it16/final outputs/it15/g2_merged 2
+      && touch outputs/chain/it16c/markers/merge_epochs.done
+    gpus: []
+    done: outputs/chain/it16c/markers/merge_epochs.done
+    timeout_min: 40
+    on_failure: stop
+
+  - name: final_e1_select
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it16/final_e1_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_final_e1_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_final_select_e1 --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol <SELECT_PROTOCOL>
+    gpus: [0]
+    done: runs/eval/it16_final_select_e1/metrics.json
+    timeout_min: 120
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: final_e2_select
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it16/final_e2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_final_e2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_final_select_e2 --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol <SELECT_PROTOCOL>
+    gpus: [0]
+    done: runs/eval/it16_final_select_e2/metrics.json
+    timeout_min: 120
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # Exit 1 of select_checkpoint (no epoch passes the gate) ends the && chain: the step fails, nothing is chosen.
+  # `--fallback` is required by `decide` but unused at status 0.
+  - name: select_final
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.select_checkpoint
+      --base runs/eval/it16_base_select runs/eval/it16_final_select_e1 runs/eval/it16_final_select_e2
+      --require-split select --exclude-quarantined data/select_quarantine.txt --out outputs/it16/selection.json
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.sft.epochs decide outputs/it16/selection.json
+      outputs/it16 --fallback 2 --status 0 --prefix final
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.sft.epochs best outputs/sft/it16-commit-checks
+      outputs/it16/selected_epoch.txt --expect 2
+    gpus: []
+    done: outputs/sft/it16-commit-checks/best_checkpoint.json
+    timeout_min: 20
+    on_failure: stop
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [outputs/it16/selection.json, outputs/it16/selected_epoch.txt, outputs/logs]
+  archives:
+    - {iteration: 16, name: it16c-sft, run: [outputs/sft/it16-commit-checks],
+       eval: [runs/eval/it16_base_select, runs/eval/it16_final_e1_sanity, runs/eval/it16_final_select_e1,
+              runs/eval/it16_final_e2_sanity, runs/eval/it16_final_select_e2],
+       file: [outputs/it16/selection.json, outputs/it16/selected_epoch.txt, outputs/chain/it16c/coverage.json,
+              outputs/chain/it16c/never_trained.json],
+       note: "iteration 16 stage (c): SFT from G2 s1 on the matched-pair build; epoch chosen on the select split"}

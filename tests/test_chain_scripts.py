@@ -254,6 +254,30 @@ def test_decide_does_not_mistake_a_refused_comparison_for_a_failed_gate(tmp_path
     assert not (out / "selected_epoch.txt").exists()
 
 
+def test_best_records_the_selected_epoch_so_the_archive_keeps_its_adapter(tmp_path):
+    """Iteration 16 stage (c): the final eval may run on a new node, so the selected epoch's adapter must reach the
+    archive. `best` names its checkpoint in best_checkpoint.json, the file `archive.save` reads."""
+    from honest_agents.archive import select_run_files
+
+    run = _run_dir(tmp_path, {40: 2.0, 20: 1.0})
+    out = tmp_path / "o"
+    epochs.decide(_selection(tmp_path / "selection.json", "it16_final_select_e1"), out, fallback=2, status=0,
+                  prefix="it16_final")  # fmt: skip
+    assert epochs.best(run, out / "selected_epoch.txt", expect=2) == {"checkpoint": "checkpoint-20", "epoch": 1,
+                                                                      "how": "selected"}  # fmt: skip
+    best = json.loads((run / "best_checkpoint.json").read_text())["checkpoint"]
+    files = ["checkpoint-20/adapter_model.safetensors", "checkpoint-40/adapter_model.safetensors",
+             "final/adapter_model.safetensors", "best_checkpoint.json"]  # fmt: skip
+    assert "checkpoint-20/adapter_model.safetensors" in select_run_files(files, best)
+    assert "checkpoint-40/adapter_model.safetensors" not in select_run_files(files, best)
+    (out / "selected_epoch.txt").write_text("3 selected\n")
+    with pytest.raises(SystemExit, match="no checkpoint of epoch 3"):
+        epochs.best(run, out / "selected_epoch.txt")
+    (out / "selected_epoch.txt").write_text("garbled\n")
+    with pytest.raises(SystemExit, match="expected one line"):
+        epochs.best(run, out / "selected_epoch.txt")
+
+
 FAKE_UV = r"""#!/usr/bin/env bash
 # `env -u VIRTUAL_ENV uv run --frozen --extra train python ARGS` -> the test interpreter; merge and select are recorded
 while [[ $# -gt 0 && "$1" != python ]]; do shift; done

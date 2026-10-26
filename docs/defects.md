@@ -65,6 +65,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-55 | tooling / build | closed | `final_benchmark freeze` (after the DEF-54 fix) still drops a benchmark gone from the definitions, with its results, and takes in a new one, both without `--refreeze` and unlogged; its `refrozen` log shows metric changes as `side.metric:direction` keys only, so a moved headline logs identical before and after |
 | DEF-56 | tooling / build | closed | `final_benchmark freeze` (after the DEF-55 fix) does not freeze a benchmark's `role` (which benchmarks are headlines) and logs the items record as n and sha256 while the refusal also compares its file, so a moved items file logs identical before and after |
 | DEF-57 | tooling / build | closed | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
+| DEF-NEW-it16-jobs-1 | recording / eval harness | open | the pre-registration (section 2) runs every arm with the same per-(task, sample, turn) vLLM seeds, but no rollout path sends a seed: `run_eval` and the Harbor agent sample unseeded |
+| DEF-NEW-it16-jobs-2 | tooling / build | open | the never-trained check's repo scope (`REPO_TRAINING_GLOBS`) does not match `data/commit_checks/builds/`, so the iteration-16 training build (the claim-point examples and DPO pairs) is never checked against the frozen benchmarks |
+| DEF-NEW-it16-jobs-3 | stats | open | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
 
 ---
 
@@ -3122,3 +3125,57 @@ section 7 critique) and from re-checks against the code and the archive on that 
   the stored file's, gzipped for 3), every other build's hash and count unchanged. `training_builds` over the main tree
   with the archive gives the same 647 labels; `check --archive` ok.
 - **Impact note:** never-trained verdict re-scored, post-fix: pass (unchanged); nothing void.
+
+### DEF-NEW-it16-jobs-1: the arms' per-(task, sample, turn) sampling seeds do not exist
+- **Area:** recording / eval harness. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, writing the stage (a) and
+  (d) job files (`configs/chains/it16_a_calibration.yaml`, `it16_d_final_eval.yaml`).
+- **Evidence:** `docs/iteration-16-prereg.md` L63-64: "All arms ... use the same items, harness, system prompt, sampling
+  settings and per-(task, sample, turn) seeds" (also `docs/iteration-16-direction.md` L138). No request carries a seed:
+  `src/honest_agents/eval/rollout.py` builds each request from `RolloutConfig` (`request_extra_body`, ~L126-132: only
+  `top_k`, `min_p`, `repetition_penalty` and the config's `extra_body`; `chat.completions.create(**kwargs)` ~L316, no
+  `seed`); `src/honest_agents/eval/harbor_agent.py` `HonestPolicyAgent.rollout_config` (~L209-225) sets temperature and
+  top_p only; `run_eval --seed` is the bootstrap seed of the protocol (`run_eval.py` L210, L363), not a sampling seed.
+  `grep -n seed` over `eval/rollout.py` and `eval/harbor_agent.py` finds nothing.
+- **Impact:** no archived number: no archived comparison claimed seeded sampling (every archived paired difference is
+  between independently sampled arms, which the estimator's sampling term assumes). The iteration-16 bars' power
+  (`analysis.power`) is computed with independent sampling too, so the bars stand; what is false is the
+  pre-registration's sentence. Running the arms as written would not be what was pre-registered.
+- **Fix (proposed; eval-harness owner):** either send `seed = f(task id, sample index, turn index)` in every request of
+  `rollout.run_agent_loop` and the Harbor agent (vLLM honours a per-request `seed`; record it in the episode), or amend the
+  pre-registration to independent sampling before it is approved. The job files need no change either way.
+- **Closure test:** a stub OpenAI client records the requests of two episodes of the same (task, sample) and asserts the
+  same seed per turn and different seeds across samples (or, if amended, a test that the pre-registration no longer
+  claims seeds).
+
+### DEF-NEW-it16-jobs-2: the never-trained check does not read the iteration-16 training build
+- **Area:** tooling / build. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, writing the stage (c) data gates
+  (`configs/chains/it16_c_sft.yaml` step `data_gates` runs `final_benchmark never-trained` before training).
+- **Evidence:** `src/honest_agents/eval/final_benchmark.py` L61-66: `REPO_TRAINING_GLOBS` = `data/decision/*.jsonl`,
+  `data/judgment/*.jsonl`, `data/pools/decision_build_manifest.json`, `data/pools/surfaces/*.json`. The commit-check
+  builds live under `data/commit_checks/builds/<build>/` (`examples.jsonl`, `dpo_pairs.jsonl`; e.g. the tracked
+  `claim_splice_v1`), which no pattern matches; `ARCHIVE_TRAINING_GLOBS` covers archived SFT builds only once they are
+  archived as a run's `examples.jsonl`, i.e. after training.
+- **Impact:** no archived number: the one committed build, `claim_splice_v1`, has 0 examples (`wc -l` 0), so the
+  recorded verdict (62,559 rows, DEF-57) lost nothing. The risk is the frozen-before-training check of the
+  pre-registration (section 4) passing over the very data the final arm trains on.
+- **Fix (proposed; bench lane, `final_benchmark.py`):** add `data/commit_checks/builds/*/examples.jsonl` and
+  `data/commit_checks/builds/*/dpo_pairs.jsonl` to `REPO_TRAINING_GLOBS` (and their archived copies to the archive scope).
+- **Closure test:** a fixture build under `data/commit_checks/builds/x/examples.jsonl` holding a benchmark item id makes
+  `never-trained` exit 1 (it exits 0 on the current code).
+
+### DEF-NEW-it16-jobs-3: the AbstentionBench guard's margin has no calibration data
+- **Area:** stats. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, wiring the AbstentionBench and Agentic
+  Abstention units into stage (d)'s `compute` (review of `e32ed26`: (d) ran both benchmarks but never scored them).
+- **Evidence:** `docs/iteration-16-prereg.md` L270-273: "External guards, final − base (all computed-at-build from the
+  calibration samples, ni10 rule ...): AbstentionBench over-abstention ...: UB < +m; MASK honesty ...: LB > −m". L196-198
+  and L307-308 define the calibration samples as "the base and G2 arms on TB2 and ImpossibleBench, S = 2", and
+  `configs/chains/it16_a_calibration.yaml` runs exactly those. No stage before (d) runs AbstentionBench (or MASK) on any
+  arm, so the ni10 margin of either guard cannot be computed before a final-arm episode exists, as the
+  pre-registration requires (runbook section 7 (a): "the external margins from the base arm").
+- **Impact:** no archived number (nothing has run). After the stage (d) repair, `compute` fills the guard's interval
+  (`answer.abstained`, final − base) but there is no pre-registered m to read it against; MASK is not in (d) at all.
+- **Fix (proposed; pre-registration / power-prereg lane, owner decision):** either add AbstentionBench (base arm, S = 1,
+  with the judge endpoint, after DEF-50) to the calibration stage and compute m there, or fix m in the pre-registration
+  now (a stated number, e.g. a cap like P3's), before it is approved. The (d) job file needs no change either way.
+- **Closure test:** a check that every external guard of prereg 6.3 has its margin either stated or computed from a
+  benchmark the calibration chain runs (`tests/test_it16_chains.py`).
