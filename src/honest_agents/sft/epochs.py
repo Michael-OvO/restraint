@@ -3,6 +3,7 @@ scripts only orchestrate).
 
     python -m honest_agents.sft.epochs list RUN_DIR [--expect 3]
     python -m honest_agents.sft.epochs decide SELECTION_JSON OUT_DIR --fallback 3 --status N --prefix sft_v2
+    python -m honest_agents.sft.epochs best RUN_DIR OUT_DIR/selected_epoch.txt [--expect 2]
 
 `list` prints `<epoch><TAB><checkpoint dir>` in epoch order. The epoch of `checkpoint-N` is read from that checkpoint's own
 `trainer_state.json` (`epoch` at save time, with `save_strategy: epoch` an integer), never from the position in a sorted
@@ -15,6 +16,10 @@ than `--expect` is refused.
 section 4: the select-split gate is underpowered at ~270 feasible episodes, so when no epoch passes it is epoch 3). Any
 other status (the runs cannot be compared, a split mismatch) is an error, not a fallback. It writes
 `OUT_DIR/selected_epoch.txt` (`<k> selected|fallback`) and the symlink `OUT_DIR/<prefix>_selected_merged -> <prefix>_e<k>_merged`.
+
+`best` writes `RUN_DIR/best_checkpoint.json` (`{"checkpoint": "checkpoint-N", "epoch": k, "how": ...}`) for the epoch in
+`selected_epoch.txt`, so `honest_agents.archive` keeps that epoch's adapter (it keeps `final/` and the checkpoint the
+file names): merged models are not archived, and the next node rebuilds the selected model from that adapter.
 """
 
 from __future__ import annotations
@@ -82,6 +87,20 @@ def decide(selection: Path, out_dir: Path, *, fallback: int, status: int, prefix
     return epoch, how
 
 
+def best(run_dir: Path, selected: Path, *, expect: int | None = None) -> dict[str, object]:
+    """Record the selected epoch's checkpoint in `run_dir/best_checkpoint.json` (the file `honest_agents.archive` reads)."""
+    words = selected.read_text().split() if selected.is_file() else []
+    if len(words) != 2 or not words[0].isdigit() or words[1] not in ("selected", "fallback"):
+        raise SystemExit(f"{selected}: expected one line `<epoch> selected|fallback` (written by `decide`)")
+    epoch = int(words[0])
+    ckpt = dict(checkpoint_epochs(run_dir, expect)).get(epoch)
+    if ckpt is None:
+        raise SystemExit(f"{run_dir}: no checkpoint of epoch {epoch}")
+    record: dict[str, object] = {"checkpoint": ckpt.name, "epoch": epoch, "how": words[1]}
+    (run_dir / "best_checkpoint.json").write_text(json.dumps(record) + "\n")
+    return record
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m honest_agents.sft.epochs", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -94,10 +113,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     de.add_argument("--fallback", type=int, required=True)
     de.add_argument("--status", type=int, required=True, help="exit status of eval.select_checkpoint")
     de.add_argument("--prefix", default="sft_v2", help="merged directories are <prefix>_e<k>_merged")
+    be = sub.add_parser("best", help="write RUN_DIR/best_checkpoint.json for the selected epoch (archive keeps it)")
+    be.add_argument("run_dir", type=Path)
+    be.add_argument("selected", type=Path, help="selected_epoch.txt written by `decide`")
+    be.add_argument("--expect", type=int, default=None, help="refuse unless the epochs are exactly 1..N")
     args = ap.parse_args(argv)
     if args.cmd == "list":
         for k, path in checkpoint_epochs(args.run_dir, args.expect):
             print(f"{k}\t{path}")
+        return 0
+    if args.cmd == "best":
+        print(json.dumps(best(args.run_dir, args.selected, expect=args.expect)))
         return 0
     epoch, how = decide(args.selection, args.out_dir, fallback=args.fallback, status=args.status, prefix=args.prefix)
     print(f"epoch {epoch} ({how})")

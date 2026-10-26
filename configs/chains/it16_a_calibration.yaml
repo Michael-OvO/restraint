@@ -1,0 +1,141 @@
+# Iteration 16, stage (a): the calibration samples (docs/iteration-16-prereg.md section 6.1 and section 8 "Spend in
+# stages"). Base and G2 seed 1 on Terminal-Bench 2.0 and ImpossibleBench (LiveCodeBench split, 103 problems x 3 splits),
+# S = 2. They set m3, the MDEs of P1 and P2 and the model-scenario components; margins come only from the base arm. Their
+# episodes are never final-arm evidence. Runbook: docs/iteration-16-runbook.md (node, staging, launch, watcher, stops).
+# NOT APPROVED: nothing here runs before the owner signs off docs/iteration-16-signoff.md and approves this stage's spend.
+# The first step is the integrity gate itself (`gate.ledger check`): while any defect in docs/defects.md is open (DEF-10
+# and DEF-43 are, 2026-10-26) the chain stops there, before anything is merged, served or sampled.
+# Preconditions (runbook section 2): `node sync --with-data` with data/weights/it14/sft-v2-e3-final,
+# data/weights/it15/g2-s1-final and data/ext/impossiblebench (the archive's benchmarks/impossiblebench) staged.
+# One GPU: every server is on GPU 0 and the steps run one after another (no training in this stage).
+# Every served checkpoint opens with its 12-task sanity run (DEF-46: `node_chain check` refuses otherwise); the base
+# arm gets one too (cheap; the same serving path). Timeouts: G2 rebuild = two CPU merges (~5 min each, it14); TB2 has
+# no archived run at 30 turns, so its step budget is ~3x the estimate (runbook section 3).
+name: it16a
+state_dir: outputs/chain/it16a
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --ledger docs/defects.md
+      --json outputs/chain/it16a/gate_ledger.json
+      && mkdir -p outputs/chain/it16a/markers && touch outputs/chain/it16a/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it16a/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  # G2 seed 1, rebuilt on CPU: base + SFT-v2 epoch 3, then + the G2 adapter (prereg section 2).
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  # ImpossibleBench task dirs: the staged snapshot must hash to the archive's MANIFEST.sha256 (the files
+  # data/benchmarks/final_benchmark.json pins), then their tuned prompt (the adapter's default, named explicitly).
+  - name: ib_tasks
+    command: >-
+      (cd data/ext/impossiblebench && sha256sum --check --strict --quiet MANIFEST.sha256)
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench
+      materialize --data data/ext/impossiblebench/hf/impossible_livecodebench --out outputs/it16/ib_lcb_tuned
+      --prompt tuned
+      && mkdir -p outputs/chain/it16a/markers && touch outputs/chain/it16a/markers/ib_tasks.done
+    gpus: []
+    done: outputs/chain/it16a/markers/ib_tasks.done
+    timeout_min: 20
+    on_failure: stop
+
+  - name: base_sanity
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_base_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it16_base_sanity/metrics.json
+    timeout_min: 45
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: base_calibration
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- env N_CONCURRENT=12 scripts/eval_tb.sh tb2 runs/harbor/it16a_base_tb2 -k 2
+      -- env N_CONCURRENT=24 scripts/eval_tb.sh outputs/it16/ib_lcb_tuned runs/harbor/it16a_base_ib -k 2
+      && mkdir -p outputs/chain/it16a/markers && touch outputs/chain/it16a/markers/base_calibration.done
+    gpus: [0]
+    done: outputs/chain/it16a/markers/base_calibration.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 45
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: g2_sanity
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it16_g2_sanity/metrics.json
+    timeout_min: 45
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: g2_calibration
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- env N_CONCURRENT=12 scripts/eval_tb.sh tb2 runs/harbor/it16a_g2_tb2 -k 2
+      -- env N_CONCURRENT=24 scripts/eval_tb.sh outputs/it16/ib_lcb_tuned runs/harbor/it16a_g2_ib -k 2
+      && mkdir -p outputs/chain/it16a/markers && touch outputs/chain/it16a/markers/g2_calibration.done
+    gpus: [0]
+    done: outputs/chain/it16a/markers/g2_calibration.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 45
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # Units (CPU, no server): TB2 per final_benchmark.tb2_units, ImpossibleBench per its scorer. One Harbor job per
+  # directory: a retried step leaves two, and `score` then refuses (its one positional argument); delete the partial job
+  # first (runbook section 6).
+  - name: calibration_units
+    command: >-
+      mkdir -p runs/final/it16a
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --bench terminal_bench_2 runs/harbor/it16a_base_tb2/tb2__* --out runs/final/it16a/base_tb2_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --bench terminal_bench_2 runs/harbor/it16a_g2_tb2/tb2__* --out runs/final/it16a/g2_tb2_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it16a_base_ib/ib_lcb_tuned__* --out runs/final/it16a/base_ib_summary.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it16a_g2_ib/ib_lcb_tuned__* --out runs/final/it16a/g2_ib_summary.json
+      && touch outputs/chain/it16a/markers/calibration_units.done
+    gpus: []
+    done: outputs/chain/it16a/markers/calibration_units.done
+    timeout_min: 30
+    on_failure: stop
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it16a_base_tb2, runs/harbor/it16a_base_ib, runs/harbor/it16a_g2_tb2, runs/harbor/it16a_g2_ib,
+               runs/final/it16a, outputs/logs]
+  archives:
+    - {iteration: 16, name: it16a-calibration, eval: [runs/eval/it16_base_sanity, runs/eval/it16_g2_sanity],
+       no_weights: true, note: "iteration 16 stage (a): calibration samples, base and G2 s1, TB2 + ImpossibleBench LCB, S = 2"}
