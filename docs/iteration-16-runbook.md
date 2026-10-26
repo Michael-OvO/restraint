@@ -2,7 +2,7 @@
 
 **Status: prepared, not launched, not approved.** The integrity gate is shut: DEF-10 (the pre-registration is a
 DRAFT) and DEF-43 (owner decision) are open, with DEF-20, DEF-50 and the two entries this runbook's lane added
-(DEF-NEW-it16-jobs-1, -2). No stage below may run until [integrity-gate.md](integrity-gate.md) step 3 is signed off in
+(DEF-58, DEF-59). No stage below may run until [integrity-gate.md](integrity-gate.md) step 3 is signed off in
 [iteration-16-signoff.md](iteration-16-signoff.md) and the owner approves that stage's spend. The job files enforce
 this themselves: the first step of each one is `python -m honest_agents.gate.ledger check`, which exits 1 while any
 ledger entry is open, and every other step depends on it.
@@ -178,12 +178,12 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   - The SFT example builder for a prebuilt commit-check build is not registered in `sft.train_sft` (no `kind`).
   - `<SELECT_PROTOCOL>` is the `run_eval --protocol` file with `ni_margin` = max(5, ni10 at the select split), computed
     at build.
-- DEF-NEW-it16-jobs-1: no rollout sends the per-(task, sample, turn) seeds the pre-registration promises. Implement
+- DEF-58: no rollout sends the per-(task, sample, turn) seeds the pre-registration promises. Implement
   them or amend the pre-registration before it is approved.
-- DEF-NEW-it16-jobs-3: the AbstentionBench over-abstention guard's margin m (prereg 6.3) is to come from the
+- DEF-60: the AbstentionBench over-abstention guard's margin m (prereg 6.3) is to come from the
   calibration samples, but those are TB2 and ImpossibleBench only, so (a) gives no m for it (nor for MASK). (d) scores
   the guard's interval; the margin needs an owner decision before the pre-registration is approved.
-- DEF-NEW-it16-jobs-2: `final_benchmark never-trained` does not read `data/commit_checks/builds/`, so (c)'s
+- DEF-59: `final_benchmark never-trained` does not read `data/commit_checks/builds/`, so (c)'s
   `data_gates` would not see the build it trains on until that is fixed.
 - The ImpossibleBench instruction is the adapter's default "tuned" prompt. The manifest freezes the items and files but
   not the prompt variant, so the job files pin `--prompt tuned` explicitly.
