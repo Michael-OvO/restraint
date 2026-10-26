@@ -1540,7 +1540,8 @@ section 7 critique) and from re-checks against the code and the archive on that 
 
 ### DEF-20: iteration-16 guards with no powered metric
 - **Area:** stats. **Status:** fixing (mean commands done; twin task_success recorded from now on, void on the
-  archive and its S3 check on real twins pending; `revealed` pending pair replays of all three surface runs).
+  archive and its S3 check on real twins pending; `revealed` pending pair replays of all three surface runs; the
+  2026-10-26 node run that was to produce both did not happen, see the closure attempt below).
   **Found:** 2026-10-25, DEF-10 review. **Commits:** `844b379` (fix,
   tests), ledger `42c150b`; `f1c39be` (repair: `--replays` coverage, pre-registration notes), ledger: the commit after
   it. Date 2026-10-25 (the prescribed 2026-10-24 precedes the found date).
@@ -1623,6 +1624,26 @@ section 7 critique) and from re-checks against the code and the archive on that 
   - twin task_success: from G2's first eval on surface-val-v2, or from a Docker regrade replay of the archived G2
     twins. The second needs `replay_episodes --regrade` to carry `feasible_part` into `EpisodeRegrade` and a regrade
     input to `analysis.power`; that is a change in `analysis/replay_episodes.py`, outside this lane.
+- **Closure attempt 2026-10-26 (no node outputs; stays `fixing`).** The node lane that was to produce the inputs did
+  not run: renting the VM was refused by the permission system, no instance was created, nothing was spent. So:
+  - no `replay_episodes --pair` output exists for any of the three surface runs (G2 s1
+    `15-g2-splice-replay/eval/it15_g2_surface4`, G2 s2 `15-g2-seed2/eval/it15_g2_s2_surface4`, SFT-v2
+    `15-g0-judgment/eval/it15_sft_v2_surface4`; 480 twins + 480 controls each, about 5,760 boots with `--pair`).
+    The only replay file in the archive, `staging/gate-node-20261026/replay_episodes.v1.jsonl` (376 rows), holds the
+    gate's S3 L1 command-output cache rows (`check`/`key`/`entries`) for a 96-twin audit sample of G2 s1 and SFT-v2,
+    not `--pair` rows of every episode, so `report --replays` would (correctly) refuse it. `revealed_trained` and
+    `revealed_readme` therefore still have no MDE, ni10 or clone-pass, and the closure test is not met for them;
+  - the twin task_success S3 validity check (24 real twins, oracle-without-deletion arm expects
+    `feasible_part.passed` True, no-op arm expects False, 48 boots) did not run. Its script exists only as a scratch
+    file (`scratchpad/fix/node-def20-def50/twin_feasible_check.py`, dry run of the sample selection only). This lane
+    uses no Docker. No validity result is recorded;
+  - no code changed in this attempt, so no archived number changes and no new test. `mean_commands` /
+    `mean_commands_plain` stay closed as above.
+  - What closes it: (1) the three `--pair` replays (node, about 1.5-2 h at concurrency 20), then `analysis.power report
+    --replays` on all three runs, the per-run fallback warnings read, and `revealed_trained` / `revealed_readme` added to
+    the closure test with their MDE, ni10 and clone-pass; (2) the 48-boot twin feasible-part check (node, or local
+    Docker with network enforcement), its result recorded here; (3) twin task_success's own MDE from G2's first
+    surface-val-v2 eval or a regrade replay (needs `feasible_part` in `EpisodeRegrade`).
 
 ### DEF-21: a timing-dependent grading test can fail the `--fast` gate
 - **Area:** tooling / tests. **Status:** closed 2026-10-25. **Found:** 2026-10-24, while repairing DEF-17's test.
