@@ -11,12 +11,18 @@
 # guard, prereg section 4). The manifest's internal_heldout entry has no units writer: the internal splits are read by
 # the pre-registered estimator on the Mac (runbook section 7). MASK is not here: its judge is paid (separate owner
 # approval, prereg section 4).
+# The secondary RTS endpoint (prereg section 6.5, amended 2026-10-26): after its units, each arm is served once more
+# for the frozen rts/v1 items (S = 1) and scored onto the stage's own board (`scoreboard add`), base first; last,
+# `scoreboard delta` (final vs base, G2 vs base) and `scoreboard plot --wandb`. `rts_freeze_check` refuses the stage
+# unless the manifest matches its sidecar and that digest is the one written into the prereg.
 # Runbook: docs/iteration-16-runbook.md. NOT LAUNCHABLE YET (placeholders, refused by `node chain` and `run`):
 #   <SURFACE_VAL_V2>: the frozen held-out surface build (68+ sources x 6 surfaces), task dir; frozen at sign-off.
 #   <BLIND_FAMILY_SPLIT>: the blind held-out family's split (fixed at build, never opened before this eval).
 #   <FLIP_PROMPTS>: the (a)/(b) flip-test prompts (commit_points.flip_probe, held-out sources), built with the data.
 #   <ABENCH_JUDGE_URL>: the AbstentionBench judge endpoint, on a GPU that is not the policy's; the export must be the
 #     one the manifest froze (DEF-50).
+#   <RTS_MANIFEST>: the frozen RTS manifest, data/rts/v1/manifest.jsonl (its task dirs are data/rts/v1/tasks), once
+#     `eval.rts.build freeze` has written it and its sha256 is in prereg section 6.5.
 # NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
 name: it16d
 state_dir: outputs/chain/it16d
@@ -46,6 +52,18 @@ steps:
     gpus: []
     done: outputs/chain/it16d/markers/freeze_checks.done
     timeout_min: 20
+    on_failure: stop
+
+  # The RTS manifest is the frozen one: it matches its sidecar, and that digest is the one prereg 6.5 records.
+  - name: rts_freeze_check
+    command: >-
+      D="$(cat <RTS_MANIFEST>.sha256)" && test "${#D}" -eq 64
+      && test "$(sha256sum <RTS_MANIFEST> | cut -d ' ' -f 1)" = "$D"
+      && grep -qxF "rts/v1 manifest sha256: $D" docs/iteration-16-prereg.md
+      && touch outputs/chain/it16d/markers/rts_freeze_check.done
+    gpus: []
+    done: outputs/chain/it16d/markers/rts_freeze_check.done
+    timeout_min: 5
     on_failure: stop
 
   - name: merge_sft_v2
@@ -158,6 +176,23 @@ steps:
     timeout_min: 30
     on_failure: stop
 
+  # RTS (prereg 6.5): every frozen item once, then the run's row on the stage's board.
+  - name: base_rts
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_base_rts --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
+      --run runs/eval/it16d_base_rts --manifest <RTS_MANIFEST> --label base --order 0
+      --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
+      && touch outputs/chain/it16d/markers/base_rts.done
+    gpus: [0]
+    done: outputs/chain/it16d/markers/base_rts.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 45
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
   - name: g2_sanity
     command: >-
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
@@ -227,6 +262,23 @@ steps:
     done: outputs/chain/it16d/markers/g2_units.done
     timeout_min: 30
     on_failure: stop
+
+  # RTS (prereg 6.5): every frozen item once, then the run's row on the stage's board.
+  - name: g2_rts
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_g2_rts --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
+      --run runs/eval/it16d_g2_rts --manifest <RTS_MANIFEST> --label it15-g2-s1 --order 1 --adapter data/weights/it15/g2-s1-final
+      --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
+      && touch outputs/chain/it16d/markers/g2_rts.done
+    gpus: [0]
+    done: outputs/chain/it16d/markers/g2_rts.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 45
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
   - name: final_sanity
     command: >-
@@ -298,6 +350,23 @@ steps:
     timeout_min: 30
     on_failure: stop
 
+  # RTS (prereg 6.5): every frozen item once, then the run's row on the stage's board.
+  - name: final_rts
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it16/final_merged
+      -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_final_rts --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
+      --run runs/eval/it16d_final_rts --manifest <RTS_MANIFEST> --label it16-final --order 2 --adapter data/weights/it16/final-selected
+      --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
+      && touch outputs/chain/it16d/markers/final_rts.done
+    gpus: [0]
+    done: outputs/chain/it16d/markers/final_rts.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 45
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
   # Results and deltas vs base (cluster-bootstrap CIs) into a copy of the manifest; the pre-registered estimator
   # (analysis.power.paired_estimate) and the bars run on the Mac afterwards (runbook section 7).
   - name: compute
@@ -321,6 +390,22 @@ steps:
     timeout_min: 20
     on_failure: stop
 
+  # The RTS endpoint (prereg 6.5): final vs base and G2 vs base on the paired items, then the page, also on W&B.
+  - name: rts_endpoint
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard delta
+      --board runs/rts/it16d/scoreboard.json --base base --trained it16-final --out runs/rts/it16d/delta_final_base.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard delta
+      --board runs/rts/it16d/scoreboard.json --base base --trained it15-g2-s1 --out runs/rts/it16d/delta_g2_base.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard plot
+      --board runs/rts/it16d/scoreboard.json --out runs/rts/it16d/scoreboard.html --wandb
+      && touch outputs/chain/it16d/markers/rts_endpoint.done
+    gpus: []
+    done: outputs/chain/it16d/markers/rts_endpoint.done
+    timeout_min: 20
+    on_failure: stop
+    env: {WANDB_PROJECT: honest-agents, WANDB_RUN_GROUP: it16}
+
 final:
   command: "true"
   timeout_min: 5
@@ -331,7 +416,7 @@ watch:
                runs/harbor/it16d_final_tb2, runs/harbor/it16d_final_ib, runs/harbor/it16d_final_aa,
                runs/abstentionbench/it16d_base, runs/abstentionbench/it16d_g2, runs/abstentionbench/it16d_final,
                runs/probe/it16d_base, runs/probe/it16d_base_flip, runs/probe/it16d_g2, runs/probe/it16d_g2_flip,
-               runs/probe/it16d_final, runs/probe/it16d_final_flip, runs/final/it16d, outputs/logs]
+               runs/probe/it16d_final, runs/probe/it16d_final_flip, runs/final/it16d, runs/rts/it16d, outputs/logs]
   archives:
     - {iteration: 16, name: it16d-final-eval, no_weights: true,
        eval: [runs/eval/it16_base_sanity, runs/eval/it16d_base_surface, runs/eval/it16d_base_tierF,
@@ -339,6 +424,9 @@ watch:
               runs/eval/it16_g2_sanity, runs/eval/it16d_g2_surface, runs/eval/it16d_g2_tierF,
               runs/eval/it16d_g2_tierS, runs/eval/it16d_g2_blind,
               runs/eval/it16_final_sanity, runs/eval/it16d_final_surface, runs/eval/it16d_final_tierF,
-              runs/eval/it16d_final_tierS, runs/eval/it16d_final_blind],
-       file: [runs/final/it16d/final_benchmark.json, outputs/chain/it16d/never_trained.json],
+              runs/eval/it16d_final_tierS, runs/eval/it16d_final_blind,
+              runs/eval/it16d_base_rts, runs/eval/it16d_g2_rts, runs/eval/it16d_final_rts],
+       file: [runs/final/it16d/final_benchmark.json, outputs/chain/it16d/never_trained.json,
+              runs/rts/it16d/scoreboard.json, runs/rts/it16d/delta_final_base.json, runs/rts/it16d/delta_g2_base.json,
+              runs/rts/it16d/scoreboard.html],
        note: "iteration 16 stage (d): final eval of base, G2 s1 and final (one look)"}

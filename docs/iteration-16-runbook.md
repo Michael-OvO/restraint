@@ -16,7 +16,7 @@ separate job file, launched and watched on its own:
 | (a) | `configs/chains/it16_a_calibration.yaml` | calibration samples: base and G2 s1 on TB2 and ImpossibleBench LCB, S = 2, after a 12-task sanity run of each served model | yes, once the gate opens |
 | (b) | `configs/chains/it16_b_claim_rollouts.yaml` | G2 s1 own runs on the 400 training-pool surface tasks (`data/decision/read_rft_tasks.jsonl`), S = 4, transcripts (bank) and tool outputs kept; then the checklist validation of the new end states | yes, once the gate opens |
 | (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>` |
-| (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>` |
+| (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK, plus the RTS secondary endpoint (prereg 6.5) | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>`, `<RTS_MANIFEST>` |
 
 A `<PLACEHOLDER>` is refused by `python -m honest_agents.node chain` (without `--dry-run`) and by `node_chain run`. Each
 one stands for an input that is built later (prereg sections 3-7 "computed-at-build"). All four files pass
@@ -25,7 +25,8 @@ one stands for an input that is built later (prereg sections 3-7 "computed-at-bu
 
 Order: (a) and (b) are independent and can share one rental. (c) needs the claim-point build. The commit-data lane
 makes that build from (b)'s transcripts on the Mac, at $0. (d) needs (c)'s selected adapter and the frozen eval build.
-The base and G2 numbers of (a) are not reused in (d) (prereg 6.1).
+The base and G2 numbers of (a) are not reused in (d) (prereg 6.1). (d) also needs the frozen RTS manifest, which needs
+the RTS gate: a Docker job on a rented CPU node (section 2.1), independent of (a)-(c).
 
 ## 1. Node
 
@@ -65,6 +66,27 @@ uv run --extra eval python -m honest_agents.eval.final_benchmark check --archive
 (cd data/ext/impossiblebench && shasum -a 256 -c MANIFEST.sha256)             # the step on the node repeats this
 ```
 
+### 2.1 RTS: the gate on a CPU node, then the freeze (before (d))
+
+The RTS gate ([RTS build plan](superpowers/plans/2026-10-26-rts-build.md), core lane) runs every candidate pair's
+oracle and a do-nothing agent in Docker. It needs no GPU, and the Mac must not run it (at most 2 local sandboxes). It
+runs on a rented **CPU-only** node, which the owner approves like any rental. The steps:
+
+1. Mac, $0: `python -m honest_agents.eval.rts.build seeds`, then `pairs` (no Docker). The candidates land under
+   `data/rts/v1/candidates/`, so `node sync --with-data` sends them.
+2. CPU node: `python -m honest_agents.eval.rts.build gate --concurrency N`. It is resumable, so a lost node costs only
+   the pairs in flight. Arm a watcher for it like any paid job (section 5) and pull its result rows.
+3. Mac, $0: `python -m honest_agents.eval.rts.build freeze`. It writes `data/rts/v1/manifest.jsonl`, its `.sha256`
+   sidecar, `data/rts/v1/tasks/` and `data/rts/v1/protocol.json`, and it refuses to overwrite a frozen v1.
+4. Write the sidecar's digest into prereg section 6.5 (the line `rts/v1 manifest sha256: ...`, in place of
+   `computed-at-build`). Replace `<RTS_MANIFEST>` in the (d) job file by `data/rts/v1/manifest.jsonl`. Commit both
+   before (d) is synced. `rts_freeze_check`, the step after `freeze_checks`, refuses the chain unless the manifest
+   matches its sidecar and the prereg line holds that digest.
+
+The gate is not costed here. Its job count is about four runs per candidate pair (oracle on twin and control, do-nothing
+on both), and the candidate count is known only after `pairs`. Cost it from P1's gate timings and ask for it
+separately.
+
 G2 s1 is rebuilt on the node by two CPU merges: base + SFT-v2 e3, then + the G2 adapter. That is the prereg's "rebuilt
 on CPU". Every merged model, G2 included, has its 12-task sanity run before any other use of its server
 (`runs/eval/it16_g2_sanity` and so on). The merge and sanity steps have the same done markers in every job file, so on
@@ -81,9 +103,12 @@ image pulls per rental.
 | (a) | merges 2 x 4 min (it14 `sft_v2_merge` 3.9 min); 2 sanity runs about 10 min each; **TB2** S = 2 = 178 trials per arm at concurrency 12. No archived TB2 run at 30 turns exists. The 108 Agentic Abstention trials (TB2 tasks, 10 turns, concurrency 12) took 24-27 min (mean 85-114 s per trial, `14-session-b/harbor`), so assume 3x per trial at 30 turns: about 1-2 h per arm, plus about 0.5 h of image pulls for the first arm. **ImpossibleBench** S = 2 = 618 small trials per arm at concurrency 24, about 1-2 min each: 0.5-0.9 h per arm | about 6 h (4.5-8.5) | about $9 (7-12) |
 | (b) | merges and sanity 0.35 h; **1,600 episodes**: `it15_g4_sample` (same 400 tasks, same model, concurrency 24) took 3 h 20 min (`sample_g4.log` 08:03:55 to 11:23:45 UTC; summed episode time / 24 = 3.28 h); checklist validation at most 150 min (`--budget-min`; what is left resumes from the cache at L1) | about 6.9 h (4.4 without the validation) | about $10 ($6.4) |
 | (c) | merges 0.2 h; data gates (never-trained, coverage, the SFT dry run) about 0.3 h; base on the select split, 424 episodes (it14 `base_select` 37 min); **training**: G2 trained 3,102 examples x 2 epochs in 7,306 s at 0.849 samples/s (`train_g2.log`), so about 2 h for a build of about 3,000 examples, scaling linearly; 2 epoch merges 0.2 h; 2 x (sanity + select split) about 0.7 h each (it14 `sft_v2_select_e*` 25-32 min) | about 5.5 h (4.5-7) | about $8 (6.5-10) |
-| (d) | per arm: surface-val-v2 at least 816 x 4 = 3,264 episodes at about 870/h (it15 `surface4`: 960 episodes, 1.1 h) = 3.75 h; tier F 712 episodes about 1.9 h (`g2_s2_tierF.log`: tier F + surface4 in 3 h 02 min); tier S 480 episodes about 0.65 h; the decision probe and the flip probe about 0.3 h; the blind family about 0.5 h; TB2 S = 4 = 356 trials, 2-4 h; ImpossibleBench S = 4 = 1,236 trials, 0.9-1.7 h; Agentic Abstention 432 trials about 1.7 h; AbstentionBench about 0.5 h. That is 12-15 h per arm, x 3, plus 1 h of merges and sanity runs | about 40 h (37-47) | about $58 (54-69) |
+| (d) | per arm: surface-val-v2 at least 816 x 4 = 3,264 episodes at about 870/h (it15 `surface4`: 960 episodes, 1.1 h) = 3.75 h; tier F 712 episodes about 1.9 h (`g2_s2_tierF.log`: tier F + surface4 in 3 h 02 min); tier S 480 episodes about 0.65 h; the decision probe and the flip probe about 0.3 h; the blind family about 0.5 h; TB2 S = 4 = 356 trials, 2-4 h; ImpossibleBench S = 4 = 1,236 trials, 0.9-1.7 h; Agentic Abstention 432 trials about 1.7 h; AbstentionBench about 0.5 h. That is 12-15 h per arm, x 3, plus 1 h of merges and sanity runs. **RTS** (re-costed from the RTS spec's section 9): every rts/v1 item once, about 400-600 episodes per arm at concurrency 12. The spec scales the Agentic Abstention timings (432 trials, 1.5-4 h) to 2-5 h per arm. Add 0.5-1 h of image pulls for the first arm (the RTS benchmarks' images are new to the node). The scoring, the two deltas and the page take minutes on the CPU. RTS adds about 10 h (6.5-16) | about 50 h (44-63) | about $73 (64-92) |
 
-Total for the four stages: about 58 h, about **$85** ($74-101) without overrun. Allow 30 % for overrun. Each stage is
+The (d) RTS figure is not timed. The base arm's `base_rts` step measures it (its log and the run's
+`rollout.wall_time_sec`); re-cost the G2 and final arms from it if the owner asks before they run.
+
+Total for the four stages: about 68 h, about **$100** ($83-124) without overrun. Allow 30 % for overrun. Each stage is
 asked for separately. The TB2 and ImpossibleBench rows are the least certain. Stage (a) measures both, and (d) is
 re-costed from (a)'s measured job times (Harbor `result.json` `started_at` / `finished_at`) before (d) is requested.
 
@@ -172,10 +197,19 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   abench_units}.json`; Agentic Abstention's timely recall, which the manifest does not list, is in each job's
   `agentic_abstention_summary.json` `intervals`). Then the pre-registered estimator and
   bars on the archive (`analysis.power report --bar ...`, prereg sections 5-6) and the decision table (section 9).
+  RTS (prereg 6.5): the stage's own board `runs/rts/it16d/scoreboard.json` (rows `base`, `it15-g2-s1`, `it16-final`;
+  units under `runs/rts/it16d/units/`), the endpoints `runs/rts/it16d/delta_{final,g2}_base.json` (verdict, the three
+  conditions, the ladder) and the page `runs/rts/it16d/scoreboard.html`, also on W&B (project `honest-agents`, run
+  `rts-scoreboard`). Compute the RTS MDE from the base row's units alone and write it into prereg 6.5 before reading
+  either delta. It is reported and never moves a bar. RTS is not in the decision table.
 
 ## 8. What is not settled yet
 
 - The placeholders of (c) and (d) (table at the top).
+  - `<RTS_MANIFEST>` waits for the RTS freeze (section 2.1), which waits for the core and operator lanes and the
+    CPU-node gate.
+  - `analysis.power` has no RTS loader yet, so the RTS MDE of prereg 6.5 has no tool. The tool must work on the base
+    row's units (`runs/rts/it16d/units/base.json`) before (d)'s RTS numbers are read.
   - The SFT example builder for a prebuilt commit-check build is not registered in `sft.train_sft` (no `kind`).
   - `<SELECT_PROTOCOL>` is the `run_eval --protocol` file with `ni_margin` = max(5, ni10 at the select split), computed
     at build.
