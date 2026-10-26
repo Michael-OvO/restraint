@@ -405,7 +405,7 @@
     "abstentionbench": {
       "role": "regression check",
       "status": "pending",
-      "pending_reason": "the HF loading script is pinned, but the 20 source datasets it downloads are not; the items are frozen by the sha256 of the first export (scripts/eval_abstentionbench.sh), recorded here before any arm runs (ledger DEF-NEW-bench-2)",
+      "pending_reason": "the HF loading script is pinned, but the 20 source datasets it downloads are not; the items are frozen by the sha256 of the first export (scripts/eval_abstentionbench.sh), recorded here before any arm runs (ledger DEF-50)",
       "paper": "arXiv:2506.09038",
       "sources": [
         {
