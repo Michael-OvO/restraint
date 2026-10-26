@@ -68,7 +68,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-58 | recording / eval harness | closed | the pre-registration (section 2) runs every arm with the same per-(task, sample, turn) vLLM seeds, but no rollout path sends a seed: `run_eval` and the Harbor agent sample unseeded |
 | DEF-59 | tooling / build | closed | the never-trained check's repo scope (`REPO_TRAINING_GLOBS`) does not match `data/commit_checks/builds/`, so the iteration-16 training build (the claim-point examples and DPO pairs) is never checked against the frozen benchmarks |
 | DEF-60 | stats | closed | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
-| DEF-61 | tooling / tests | open | `serve_and_run.sh` did not exit within 60 s of a SIGINT in `--fast` twice (2026-10-25 and 2026-10-26, machine loaded); it is the script every node chain uses to stop its vLLM server |
+| DEF-61 | tooling / tests | closed 2026-10-26 | `serve_and_run.sh` did not exit within 60 s of a SIGINT in `--fast` twice (2026-10-25 and 2026-10-26, machine loaded); it is the script every node chain uses to stop its vLLM server |
 
 ---
 
@@ -3227,7 +3227,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `tests/test_it16_chains.py::test_every_external_guard_states_its_margin`. Impact: none re-scored (nothing has run).
 
 ### DEF-61: serve_and_run.sh can miss its 60 s exit after a SIGINT
-- **Area:** tooling / tests. **Status:** open. **Found:** 2026-10-26, `scripts/test.sh --fast` after the `design/rts`
+- **Area:** tooling / tests. **Status:** closed 2026-10-26. **Found:** 2026-10-26, `scripts/test.sh --fast` after the `design/rts`
   merge (`4c00e5e`); the same test failed once on 2026-10-25 during an L0 sweep (morning brief, "Small things").
 - **Evidence:** `tests/test_chain_scripts.py::test_serve_and_run_stops_the_server_on_sigint_and_sigterm[2-130]`:
   `subprocess.TimeoutExpired ... timed out after 60 seconds` at `p.communicate(timeout=60)` (L143), so the script was
@@ -3241,3 +3241,26 @@ section 7 critique) and from re-checks against the code and the archive on that 
   deterministic.
 - **Closure test:** the test passes repeatedly under a loaded machine (e.g. 50 runs with `-n` workers), plus a test for
   the found window.
+- **Fix (done, 2026-10-26):** cause: a signal that lands after the command's `&` but before `CHILD_PID=$!` runs the
+  INT/TERM trap there (bash runs a pending trap between two commands), so `cleanup` sees an empty `CHILD_PID`, skips
+  the command and stops only the server. The command lives on (`sleep 120` in the test) and keeps the script's stdout
+  open, so `communicate(timeout=60)` waits for an EOF that comes 120 s later; on a node the evaluation would outlive its
+  step. The window is open only while the parent is descheduled right after the fork and the child has already written
+  `cmd.pid`, which is why it needs a loaded machine. Evidence: (1) a copy of the script that spins in exactly that window
+  (`while :; do sleep 0.1; done` after the `&` line) gives the DEF's failure on the old code, for SIGINT and SIGTERM:
+  `TimeoutExpired ... timed out after 60 seconds` at `communicate`, with both `bash -c ...` and `sleep 120` still
+  running a minute later; (2) the other candidates are ruled out: the child is in its own group under `set -m` with or
+  without a controlling tty (pgid = pid), bash's `wait` returns at once on a trapped SIGINT (trace: trap 0.55 s after
+  `wait` began, 0.5 s after the signal), the group kill reaches the child, and `stop_vllm` stops the stub within 1 s.
+  A natural hit was not caught: 2,160 runs of the old script with a probe in the INT trap (300 at `nice 15` beside 36
+  CPU spinners, 1,500 at `nice 10` beside 54 spinners, 200 at load average 26-90, 2 x 80 inside full `--fast` runs) all
+  had `CHILD_PID` set and none hung; the closure rests on the reproduction and on this being the only path found by
+  which the command outlives the teardown. Fix: `scripts/serve_and_run.sh` records `$!` in `BG_BEFORE` before each
+  command's fork; `cleanup` takes `CHILD_PID=$!` when `CHILD_PID` is empty and `$!` has changed since (bash sets `$!`
+  in the parent before any trap can run). A signal before the fork leaves `$!` unchanged, so nothing is taken; the
+  normal path is unchanged.
+- **Tests:** `tests/test_chain_scripts.py::test_serve_and_run_stops_a_command_signalled_before_its_pid_was_recorded`
+  (`[2-130]`, `[15-143]`; fail on the old code with the DEF's `TimeoutExpired`), and
+  `test_serve_and_run_stops_the_server_on_sigint_and_sigterm`. Load run with the fix: both tests x both signals x 150
+  = 600 runs, `-n 16` beside 36 CPU spinners (load average 55-77), 600 passed. Impact: none re-scored (a tooling path).
+- **Commits:** `f92b3ac` (fix, test).
