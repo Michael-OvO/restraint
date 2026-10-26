@@ -5,7 +5,9 @@
 #      `uv run --frozen --extra train vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8001` on a free GPU),
 #      JUDGE_MODEL (meta-llama/Llama-3.1-8B-Instruct), LIMIT (all), CONCURRENCY (64).
 # The HF dataset is a loading script that needs datasets<=3.6.0, so it is exported to JSONL once from a separate py3.11
-# venv under $HONEST_EXT_DIR/abstentionbench-export. Data license: CC BY-NC 4.0 (research use only).
+# venv under $HONEST_EXT_DIR/abstentionbench-export, and refused unless its sha256 is the one that
+# data/benchmarks/final_benchmark.json froze: the first run exports, then stops until that export is archived and frozen
+# (ledger DEF-50). Data license: CC BY-NC 4.0 (research use only).
 source "$(dirname "$0")/eval_common.sh"
 require_model
 : "${JUDGE_BASE_URL:?set JUDGE_BASE_URL to an OpenAI-compatible endpoint serving the judge model}"
@@ -22,6 +24,8 @@ if [[ ! -s "$DATA" ]]; then
   "$PY" "$REPO_ROOT/src/honest_agents/eval/external/abstentionbench_export_standalone.py" --out "$DATA" \
     --revision "$ABSTENTIONBENCH_HF_REVISION"
 fi
+# the items are frozen by the export's sha256 (ledger DEF-50): no arm runs on any other export, nor before the freeze
+"${UV_RUN[@]}" python -m honest_agents.eval.final_benchmark verify-export --bench abstentionbench "$DATA"
 "${UV_RUN[@]}" python -m honest_agents.eval.external.abstentionbench run \
   --data "$DATA" --out "$OUT" --base-url "$BASE_URL" --model "$MODEL" \
   --judge-base-url "$JUDGE_BASE_URL" --judge-model "${JUDGE_MODEL:-meta-llama/Llama-3.1-8B-Instruct}" \

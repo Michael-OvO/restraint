@@ -2781,23 +2781,53 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix (done so far):** the exporter takes `--revision` (default `af06080e`, the Hub's revision on 2026-10-25, last
   modified 2025-08-06) and `scripts/eval_abstentionbench.sh` passes `ABSTENTIONBENCH_HF_REVISION` from
   `scripts/eval_common.sh`; the manifest lists the benchmark as `pending` with that revision.
-- **Remaining (needs new code, not just a command):** `final_benchmark freeze` cannot ingest an export today:
-  `benchmark_ids("abstentionbench")` returns `None` and `definitions()` hardcodes `status: "pending"` with no export
-  source or hash, so `freeze --refreeze` would leave the benchmark unfrozen. Needed: (1) run the export once on the node
-  (it executes their loading script, so not on the Mac under the untrusted-code rule) and archive the JSONL under
-  `benchmarks/abstentionbench/`; (2) new code: `definitions()` adds an export source (`archive_file` + `sha256`, which
-  `check --archive` already verifies) and sets `frozen` when the archived export exists, and `benchmark_ids` derives
-  `dataset/index` ids from it. Those ids must not go into the never-trained index as they are: `BenchIndex.add_ids` also
-  indexes the part after the first `/`, which for `dataset/index` is a bare integer and would flag any numeric training
-  identifier; (3) `scripts/eval_abstentionbench.sh` refuses an export whose sha256 differs from the manifest's;
-  (4) then `freeze --archive A --refreeze` and a test that the frozen ids re-derive from the export.
+- **Ingest code (done, 2026-10-24, commit `COMMIT_PENDING`):** `final_benchmark` can now freeze an export.
+  - `definitions()` builds the entry with `_abstentionbench(archive)`. With no `benchmarks/abstentionbench/
+    abstentionbench.jsonl` in the archive it is the committed `pending` entry, unchanged (role, sources, metrics
+    equal; tested). With the export it is `frozen` and gains a source `{kind: export, exporter, revision,
+    archive_file, sha256}`, which `check --archive` verifies with its existing `archive_file` check.
+  - `benchmark_ids("abstentionbench")` derives `dataset/index` from the export (the `abstentionbench_units` cluster
+    ids) and refuses repeated ids. `freeze` without `--refreeze` refuses the pending -> frozen change (items and
+    sources changed), as for any other benchmark.
+  - `BenchIndex.add_ids` no longer indexes an all-digit bare form, so `gsm8k/12` flags only `gsm8k/12`, not a
+    training `seed: "12"`. No committed items file has an all-digit bare form (0 of 2553 ids), so the never-trained
+    index and its recorded verdict are unchanged.
+  - With the export archived, `benchmark_texts` also yields its questions, so the 8-gram containment check covers
+    them (questions under 20 words are skipped, as for every benchmark).
+  - `final_benchmark verify-export --bench abstentionbench FILE` exits 1 unless FILE's sha256 is the frozen export's,
+    including when the manifest records no export yet. `scripts/eval_abstentionbench.sh` runs it after the export
+    step and before `abstentionbench run`, under `set -euo pipefail`, so no arm runs on another export or before the
+    freeze.
+- **Remaining (one node step, commands only):** the export runs the Hub loading script, so it runs on the node
+  (`/root/restraint`), never on the Mac. The first run exports and then stops at `verify-export` (exit 1, "records
+  no export"); `MODEL` and `JUDGE_BASE_URL` only get past the script's argument checks, nothing is served:
+  1. node: `cd /root/restraint && MODEL=unused JUDGE_BASE_URL=http://127.0.0.1:9/v1 scripts/eval_abstentionbench.sh
+     || true; sha256sum ~/.cache/honest_agents/ext/abstentionbench.jsonl`
+  2. Mac: `mkdir -p ~/Documents/honest-agents-archive/benchmarks/abstentionbench && rsync -av
+     <node>:/root/.cache/honest_agents/ext/abstentionbench.jsonl ~/Documents/honest-agents-archive/benchmarks/abstentionbench/`
+     and check that `shasum -a 256` matches step 1.
+  3. Mac (`FB="env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m
+     honest_agents.eval.final_benchmark"`, the scripts' `UV_RUN`): `$FB freeze --archive
+     ~/Documents/honest-agents-archive --refreeze`, then `$FB check --archive
+     ~/Documents/honest-agents-archive` (expect `ok`) and `$FB never-trained --archive
+     ~/Documents/honest-agents-archive --record` (expect `pass`). Then change the `status == "pending"` line of
+     `test_abstentionbench_export_pins_the_dataset_revision` to `"frozen"`, and commit the manifest, the
+     `data/benchmarks/items/abstentionbench.txt` items file and the test.
+  When this step is done the entry can close. The node keeps its export at the same path, so later arms pass
+  `verify-export`.
 - **Metric (fixed in the repair commit):** the manifest's metric was `qa.f1`, which `compute` cannot produce (F1 is not a
   per-unit mean, and the scorer emitted no units). It is now `abstain.abstained` (recall on should-abstain questions,
   non-inferior) and `answer.abstained` (over-abstention, reported), per-question units from
   `final_benchmark.abstentionbench_units` / `final_benchmark units --bench abstentionbench`; their F1 is still reported
   by `abstentionbench score`. No arm has run, so no number changes.
-- **Closure test (so far):** `tests/eval/test_final_benchmark.py::test_abstentionbench_export_pins_the_dataset_revision`
-  (fails on the old exporter and script).
+- **Closure tests (so far):** `tests/eval/test_final_benchmark.py`:
+  `test_abstentionbench_export_pins_the_dataset_revision` (fails on the old exporter and script), and from the ingest
+  commit `test_abstentionbench_frozen_ids_rederive_from_the_archived_export` (on a small synthetic export: freeze,
+  `check --archive` clean, a changed export caught), `test_eval_abstentionbench_refuses_an_export_other_than_the_frozen_one`,
+  `test_a_bare_row_index_is_not_indexed_as_a_benchmark_id` and `test_abstentionbench_questions_are_benchmark_texts`.
+  All four fail on the code before the ingest commit.
+- **Impact (ingest commit):** none. No AbstentionBench run or export is archived, the committed manifest is byte
+  identical, and the never-trained index is unchanged (no all-digit bare forms).
 
 ### DEF-51: the base model's Hub revision is pinned nowhere
 - **Area:** build. **Status:** closed 2026-10-25 (the found date; 2026-10-24 would precede it, as for DEF-54).
