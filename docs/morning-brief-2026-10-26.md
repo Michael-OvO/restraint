@@ -3,6 +3,25 @@
 Written at 07:40 UTC (03:40 EDT) on `ad4be54` plus this commit. Nothing was pushed. The integrity gate is still
 **shut**: 7 ledger entries are not closed, and 3 of them need you.
 
+## Update, 2026-10-26 ~07:30 EDT (after the node batch)
+
+- **Node batch done, node destroyed.** Vast VM 57781978 (UK, 30 vCPU, $0.44/h, about 3.5 h, about $1.6).
+  `vastai show instances` is empty. The balance is **$13.89**.
+  - **DEF-20:** pair replays of all 2,880 episodes of the three surface runs (960/960 each; 35 did not reproduce
+    and fall back to the strict rule). `revealed` now has MDE, ni10 and clone-pass: G2 s1 trained 52.0 %, readme
+    82.4 %; MDE 6.2 / 10.1 at K = 20, 3.2 / 5.3 at K = 68 (`docs/research/it16-power-replays.md`). Twin
+    feasible-part validity: 48/48 runs correct on 24 real twins. **Only remaining item:** twin task_success's own MDE,
+    which the stage-(a) eval supplies (an experiment, so it waits for DEF-10).
+  - **DEF-50: blocked on you.** The export reached the gated dataset `Idavidrein/gpqa` and stopped. No Hugging Face
+    token is configured on the Mac. Either put a token with GPQA access in `~/.cache/huggingface/token` (`node run`
+    forwards it over stdin; the rerun takes minutes on any node), or decide to freeze AbstentionBench without GPQA,
+    which is a pre-registration amendment.
+- **DEF-59 closed** (`4077af4`): the never-trained check reads `data/commit_checks/builds/*`, with a regression test
+  and a re-recorded scope (pass, 62,559 rows).
+- **Ledger now:** 54 of 60 closed. Open or fixing: DEF-10, DEF-43, DEF-58 and DEF-60 (your decisions, all inside
+  Decisions 1 and 2 below); DEF-50 (your HF token or amendment); DEF-20 (needs stage (a), so it follows DEF-10).
+- Everything else below is as written at 03:40 EDT. Ignore the "one instance is running" row: it has been destroyed.
+
 ## State this morning
 
 | check | result |
