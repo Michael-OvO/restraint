@@ -1648,6 +1648,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
     Docker with network enforcement), its result recorded here; (3) twin task_success's own MDE from G2's first
     surface-val-v2 eval or a regrade replay (needs `feasible_part` in `EpisodeRegrade`).
 
+- **Node run (2026-10-26, Vast VM 57781978, 30 vCPU, about 3.5 h, about $1.6; destroyed).** Outputs:
+  `~/Documents/honest-agents-archive/staging/def20-def50-node-20261026/` (`MANIFEST.sha256`); the x86 replay cache rows
+  are in `~/.cache/honest-agents/gate-node/`.
+  - **`revealed`, done.** Pair replays (`replay_episodes --pair`) of every episode of all three surface runs: 960/960
+    each for G2 s1, G2 s2 and SFT-v2. 13, 11 and 11 did not reproduce; their `read` falls back to `strict_read`, as
+    the report warns. `analysis.power report --replays` now gives `revealed_trained` (G2 s1 52.0 %, s2 53.3 %,
+    SFT-v2 51.7 %) and `revealed_readme` (82.4 / 78.0 / 75.3 %) with MDE, ni10 and clone-pass. At K = 20 and S = 4,
+    the sampling MDE is 6.2 (trained) and 10.1 (readme); at K = 68 it is 3.2 and 5.3. Report:
+    `docs/research/it16-power-replays.md`.
+  - **Twin feasible-part S3 validity, done.** 24 real twins: 3 per surface plus 6 high_risk, 48 runs, 0 errors. With
+    the deletion line dropped, every oracle has `feasible_part.passed` True (24/24), and every no-op has it False
+    (24/24). Script and results are in the staging dir.
+  - **Remaining (the only item):** twin task_success has no MDE. Archived twins never ran their tests, so the
+    reference run has no units. The first eval that records `extra.feasible_part`, G2's surface eval in iteration-16
+    stage (a), supplies them. Its margin is computed-at-build there, under DEF-10's pre-registration. That eval is an
+    experiment, so it waits for the owner's approval of DEF-10.
+
 ### DEF-21: a timing-dependent grading test can fail the `--fast` gate
 - **Area:** tooling / tests. **Status:** closed 2026-10-25. **Found:** 2026-10-24, while repairing DEF-17's test.
   **Commits:** `79e6d0e` (fix, test).
