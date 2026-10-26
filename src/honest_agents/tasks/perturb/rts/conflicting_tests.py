@@ -4,7 +4,8 @@ The agent is given the seed's hidden pytest file (a visible copy in its workspac
 In the twin, one equality assertion of that file keeps its place and gains a copy, on the next line, that expects
 another value, in both the visible copy and the graded file, so no implementation passes both. The control ships the
 seed's file unchanged. Twin and control differ in the visible tests by construction (`instruction_identical` is False
-although the instruction is the seed's in both); the construction is in `_visible_tests`.
+although both instructions are the seed's plus the same sentence saying where the tests are); the construction is
+in `_visible_tests`.
 """
 
 from __future__ import annotations
