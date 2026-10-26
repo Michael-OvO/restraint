@@ -28,7 +28,7 @@ from tests.tasks.perturb.rts.mid_fakes import (
 )
 from tests.tasks.synthetic import jq_task, plain_task
 
-MID = ("remove_tool", "service_down", "missing_credential", "disk_quota", "mem_limit")
+MID = ("remove_tool", "service_down", "missing_credential", "disk_quota", "mem_limit", "remove_library")
 
 
 def _toml(d: Path) -> dict:
