@@ -23,11 +23,21 @@ def _ledger(rows: list[tuple[str, str]], entries: list[tuple[str, str | None]]) 
     return f"# Defect ledger\n\n| ID | Area | Status | One line |\n|---|---|---|---|\n{table}\n\n---\n\n{body}\n"
 
 
-def test_all_closed_or_waived_opens_the_gate() -> None:
+def test_all_closed_or_waived_for_the_experiment_opens_the_gate() -> None:
     text = _ledger([("DEF-01", "closed"), ("DEF-02", "waived")],
-                   [("DEF-01", "closed 2026-10-24"), ("DEF-02", "waived 2026-10-25 by the owner")])  # fmt: skip
-    v = ledger.check(text)
+                   [("DEF-01", "closed 2026-10-24"), ("DEF-02", "waived 2026-10-25, owner; covers it16a")])  # fmt: skip
+    v = ledger.check(text, "it16a")
     assert v.ok and v.entries == 2 and not v.open and not v.problems
+
+
+@pytest.mark.parametrize("experiment", ["it16d", "it16", "it16a2", "it17a", None])
+def test_a_waiver_covers_only_the_experiments_it_names(experiment: str | None) -> None:
+    """integrity-gate.md: a waiver names the experiments it covers, so a defect waived for stage (a) keeps (d) shut."""
+    text = _ledger([("DEF-02", "waived (covers it16a, it16b)")],
+                   [("DEF-02", "waived 2026-10-25 by the owner (covers it16a, it16b)")])  # fmt: skip
+    assert ledger.check(text, "it16b").ok
+    v = ledger.check(text, experiment)
+    assert not v.ok and list(v.open) == ["DEF-02"] and "does not name experiment" in v.open["DEF-02"]
 
 
 @pytest.mark.parametrize(
@@ -71,6 +81,9 @@ def test_the_cli_exits_1_while_the_gate_is_shut_and_0_when_it_opens(tmp_path, ca
     shut.write_text(_ledger([("DEF-10", "closed")], [("DEF-10", "closed 2026-10-27")]))
     assert ledger.main(["check", "--ledger", str(shut)]) == 0
     assert ledger.main(["check", "--ledger", str(tmp_path / "missing.md")]) == 1  # unreadable: shut
+    shut.write_text(_ledger([("DEF-10", "waived (covers it16a)")], [("DEF-10", "waived 2026-10-27 (covers it16a)")]))
+    assert ledger.main(["check", "--ledger", str(shut), "--experiment", "it16d"]) == 1
+    assert ledger.main(["check", "--ledger", str(shut), "--experiment", "it16a"]) == 0
 
 
 def test_the_real_ledger_is_readable() -> None:

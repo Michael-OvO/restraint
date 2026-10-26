@@ -19,8 +19,10 @@ Commands (all offline; `--archive` = the honest-agents archive root):
   trajectory banks, the distillation pool, teacher and training-pool own episodes, GRPO rollout completions, and the
   selection / validation inputs). `--record` writes the verdict and the hashes of the builds checked into the manifest,
   and refuses (exit 2) when a known untracked input (`UNTRACKED_TRAINING_INPUTS`) is neither in the tree nor archived.
-* `units --bench B INPUT... --out FILE`: the units file of a TB2 run (Harbor job dirs) or an AbstentionBench run
-  (responses.jsonl); the other adapters' scorers write their own.
+* `units --bench B INPUT... --out FILE [--single]`: the units file of a TB2 run (Harbor job dirs), an AbstentionBench
+  run (responses.jsonl) or an Agentic Abstention run (its scorer's `agentic_abstention_summary.json`, copied to a fixed
+  path); ImpossibleBench's scorer writes its own. `--single` refuses anything but one input (one look: a resumed step
+  that left a second job dir must not pool two runs).
 * `verify-export --bench abstentionbench FILE`: exit 1 unless FILE is the export the manifest froze (its sha256).
 * `compute --units ARM=BENCH:FILE ...`: fill the arms' results and the deltas vs base from scorer outputs (`units`).
 """
@@ -33,6 +35,7 @@ import gzip
 import hashlib
 import json
 import re
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -849,13 +852,15 @@ def abstentionbench_units(results: Sequence[dict[str, Any]]) -> list[dict[str, A
 
 def write_units(bench: str, inputs: Sequence[Path], out: Path) -> list[dict[str, Any]]:
     """The `{"units": [...]}` file `compute --units ARM=BENCH:FILE` reads, from Harbor job dirs (terminal_bench_2) or
-    responses.jsonl files (abstentionbench)."""
+    responses.jsonl files (abstentionbench) or the scorer summaries (agentic_abstention: their `units`)."""
     if bench == "terminal_bench_2":
         from honest_agents.eval.harbor_results import load_harbor_job
 
         units = tb2_units([r for job in inputs for r in load_harbor_job(job)])
     elif bench == "abstentionbench":
         units = abstentionbench_units([row for f in inputs for row in iter_rows(f)])
+    elif bench == "agentic_abstention":
+        units = [u for f in inputs for u in json.loads(f.read_text())["units"]]
     else:
         raise ValueError(f"no units writer for {bench!r} (its adapter's scorer writes the units)")
     out.write_text(json.dumps({"benchmark": bench, "inputs": [str(p) for p in inputs], "units": units}, indent=2))
@@ -920,9 +925,14 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--record", action="store_true", help="write the verdict and the build hashes into the manifest")
     n.add_argument("--out", help="full report JSON")
     u = sub.add_parser("units", help="write the units file `compute` reads from TB2 jobs or AbstentionBench responses")
-    u.add_argument("--bench", required=True, choices=("terminal_bench_2", "abstentionbench"))
-    u.add_argument("inputs", nargs="+", help="Harbor job dirs (terminal_bench_2) or responses.jsonl (abstentionbench)")
+    u.add_argument("--bench", required=True, choices=("terminal_bench_2", "abstentionbench", "agentic_abstention"))
+    u.add_argument(
+        "inputs",
+        nargs="+",
+        help="Harbor job dirs (terminal_bench_2), responses.jsonl (abstentionbench) or agentic_abstention_summary.json",
+    )
     u.add_argument("--out", required=True)
+    u.add_argument("--single", action="store_true", help="refuse unless exactly one input (one run per arm)")
     v = sub.add_parser("verify-export", help="exit 1 unless the file is the export the manifest froze (sha256)")
     v.add_argument("--bench", required=True, choices=("abstentionbench",))
     v.add_argument("export")
@@ -937,6 +947,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({k: v.get("items") for k, v in m["benchmarks"].items()}, indent=2))
         return 0
     if args.cmd == "units":
+        if args.single and len(args.inputs) != 1:
+            print(
+                f"refusing: --single needs one input, got {len(args.inputs)}: {' '.join(args.inputs)}", file=sys.stderr
+            )
+            return 2
         units = write_units(args.bench, [Path(x) for x in args.inputs], Path(args.out))
         print(json.dumps({"benchmark": args.bench, "n_units": len(units)}))
         return 0

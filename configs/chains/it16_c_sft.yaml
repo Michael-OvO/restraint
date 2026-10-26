@@ -23,7 +23,8 @@ balance_floor: 8
 steps:
   - name: gate_ledger
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --ledger docs/defects.md
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16c
+      --ledger docs/defects.md
       --json outputs/chain/it16c/gate_ledger.json
       && mkdir -p outputs/chain/it16c/markers && touch outputs/chain/it16c/markers/gate_ledger.done
     gpus: []

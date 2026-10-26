@@ -128,7 +128,9 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
 
 1. **The gate is shut.** `gate_ledger` exits 1 while any ledger entry is open. The chain stops before anything is
    merged or served, the final step runs, and the watcher pulls and stops the node. Do not delete its done marker to
-   get past it.
+   get past it. A waiver opens the gate only for the chains it names (`gate.ledger check --experiment <chain name>`):
+   the owner writes them into both statuses of the entry, for example `waived (owner, 2026-10-27; covers it16a,
+   it16b)`, and that entry keeps `it16c` and `it16d` shut.
 2. **An infra guard fires.**
    - A sanity step fails. Its incoherent output stops the chain (`on_failure: stop`), and the model is not evaluated.
    - The egress preflight refuses a boot (`run_eval` and Harbor fail the step).
@@ -149,7 +151,8 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
 6. **A grey region** in any endpoint (read on the Mac after (d)). Stop and report. There is no default action.
 7. **One look.** A benchmark that finished is never run again for a better number. A failed step is resumed by
    restarting the chain (its done markers skip finished steps). Delete its partial outputs first, for example a
-   half-written `runs/harbor/<job dir>` (the units steps refuse two job dirs). Restart only once the cause is fixed and
+   half-written `runs/harbor/<job dir>` (the units steps refuse two job dirs: `final_benchmark units --single`, and
+   the ImpossibleBench scorer takes one). Restart only once the cause is fixed and
    logged.
 
 ## 7. After each stage (Mac, $0)
@@ -163,7 +166,10 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   (3.4). Resume the validation of any states left after its 150-minute budget at L1 first.
 - **(c):** `selection.json`, `selected_epoch.txt`. Stage the selected adapter as `data/weights/it16/final-selected`
   (section 2) for (d).
-- **(d):** `runs/final/it16d/final_benchmark.json` (results and deltas vs base). Then the pre-registered estimator and
+- **(d):** `runs/final/it16d/final_benchmark.json` (results and deltas vs base for TB2, ImpossibleBench LCB, Agentic
+  Abstention and AbstentionBench, from the units files `runs/final/it16d/<arm>_{tb2_units,ib_summary,aa_units,
+  abench_units}.json`; Agentic Abstention's timely recall, which the manifest does not list, is in each job's
+  `agentic_abstention_summary.json` `intervals`). Then the pre-registered estimator and
   bars on the archive (`analysis.power report --bar ...`, prereg sections 5-6) and the decision table (section 9).
 
 ## 8. What is not settled yet
@@ -174,6 +180,9 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
     at build.
 - DEF-NEW-it16-jobs-1: no rollout sends the per-(task, sample, turn) seeds the pre-registration promises. Implement
   them or amend the pre-registration before it is approved.
+- DEF-NEW-it16-jobs-3: the AbstentionBench over-abstention guard's margin m (prereg 6.3) is to come from the
+  calibration samples, but those are TB2 and ImpossibleBench only, so (a) gives no m for it (nor for MASK). (d) scores
+  the guard's interval; the margin needs an owner decision before the pre-registration is approved.
 - DEF-NEW-it16-jobs-2: `final_benchmark never-trained` does not read `data/commit_checks/builds/`, so (c)'s
   `data_gates` would not see the build it trains on until that is fixed.
 - The ImpossibleBench instruction is the adapter's default "tuned" prompt. The manifest freezes the items and files but

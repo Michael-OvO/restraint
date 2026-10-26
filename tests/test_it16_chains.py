@@ -7,6 +7,7 @@ yet are refused at launch by their placeholders."""
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
@@ -62,7 +63,11 @@ def test_the_integrity_gate_is_the_first_step_and_everything_waits_for_it(stage:
     chain = _chain(stage)
     first = chain.steps[0]
     assert first.name == "gate_ledger" and first.after == () and first.on_failure == "stop"
-    assert "python -m honest_agents.gate.ledger check --ledger docs/defects.md" in first.command
+    # the chain's own name, so a waiver granted for another stage does not let this one through
+    assert chain.name == f"it16{stage}"
+    assert (
+        f"python -m honest_agents.gate.ledger check --experiment it16{stage} --ledger docs/defects.md" in first.command
+    )
     for step in chain.steps[1:]:
         assert "gate_ledger" in _ancestors(chain, step.name), step.name
 
@@ -166,3 +171,38 @@ def test_the_final_eval_runs_every_arm_once_on_every_benchmark() -> None:
     compute = chain.step("compute").command
     assert all(f"{arm}=terminal_bench_2:" in compute and f"{arm}=impossiblebench_lcb:" in compute
                for arm in ("base", "G2", "final"))  # fmt: skip
+
+
+def test_the_final_eval_scores_every_benchmark_it_runs_for_every_arm() -> None:
+    """Every manifest benchmark whose adapter stage (d) runs reaches `compute` for all three arms, from a units file a
+    `<arm>_units` step writes from one run: without it AbstentionBench's over-abstention guard (prereg 6.3) and the
+    Agentic Abstention CIs (6.4) would be missing from the final manifest while the chain still validated."""
+    chain = _chain("d")
+    benchmarks = json.loads((REPO / "data" / "benchmarks" / "final_benchmark.json").read_text())["benchmarks"]
+    run = {"terminal_bench_2": "eval_tb.sh tb2", "impossiblebench_lcb": "eval_tb.sh outputs/it16/ib_lcb_tuned",
+           "agentic_abstention": "scripts/eval_agentic_abstention.sh",
+           "abstentionbench": "scripts/eval_abstentionbench.sh"}  # fmt: skip
+    for name, b in benchmarks.items():
+        adapter = (b.get("adapter") or "").split(" ")[0]
+        if adapter.startswith("scripts/"):
+            assert name in run, f"{name}: the manifest's adapter {adapter} has no entry here"
+    assert not set(run) - set(benchmarks)
+    compute = chain.step("compute").command.split()
+    specs = {}  # (arm, benchmark) -> units file
+    for flag, spec in itertools.pairwise(compute):
+        if flag == "--units":
+            arm, rest = spec.split("=", 1)
+            bench, file = rest.split(":", 1)
+            specs[arm, bench] = file
+    for arm, tag in (("base", "base"), ("G2", "g2"), ("final", "final")):
+        external, units = chain.step(f"{tag}_external").command, chain.step(f"{tag}_units").command
+        assert f"{tag}_units" in _ancestors(chain, "compute")
+        for name, marker in run.items():
+            assert marker in external, (arm, name)
+            file = specs.get((arm, name))
+            assert file, f"compute gets no --units {arm}={name}:FILE"
+            assert f"--out {file}" in units, f"{file}: no {tag}_units step writes it"
+        for bench in ("terminal_bench_2", "agentic_abstention", "abstentionbench"):
+            assert f"units --single --bench {bench} " in " ".join(units.split()), (tag, bench)
+        assert f"runs/abstentionbench/it16d_{tag}/responses.jsonl" in units
+        assert f"runs/harbor/it16d_{tag}_aa/agentic_abstention_immediate__*/agentic_abstention_summary.json" in units

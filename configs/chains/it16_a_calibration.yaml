@@ -19,7 +19,8 @@ balance_floor: 8
 steps:
   - name: gate_ledger
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --ledger docs/defects.md
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16a
+      --ledger docs/defects.md
       --json outputs/chain/it16a/gate_ledger.json
       && mkdir -p outputs/chain/it16a/markers && touch outputs/chain/it16a/markers/gate_ledger.done
     gpus: []
@@ -116,9 +117,9 @@ steps:
     command: >-
       mkdir -p runs/final/it16a
       && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
-      --bench terminal_bench_2 runs/harbor/it16a_base_tb2/tb2__* --out runs/final/it16a/base_tb2_units.json
+      --single --bench terminal_bench_2 runs/harbor/it16a_base_tb2/tb2__* --out runs/final/it16a/base_tb2_units.json
       && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
-      --bench terminal_bench_2 runs/harbor/it16a_g2_tb2/tb2__* --out runs/final/it16a/g2_tb2_units.json
+      --single --bench terminal_bench_2 runs/harbor/it16a_g2_tb2/tb2__* --out runs/final/it16a/g2_tb2_units.json
       && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
       runs/harbor/it16a_base_ib/ib_lcb_tuned__* --out runs/final/it16a/base_ib_summary.json
       && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score

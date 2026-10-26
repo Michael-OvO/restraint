@@ -5,8 +5,12 @@
 # is resumed (done markers), never re-run for a better number. The calibration episodes of stage (a) are not reused.
 # Per arm: the 12-task sanity run; internal (surface-val-v2 x 4, tier F x 4, tier S x 4, the blind held-out family x 4,
 # the archived decision probe x 8, the flip-test probe); external (TB2 x 4, ImpossibleBench LCB x 4, Agentic Abstention
-# x 4, AbstentionBench); then the units files. Last, `final_benchmark compute` fills the arms' results and deltas into
-# a copy of the manifest. MASK is not here: its judge is paid (separate owner approval, prereg section 4).
+# x 4, AbstentionBench); then the units files of all four external benchmarks, one run each (`units --single`; the
+# ImpossibleBench scorer takes one job dir). Last, `final_benchmark compute` fills the arms' results and deltas into a
+# copy of the manifest for TB2, ImpossibleBench LCB, Agentic Abstention and AbstentionBench (incl. the over-abstention
+# guard, prereg section 4). The manifest's internal_heldout entry has no units writer: the internal splits are read by
+# the pre-registered estimator on the Mac (runbook section 7). MASK is not here: its judge is paid (separate owner
+# approval, prereg section 4).
 # Runbook: docs/iteration-16-runbook.md. NOT LAUNCHABLE YET (placeholders, refused by `node chain` and `run`):
 #   <SURFACE_VAL_V2>: the frozen held-out surface build (68+ sources x 6 surfaces), task dir; frozen at sign-off.
 #   <BLIND_FAMILY_SPLIT>: the blind held-out family's split (fixed at build, never opened before this eval).
@@ -22,7 +26,8 @@ balance_floor: 8
 steps:
   - name: gate_ledger
     command: >-
-      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --ledger docs/defects.md
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16d
+      --ledger docs/defects.md
       --json outputs/chain/it16d/gate_ledger.json
       && mkdir -p outputs/chain/it16d/markers && touch outputs/chain/it16d/markers/gate_ledger.done
     gpus: []
@@ -139,9 +144,14 @@ steps:
     command: >-
       mkdir -p runs/final/it16d
       && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
-      --bench terminal_bench_2 runs/harbor/it16d_base_tb2/tb2__* --out runs/final/it16d/base_tb2_units.json
+      --single --bench terminal_bench_2 runs/harbor/it16d_base_tb2/tb2__* --out runs/final/it16d/base_tb2_units.json
       && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
       runs/harbor/it16d_base_ib/ib_lcb_tuned__* --out runs/final/it16d/base_ib_summary.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench agentic_abstention runs/harbor/it16d_base_aa/agentic_abstention_immediate__*/agentic_abstention_summary.json
+      --out runs/final/it16d/base_aa_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench abstentionbench runs/abstentionbench/it16d_base/responses.jsonl --out runs/final/it16d/base_abench_units.json
       && touch outputs/chain/it16d/markers/base_units.done
     gpus: []
     done: outputs/chain/it16d/markers/base_units.done
@@ -204,9 +214,14 @@ steps:
     command: >-
       mkdir -p runs/final/it16d
       && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
-      --bench terminal_bench_2 runs/harbor/it16d_g2_tb2/tb2__* --out runs/final/it16d/g2_tb2_units.json
+      --single --bench terminal_bench_2 runs/harbor/it16d_g2_tb2/tb2__* --out runs/final/it16d/g2_tb2_units.json
       && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
       runs/harbor/it16d_g2_ib/ib_lcb_tuned__* --out runs/final/it16d/g2_ib_summary.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench agentic_abstention runs/harbor/it16d_g2_aa/agentic_abstention_immediate__*/agentic_abstention_summary.json
+      --out runs/final/it16d/g2_aa_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench abstentionbench runs/abstentionbench/it16d_g2/responses.jsonl --out runs/final/it16d/g2_abench_units.json
       && touch outputs/chain/it16d/markers/g2_units.done
     gpus: []
     done: outputs/chain/it16d/markers/g2_units.done
@@ -269,9 +284,14 @@ steps:
     command: >-
       mkdir -p runs/final/it16d
       && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
-      --bench terminal_bench_2 runs/harbor/it16d_final_tb2/tb2__* --out runs/final/it16d/final_tb2_units.json
+      --single --bench terminal_bench_2 runs/harbor/it16d_final_tb2/tb2__* --out runs/final/it16d/final_tb2_units.json
       && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
       runs/harbor/it16d_final_ib/ib_lcb_tuned__* --out runs/final/it16d/final_ib_summary.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench agentic_abstention runs/harbor/it16d_final_aa/agentic_abstention_immediate__*/agentic_abstention_summary.json
+      --out runs/final/it16d/final_aa_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units --single
+      --bench abstentionbench runs/abstentionbench/it16d_final/responses.jsonl --out runs/final/it16d/final_abench_units.json
       && touch outputs/chain/it16d/markers/final_units.done
     gpus: []
     done: outputs/chain/it16d/markers/final_units.done
@@ -289,6 +309,12 @@ steps:
       --units base=impossiblebench_lcb:runs/final/it16d/base_ib_summary.json
       --units G2=impossiblebench_lcb:runs/final/it16d/g2_ib_summary.json
       --units final=impossiblebench_lcb:runs/final/it16d/final_ib_summary.json
+      --units base=agentic_abstention:runs/final/it16d/base_aa_units.json
+      --units G2=agentic_abstention:runs/final/it16d/g2_aa_units.json
+      --units final=agentic_abstention:runs/final/it16d/final_aa_units.json
+      --units base=abstentionbench:runs/final/it16d/base_abench_units.json
+      --units G2=abstentionbench:runs/final/it16d/g2_abench_units.json
+      --units final=abstentionbench:runs/final/it16d/final_abench_units.json
       --out runs/final/it16d/final_benchmark.json
     gpus: []
     done: runs/final/it16d/final_benchmark.json

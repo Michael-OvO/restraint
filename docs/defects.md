@@ -67,6 +67,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-57 | tooling / build | closed | the never-trained check's repo scope globs gitignored `data/` files, so its recorded verdict depends on the tree it ran in: the build:bench worktree had none of the 5 local DPO decision inputs the main tree has |
 | DEF-NEW-it16-jobs-1 | recording / eval harness | open | the pre-registration (section 2) runs every arm with the same per-(task, sample, turn) vLLM seeds, but no rollout path sends a seed: `run_eval` and the Harbor agent sample unseeded |
 | DEF-NEW-it16-jobs-2 | tooling / build | open | the never-trained check's repo scope (`REPO_TRAINING_GLOBS`) does not match `data/commit_checks/builds/`, so the iteration-16 training build (the claim-point examples and DPO pairs) is never checked against the frozen benchmarks |
+| DEF-NEW-it16-jobs-3 | stats | open | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
 
 ---
 
@@ -3140,3 +3141,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `data/commit_checks/builds/*/dpo_pairs.jsonl` to `REPO_TRAINING_GLOBS` (and their archived copies to the archive scope).
 - **Closure test:** a fixture build under `data/commit_checks/builds/x/examples.jsonl` holding a benchmark item id makes
   `never-trained` exit 1 (it exits 0 on the current code).
+
+### DEF-NEW-it16-jobs-3: the AbstentionBench guard's margin has no calibration data
+- **Area:** stats. **Status:** open. **Found:** 2026-10-26, lane it16-jobs, wiring the AbstentionBench and Agentic
+  Abstention units into stage (d)'s `compute` (review of `e32ed26`: (d) ran both benchmarks but never scored them).
+- **Evidence:** `docs/iteration-16-prereg.md` L270-273: "External guards, final − base (all computed-at-build from the
+  calibration samples, ni10 rule ...): AbstentionBench over-abstention ...: UB < +m; MASK honesty ...: LB > −m". L196-198
+  and L307-308 define the calibration samples as "the base and G2 arms on TB2 and ImpossibleBench, S = 2", and
+  `configs/chains/it16_a_calibration.yaml` runs exactly those. No stage before (d) runs AbstentionBench (or MASK) on any
+  arm, so the ni10 margin of either guard cannot be computed before a final-arm episode exists, as the
+  pre-registration requires (runbook section 7 (a): "the external margins from the base arm").
+- **Impact:** no archived number (nothing has run). After the stage (d) repair, `compute` fills the guard's interval
+  (`answer.abstained`, final − base) but there is no pre-registered m to read it against; MASK is not in (d) at all.
+- **Fix (proposed; pre-registration / power-prereg lane, owner decision):** either add AbstentionBench (base arm, S = 1,
+  with the judge endpoint, after DEF-50) to the calibration stage and compute m there, or fix m in the pre-registration
+  now (a stated number, e.g. a cap like P3's), before it is approved. The (d) job file needs no change either way.
+- **Closure test:** a check that every external guard of prereg 6.3 has its margin either stated or computed from a
+  benchmark the calibration chain runs (`tests/test_it16_chains.py`).

@@ -1,18 +1,25 @@
 """The integrity gate's rule as a launch guard: no experiment starts while any defect in the ledger is open.
 
-    python -m honest_agents.gate.ledger check [--ledger docs/defects.md] [--json FILE]
+    python -m honest_agents.gate.ledger check --experiment NAME [--ledger docs/defects.md] [--json FILE]
 
 docs/integrity-gate.md "The rule": an open defect is any entry of docs/defects.md whose status is not `closed` or
 `waived`. The ledger states each status twice, in the summary table (`| DEF-10 | stats | fixing | ... |`) and in the
 entry's own `**Status:**` line (`### DEF-10: ...`). Both are read, and the check fails closed:
 
 * an entry is open when either status does not start with `closed` or `waived` (`fixing (awaiting ...)` is open);
+* a waiver covers only the experiments it names ("Only the owner can waive a defect ... with ... the experiments the
+  waiver covers"): a `waived` entry is open unless one of its statuses names `--experiment` as a word, for example
+  `waived (owner, 2026-10-25; covers it16a, it16b)` lets the chain `it16a` through but not `it16d`. Without
+  `--experiment` every waiver counts as open. Experiment names carry their iteration (`it16a`), so a waiver also stops
+  covering at the end of its iteration (the doc's expiry) as long as the next iteration's chains are named afresh;
+  the date itself is not read;
 * an ID in the table with no `###` entry, an entry with no table row, an entry whose status cannot be found, a
   duplicate ID or a ledger with no entry at all is a problem, reported like an open entry.
 
 Exit 0 only when every entry is closed or waived and nothing is malformed; exit 1 otherwise (the open entries and the
-problems are printed). Every iteration-16 experiment job file opens with this check as its first step
-(`configs/chains/it16_*.yaml`), so a chain launched while the gate is shut stops before anything is served or trained.
+problems are printed). Every iteration-16 experiment job file opens with this check as its first step, with its chain
+name as `--experiment` (`configs/chains/it16_*.yaml`), so a chain launched while the gate is shut stops before anything
+is served or trained.
 A placeholder ID of a new defect (`DEF-NEW-<lane>-<n>`) counts like any other.
 """
 
@@ -49,6 +56,15 @@ def is_open(status: str) -> bool:
     return not status.strip().lower().startswith(NOT_OPEN)
 
 
+def is_waived(status: str) -> bool:
+    return status.strip().lower().startswith("waived")
+
+
+def covers(status: str, experiment: str | None) -> bool:
+    """Whether a waiver's status names `experiment` (as a whole word)."""
+    return experiment is not None and re.search(rf"(?<![\w-]){re.escape(experiment)}(?![\w-])", status) is not None
+
+
 def parse(text: str) -> tuple[dict[str, str], dict[str, str | None], list[str]]:
     """(table statuses, entry statuses, problems). An entry's status is the first `**Status:**` after its heading,
     before the next heading; None when there is none."""
@@ -75,7 +91,7 @@ def parse(text: str) -> tuple[dict[str, str], dict[str, str | None], list[str]]:
     return table, entries, problems
 
 
-def check(text: str) -> LedgerVerdict:
+def check(text: str, experiment: str | None = None) -> LedgerVerdict:
     table, entries, problems = parse(text)
     verdict = LedgerVerdict(entries=len(set(table) | set(entries)), problems=list(problems))
     if not verdict.entries:
@@ -91,6 +107,9 @@ def check(text: str) -> LedgerVerdict:
         statuses = [s for s in (row, entry) if s is not None]
         if any(is_open(s) for s in statuses):
             verdict.open[did] = next(s for s in statuses if is_open(s))
+        elif any(is_waived(s) for s in statuses) and not any(covers(s, experiment) for s in statuses):
+            waiver = next(s for s in statuses if is_waived(s))
+            verdict.open[did] = f"{waiver} (the waiver does not name experiment {experiment or '(none given)'})"
     return verdict
 
 
@@ -100,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="exit 0 only when every ledger entry is closed or waived")
     c.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    c.add_argument("--experiment", default=None, help="the experiment (chain name) a waiver must name to cover it")
     c.add_argument("--json", type=Path, default=None, help="also write the verdict as JSON")
     a = ap.parse_args(argv)
     try:
@@ -107,12 +127,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as e:
         print(f"error: cannot read the ledger {a.ledger} ({e.strerror}); the gate stays shut", file=sys.stderr)
         return 1
-    verdict = check(text)
+    verdict = check(text, a.experiment)
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
-        a.json.write_text(json.dumps({**asdict(verdict), "ok": verdict.ok, "ledger": str(a.ledger)}, indent=1))
+        a.json.write_text(
+            json.dumps(
+                {**asdict(verdict), "ok": verdict.ok, "ledger": str(a.ledger), "experiment": a.experiment}, indent=1
+            )
+        )
     if verdict.ok:
-        print(f"ledger {a.ledger}: all {verdict.entries} entries closed or waived; the gate is open")
+        scope = f" or waived for {a.experiment}" if a.experiment else ""
+        print(f"ledger {a.ledger}: all {verdict.entries} entries closed{scope}; the gate is open")
         return 0
     print(
         f"ledger {a.ledger}: the integrity gate is SHUT (docs/integrity-gate.md); no experiment may start",
