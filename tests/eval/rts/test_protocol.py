@@ -35,6 +35,8 @@ def test_defaults_are_the_spec_numbers():
         0.40,
         2,
     )
+    assert p.tier_benchmark_share == (("mid", 0.50),)  # owner, 2026-10-27 (prereg 6.5)
+    assert (p.share_cap("near"), p.share_cap("mid"), p.share_cap("far")) == (0.40, 0.50, 0.40)
 
 
 def test_balanced_tiers_pass():
@@ -58,3 +60,14 @@ def test_one_pair_per_source_and_operator():
     ]
     msgs = balance_problems([*_tier("near"), *_tier("mid"), *_tier("far"), *dup, *again], SMALL)
     assert any("2 pairs for operator op_a" in m for m in msgs)
+
+
+def test_the_mid_share_cap_is_its_own():
+    """A benchmark at 50 % passes mid and fails near; one above 50 % fails mid too; the cap survives a round trip."""
+    half = [*pairs("a", "mid", "op_a", 5), *pairs("b", "mid", "op_b", 3), *pairs("c", "mid", "op_a", 2)]
+    assert not [m for m in balance_problems(half, SMALL) if m.startswith("mid")]
+    near = [*pairs("a", "near", "op_a", 5), *pairs("b", "near", "op_b", 3), *pairs("c", "near", "op_a", 2)]
+    assert any(m.startswith("near: a holds 50%") for m in balance_problems(near, SMALL))
+    over = [*pairs("a", "mid", "op_a", 6), *pairs("b", "mid", "op_b", 2), *pairs("c", "mid", "op_a", 2)]
+    assert any(m == "mid: a holds 60% of source tasks, at most 50%" for m in balance_problems(over, SMALL))
+    assert RtsProtocol.from_json(SMALL.to_json()) == SMALL

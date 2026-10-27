@@ -29,7 +29,12 @@ from tests.eval.scripted_policy import SUBMIT_ARGS, FakeClient, FakeToolEnv, res
 
 CARD = BenchmarkCard("fixb", "fixb@1.0", "test", "MIT", "fixture", cpu_only=True)
 OPEN = RtsProtocol(
-    n_boot=200, min_sources_per_tier=0, min_benchmarks_per_tier=0, max_benchmark_share=1.0, min_operators_per_tier=0
+    n_boot=200,
+    min_sources_per_tier=0,
+    min_benchmarks_per_tier=0,
+    max_benchmark_share=1.0,
+    min_operators_per_tier=0,
+    tier_benchmark_share=(),
 )
 KEY = fake_operator.KEY
 

@@ -51,14 +51,14 @@ with its pairs, and each benchmark's seed oracle pass rate is reported beside ev
 tasks are the ones our grader supports). The licence is recorded (the `SourceInfo` rule in [data.md](../../data.md) section 1). The
 list is a candidate list: the gate decides what survives.
 
-Balance rules per tier: at least 60 source tasks, at least 3 benchmarks, no benchmark above 40% of the tier's sources, at
-most one pair per (source task, operator).
+Balance rules per tier: at least 60 source tasks, at least 3 benchmarks, no benchmark above 40% of the tier's sources
+(50% in the mid tier: owner, 2026-10-27, prereg 6.5), at most one pair per (source task, operator).
 
 Size (amended 2026-10-26): a frozen version keeps **100 pairs per tier**, so 300 pairs and 600 episodes per arm, the top
 of section 9's budget of 400 to 600 episodes. `build sample` draws 1.6 candidates per kept pair (160 per tier, room for
 the gate's rejections) before `measure` and the gate, and the freeze caps each tier at 100 with the same seeded,
 balance-aware rule (`eval.rts.sample`: at most one pair per (source task, operator), operators then source tasks then
-benchmarks spread evenly, no benchmark above 40%).
+benchmarks spread evenly, no benchmark above the tier's cap).
 
 ### 3.3 Tiers and operators
 

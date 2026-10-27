@@ -14,8 +14,6 @@
 #   <SFT_BUILD_MANIFEST>: the frozen build's build_manifest.json (commit_points.coverage reads it).
 #   <SELECT_PROTOCOL>: a run_eval --protocol file whose ni_margin is max(5, the ni10 of verified_success at the select
 #     split's K and S), computed at build (prereg section 7); the runs record it and select_checkpoint applies it.
-#   <RTS_MANIFEST>: the frozen RTS manifest, data/rts/v1/manifest.jsonl, with its digest in prereg 6.5: the RTS freeze
-#     comes before this stage, whose select-split runs are the first final-arm episodes (prereg 6.5).
 # NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
 name: it16c
 state_dir: outputs/chain/it16c
@@ -40,7 +38,7 @@ steps:
   - name: rts_freeze_check
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.verify
-      --manifest <RTS_MANIFEST> --prereg docs/iteration-16-prereg.md
+      --manifest data/rts/v1/manifest.jsonl --prereg docs/iteration-16-prereg.md
       && touch outputs/chain/it16c/markers/rts_freeze_check.done
     gpus: []
     done: outputs/chain/it16c/markers/rts_freeze_check.done

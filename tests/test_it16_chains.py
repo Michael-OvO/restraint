@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import shlex
 from pathlib import Path
 
@@ -29,8 +30,8 @@ STAGES = {
 PENDING = {
     "a": set(),
     "b": set(),
-    "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>", "<RTS_MANIFEST>"},
-    "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>", "<RTS_MANIFEST>"},
+    "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>"},
+    "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>"},
 }
 
 
@@ -247,7 +248,7 @@ RTS_BOARD = "--board runs/rts/it16d/scoreboard.json"
 
 
 def _scoreboard_calls(command: str) -> list[list[str]]:
-    words = shlex.split(command.replace("<RTS_MANIFEST>", "M"))
+    words = shlex.split(command.replace("data/rts/v1/manifest.jsonl", "M"))
     calls = []
     for i, w in enumerate(words):
         if w == "honest_agents.eval.rts.scoreboard":
@@ -307,7 +308,7 @@ def test_the_rts_commands_parse_with_the_scoreboard_cli(capsys: pytest.CaptureFi
 
 
 def _verify_args(command: str) -> list[str]:
-    words = shlex.split(command.replace("<RTS_MANIFEST>", "data/rts/v1/manifest.jsonl"))
+    words = shlex.split(command)
     i = words.index("honest_agents.eval.rts.verify")
     return words[i + 1 : words.index("&&", i)]
 
@@ -340,9 +341,11 @@ def test_the_rts_freeze_check_needs_the_frozen_version_and_the_digest_in_the_pre
     digest = write_manifest(items, v1 / "manifest.jsonl")
     (v1 / "protocol.json").write_text(json.dumps(RtsProtocol().to_json()))
     (tmp_path / "docs").mkdir()
-    prereg = PREREG.read_text()
+    # the committed prereg holds the real freeze's digest; the test rewinds it to before the freeze
+    (committed,) = [ln for ln in PREREG.read_text().splitlines() if ln.startswith("rts/v1 manifest sha256: ")]
+    assert re.fullmatch(r"rts/v1 manifest sha256: [0-9a-f]{64}", committed)
     line = "rts/v1 manifest sha256: computed-at-build"
-    assert line in prereg.splitlines()
+    prereg = PREREG.read_text().replace(committed, line)
 
     def passes(text: str) -> bool:
         (tmp_path / "docs/iteration-16-prereg.md").write_text(text)

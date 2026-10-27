@@ -11,8 +11,9 @@ frozen version has a stable size. Both use `select_balanced`:
 * greedy, one pair at a time, preferring in this order: the operator with the fewest pairs so far (a tier's J is the mean
   of its operators'), a source task the tier does not hold yet (more clusters), the benchmark with the fewest pairs so
   far, then the rank;
-* no benchmark above `max_benchmark_share` of the tier's selected source tasks: a benchmark's sources are capped at
-  `floor(share * S)`, with S the selection's source count, iterated down from the target until it holds.
+* no benchmark above the tier's share cap (`RtsProtocol.share_cap`) of the tier's selected source tasks: a benchmark's
+  sources are capped at `floor(share * S)`, with S the selection's source count, iterated down from the target until
+  it holds.
 
 A candidate is a `pairs` verdict that is `built`, or `measure` (applicable, waiting for its oracle measurement, which
 `measure --selection` then runs only for the selected ones). A verdict whose measurement already failed is no
@@ -156,13 +157,15 @@ def select_tier(
     the cap (still at most `n`), and the freeze's balance check reports what is really there. Returns (picked,
     dropped, a note when the cap was not applied)."""
     pool = list(pool)
-    picked, dropped = select_balanced(pool, n, max_share=proto.max_benchmark_share, seed=seed)
+    tiers = {c.tier for c in pool}
+    cap = proto.share_cap(tiers.pop()) if len(tiers) == 1 else proto.max_benchmark_share
+    picked, dropped = select_balanced(pool, n, max_share=cap, seed=seed)
     got = len({c.source_task for c in picked})
-    if proto.max_benchmark_share >= 1.0 or got >= proto.min_sources_per_tier:
+    if cap >= 1.0 or got >= proto.min_sources_per_tier:
         return picked, dropped, None
     loose, why = select_balanced(pool, n, max_share=1.0, seed=seed)
     note = (
-        f"the {proto.max_benchmark_share:.0%} benchmark cap would leave {got} source tasks, below the "
+        f"the {cap:.0%} benchmark cap would leave {got} source tasks, below the "
         f"{proto.min_sources_per_tier} minimum: selected without the cap (the tier fails the balance rules as it stands)"
     )
     return loose, why, note
@@ -215,7 +218,9 @@ def sample(
         raise ValueError(f"target must be at least 1 and oversample at least 1.0 (got {target}, {oversample})")
     cands, dropped = candidates_from_rows(rows)
     if built_only:
-        dropped.update({c.pair_id: "awaiting a measurement (built-only re-sample)" for c in cands if c.stage != "built"})
+        dropped.update(
+            {c.pair_id: "awaiting a measurement (built-only re-sample)" for c in cands if c.stage != "built"}
+        )
         cands = [c for c in cands if c.stage == "built"]
     n = math.ceil(target * oversample)
     selected: list[Candidate] = []
@@ -233,7 +238,7 @@ def sample(
         "oversample": oversample,
         "per_tier": n,
         "seed": seed,
-        "max_benchmark_share": proto.max_benchmark_share,
+        "max_benchmark_share": {t: proto.share_cap(t) for t in TIERS},
         "tiers": tiers,
         "selected": [asdict(c) for c in sorted(selected, key=lambda c: c.pair_id)],
         "dropped": dict(sorted(dropped.items())),

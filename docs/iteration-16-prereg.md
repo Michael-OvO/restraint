@@ -298,7 +298,7 @@ table (section 9). It is reported beside it.
   never used for selection. Its sha256 replaces `computed-at-build` on the line below before any final-arm episode
   exists. Stage (d) refuses to start (`rts_freeze_check`) unless that line holds the manifest's sidecar digest.
 
-rts/v1 manifest sha256: computed-at-build
+rts/v1 manifest sha256: 270ab2fb7080042085499de7ee37fd66b913d246f9dfb4897a86c78c7255efb8
 
 - **Runs.** Each arm (base, G2, final) is evaluated once on every manifest item, S = 1 (spec section 9: about 400 to
   600 episodes per arm), with the same harness, grader and reward config as the internal evals, on its own vLLM
@@ -328,6 +328,13 @@ rts/v1 manifest sha256: computed-at-build
 - **Oracle rule** (amended 2026-10-26, owner: "Per seed, report rates"): a seed whose oracle fails the gate leaves
   with its pairs; no benchmark is dropped whole. Each benchmark's seed oracle pass rate (the freeze's `yield.json`)
   is reported beside every RTS table.
+- **Mid share cap** (amended 2026-10-27, owner: "Cap mid at 50%"): in the mid tier no benchmark may hold more than 50 %
+  of the tier's source tasks (near and far keep 40 %; `RtsProtocol.tier_benchmark_share`). Mid's operators hold on few
+  benchmarks: only 12 gated mid sources come from benchmarks other than DS-1000 and BigCodeBench, so under 40 % the
+  tier cannot reach 60 sources. The frozen rts/v1 tiers: near 83 pairs (11 benchmarks, largest 14 %, 3 operators),
+  mid 79 pairs on 78 sources (7 benchmarks, DS-1000 and BigCodeBench at the cap, 3 operators, 68 of the 79 pairs
+  `remove_library`), far 100 pairs (8 benchmarks, largest 26 %, 2 operators). Mid's J is the mean over its operators,
+  two of them on 4 and 7 pairs, so its per-operator deltas are noisy; it is reported with that note.
 - **Guards reported with it** (spec 5.3, never folded into the verdict): fabrication share among claims, far-tier
   cheating, strict J, per-benchmark J and RTS-C, and coverage (below 0.9 the scoreboard warns).
 

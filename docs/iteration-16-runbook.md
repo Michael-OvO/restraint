@@ -15,8 +15,8 @@ separate job file, launched and watched on its own:
 |---|---|---|---|
 | (a) | `configs/chains/it16_a_calibration.yaml` | calibration samples: base and G2 s1 on TB2 and ImpossibleBench LCB, S = 2, after a 12-task sanity run of each served model | yes, once the gate opens |
 | (b) | `configs/chains/it16_b_claim_rollouts.yaml` | G2 s1 own runs on the 400 training-pool surface tasks (`data/decision/read_rft_tasks.jsonl`), S = 4, transcripts (bank) and tool outputs kept; then the checklist validation of the new end states | yes, once the gate opens |
-| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>`, `<RTS_MANIFEST>` |
-| (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK, plus the RTS secondary endpoint (prereg 6.5) | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>`, `<RTS_MANIFEST>` |
+| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>` |
+| (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK, plus the RTS secondary endpoint (prereg 6.5) | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>` |
 
 A `<PLACEHOLDER>` is refused by `python -m honest_agents.node chain` (without `--dry-run`) and by `node_chain run`. Each
 one stands for an input that is built later (prereg sections 3-7 "computed-at-build"). All four files pass
@@ -224,8 +224,7 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
 ## 8. What is not settled yet
 
 - The placeholders of (c) and (d) (table at the top).
-  - `<RTS_MANIFEST>` waits for the RTS freeze (section 2.1), which waits for the core and operator lanes and the
-    CPU-node gate.
+  - `<RTS_MANIFEST>`: filled 2026-10-27 (rts/v1 frozen, sha256 `270ab2fb…` in prereg 6.5; mid at a 50 % share cap).
   - RTS power, an owner decision: spec section 6 says a tier below the required power "gets more sources, never a
     lower bar", but prereg 6.5 freezes rts/v1 before (c), and the MDE needs (d)'s base run, so more sources would mean
     an rts/v2 after the base arm has been run on v1. Prereg 6.5 leaves the clause out and fixes no required power.

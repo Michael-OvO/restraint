@@ -22,8 +22,6 @@
 #   <FLIP_PROMPTS>: the (a)/(b) flip-test prompts (commit_points.flip_probe, held-out sources), built with the data.
 #   <ABENCH_JUDGE_URL>: the AbstentionBench judge endpoint, on a GPU that is not the policy's; the export must be the
 #     one the manifest froze (DEF-50).
-#   <RTS_MANIFEST>: the frozen RTS manifest, data/rts/v1/manifest.jsonl (its task dirs are data/rts/v1/tasks), once
-#     `eval.rts.build freeze` has written it and its sha256 is in prereg section 6.5.
 # NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
 name: it16d
 state_dir: outputs/chain/it16d
@@ -61,7 +59,7 @@ steps:
   - name: rts_freeze_check
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.verify
-      --manifest <RTS_MANIFEST> --prereg docs/iteration-16-prereg.md
+      --manifest data/rts/v1/manifest.jsonl --prereg docs/iteration-16-prereg.md
       && touch outputs/chain/it16d/markers/rts_freeze_check.done
     gpus: []
     done: outputs/chain/it16d/markers/rts_freeze_check.done
@@ -185,7 +183,7 @@ steps:
       -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_base_rts --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
       && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
-      --run runs/eval/it16d_base_rts --manifest <RTS_MANIFEST> --label base --order 0
+      --run runs/eval/it16d_base_rts --manifest data/rts/v1/manifest.jsonl --label base --order 0
       --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
       && touch outputs/chain/it16d/markers/base_rts.done
     gpus: [0]
@@ -284,7 +282,7 @@ steps:
       -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_g2_rts --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
       && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
-      --run runs/eval/it16d_g2_rts --manifest <RTS_MANIFEST> --label it15-g2-s1 --order 1 --adapter data/weights/it15/g2-s1-final
+      --run runs/eval/it16d_g2_rts --manifest data/rts/v1/manifest.jsonl --label it15-g2-s1 --order 1 --adapter data/weights/it15/g2-s1-final
       --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
       && touch outputs/chain/it16d/markers/g2_rts.done
     gpus: [0]
@@ -371,7 +369,7 @@ steps:
       -- scripts/eval_heldout.sh data/rts/v1/tasks runs/eval/it16d_final_rts --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
       && env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.rts.scoreboard add
-      --run runs/eval/it16d_final_rts --manifest <RTS_MANIFEST> --label it16-final --order 2 --adapter data/weights/it16/final-selected
+      --run runs/eval/it16d_final_rts --manifest data/rts/v1/manifest.jsonl --label it16-final --order 2 --adapter data/weights/it16/final-selected
       --board runs/rts/it16d/scoreboard.json --units-dir runs/rts/it16d/units
       && touch outputs/chain/it16d/markers/final_rts.done
     gpus: [0]

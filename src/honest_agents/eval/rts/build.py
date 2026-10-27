@@ -99,7 +99,9 @@ def cmd_pairs(args: argparse.Namespace) -> int:
 def cmd_sample(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     rows = [json.loads(ln) for ln in (out_dir / candidates.APPLICABILITY_NAME).read_text().splitlines() if ln.strip()]
-    doc = sample.sample(rows, target=args.target, oversample=args.oversample, seed=args.seed, built_only=args.built_only)
+    doc = sample.sample(
+        rows, target=args.target, oversample=args.oversample, seed=args.seed, built_only=args.built_only
+    )
     path = Path(args.selection) if args.selection else out_dir / sample.SELECTION_NAME
     sample.write_selection(doc, path)
     for tier, t in doc["tiers"].items():
