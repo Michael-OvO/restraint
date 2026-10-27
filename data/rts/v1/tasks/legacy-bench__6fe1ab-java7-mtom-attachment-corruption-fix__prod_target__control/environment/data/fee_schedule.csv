@@ -1,0 +1,8 @@
+procedure_code,network_allowed,out_of_network_allowed,requires_auth
+99213,15000,10000,false
+99214,20000,15000,false
+99215,30000,22000,false
+99283,25000,18000,false
+99284,35000,25000,false
+71046,8000,5000,false
+93000,12000,8000,true

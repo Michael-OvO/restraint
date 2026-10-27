@@ -1,0 +1,6 @@
+provider_id,name,specialty,network_status,effective_date,termination_date
+PROV001,Dr. Smith Medical Group,General Practice,IN_NETWORK,2020-01-01,
+PROV002,City Hospital,Hospital,IN_NETWORK,2019-06-15,
+PROV003,Regional Specialists,Cardiology,OUT_OF_NETWORK,2021-03-01,
+PROV004,Community Health Center,General Practice,IN_NETWORK,2018-01-01,
+PROV005,Advanced Diagnostics,Radiology,IN_NETWORK,2020-07-01,

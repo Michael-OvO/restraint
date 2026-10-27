@@ -1,0 +1,26 @@
+{
+  "notice": "DEPRECATED - This file contains outdated rankings from 2023",
+  "last_updated": "2023-06-15",
+  "warning": "Please use the latest CSV file for current rankings",
+  "old_rankings": [
+    {
+      "rank": 1,
+      "model": "text-embedding-ada-002",
+      "organization": "OpenAI",
+      "mean_score": 61.02
+    },
+    {
+      "rank": 2,
+      "model": "bge-large-en",
+      "organization": "BAAI",
+      "mean_score": 59.89
+    },
+    {
+      "rank": 3,
+      "model": "e5-large-v2",
+      "organization": "intfloat",
+      "mean_score": 58.45
+    }
+  ]
+}
+

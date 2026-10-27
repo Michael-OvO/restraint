@@ -1,0 +1,13 @@
+SELECT * FROM users WHERE id = 1;
+This file contains legitimate SQL queries.
+UPDATE products SET price = 100 WHERE id = 5;
+
+Dangerous content below:
+SELECT * FROM users WHERE id = 1 UNION SELECT password FROM admin;
+DROP TABLE users;
+INSERT INTO logs VALUES ('test' OR '1'='1');
+
+Normal database operations:
+CREATE TABLE customers (id INT, name VARCHAR(100));
+SELECT COUNT(*) FROM orders;
+DELETE FROM temp WHERE status = 'old';

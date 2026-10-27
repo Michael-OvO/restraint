@@ -1,0 +1,10 @@
+Chemical Equilibrium System:
+
+Reaction 1: A + B ⇌ C with K1 = 4
+Reaction 2: 2A ⇌ B with K2 = 9
+Conservation: A₀ = [A] + [C] + 2[B] where A₀ = 10
+
+Equilibrium equations:
+- K1 = [C] / ([A] * [B])  →  4 = [C] / ([A] * [B])
+- K2 = [B] / [A]²  →  9 = [B] / [A]²
+- 10 = [A] + [C] + 2[B]

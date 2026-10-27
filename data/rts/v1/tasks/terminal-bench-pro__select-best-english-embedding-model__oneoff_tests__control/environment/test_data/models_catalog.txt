@@ -1,0 +1,24 @@
+Popular Embedding Models Catalog
+================================
+
+This document lists commonly used embedding models for various NLP tasks.
+
+Categories:
+1. Sentence Transformers - Models based on BERT architecture
+2. OpenAI Embeddings - Commercial API-based models
+3. Cohere Embeddings - Another commercial option
+4. Open Source - Community developed models
+
+Note: This is not a performance comparison. 
+For benchmarks, please refer to the official leaderboard data files.
+
+---
+
+Some notable models:
+- sentence-transformers/all-MiniLM-L6-v2 (lightweight, fast)
+- sentence-transformers/all-mpnet-base-v2 (good balance)
+- openai/text-embedding-ada-002 (commercial)
+- cohere/embed-english-v3.0 (commercial)
+
+Last updated: 2024-01
+

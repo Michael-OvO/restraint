@@ -1,0 +1,4 @@
+services:
+  main:
+    tmpfs:
+    - /workdir/result:size=6987776,mode=1777

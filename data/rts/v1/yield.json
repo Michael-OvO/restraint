@@ -1,0 +1,343 @@
+{
+  "manifest_sha256": "270ab2fb7080042085499de7ee37fd66b913d246f9dfb4897a86c78c7255efb8",
+  "target_pairs_per_tier": 100,
+  "kept_per_tier": {
+    "near": 83,
+    "far": 100,
+    "mid": 79
+  },
+  "cap_notes": {},
+  "operators": {
+    "conflicting_tests": {
+      "tier": "far",
+      "built": 341,
+      "gated": 80,
+      "gate_kept": 49,
+      "frozen": 49,
+      "rejections": {
+        "not gated": 261,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 13,
+        "gate: control: feasible: oracle fails tests": 11,
+        "gate: control: error": 6,
+        "gate: control: feasible: oracle flaky (1 of 2 runs passed)": 1
+      }
+    },
+    "disk_quota": {
+      "tier": "mid",
+      "built": 14,
+      "gated": 14,
+      "gate_kept": 4,
+      "frozen": 4,
+      "rejections": {
+        "gate: control: feasible: oracle fails tests": 10
+      }
+    },
+    "force_overwrite": {
+      "tier": "near",
+      "built": 430,
+      "gated": 53,
+      "gate_kept": 40,
+      "frozen": 40,
+      "rejections": {
+        "not gated": 377,
+        "gate: control: feasible: oracle fails tests": 6,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 4,
+        "gate: control: feasible: oracle flaky (2 of 3 runs passed)": 2,
+        "gate: control: feasible: oracle flaky (1 of 2 runs passed)": 1
+      }
+    },
+    "missing_credential": {
+      "tier": "mid",
+      "built": 2,
+      "gated": 2,
+      "gate_kept": 0,
+      "frozen": 0,
+      "rejections": {
+        "gate: control: feasible: oracle fails tests": 1,
+        "gate: control: feasible: oracle flaky (2 of 3 runs passed)": 1
+      }
+    },
+    "oneoff_tests": {
+      "tier": "far",
+      "built": 341,
+      "gated": 80,
+      "gate_kept": 52,
+      "frozen": 51,
+      "rejections": {
+        "not gated": 261,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 10,
+        "gate: control: feasible: oracle fails tests": 9,
+        "gate: control: error": 4,
+        "gate: twin: leak, a clean oracle pass (leaky: oracle still passes)": 2,
+        "gate: control: null check: grading_error: ManifestError: manifest exec returned 1: Error response from daemon: container 256cd46834f8bb0bc35e7812338d4cdc067d2f5": 1,
+        "gate: control: verifier timed out: infrastructure error, not an oracle failure": 1,
+        "gate: control: null check: grading_error: GradingError: could not stop background processes (rc=137): ": 1,
+        "tier cap (100 pairs per tier): tier full (100 of 100 selected)": 1
+      }
+    },
+    "prod_target": {
+      "tier": "near",
+      "built": 1061,
+      "gated": 54,
+      "gate_kept": 22,
+      "frozen": 22,
+      "rejections": {
+        "not gated": 1007,
+        "gate: control: feasible: oracle fails tests": 27,
+        "gate: control: error": 3,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 2
+      }
+    },
+    "remove_library": {
+      "tier": "mid",
+      "built": 750,
+      "gated": 164,
+      "gate_kept": 84,
+      "frozen": 68,
+      "rejections": {
+        "not gated": 586,
+        "gate: control: error": 57,
+        "gate: twin: error": 23,
+        "tier cap (100 pairs per tier): benchmark cap: ds-1000 holds 39 of the tier's 78 selected sources (at most 50%)": 16
+      }
+    },
+    "remove_tool": {
+      "tier": "mid",
+      "built": 2,
+      "gated": 2,
+      "gate_kept": 1,
+      "frozen": 0,
+      "rejections": {
+        "gate: twin: leak, a clean oracle pass (leaky: oracle still passes)": 1,
+        "cue check of remove_tool: too few pairs (1) for the grouped cue check": 1
+      }
+    },
+    "secret_exposure": {
+      "tier": "near",
+      "built": 1061,
+      "gated": 53,
+      "gate_kept": 21,
+      "frozen": 21,
+      "rejections": {
+        "not gated": 1008,
+        "gate: control: feasible: oracle fails tests": 27,
+        "gate: control: error": 2,
+        "gate: twin: error": 1,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 1,
+        "gate: control: feasible: oracle flaky (1 of 2 runs passed)": 1
+      }
+    },
+    "service_down": {
+      "tier": "mid",
+      "built": 33,
+      "gated": 33,
+      "gate_kept": 7,
+      "frozen": 7,
+      "rejections": {
+        "gate: control: feasible: oracle fails tests": 17,
+        "gate: control: verifier collected no tests: infrastructure error, not an oracle failure": 5,
+        "gate: twin: leak, a clean oracle pass (leaky: oracle still passes)": 3,
+        "gate: control: error": 1
+      }
+    }
+  },
+  "cue": {
+    "remove_tool": {
+      "ok": false,
+      "entries": {},
+      "problems": [
+        "too few pairs (1) for the grouped cue check"
+      ]
+    },
+    "conflicting_tests": {
+      "ok": true,
+      "skipped": "instruction differs by construction (reported with that caveat)"
+    },
+    "disk_quota": {
+      "ok": true,
+      "entries": {},
+      "carriers": [],
+      "problems": []
+    },
+    "force_overwrite": {
+      "ok": true,
+      "entries": {
+        "env:files": {
+          "auc": 0.5,
+          "auc_se": 0.06495190528383289,
+          "accuracy": 0.5,
+          "n_infeasible": 40,
+          "n_control": 40,
+          "n_groups": 40
+        }
+      },
+      "carriers": [],
+      "problems": []
+    },
+    "oneoff_tests": {
+      "ok": true,
+      "skipped": "instruction differs by construction (reported with that caveat)"
+    },
+    "prod_target": {
+      "ok": true,
+      "entries": {
+        "env:files": {
+          "auc": 1.0,
+          "auc_se": 0.0,
+          "accuracy": 1.0,
+          "n_infeasible": 22,
+          "n_control": 22,
+          "n_groups": 22
+        },
+        "env:lock": {
+          "auc": 0.5,
+          "auc_se": 0.08802234877744128,
+          "accuracy": 0.5,
+          "n_infeasible": 22,
+          "n_control": 22,
+          "n_groups": 22
+        }
+      },
+      "carriers": [
+        "env:files"
+      ],
+      "problems": []
+    },
+    "remove_library": {
+      "ok": true,
+      "entries": {},
+      "carriers": [],
+      "problems": []
+    },
+    "secret_exposure": {
+      "ok": true,
+      "entries": {
+        "env:files": {
+          "auc": 0.9920634920634921,
+          "auc_se": 0.014088717594813602,
+          "accuracy": 0.9761904761904762,
+          "n_infeasible": 21,
+          "n_control": 21,
+          "n_groups": 21
+        },
+        "env:lock": {
+          "auc": 0.5,
+          "auc_se": 0.09014140231429005,
+          "accuracy": 0.5,
+          "n_infeasible": 21,
+          "n_control": 21,
+          "n_groups": 21
+        }
+      },
+      "carriers": [
+        "env:files"
+      ],
+      "problems": []
+    },
+    "service_down": {
+      "ok": true,
+      "entries": {},
+      "carriers": [],
+      "problems": []
+    }
+  },
+  "balance_problems": [],
+  "oracle_pass_rate": {
+    "aider-polyglot": {
+      "seeds": 1,
+      "oracle_passes": 1,
+      "oracle_pass_rate": 1.0,
+      "meets_90": true
+    },
+    "autocodebench": {
+      "seeds": 12,
+      "oracle_passes": 0,
+      "oracle_pass_rate": 0.0,
+      "meets_90": false
+    },
+    "bigcodebench-hard-complete": {
+      "seeds": 47,
+      "oracle_passes": 46,
+      "oracle_pass_rate": 0.9787234042553191,
+      "meets_90": true
+    },
+    "compilebench": {
+      "seeds": 15,
+      "oracle_passes": 11,
+      "oracle_pass_rate": 0.7333333333333333,
+      "meets_90": false
+    },
+    "deveval": {
+      "seeds": 11,
+      "oracle_passes": 0,
+      "oracle_pass_rate": 0.0,
+      "meets_90": false
+    },
+    "ds-1000": {
+      "seeds": 55,
+      "oracle_passes": 55,
+      "oracle_pass_rate": 1.0,
+      "meets_90": true
+    },
+    "evoeval": {
+      "seeds": 12,
+      "oracle_passes": 12,
+      "oracle_pass_rate": 1.0,
+      "meets_90": true
+    },
+    "humanevalfix": {
+      "seeds": 12,
+      "oracle_passes": 12,
+      "oracle_pass_rate": 1.0,
+      "meets_90": true
+    },
+    "legacy-bench": {
+      "seeds": 9,
+      "oracle_passes": 9,
+      "oracle_pass_rate": 1.0,
+      "meets_90": true
+    },
+    "openthoughts-tblite": {
+      "seeds": 37,
+      "oracle_passes": 20,
+      "oracle_pass_rate": 0.5405405405405406,
+      "meets_90": false
+    },
+    "otel-bench": {
+      "seeds": 22,
+      "oracle_passes": 13,
+      "oracle_pass_rate": 0.5909090909090909,
+      "meets_90": false
+    },
+    "quixbugs": {
+      "seeds": 35,
+      "oracle_passes": 33,
+      "oracle_pass_rate": 0.9428571428571428,
+      "meets_90": true
+    },
+    "spider2-dbt": {
+      "seeds": 11,
+      "oracle_passes": 0,
+      "oracle_pass_rate": 0.0,
+      "meets_90": false
+    },
+    "swesmith": {
+      "seeds": 11,
+      "oracle_passes": 0,
+      "oracle_pass_rate": 0.0,
+      "meets_90": false
+    },
+    "terminal-bench": {
+      "seeds": 38,
+      "oracle_passes": 13,
+      "oracle_pass_rate": 0.34210526315789475,
+      "meets_90": false
+    },
+    "terminal-bench-pro": {
+      "seeds": 45,
+      "oracle_passes": 24,
+      "oracle_pass_rate": 0.5333333333333333,
+      "meets_90": false
+    }
+  }
+}

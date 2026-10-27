@@ -1,0 +1,4 @@
+services:
+  main:
+    tmpfs:
+    - /app/repo:size=17825792,mode=1777

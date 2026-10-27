@@ -1,0 +1,4 @@
+services:
+  main:
+    tmpfs:
+    - /app/output:size=36864,mode=1777

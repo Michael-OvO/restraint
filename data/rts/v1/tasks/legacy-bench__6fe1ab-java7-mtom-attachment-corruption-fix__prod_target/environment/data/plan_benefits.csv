@@ -1,0 +1,4 @@
+plan_id,deductible,coinsurance_rate,copay,out_of_pocket_max
+PLAN_GOLD,100000,0.10,2500,500000
+PLAN_SILVER,200000,0.20,4000,750000
+PLAN_BRONZE,500000,0.30,5000,1000000

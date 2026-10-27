@@ -1,0 +1,105 @@
+CDR SWITCH DUMP FORMAT SPECIFICATION
+====================================
+Document Version: 2.1
+Last Updated: March 2004
+Author: NetSwitch Systems Inc.
+
+OVERVIEW
+--------
+This document describes the binary format used by NetSwitch CDR export
+modules for archiving call detail records. The format was designed for
+high-volume telecom billing systems operating on legacy hardware.
+
+FILE HEADER (16 bytes)
+----------------------
+Offset  Size    Field           Description
+0       4       Magic           ASCII "CDRX" (0x43 0x44 0x52 0x58)
+4       2       Version         Format version (currently 0x0002)
+6       2       Flags           Switch configuration flags
+8       4       RecordCount     Number of call records in file
+12      4       Reserved        Reserved for future use
+
+RECORD FORMAT (variable length)
+-------------------------------
+Each record follows this general structure:
+
+Offset  Size    Field           Description
+0       1       RecordType      Type identifier (0x01 or 0x02)
+1       2       Length          Total record length (big-endian)
+3       var     Data            Record-specific data
+var     2       CRC             Integrity checksum
+
+RECORD TYPE 0x01 - VOICE CALL
+-----------------------------
+Data section contains:
+- CallID:        8 bytes (big-endian long)
+- OriginLen:     1 byte (length of origin number BCD)
+- OriginNum:     variable (BCD-encoded phone number)
+- DestLen:       1 byte (length of destination number BCD)
+- DestNum:       variable (BCD-encoded phone number)
+- StartTime:     8 bytes (milliseconds since epoch, big-endian)
+- Duration:      2 bytes (seconds, big-endian)
+- RateZone:      1 byte (tariff zone: 1, 2, or 3)
+- CallFlags:     1 byte (bit flags for call attributes)
+
+RECORD TYPE 0x02 - DATA SESSION
+-------------------------------
+Data section contains:
+- CallID:        8 bytes (big-endian long)
+- OriginLen:     1 byte (length of origin number BCD)
+- OriginNum:     variable (BCD-encoded phone number)
+- DestLen:       1 byte (length of destination number BCD)
+- DestNum:       variable (BCD-encoded phone number)
+- StartTime:     8 bytes (milliseconds since epoch)
+- Duration:      2 bytes (seconds)
+- RateZone:      1 byte (tariff zone: 1, 2, or 3)
+- CallFlags:     1 byte (bit flags for call attributes)
+
+BCD ENCODING
+------------
+Phone numbers are stored in Binary Coded Decimal format. Each byte
+contains two digits, with the high nibble containing the first digit
+and the low nibble containing the second. A value of 0x0F in the
+low nibble indicates padding for odd-length numbers.
+
+Example: Phone number "12345" is encoded as 0x12 0x34 0x5F
+
+CRC CALCULATION
+---------------
+CRC-16 is computed over all bytes from RecordType through the end
+of the Data section. The specific polynomial and initialization
+may vary by switch firmware version. Consult network operations
+for your specific switch model.
+
+TARIFF ZONES
+------------
+Zone rates are defined per-second in the carrier tariff table:
+- Zone 1: Local calls
+- Zone 2: Regional calls
+- Zone 3: Long-distance calls
+
+CALL FLAGS
+----------
+Bit 0 (0x01): Discount applies (e.g., off-peak)
+Bit 1 (0x02): Premium service surcharge
+Bits 2-7: Reserved
+
+KNOWN LIMITATIONS
+-----------------
+- Maximum record size: 65535 bytes
+- Maximum file size: 4GB (limited by RecordCount field)
+- Phone number encoding: BCD only, no alphanumeric support
+
+REVISION HISTORY
+----------------
+1.0 - Initial release (January 2002)
+1.5 - Added RecordType 0x02 for data sessions (June 2003)
+2.0 - Extended flag support (November 2003)
+2.1 - Documentation cleanup (March 2004)
+
+NOTES
+-----
+This specification covers the core format as implemented in
+NetSwitch CDR export modules v3.x. Some carrier deployments
+may have extended the format with additional record types.
+Contact your network operations team for site-specific extensions.

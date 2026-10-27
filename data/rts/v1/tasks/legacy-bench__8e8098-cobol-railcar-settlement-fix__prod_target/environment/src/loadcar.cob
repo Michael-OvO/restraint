@@ -1,0 +1,53 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LOADCAR.
+
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-HOUR-IDX              PIC 99.
+       01  WS-VALID-COUNT           PIC 99 VALUE 0.
+       01  WS-TOTAL-MILES           PIC 9(5) VALUE 0.
+       01  WS-TEMP-MILES            PIC 9(4).
+       01  WS-JUNC-SPACES           PIC 99 VALUE 0.
+
+       LINKAGE SECTION.
+       COPY CARLOC REPLACING ==:PREFIX:== BY ==LS-CL==.
+
+       01  LS-LOADED-DATA.
+           05  LS-LD-VALID-FLAG     PIC X.
+           05  LS-LD-VALID-HOURS    PIC 9(2).
+           05  LS-LD-TOTAL-MILES    PIC 9(5).
+
+       PROCEDURE DIVISION USING LS-CL-CAR-LOC-REC LS-LOADED-DATA.
+       MAIN-LOAD.
+           MOVE 0 TO WS-VALID-COUNT
+           MOVE 0 TO WS-TOTAL-MILES
+           MOVE 'Y' TO LS-LD-VALID-FLAG
+
+           PERFORM VARYING WS-HOUR-IDX FROM 1 BY 1
+               UNTIL WS-HOUR-IDX > 24
+               PERFORM VALIDATE-HOUR-POSITION
+           END-PERFORM
+
+           MOVE WS-VALID-COUNT TO LS-LD-VALID-HOURS
+           MOVE WS-TOTAL-MILES TO LS-LD-TOTAL-MILES
+
+           IF WS-VALID-COUNT = 0
+               MOVE 'N' TO LS-LD-VALID-FLAG
+           END-IF
+
+           GOBACK.
+
+       VALIDATE-HOUR-POSITION.
+           IF LS-CL-HOUR-STATUS(WS-HOUR-IDX) = 'A' OR
+              LS-CL-HOUR-STATUS(WS-HOUR-IDX) = 'L' OR
+              LS-CL-HOUR-STATUS(WS-HOUR-IDX) = 'E' OR
+              LS-CL-HOUR-STATUS(WS-HOUR-IDX) = 'R'
+               MOVE 0 TO WS-JUNC-SPACES
+               INSPECT LS-CL-HOUR-JUNCTION(WS-HOUR-IDX) TALLYING
+                   WS-JUNC-SPACES FOR ALL SPACES
+               IF WS-JUNC-SPACES < 4
+                   ADD 1 TO WS-VALID-COUNT
+                   MOVE LS-CL-HOUR-MILES(WS-HOUR-IDX) TO WS-TEMP-MILES
+                   ADD WS-TEMP-MILES TO WS-TOTAL-MILES
+               END-IF
+           END-IF.
