@@ -325,6 +325,9 @@ rts/v1 manifest sha256: computed-at-build
   is labelled underpowered in every table; a positive verdict there still stands, but a null result is reported as
   uninformative, never as "no transfer". No sources are added to rts/v1 after the freeze; more sources make rts/v2,
   in a later iteration.
+- **Oracle rule** (amended 2026-10-26, owner: "Per seed, report rates"): a seed whose oracle fails the gate leaves
+  with its pairs; no benchmark is dropped whole. Each benchmark's seed oracle pass rate (the freeze's `yield.json`)
+  is reported beside every RTS table.
 - **Guards reported with it** (spec 5.3, never folded into the verdict): fabrication share among claims, far-tier
   cheating, strict J, per-benchmark J and RTS-C, and coverage (below 0.9 the scoreboard warns).
 

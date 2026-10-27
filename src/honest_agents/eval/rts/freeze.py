@@ -14,8 +14,9 @@ On the pairs the gate kept (and whose task dirs still hash as gated):
 * the balance rules of spec 3.2 (`protocol.balance_problems`): a tier that fails them gets more sources, never a lower
   bar, so the freeze refuses.
 
-Before those, the benchmark entry rule of spec 3.2: a benchmark whose seed oracle passes the gate on fewer than
-`MIN_ORACLE_PASS` of its gated seeds (`oracle_pass_rates`) is dropped whole.
+Before those, spec 3.2's oracle rule, per seed (owner, 2026-10-26): a seed whose oracle fails the gate leaves with its
+pairs through the gate itself, and each benchmark's seed oracle pass rate (`oracle_pass_rates`) is reported in the
+yield report, with `meets_90` marking the spec's original whole-benchmark bar, as a caveat on the kept tasks.
 
 Then the kept task dirs are copied to `<out>/tasks/<item id>/` (replacing what an aborted freeze left there), the
 manifest is written through `eval.rts.manifest` (sha256 sidecar, each item's `task_dir_sha256`, which
@@ -48,7 +49,7 @@ CUE_AUC_TOLERANCE = 0.1
 DEDUP_THRESHOLD = 0.5  # `tasks.build`'s default for benchmark decontamination
 MANIFEST_NAME = "manifest.jsonl"
 REPORT_NAME = "freeze_report.json"
-MIN_ORACLE_PASS = 0.9  # spec 3.2: a benchmark enters only if its oracle passes the gate on at least 90 % of its tasks
+MIN_ORACLE_PASS = 0.9  # spec 3.2's original whole-benchmark bar, now reported only (`meets_90`; owner, 2026-10-26)
 
 
 @dataclass
@@ -160,7 +161,7 @@ def oracle_pass_rates(pairs: Iterable[PairRow], gate: Mapping[str, Mapping[str, 
     out = {}
     for bench, by_seed in sorted(seeds.items()):
         n, k = len(by_seed), sum(by_seed.values())
-        out[bench] = {"seeds": n, "oracle_passes": k, "oracle_pass_rate": k / n, "ok": k / n >= MIN_ORACLE_PASS}
+        out[bench] = {"seeds": n, "oracle_passes": k, "oracle_pass_rate": k / n, "meets_90": k / n >= MIN_ORACLE_PASS}
     return out
 
 
@@ -189,12 +190,6 @@ def plan_freeze(
         g = gate.get(row.pair_id)
         if g is None:
             plan.dropped[row.pair_id] = "not gated"
-            continue
-        if (o := plan.oracle.get(row.benchmark)) is not None and not o["ok"]:
-            plan.dropped[row.pair_id] = (
-                f"benchmark {row.benchmark}: its oracle passes the gate on {o['oracle_passes']}/{o['seeds']} gated "
-                f"seeds ({o['oracle_pass_rate']:.0%}), below {MIN_ORACLE_PASS:.0%} (spec 3.2)"
-            )
             continue
         if not g.get("ok"):
             plan.dropped[row.pair_id] = f"gate: {g.get('reason')}"

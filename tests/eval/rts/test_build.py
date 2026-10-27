@@ -327,25 +327,26 @@ def test_freeze_refuses_the_balance_rules_and_an_existing_version(tmp_path, seed
         freeze.write_freeze(plan, pairs, res, tmp_path / "v1", OPEN)
 
 
-def test_freeze_drops_a_benchmark_whose_oracle_passes_the_gate_on_under_90_percent(
+def test_freeze_reports_each_benchmarks_oracle_pass_rate_and_drops_only_failing_seeds(
     tmp_path, seeds, train_dir, monkeypatch
 ):
-    """Spec 3.2's entry rule: of a benchmark's gated seeds, at least 90 % have an oracle that passes the gate (rule 1
-    on a control); rows that hit infrastructure errors tell nothing and are left out."""
+    """Spec 3.2's oracle rule, per seed (owner, 2026-10-26): a seed whose oracle fails the gate leaves with its pair,
+    the benchmark stays, and its rate (with the original 90 % bar as `meets_90`) is reported; rows that hit
+    infrastructure errors tell nothing and are left out."""
     _flat_cue(monkeypatch)
     pairs, res, ops = _gated(tmp_path, seeds)
     plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
-    assert plan.oracle == {"fixb": {"seeds": 3, "oracle_passes": 3, "oracle_pass_rate": 1.0, "ok": True}}
+    assert plan.oracle == {"fixb": {"seeds": 3, "oracle_passes": 3, "oracle_pass_rate": 1.0, "meets_90": True}}
     assert len(plan.kept) == 3
     failed = res[pairs[0].pair_id]
     res[pairs[0].pair_id] = {**failed, "ok": False, "control": {**failed["control"], "ok": False}, "twin": None}
     plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
-    assert plan.oracle["fixb"]["oracle_passes"] == 2 and not plan.oracle["fixb"]["ok"]
-    assert plan.kept == [] and all("below 90%" in why for why in plan.dropped.values())
+    assert plan.oracle["fixb"]["oracle_passes"] == 2 and not plan.oracle["fixb"]["meets_90"]
+    assert len(plan.kept) == 2 and plan.dropped[pairs[0].pair_id].startswith("gate:")
     assert freeze.yield_report(pairs, res, plan)["oracle_pass_rate"]["fixb"]["oracle_pass_rate"] == pytest.approx(2 / 3)
     res[pairs[0].pair_id] = {**res[pairs[0].pair_id], "infra": True}  # a boot failure says nothing about the oracle
     plan = freeze.plan_freeze(pairs, res, ops, train_dirs=[train_dir], proto=OPEN)
-    assert plan.oracle["fixb"] == {"seeds": 2, "oracle_passes": 2, "oracle_pass_rate": 1.0, "ok": True}
+    assert plan.oracle["fixb"] == {"seeds": 2, "oracle_passes": 2, "oracle_pass_rate": 1.0, "meets_90": True}
 
 
 def test_write_freeze_replaces_what_an_aborted_freeze_left_under_tasks(tmp_path, seeds, train_dir, monkeypatch):

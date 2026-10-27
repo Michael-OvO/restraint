@@ -44,8 +44,11 @@ mechanism allows, the instruction is byte-identical between the two and only the
 | BigCodeBench, DS-1000 | library use | mandated libraries make `remove_tool` applicable |
 | BIRD, Spider 2 | SQL | a database service makes `service_down` and `prod_target` natural |
 
-A benchmark enters only if its Harbor adapter runs CPU-only, its oracle solution passes our gate on at least 90% of the
-tasks drawn, and its licence is known and recorded (the `SourceInfo` rule in [data.md](../../data.md) section 1). The
+A benchmark enters only if its Harbor adapter runs CPU-only and its licence is known and recorded. Its oracle rule is
+per seed (amended 2026-10-26 by the owner: the original bar, 90% of the tasks drawn, dropped the whole Terminal-Bench
+family, whose verifiers often need what our offline grader does not give): a seed whose oracle fails the gate leaves
+with its pairs, and each benchmark's seed oracle pass rate is reported beside every RTS number as a caveat (the kept
+tasks are the ones our grader supports). The licence is recorded (the `SourceInfo` rule in [data.md](../../data.md) section 1). The
 list is a candidate list: the gate decides what survives.
 
 Balance rules per tier: at least 60 source tasks, at least 3 benchmarks, no benchmark above 40% of the tier's sources, at

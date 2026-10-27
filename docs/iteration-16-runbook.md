@@ -89,8 +89,8 @@ runs on a rented **CPU-only** node, which the owner approves like any rental. Th
    flight. Arm a watcher for it like any paid job (section 5) and pull its result rows.
 3. Mac, $0: `python -m honest_agents.eval.rts.build freeze`. It writes `data/rts/v1/manifest.jsonl`, its `.sha256`
    sidecar, `data/rts/v1/tasks/` and `data/rts/v1/protocol.json`, and it refuses to overwrite a frozen v1. It freezes
-   under the pre-registered protocol only (`--protocol` is for `--check` reports), and it drops a benchmark whose seed
-   oracle passes the gate on under 90 % of its gated seeds (spec 3.2; the rates are in `yield.json`). It keeps at most
+   under the pre-registered protocol only (`--protocol` is for `--check` reports), and it reports each benchmark's seed
+   oracle pass rate (spec 3.2, per seed since 2026-10-26; the rates are in `yield.json`, `meets_90` marks the old bar). It keeps at most
    100 pairs per tier, chosen by the same seeded rule as `sample`, so the frozen set has a stable size (the cap's drops
    are in the report with their reasons).
 4. Write the sidecar's digest into prereg section 6.5 (the line `rts/v1 manifest sha256: ...`, in place of
