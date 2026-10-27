@@ -1,4 +1,10 @@
-# Iteration 16: integrity sign-off (draft, NOT signed off)
+# Iteration 16: integrity sign-off (signed off for it16b; other stages pending)
+
+**Owner sign-off for it16b, 2026-10-27** ("Sure", answering: approve the amendment, then launch (b) now on one GPU
+node; then "Rent 57984620" for the node, an RTX 6000 Ada 48 GB VM, 128 vCPU, $1.00/h, instance 58013046). The start
+model's 12-task sanity run is the chain's own `g2_sanity` step (`on_failure: stop`). The same answer approved the
+it16 plan amendment (stage (a) dropped, an RL stage after (c), a select-split validation gate before a lean,
+conditional final eval); it is written into the pre-registration before any final-arm episode exists.
 
 Draft written under [integrity-gate.md](integrity-gate.md) step 3. **Every automated check passes**: the full L1 run
 (oracle gate, S3, S11) on `8d45d25`, and tests and L0 again on `ad4be54` (2026-10-26 morning; the L1 result carries
@@ -54,6 +60,20 @@ for every stage. What each waived entry still owes is in the table.
 Closed on 2026-10-26 on the owner's "Approve and continue": DEF-43 (release of the 24 select variants), DEF-58
 (pre-registration amended to independent sampling) and DEF-60 (AbstentionBench and MASK margins stated, m = 7.5 points).
 DEF-46 and DEF-59 closed earlier the same night.
+
+## L1 validity on 81bc68f (the it16b launch commit)
+
+`git diff ad4be54 81bc68f` over the gated files of integrity-gate.md step 4 touches:
+- `tasks/perturb/rts/` (new: the RTS operators; no it16 training, val or eval build imports them);
+- `tasks/validate.py` (`_run_episode` takes an optional `report`; the default is the old `ORACLE_REPORT`);
+- `tasks/hermetic.py` (`image_leak_problems(visible_tests=())`; the empty default is the old behaviour);
+- `tasks/perturb/remove_tool.py` (the removal step moved into `removal_run`, same string);
+- `eval/run_eval.py` (`reward_config_of_run` split out of `_stored_reward_config`, same result);
+- `tasks/analysis/` and `analysis/power.py` (RTS and the waiver round's reporting).
+
+None changes what stage (b) builds, runs or grades: its tasks are the committed `data/decision` surface tasks
+(unchanged), and the refactors are identical by construction (their tests are in `--fast`, green on `81bc68f`:
+4989 passed). **The L1 results hold for it16b.**
 
 ## What blocks sign-off, exactly
 
