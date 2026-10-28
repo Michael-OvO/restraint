@@ -18,9 +18,9 @@ lora:
 
 data:
   items:                                   # sft.confidence_bandit build outputs (prereg section 3); the it17a ones are
-    - runs/it17/items_it17a_feasible.jsonl  # built after stage (a) and frozen with their sha256s
-    - runs/it17/items_it17a_infeasible.jsonl
-    - runs/it17/items_it16b.jsonl
+    - data/it17/items_it17a_feasible.jsonl  # built after stage (a) and frozen with their sha256s
+    - data/it17/items_it17a_infeasible.jsonl
+    - data/it17/items_it16b.jsonl
   max_prompt_tokens: 16384
   heldout_fraction: 0.3                    # by source (stable hash, seed it17-confidence): the dev set's half
   seed: it17-confidence

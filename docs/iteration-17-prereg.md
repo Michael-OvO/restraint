@@ -96,3 +96,50 @@ The online run's own confidences are scored too (unpaired; reported, the power o
   5 and 6 address for it17.
 - The L1 sweep on the DEF-65 harness commit (`it17a`'s `gate_l1` step, on the node).
 - Owner approval of each stage's GPU spend; owner approval of this pre-registration.
+
+## 9. Computed at build (2026-10-28, before any training)
+
+**Stage (a)** (`iterations/17-it17a-data-rollouts`, node 58122470): 1,860 feasible and 508 infeasible G2 episodes,
+0 infra errors, every one banked; L1 on the DEF-65 harness passed first (docs/iteration-17-signoff.md).
+
+**Items** (`sft.confidence_bandit build`, leaky variants dropped since `919fc79`):
+
+| file | sha256 | items | sources | feasible claims (pass / fail) | dropped |
+|---|---|---|---|---|---|
+| `data/it17/items_it17a_feasible.jsonl` | `1cbb6cc5…` | 1,838 | 205 | 1,672 (1,320 / 352) | no report 22 |
+| `data/it17/items_it17a_infeasible.jsonl` | `109c8ed0…` | 489 | 172 | - | leaky variant 14, no report 5 |
+| `data/it17/items_it16b.jsonl` | `9fdf06fd…` | 852 | 49 | 336 (312 / 24) | excluded source 744, no report 3 |
+
+Full digests: `1cbb6cc54619e53345466b6b878cbcb84bc66804b22884b106ee1f8f02ab505a`,
+`109c8ed02c28fe6402dfc1449c59467544154ddfc160099f9d622313623d9ade`,
+`9fdf06fde8457be3dbd4c7e360d7baddecd8fc1f354c211f930732c92193368b`. Rollout lists:
+`3597268d57c617cc2be879578b7a81691438880ab1ab485ff62a2b6d04bf519d` (feasible),
+`440f32bcb208bf1659ace4bb2382e0ccc6f7f5d06fac075904f2cf1727cabf43` (infeasible).
+
+**Held-out split** (`train.confidence --dry-run`): train 2,422 items on 159 sources (feasible claims 1,239 pass /
+**311 fail**, above the 150 floor; infeasible 201 claimed / 486 not); held out 757 items on 46 sources. No source on
+both sides. Prompts: median 4,483 tokens, p95 9,578, max 14,696 (none over 16,384).
+
+**Training config** `configs/confidence/it17.yaml`: sha256 `2c2db886767daaba74c24a78ef01d19a7bf20ef939d88c68f3afaff2856a5d2a`.
+
+**Dev set and power** (`analysis.calibration power --run dev:select=<it16c G2 select> --run dev:pool=<it17a
+feasible> --heldout-of dev:pool`): 621 G2 claims, 125 failing, 105 sources (60 select + 45 held-out pool sources with
+claims). MDE of the AUROC difference at the dev set's own design: **0.124** (80 % power, one-sided 0.05; SE scaling
+with S measured at e = 0.21; unpaired, so conservative for the paired design). Below 0.15: the primary is not
+reported as underpowered.
+
+**Guard margins** (`analysis.calibration guards --run <it16c G2 select>`, K = 60, S = 2, the larger of the formula
+and simulated ni10), candidate − G2:
+
+| guard | G2 | rule |
+|---|---|---|
+| verified success | 68.4 % | LB > −7.7 points |
+| task success | 68.8 % | LB > −7.8 points |
+| claim rate, feasible | 92.3 % | LB > −5.6 points |
+| claim rate, infeasible | 9.9 % | UB < +9.3 points |
+| control decline | 5.9 % | UB < +7.5 points |
+| zero-command reports | 0.5 % | UB < +1.6 points |
+| mean commands | 13.9 | UB < +0.92 commands |
+
+Each guard uses the section-5 estimator of it16 (`analysis.power.paired_estimate`, 90 % CI, source-cluster) on the
+online select runs of G2 (re-run under the current harness) and G2-cal.
