@@ -1,0 +1,103 @@
+# Iteration 17, stage (a): G2's own episodes for the confidence bandit (docs/iteration-17-design.md section 4).
+# G2 seed 1 on the general training pool (data/train_pool.jsonl, every it16 exclusion applied:
+# `sft.confidence_bandit rollout-list`, re-checked by `verify-rollout` below): the 465 feasible variants (plain tasks
+# and controls, 205 sources) at S = 4, where the near-miss claims are, and the 254 infeasible variants at S = 2, with
+# the trajectory bank (full transcripts and graded outcomes: the bandit's items). Two episode files, so each keeps
+# its own S. Then nothing: the items are built on the Mac (`sft.confidence_bandit build`).
+# Timing: it16b ran 1,600 G2 episodes at concurrency 24 in 139 min; 1,860 + 508 here, about 3 h 15 min of rollouts.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open for it17a (the it16
+# waivers name it16a-it16d only).
+name: it17a
+state_dir: outputs/chain/it17a
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it17a
+      --ledger docs/defects.md
+      --json outputs/chain/it17a/gate_ledger.json
+      && mkdir -p outputs/chain/it17a/markers && touch outputs/chain/it17a/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it17a/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  # Training pool only: no select, val, test or final-decision-probe source, split train, no duplicate.
+  - name: split_guard
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.sft.confidence_bandit verify-rollout
+      data/it17/rollout_feasible.jsonl data/it17/rollout_infeasible.jsonl
+      && touch outputs/chain/it17a/markers/split_guard.done
+    gpus: []
+    done: outputs/chain/it17a/markers/split_guard.done
+    timeout_min: 10
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: g2_sanity
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it17_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+    gpus: [0]
+    done: runs/eval/it17_g2_sanity/metrics.json
+    timeout_min: 45
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: rollouts_feasible
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/it17/rollout_feasible.jsonl runs/eval/it17_rollouts_feasible --n-samples 4
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --bank-dir runs/eval/it17_rollouts_feasible/bank
+    gpus: [0]
+    done: runs/eval/it17_rollouts_feasible/metrics.json
+    timeout_min: 300
+    on_failure: stop
+    progress: {pattern: '^\[(\d+)/1860\]', total: 1860}
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: rollouts_infeasible
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/it17/rollout_infeasible.jsonl runs/eval/it17_rollouts_infeasible --n-samples 2
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --bank-dir runs/eval/it17_rollouts_infeasible/bank
+    gpus: [0]
+    done: runs/eval/it17_rollouts_infeasible/metrics.json
+    timeout_min: 120
+    on_failure: stop
+    progress: {pattern: '^\[(\d+)/508\]', total: 508}
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/eval/it17_g2_sanity, runs/eval/it17_rollouts_feasible, runs/eval/it17_rollouts_infeasible,
+               outputs/logs]
+  archives:
+    - {iteration: 17, name: it17a-data-rollouts,
+       eval: [runs/eval/it17_g2_sanity, runs/eval/it17_rollouts_feasible, runs/eval/it17_rollouts_infeasible],
+       keep_bank: true, no_weights: true,
+       note: "iteration 17 stage (a): G2 s1 on the training pool (feasible S = 4, infeasible S = 2), bank kept"}

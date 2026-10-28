@@ -228,6 +228,43 @@ def summary(b: Build) -> dict[str, Any]:
     }
 
 
+POOL_FILE = "data/train_pool.jsonl"
+ROLLOUT_FEASIBLE = "data/it17/rollout_feasible.jsonl"
+ROLLOUT_INFEASIBLE = "data/it17/rollout_infeasible.jsonl"
+
+
+def rollout_rows(pool: str | Path, data_dir: str | Path = "data", tasks_root: str | Path = "data/tasks") -> list[dict]:
+    """The it17 data rollout's tasks: every `pool` variant of the train split whose source is outside
+    `excluded_from_commit_training` and whose task directory exists, in pool order."""
+    excluded = excluded_from_commit_training(data_dir)
+    rows = [json.loads(line) for line in Path(pool).read_text().splitlines() if line.strip()]
+    return [
+        r for r in rows
+        if r.get("split") == "train" and r.get("pair_id") not in excluded
+        and (Path(tasks_root) / r["variant_id"]).is_dir()
+    ]  # fmt: skip
+
+
+def verify_rollout(paths: Sequence[str | Path], data_dir: str | Path = "data") -> list[str]:
+    """Problems of the rollout lists: an excluded source, a split other than train, a duplicate variant."""
+    excluded = excluded_from_commit_training(data_dir)
+    problems: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        for line in Path(path).read_text().splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if r.get("pair_id") in excluded:
+                problems.append(f"{path}: {r['variant_id']} has excluded source {r['pair_id']}")
+            if r.get("split") != "train":
+                problems.append(f"{path}: {r['variant_id']} split {r.get('split')!r}")
+            if r["variant_id"] in seen:
+                problems.append(f"{path}: {r['variant_id']} listed twice")
+            seen.add(r["variant_id"])
+    return problems
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m honest_agents.sft.confidence_bandit", description=__doc__.split("\n")[0]
@@ -238,7 +275,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--out", required=True)
     b.add_argument("--data-dir", default="data")
     b.add_argument("--drop-excluded", action="store_true")
+    r = sub.add_parser("rollout-list", help="the it17 data rollout's task lists (feasible, infeasible)")
+    r.add_argument("--pool", default=POOL_FILE)
+    r.add_argument("--data-dir", default="data")
+    r.add_argument("--tasks-root", default="data/tasks")
+    r.add_argument("--feasible-out", default=ROLLOUT_FEASIBLE)
+    r.add_argument("--infeasible-out", default=ROLLOUT_INFEASIBLE)
+    v = sub.add_parser("verify-rollout", help="refuse a rollout list with an excluded source or a non-train row")
+    v.add_argument("paths", nargs="+")
+    v.add_argument("--data-dir", default="data")
     args = ap.parse_args(argv)
+    if args.cmd == "rollout-list":
+        rows = rollout_rows(args.pool, args.data_dir, args.tasks_root)
+        for out_path, keep in ((args.feasible_out, True), (args.infeasible_out, False)):
+            part = [x for x in rows if bool(x.get("feasible")) is keep]
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_text("".join(json.dumps(x) + "\n" for x in part))
+            print(f"{out_path}: {len(part)} variants, {len({x['pair_id'] for x in part})} sources")
+        return 0
+    if args.cmd == "verify-rollout":
+        problems = verify_rollout(args.paths, args.data_dir)
+        for line in problems[:20]:
+            print(line)
+        print(f"verify-rollout: {len(problems)} problem(s)")
+        return 1 if problems else 0
     got = build(args.bank, args.data_dir, drop_excluded=args.drop_excluded)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
