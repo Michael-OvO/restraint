@@ -42,6 +42,11 @@ online loop always prices effort.
   model to report at once (zero commands in 82 % of feasible episodes, docs/training-log.md), which a number-only
   loss does not train. The guards still check it (section 5).
 - **Start:** G2 seed 1, LoRA, KL to G2. On-policy in the sense that matters: the transcripts and reports are G2's own.
+- **Estimator (2026-10-28):** the expectation over the value is computed exactly, not sampled
+  (`train.confidence_exact`): Qwen3.5 writes the value one digit per token, so one forward pass over `prompt + "0."`
+  gives the probability of every value to a tenth; the same objective as GRPO's, with no sampling variance and about
+  8x cheaper (GRPO with 8 samples over 5k-token prompts would take about 10 h per epoch). Tested against brute force
+  and against sampling (`tests/test_train_confidence_exact.py`).
 
 ## 4. Data
 

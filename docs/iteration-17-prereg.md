@@ -32,10 +32,15 @@ makes that value discriminate G2's failing claims from its passing ones, without
 
 ## 4. Training
 
-`configs/confidence/it17.yaml`, frozen at build: LoRA r16 / alpha 32 from G2 (merged), GRPO over `num_generations` 8
-completions of at most 8 tokens, temperature 1.0, Brier reward (`confidence_bandit.brier_reward`; unparsable = -1),
-`scale_rewards: none`, KL `beta` 0.04, learning rate 1e-5, effective batch 4 prompts x 8, 2 epochs, gradient
-checkpointing on, W&B (project honest-agents, group it17). Loss on the sampled value tokens only.
+`train.confidence_exact` with `configs/confidence/it17.yaml` (its `exact:` section), from G2 (merged): LoRA r16 /
+alpha 32; the loss per item is the **expected** Brier score of the value the model writes, plus 0.04 x the KL to G2,
+both computed exactly over the value's token tree (one forward pass over `prompt + "0."`: node 1 `1` / `0` / other,
+node 2 `\n` / `.` / other, node 3 the tenths digit; unparsable mass costs 1, the worst Brier; `0.95` resolves to 0.9,
+and anything starting with `1` to 1.0). This is the objective the GRPO bandit of the design estimates by sampling
+(`train.confidence`), without sampling variance and at about one eighth of its cost (decided 2026-10-28, before any
+training: GRPO with 8 samples of 5k-token prompts would take about 10 h per epoch). Learning rate 5e-5, cosine with
+3 % warmup, 8 items per optimiser step, 2 epochs, gradient clipping at 1.0, gradient checkpointing on, logits only at
+the three nodes; W&B (project honest-agents, group it17). The **final** adapter is the candidate (no selection).
 
 ## 5. Primary evaluation (paired, same episodes)
 
@@ -120,7 +125,7 @@ Full digests: `1cbb6cc54619e53345466b6b878cbcb84bc66804b22884b106ee1f8f02ab505a`
 **311 fail**, above the 150 floor; infeasible 201 claimed / 486 not); held out 757 items on 46 sources. No source on
 both sides. Prompts: median 4,483 tokens, p95 9,578, max 14,696 (none over 16,384).
 
-**Training config** `configs/confidence/it17.yaml`: sha256 `2c2db886767daaba74c24a78ef01d19a7bf20ef939d88c68f3afaff2856a5d2a`.
+**Training config** `configs/confidence/it17.yaml`: sha256 `6324981ccc5e4c9583f619989b62b4dbb911907bad00bf3999c9cf3bfca19dc0` (with its `exact:` section).
 
 **Dev set and power** (`analysis.calibration power --run dev:select=<it16c G2 select> --run dev:pool=<it17a
 feasible> --heldout-of dev:pool`): 621 G2 claims, 125 failing, 105 sources (60 select + 45 held-out pool sources with
