@@ -90,7 +90,7 @@ The online run's own confidences are scored too (unpaired; reported, the power o
 
 ## 8. Before any GPU spend (open)
 
-- **Owner waivers for it17a (and it17b, the training and evaluation stage):** DEF-10, DEF-20 and DEF-50 are waived for
+- **Owner waivers for it17a and it17b: granted 2026-10-28** ("Waive for it17a, it17b (Recommended)"; ledger updated). Before: DEF-10, DEF-20 and DEF-50 are waived for
   it16a-it16d only, so `gate.ledger check --experiment it17a` refuses (2026-10-28). DEF-50 (AbstentionBench export)
   and DEF-20 (it16 guard power) concern the it16 final benchmark; DEF-10 (bars at a point estimate) is what sections
   5 and 6 address for it17.
