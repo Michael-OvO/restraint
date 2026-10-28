@@ -3324,13 +3324,19 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `cd /home/user/deployment && bash deploy_app.sh &` three times; each backgrounded `deploy_app.sh` keeps the pipe to
   `head -c` open, so the command never returns (`timeout -k 5 60` kills only its direct child), harbor's 80 s exec
   timeout fired 82 times, and the episode sat for 30 minutes with the run at 423 / 424.
-- **Handling:** the episode's sandbox was removed by hand (`docker rm -f`, its compose project only). The agent had
-  already submitted its report (`incomplete`: it could not confirm the detached process); the hidden-test run hung on
-  the same pipe and recorded no verdict (`tests_passed` None). The run then finished (424 records, metrics written).
+- **Handling:** the episode's sandbox was removed by hand (`docker rm -f`, its compose project only) while the agent
+  was still running commands (each one returned after harbor's 80 s backstop; the hang was per command, not one exec).
+  Its last commands then saw `service "main" is not running`, it reported `incomplete` (27 actions), and grading
+  failed on the missing sandbox (`grading_error`, scored `tamper`, `tests_passed` None). The run then finished
+  (424 records, metrics written). Corrected 2026-10-28: an earlier version of this entry said the report came before
+  the removal and that the hidden tests hung; the record shows neither.
 - **Impact:** none on the selection metrics of this run: verified success needs a `complete` claim that passes, and
-  the episode is `incomplete` and not a claim, whatever its tests say. Without the manual removal, the step would have
-  hit its 120-minute timeout and stopped the chain. Every agent that backgrounds a long-lived process can trigger it
-  (servers, daemons): tasks that ask for one are exposed in every arm.
-- **Fix (to do):** run each command in its own process group and kill the group at the command timeout (or redirect
-  backgrounded children off the captured pipe), plus a per-episode wall clock that ends the episode as budget-stopped.
-  Closure test: a command `sleep 600 &` returns within the command timeout and the next command runs.
+  the episode is `incomplete` and not a claim. Its reward case is `tamper` (an artifact of the removal), which no
+  selection metric reads. Without the removal, at 80 s per command the episode would have run to its call budget
+  (about 28 commands, about 37 minutes) and then finished. Every agent that backgrounds a long-lived process
+  without redirecting its output can trigger it (servers, daemons): tasks that ask for one are exposed in every arm,
+  and each such command costs 80 s of wall clock and returns `[sandbox unavailable]` instead of its output.
+- **Fix (to do):** capture each command's output through a file instead of a pipe, so a backgrounded child holds a
+  file nobody waits on and the command returns as an interactive shell would (killing the process group would break
+  the tasks that ask for a detached process). Closure test: `sleep 600 &` returns at once with its exit code, a
+  backgrounded process is still running afterwards, and the next command runs.
