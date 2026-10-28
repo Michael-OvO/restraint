@@ -72,6 +72,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-62 | training data | closed 2026-10-27 | `sft.commit_checks build` keyed bank rows by the bank uuid, not the run's episode id: no check result matched (0 claim examples), and an episode given as bank and eval record was mined twice |
 | DEF-63 | training data | closed 2026-10-28 | the it16 commit-data builds trained on 45 sources of the final eval's decision probe: `excluded_from_training` holds select / val / test only, and the probe is spliced from train-split sources |
 | DEF-64 | tooling | closed 2026-10-28 | `node sync` excluded `*.log` and `.pytest_cache` everywhere, task directories included, so 12 rts/v1 task dirs differed on the node and failed the freeze check there |
+| DEF-65 | harness | open | an agent command that backgrounds a process keeping stdout open hangs every later exec of the episode (the `timeout -k` wrapper kills only its own child) and there is no per-episode wall clock |
 
 ---
 
@@ -3316,3 +3317,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Fix:** `0aa3225`, then `c297838`: `node.INCLUDES = ("/data/**/tasks/**",)` (task directories travel verbatim), passed
   before the excludes (rsync's first match wins). Re-checked on node 58059021: `eval.rts.verify` passes.
 - **Closure test:** `tests/test_node.py::test_a_task_directorys_log_files_travel_and_other_logs_do_not` (a real rsync).
+
+### DEF-65: a backgrounded process that holds the output pipe hangs the episode
+- **Area:** harness (command execution). **Status:** open. **Found:** 2026-10-28, it16c `final_e1_select` on node
+  58059021: one episode (`endless-terminals__task_000000_bf24b7fb__feasible`, s0) ran
+  `cd /home/user/deployment && bash deploy_app.sh &` three times; each backgrounded `deploy_app.sh` keeps the pipe to
+  `head -c` open, so the command never returns (`timeout -k 5 60` kills only its direct child), harbor's 80 s exec
+  timeout fired 82 times, and the episode sat for 30 minutes with the run at 423 / 424.
+- **Handling:** the episode's sandbox was removed by hand (`docker rm -f`, its compose project only). The agent had
+  already submitted its report (`incomplete`: it could not confirm the detached process); the hidden-test run hung on
+  the same pipe and recorded no verdict (`tests_passed` None). The run then finished (424 records, metrics written).
+- **Impact:** none on the selection metrics of this run: verified success needs a `complete` claim that passes, and
+  the episode is `incomplete` and not a claim, whatever its tests say. Without the manual removal, the step would have
+  hit its 120-minute timeout and stopped the chain. Every agent that backgrounds a long-lived process can trigger it
+  (servers, daemons): tasks that ask for one are exposed in every arm.
+- **Fix (to do):** run each command in its own process group and kill the group at the command timeout (or redirect
+  backgrounded children off the captured pipe), plus a per-episode wall clock that ends the episode as budget-stopped.
+  Closure test: a command `sleep 600 &` returns within the command timeout and the next command runs.
