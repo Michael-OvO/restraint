@@ -1,0 +1,153 @@
+# Iteration 17, stage (b): train G2's confidence and evaluate it (docs/iteration-17-prereg.md sections 4-6, 9).
+# 1. Train: `train.confidence_exact` (expected Brier + KL to G2 over the value's token tree) on the frozen items
+#    (data/it17/items_*.jsonl, sha256s in prereg section 9), from G2 seed 1 merged; LoRA; W&B project honest-agents,
+#    group it17. The final adapter is the candidate (no selection).
+# 2. Primary, paired: each arm, served alone, states the confidence of the dev set's G2 episodes on the training prompt
+#    (`eval.confidence_rescore`: the select split's G2 bank in full, the it17a feasible bank on held-out sources only).
+# 3. Guards, online: G2 (re-run under the current harness, DEF-65) and G2-cal on the select split, S = 2, as it16c.
+# Every served model runs its 12-task sanity eval first, in the same server session. The analysis (paired AUROC and
+# the guards) runs on the Mac on the pulled rows (`analysis.calibration paired`, `analysis.power estimate`).
+# Timing (estimates): training about 2 x 1.5 h on one 32 GB+ GPU; each rescore about 15 min; each select run 30 min.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open for it17b.
+name: it17b
+state_dir: outputs/chain/it17b
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it17b
+      --ledger docs/defects.md
+      --json outputs/chain/it17b/gate_ledger.json
+      && mkdir -p outputs/chain/it17b/markers && touch outputs/chain/it17b/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it17b/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  # The frozen inputs (prereg section 9): refuse to train on anything else.
+  - name: inputs_frozen
+    command: >-
+      printf '%s\n'
+      '1cbb6cc54619e53345466b6b878cbcb84bc66804b22884b106ee1f8f02ab505a  data/it17/items_it17a_feasible.jsonl'
+      '109c8ed02c28fe6402dfc1449c59467544154ddfc160099f9d622313623d9ade  data/it17/items_it17a_infeasible.jsonl'
+      '9fdf06fde8457be3dbd4c7e360d7baddecd8fc1f354c211f930732c92193368b  data/it17/items_it16b.jsonl'
+      '3e5a000f2d5890ae5b7c8790dd4bf53c45fc4dec8b9c06e29dc8ccdb2f16c2a6  data/it17/dev_banks/select/bank-3226506.jsonl.gz'
+      'fec866a2f37396f3d2f856734a62a2fca0b158507354d833131708f153c5656e  data/it17/dev_banks/pool/bank-125051.jsonl.gz'
+      | sha256sum -c -
+      && touch outputs/chain/it17b/markers/inputs_frozen.done
+    gpus: []
+    done: outputs/chain/it17b/markers/inputs_frozen.done
+    timeout_min: 5
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: train_confidence
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.train.confidence_exact
+      --config configs/confidence/it17.yaml model.name=outputs/it15/g2_merged
+    gpus: [0]
+    done: outputs/confidence/it17-confidence/final/adapter_config.json
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 30
+    env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it17, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: merge_cal
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/confidence/it17-confidence/final --out outputs/it17/g2cal_merged
+    gpus: []
+    done: outputs/it17/g2cal_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: rescore_g2
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it17b_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.confidence_rescore
+      --bank data/it17/dev_banks/select --heldout-bank data/it17/dev_banks/pool --out runs/it17/rescore_g2.jsonl
+      --base-url http://localhost:8000/v1 --model policy --samples 8 --temperature 1.0 --seed 0 --concurrency 16
+      && touch outputs/chain/it17b/markers/rescore_g2.done
+    gpus: [0]
+    done: outputs/chain/it17b/markers/rescore_g2.done
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: rescore_cal
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it17/g2cal_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it17b_cal_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- env -u VIRTUAL_ENV uv run --frozen --extra eval --extra train python -m honest_agents.eval.confidence_rescore
+      --bank data/it17/dev_banks/select --heldout-bank data/it17/dev_banks/pool --out runs/it17/rescore_cal.jsonl
+      --base-url http://localhost:8000/v1 --model policy --samples 8 --temperature 1.0 --seed 0 --concurrency 16
+      && touch outputs/chain/it17b/markers/rescore_cal.done
+    gpus: [0]
+    done: outputs/chain/it17b/markers/rescore_cal.done
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: select_g2
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it17b_g2_sanity2 --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it17_g2_select --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    done: runs/eval/it17_g2_select/metrics.json
+    timeout_min: 120
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: select_cal
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it17/g2cal_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it17b_cal_sanity2 --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it17_cal_select --n-samples 2 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    done: runs/eval/it17_cal_select/metrics.json
+    timeout_min: 120
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/it17, runs/eval/it17_g2_select, runs/eval/it17_cal_select, runs/eval/it17b_g2_sanity,
+               runs/eval/it17b_cal_sanity, outputs/confidence/it17-confidence/train_log.jsonl, outputs/logs]
+  archives:
+    - {iteration: 17, name: it17b-confidence, run: [outputs/confidence/it17-confidence],
+       eval: [runs/eval/it17b_g2_sanity, runs/eval/it17b_cal_sanity, runs/eval/it17_g2_select, runs/eval/it17_cal_select],
+       file: [runs/it17/rescore_g2.jsonl, runs/it17/rescore_cal.jsonl],
+       note: "iteration 17 stage (b): confidence-only training of G2; paired dev rescoring; online select guards"}

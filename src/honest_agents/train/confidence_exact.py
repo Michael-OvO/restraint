@@ -124,10 +124,15 @@ def exact_section(raw: dict[str, Any]) -> ExactSection:
 
 
 def _node_logprobs(model: Any, ids: list[int], n_prompt: int) -> list[Any]:
+    """Log-probabilities at the tree's three nodes. They are the sequence's last three positions (`prompt, "0", "."`),
+    so only those logits are computed (`logits_to_keep`): full-vocabulary logits at every position of a 15k-token
+    prompt would take about 7 GB."""
     import torch
 
-    out = model(input_ids=torch.tensor([ids], device=model.device), use_cache=False)
-    logits = out.logits[0, n_prompt - 1 : n_prompt + 2].float()
+    if len(ids) != n_prompt + 2:
+        raise ValueError("an item is its prompt followed by exactly the two tokens 0 and .")
+    out = model(input_ids=torch.tensor([ids], device=model.device), use_cache=False, logits_to_keep=3)
+    logits = out.logits[0, -3:].float()
     return [torch.log_softmax(logits[i], dim=-1) for i in range(3)]
 
 
@@ -196,8 +201,14 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
     from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM, get_cosine_schedule_with_warmup
 
-    from honest_agents.models import lora_target_modules
+    from honest_agents.models import family_spec, flash_linear_attention_available, lora_target_modules
 
+    # as `train.run`'s preflight: Qwen3.5 is about 20x slower without flash-linear-attention
+    needs_fla = family_spec(cfg.model.family).needs_flash_linear_attention
+    if torch.cuda.is_available() and needs_fla and not flash_linear_attention_available():
+        raise RuntimeError(
+            "flash-linear-attention (`fla`) is not installed; Qwen3.5 would fall back to slow torch code"
+        )
     rng = random.Random(cfg.seed)
     torch.manual_seed(cfg.seed)
     model = AutoModelForCausalLM.from_pretrained(cfg.model.name, dtype=getattr(torch, cfg.model.dtype))
