@@ -36,3 +36,16 @@ grpo:
   num_train_epochs: 2
   eval_steps: 25
   report_to: wandb
+
+# The training run uses `train.confidence_exact` (the same objective in closed form; prereg section 4): these settings.
+# The `grpo:` section above stays for the sampled estimator `train.confidence`, which the prereg does not use.
+exact:
+  learning_rate: 5.0e-5                    # the SFT stages' LoRA rate; the adapter must move the value off "1"
+  num_train_epochs: 2
+  gradient_accumulation_steps: 8           # 8 items per optimiser step: ~605 steps over 2,422 items x 2 epochs
+  beta: 0.04                               # KL to G2 over the value's token tree
+  max_grad_norm: 1.0
+  warmup_ratio: 0.03
+  eval_steps: 50                           # held-out expected Brier and claims AUROC, logged; they select nothing
+  max_eval_items: 400
+  report_to: wandb

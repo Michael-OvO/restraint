@@ -124,14 +124,15 @@ def prefix_messages(row: BankRow, args: dict[str, Any]) -> tuple[list[dict[str, 
     return [*messages, report], moved
 
 
-def item_of(row: BankRow, excluded: set[str], *, drop_excluded: bool = False) -> Item | str:
-    """The bandit item of one bank row, or the reason it has none."""
+def item_of(row: BankRow, excluded: set[str], *, drop_excluded: bool = False, train_only: bool = True) -> Item | str:
+    """The bandit item of one bank row, or the reason it has none. `train_only` (the build) refuses a row of another
+    split; the paired evaluation (`eval.confidence_rescore`) scores the select split and passes False."""
     source = pair_of(row)
     if source in excluded:
         if not drop_excluded:
             raise ExcludedSourceError(f"episode {row.episode_id} has excluded source {source}")
         return DROP_EXCLUDED
-    if (row.task or {}).get("split") not in (None, "train"):
+    if train_only and (row.task or {}).get("split") not in (None, "train"):
         return DROP_NOT_TRAIN
     o = row.episode_outcome()
     if o.masked_reason:

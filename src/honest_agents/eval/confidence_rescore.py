@@ -1,7 +1,7 @@
 """Paired confidence scoring (iteration 17, docs/iteration-17-design.md section 5): a served model states the
 confidence of archived episodes, on exactly the training prompt, so two models are compared on the same claims.
 
-    uv run --extra eval python -m honest_agents.eval.confidence_rescore --bank DIR [--bank DIR ...] \\
+    uv run --extra eval python -m honest_agents.eval.confidence_rescore --bank DIR [--heldout-bank DIR ...] \\
         --out runs/it17/rescore_<arm>.jsonl [--base-url http://localhost:8000/v1] [--model policy] \\
         [--tokenizer Qwen/Qwen3.5-4B] [--samples 8] [--temperature 1.0] [--concurrency 16]
 
@@ -35,13 +35,32 @@ class PromptMismatchError(RuntimeError):
     pass
 
 
-def items_of(banks: Sequence[str | Path]) -> tuple[list[cb.Item], dict[str, int]]:
+def items_of(
+    banks: Sequence[str | Path],
+    heldout_banks: Sequence[str | Path] = (),
+    *,
+    fraction: float = 0.3,
+    seed: str = "it17-confidence",
+) -> tuple[list[cb.Item], dict[str, int]]:
+    """Items of every `banks` row, and of the `heldout_banks` rows whose source is held out from the training
+    (`train.confidence.heldout`, the trainer's own split). Leaky variants are dropped, as the build drops them."""
+    from honest_agents.sft.data import leaky_variants, variant_of
+    from honest_agents.train.confidence import heldout
+
     items: list[cb.Item] = []
     dropped: dict[str, int] = {}
     seen: set[str] = set()
-    for path in banks:
-        for row in bank_mod.iter_bank(Path(path).expanduser()):
-            got = cb.item_of(row, set())
+    for path, held_only in [*((b, False) for b in banks), *((b, True) for b in heldout_banks)]:
+        rows = list(bank_mod.iter_bank(Path(path).expanduser()))
+        leaky = leaky_variants(rows)
+        for row in rows:
+            if variant_of(row) in leaky:
+                dropped[cb.DROP_LEAKY] = dropped.get(cb.DROP_LEAKY, 0) + 1
+                continue
+            if held_only and not heldout(cb.pair_of(row), fraction, seed):
+                dropped["training_source"] = dropped.get("training_source", 0) + 1
+                continue
+            got = cb.item_of(row, set(), train_only=False)
             if isinstance(got, str):
                 dropped[got] = dropped.get(got, 0) + 1
             elif got.id not in seen:
@@ -103,7 +122,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m honest_agents.eval.confidence_rescore", description=__doc__.split("\n")[0]
     )
-    ap.add_argument("--bank", action="append", required=True)
+    ap.add_argument("--bank", action="append", default=[], help="every row is scored (the select split)")
+    ap.add_argument(
+        "--heldout-bank",
+        action="append",
+        default=[],
+        help="only rows of sources held out from the confidence training are scored",
+    )
+    ap.add_argument("--heldout-fraction", type=float, default=0.3)
+    ap.add_argument("--heldout-seed", default="it17-confidence")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--base-url", default="http://localhost:8000/v1")
     ap.add_argument("--model", default="policy")
@@ -114,7 +141,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=16)
     args = ap.parse_args(argv)
-    items, dropped = items_of(args.bank)
+    if not args.bank and not args.heldout_bank:
+        ap.error("give --bank and / or --heldout-bank")
+    items, dropped = items_of(args.bank, args.heldout_bank, fraction=args.heldout_fraction, seed=args.heldout_seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     have = set()
     if args.out.is_file():

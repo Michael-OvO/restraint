@@ -79,3 +79,13 @@ def test_a_prompt_the_server_tokenises_differently_is_refused(tmp_path: Path, mo
     items, _ = cr.items_of([_bank(tmp_path)])
     with pytest.raises(cr.PromptMismatchError):
         asyncio.run(cr._score(items[:1], _args(tmp_path), tmp_path / "rows.jsonl"))
+
+
+def test_a_heldout_bank_is_scored_on_held_out_sources_only(tmp_path: Path):
+    from honest_agents.train.confidence import heldout
+
+    items, dropped = cr.items_of([], [_bank(tmp_path)], fraction=0.5, seed="s")
+    expected = [f"src/t{k}" for k in range(3) if heldout(f"src/t{k}", 0.5, "s")]
+    assert sorted(i.source for i in items) == expected
+    assert dropped.get("training_source", 0) == 3 - len(expected)
+

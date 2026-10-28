@@ -46,6 +46,7 @@ def test_the_label_is_the_graded_pass_and_drops_are_counted(tmp_path: Path):
     )
     assert cb.item_of(row(no_report=True), set()) == cb.DROP_NO_REPORT
     assert cb.item_of(row(split="val"), set()) == cb.DROP_NOT_TRAIN
+    assert isinstance(cb.item_of(row(split="select"), set(), train_only=False), cb.Item)  # the paired evaluation
     with pytest.raises(cb.ExcludedSourceError):
         cb.item_of(row(), {SOURCE})
     assert cb.item_of(row(), {SOURCE}, drop_excluded=True) == cb.DROP_EXCLUDED
