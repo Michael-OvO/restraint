@@ -74,6 +74,7 @@ class ConfidenceConfig:
     lora: LoraSection = field(default_factory=LoraSection)
     data: DataSection = field(default_factory=DataSection)
     grpo: dict[str, Any] = field(default_factory=dict)  # GRPOConfig fields
+    exact: dict[str, Any] = field(default_factory=dict)  # `train.confidence_exact.ExactSection` fields
 
     @property
     def output_dir(self) -> Path:
@@ -134,13 +135,14 @@ def load_config(path: str | Path, overrides: Sequence[str] = ()) -> ConfidenceCo
     for o in overrides:
         key, _, value = o.partition("=")
         _set(raw, key, value)
-    top = {k: v for k, v in raw.items() if k not in ("model", "lora", "data", "grpo")}
+    top = {k: v for k, v in raw.items() if k not in ("model", "lora", "data", "grpo", "exact")}
     cfg = ConfidenceConfig(
         **top,
         model=_section(ModelSection, raw.get("model"), "model"),
         lora=_section(LoraSection, raw.get("lora"), "lora"),
         data=_section(DataSection, raw.get("data"), "data"),
         grpo={**DEFAULT_GRPO, **dict(raw.get("grpo") or {})},
+        exact=dict(raw.get("exact") or {}),
     )
     if bad := {k: cfg.grpo.get(k) for k, v in FIXED.items() if k in cfg.grpo and cfg.grpo[k] != v}:
         raise ValueError(f"grpo: {bad} is refused; these are fixed to {FIXED}")
