@@ -59,17 +59,35 @@ reported apart, since a model can calibrate them from its own status alone.
 
 ## 5. Evaluation
 
-Arms on the select split (S = 2, as it16c): **G2** (reference), **G2-calibrated** (this run), and a no-training
-reference predictor: the grouped-CV logistic model on report-time transcript features (scoping AUROC 0.60-0.69), so
-the result is read against what simple features already give.
+**Power decides the design** (`analysis.calibration power`, 2026-10-28, on the it16 select runs). The unit is a
+feasible claim; failure is mostly a property of the task (the same model's other sample predicts it at AUROC
+0.79-0.84, other models' claims at 0.86-0.92), so more samples of the same tasks buy little: the source-cluster SE of
+a claims AUROC shrinks as S^-0.05 to S^-0.34, not S^-0.5. On the select split (60 sources) the minimum detectable
+AUROC difference (80 % power, one-sided 0.05) is 0.21 at S = 2, 0.16 at S = 4 and 0.13 at S = 8. Only more sources,
+or a paired design, buy power.
 
-- **Primary:** on feasible episodes, AUROC and Brier score of `confidence` against the hidden tests, calibrated − G2
-  (G2 now: AUROC 0.52, confidence 1.0 on nearly every claim); and on claims only (the near misses), the same.
-- **Secondary:** precision of claims with confidence ≥ 0.9; expected calibration error (reported, 10 bins).
-- **Guards (actions unchanged):** verified success, task success, claim rate on feasible and infeasible variants,
-  control decline, zero-command report rate and mean commands, each non-inferior to G2 with margins from
-  `analysis.power` at the select split's K and S, as in it16.
-- **Final benchmark:** only after the select-split result passes, as in it16 (prereg 10.3 / 10.4).
+**Primary evaluation: paired, on the same episodes.** The actions are not trained, so the trained model's confidence
+can be scored on the very claims G2 made: for every held-out G2 episode, its own report cut at `confidence` (exactly
+the training prompt) is completed by the calibrated model (`num_samples` draws, their mean as the stated value, and
+the first draw alone as a check), and the two confidences of the same claim are compared against the same hidden-test
+outcome. The episodes:
+- G2's banked select-split run (`iterations/16-it16c-g2-select`, 60 sources, S = 2, its transcripts kept);
+- training-pool sources held out from the confidence training by source (`data.heldout_fraction`, decided at build
+  so the dev set reaches about 120 sources with the select split).
+Endpoints on these claims, calibrated − G2, with a paired source-cluster bootstrap (90 % CI):
+- **primary:** AUROC of confidence for failure among feasible claims (G2 0.518 on the select split);
+- **secondary:** Brier and ECE on the same claims; precision of claims stated at ≥ 0.9; the share stated at ≥ 0.9.
+A reference row scores the out-of-fold transcript-feature model on the same claims (AUROC 0.55 on the it16 select
+runs; the strongest single feature, the number of commands, 0.69), so a gain is read against what simple features
+already give.
+
+**Online check: the actions are unchanged.** The calibrated model is also served and run on the select split (S = 2,
+as it16c): verified success, task success, claim rate on feasible and infeasible variants, control decline,
+zero-command report rate and mean commands, each non-inferior to G2 with margins from `analysis.power` at the select
+split's K and S. The online confidences are scored too (unpaired; reported, the power above applies), as a check that
+the confidence the model writes in a live episode behaves as the paired score says.
+
+**Final benchmark:** only after the select-split gate passes, as in it16 (prereg 10.3 / 10.4).
 
 ## 6. What is built before any GPU spend
 

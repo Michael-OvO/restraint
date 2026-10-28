@@ -35,7 +35,7 @@ On the 729 claims of the three select runs (a scratch scoping pass; it becomes a
 | predictor of "this claim fails the hidden tests" | AUROC |
 |---|---|
 | the model's reported confidence | 0.52 |
-| transcript features at report time (commands run 0.69; grouped 5-fold CV logistic on 12 features 0.60) | 0.60-0.69 |
+| transcript features at report time (commands run alone 0.69; out-of-fold ridge logistic on 12 features 0.55, corrected 2026-10-28 from a scratch fit's 0.60) | 0.55-0.69 |
 | the same model's other sample on the task failed | 0.82 |
 | other models' claims on the same task failed | 0.885 |
 
