@@ -26,6 +26,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import re
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -106,12 +107,26 @@ def _section(cls: type, raw: dict[str, Any] | None, name: str) -> Any:
     return cls(**raw)
 
 
+_YAML11_WORDS = frozenset({"yes", "no", "on", "off", "y", "n"})  # YAML 1.1 booleans; trainer strategies use "no"
+_SCIENTIFIC = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)[eE][+-]?\d+$")  # YAML 1.1 reads `2e-5` as a string
+
+
+def parse_value(value: str) -> Any:
+    """An override's value: YAML, except that `yes` / `no` / `on` / `off` stay strings (write booleans as `true` /
+    `false`) and scientific notation without a dot is a float."""
+    if value.strip().lower() in _YAML11_WORDS:
+        return value.strip()
+    if _SCIENTIFIC.match(value.strip()):
+        return float(value)
+    return yaml.safe_load(value)
+
+
 def _set(raw: dict[str, Any], dotted: str, value: str) -> None:
     *path, last = dotted.split(".")
     d = raw
     for p in path:
         d = d.setdefault(p, {})
-    d[last] = yaml.safe_load(value)
+    d[last] = parse_value(value)
 
 
 def load_config(path: str | Path, overrides: Sequence[str] = ()) -> ConfidenceConfig:
@@ -198,7 +213,7 @@ def build_grpo_config(cfg: ConfidenceConfig):
 
 def summarize(p: Prepared) -> dict[str, Any]:
     lengths = sorted(p.lengths)
-    q = (lambda f: lengths[min(len(lengths) - 1, int(f * len(lengths)))]) if lengths else (lambda f: None)  # noqa: E731
+    q = (lambda f: lengths[min(len(lengths) - 1, int(f * len(lengths)))]) if lengths else (lambda f: None)
     return {
         "train": len(p.train),
         "eval": len(p.eval),
@@ -218,7 +233,7 @@ def run(cfg: ConfidenceConfig, *, dry_run: bool = False) -> dict[str, Any]:
     name = cfg.model.tokenizer or cfg.model.name
     tok = AutoTokenizer.from_pretrained(name, revision=pinned_revision(name))
     prepared = prepare(cfg, tok)
-    if set(r["source"] for r in prepared.train) & set(r["source"] for r in prepared.eval):
+    if {r["source"] for r in prepared.train} & {r["source"] for r in prepared.eval}:
         raise AssertionError("a source is on both sides of the held-out split")
     out = {"config": dataclasses.asdict(cfg), "data": summarize(prepared)}
     grpo_cfg = build_grpo_config(cfg)

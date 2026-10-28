@@ -29,6 +29,12 @@ def test_the_fixed_rules_are_enforced_and_overrides_apply(tmp_path: Path):
         tc.load_config(tmp_path / "e.yaml")
 
 
+def test_override_values_keep_their_type():
+    assert tc.parse_value("2e-5") == 2e-5 and isinstance(tc.parse_value("2e-5"), float)
+    assert tc.parse_value("no") == "no" and tc.parse_value("epoch") == "epoch" and tc.parse_value("false") is False
+    assert tc.parse_value("8") == 8 and tc.parse_value("[a.jsonl, b.jsonl]") == ["a.jsonl", "b.jsonl"]
+
+
 def test_the_heldout_split_is_by_source_and_stable():
     sources = [f"src/task_{i:03d}" for i in range(400)]
     held = {s for s in sources if tc.heldout(s, 0.1, "seed")}
