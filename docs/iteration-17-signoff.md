@@ -11,3 +11,5 @@
   `confidence_bandit verify-rollout` 0 problems; the job file passes the chain sanity rules.
 - **L1:** not run on the Mac (Docker batch work belongs on a node; the DEF-65 harness change invalidates every L1
   key): the job's `gate_l1` step runs it on the node before any episode and stops the chain if it fails.
+
+- **Node:** "Rent 52960034 (Recommended)": RTX 5090 32 GB, 64 cores, 125 GB RAM, Ontario, $1.11/h.
