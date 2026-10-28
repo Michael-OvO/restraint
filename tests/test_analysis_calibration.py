@@ -43,3 +43,25 @@ def test_claims_and_a_feature_that_separates_failures(tmp_path: Path):
     assert math.isclose(s8["se_auroc"], s2["se_auroc"] / 2) and math.isclose(
         s2["se_difference"], s2["se_auroc"] * 2**0.5
     )
+
+
+def test_paired_compares_two_arms_on_the_same_claims():
+    rows_a, rows_b = [], []
+    for i in range(60):
+        passed = i % 3 != 0
+        base = {"id": f"e{i}", "source": f"src/{i // 2}", "feasible": True, "status": "complete", "y": int(passed)}
+        rows_a.append({**base, "mean": 1.0})  # constant: no discrimination
+        rows_b.append({**base, "mean": 0.9 if passed else 0.3})  # perfect separation
+    rows_a.append({"id": "x", "source": "s", "feasible": True, "status": "incomplete", "y": 0, "mean": 0.1})
+    claims = cal.paired_claims(rows_a, rows_b)
+    assert len(claims) == 60
+    out = cal.paired(claims, n_boot=300)
+    assert out["a"]["auroc"] == 0.5 and out["b"]["auroc"] == 1.0 and math.isclose(out["b_minus_a"]["auroc"], 0.5)
+    lo, hi = out["ci90"]["auroc"]
+    assert lo > 0.3 and hi <= 0.5 + 1e-9
+    assert out["b"]["confident_precision"] == 1.0 and out["a"]["confident_share"] == 1.0
+    bad = [{**rows_b[0], "y": 1 - rows_b[0]["y"]}]
+    import pytest
+
+    with pytest.raises(ValueError, match="disagree"):
+        cal.paired_claims(rows_a[:1], bad)

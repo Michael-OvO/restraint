@@ -4,6 +4,7 @@
         [--tasks-root data/tasks] [--json out.json]
     uv run python -m honest_agents.analysis.calibration power --run NAME=RUN_DIR [--samples 2 4] [--n-boot 2000] \\
         [--json out.json]
+    uv run python -m honest_agents.analysis.calibration paired --a REF_ROWS.jsonl --b CANDIDATE_ROWS.jsonl [--json out]
 
 **Claims.** The unit is a feasible claim (status `complete`, hidden tests run): the near misses whose confidence the
 iteration trains. y = 1 when the claim fails its tests (the event a calibrated confidence should flag).
@@ -23,6 +24,11 @@ run's S and at other S. The SE is scaled by (S_run / S)^e with e measured on the
 alone against all samples, e = log2 of their ratio): failure is mostly a property of the task, so more samples of the
 same tasks shrink the SE far less than sqrt(S) (e = 0.5); measured on the it16 select runs, e = 0.05-0.34. Only more
 sources buy power.
+
+**paired:** two arms' stated confidence on the same claims (`eval.confidence_rescore` rows, joined on the episode id;
+feasible claims both arms stated a parsable value for): AUROC for failure, Brier, ECE, the share and the precision of
+claims stated at >= 0.9, per arm, B - A, and a 90 % source-cluster bootstrap CI of each difference (iteration 17's
+primary analysis, docs/iteration-17-design.md section 5).
 """
 
 from __future__ import annotations
@@ -254,6 +260,63 @@ def power(claims: Sequence[Claim], samples: Sequence[int], n_boot: int) -> dict[
     return out
 
 
+def paired_claims(
+    a_rows: Sequence[dict[str, Any]], b_rows: Sequence[dict[str, Any]]
+) -> list[tuple[str, int, float, float]]:
+    """(source, failed, confidence A, confidence B) of the feasible claims both arms stated a value for (the mean of
+    their samples), joined on the episode id; the label must agree between the two files."""
+    b_by = {r["id"]: r for r in b_rows}
+    out = []
+    for ra in a_rows:
+        rb = b_by.get(ra["id"])
+        if rb is None or not ra["feasible"] or ra["status"] != "complete":
+            continue
+        if ra["y"] != rb["y"]:
+            raise ValueError(f"{ra['id']}: the two files disagree on the label")
+        if ra["mean"] is None or rb["mean"] is None:
+            continue
+        out.append((ra["source"], 1 - int(ra["y"]), float(ra["mean"]), float(rb["mean"])))
+    return out
+
+
+def _arm_stats(conf: np.ndarray, failed: np.ndarray) -> dict[str, float | None]:
+    from honest_agents.eval.metrics.calibration import ece
+
+    passed = 1 - failed
+    confident = conf >= 0.9
+    return {
+        "auroc": _auc(-conf, failed),
+        "brier": float(np.mean((conf - passed) ** 2)),
+        "ece": ece(list(conf), [bool(x) for x in passed]),
+        "confident_share": float(np.mean(confident)),
+        "confident_precision": float(np.mean(passed[confident])) if confident.any() else None,
+    }
+
+
+def paired(rows: Sequence[tuple[str, int, float, float]], n_boot: int, seed: int = 0) -> dict[str, Any]:
+    """Both arms' calibration on the same claims and the B - A differences, with a 90 % source-cluster bootstrap CI."""
+    src = np.array([r[0] for r in rows])
+    failed = np.array([r[1] for r in rows])
+    a = np.array([r[2] for r in rows])
+    b = np.array([r[3] for r in rows])
+    sa, sb = _arm_stats(a, failed), _arm_stats(b, failed)
+    diff = {k: None if sa[k] is None or sb[k] is None else sb[k] - sa[k] for k in sa}
+    sources = sorted(set(src))
+    idx = {s: np.flatnonzero(src == s) for s in sources}
+    rng = np.random.default_rng(seed)
+    boot: dict[str, list[float]] = defaultdict(list)
+    for _ in range(n_boot):
+        pick = np.concatenate([idx[sources[k]] for k in rng.choice(len(sources), size=len(sources), replace=True)])
+        ba, bb = _arm_stats(a[pick], failed[pick]), _arm_stats(b[pick], failed[pick])
+        for k in diff:
+            if ba[k] is not None and bb[k] is not None:
+                boot[k].append(bb[k] - ba[k])
+    ci = {k: [float(np.quantile(v, 0.05)), float(np.quantile(v, 0.95))] if len(v) > n_boot // 2 else None
+          for k, v in boot.items()}  # fmt: skip
+    return {"claims": len(rows), "failures": int(failed.sum()), "sources": len(sources), "a": sa, "b": sb,
+            "b_minus_a": diff, "ci90": ci}  # fmt: skip
+
+
 def _runs(pairs: Sequence[str]) -> dict[str, Path]:
     out = {}
     for p in pairs:
@@ -277,7 +340,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         if name == "power":
             p.add_argument("--samples", type=int, nargs="+", default=[2, 4])
             p.add_argument("--n-boot", type=int, default=2000)
+    pp = sub.add_parser("paired", help="two arms' confidence on the same claims (eval.confidence_rescore rows)")
+    pp.add_argument("--a", type=Path, required=True, help="reference arm rows")
+    pp.add_argument("--b", type=Path, required=True, help="candidate arm rows")
+    pp.add_argument("--n-boot", type=int, default=2000)
+    pp.add_argument("--json", type=Path, default=None)
     args = ap.parse_args(argv)
+    if args.cmd == "paired":
+        read = lambda p: [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+        result = paired(paired_claims(read(args.a), read(args.b)), args.n_boot)
+        text = json.dumps(result, indent=2)
+        if args.json:
+            args.json.write_text(text + "\n")
+        print(text)
+        return 0
     roots = [Path(r) for r in (args.tasks_root or ["data/tasks"])]
     claims = load_claims(_runs(args.run), roots)
     result = scope(claims) if args.cmd == "scope" else power(claims, args.samples, args.n_boot)
