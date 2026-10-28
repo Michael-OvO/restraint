@@ -69,6 +69,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-59 | tooling / build | closed | the never-trained check's repo scope (`REPO_TRAINING_GLOBS`) does not match `data/commit_checks/builds/`, so the iteration-16 training build (the claim-point examples and DPO pairs) is never checked against the frozen benchmarks |
 | DEF-60 | stats | closed | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
 | DEF-61 | tooling / tests | closed 2026-10-26 | `serve_and_run.sh` did not exit within 60 s of a SIGINT in `--fast` twice (2026-10-25 and 2026-10-26, machine loaded); it is the script every node chain uses to stop its vLLM server |
+| DEF-62 | training data | closed 2026-10-27 | `sft.commit_checks build` keyed bank rows by the bank uuid, not the run's episode id: no check result matched (0 claim examples), and an episode given as bank and eval record was mined twice |
 
 ---
 
@@ -3264,3 +3265,18 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `test_serve_and_run_stops_the_server_on_sigint_and_sigterm`. Load run with the fix: both tests x both signals x 150
   = 600 runs, `-n 16` beside 36 CPU spinners (load average 55-77), 600 passed. Impact: none re-scored (a tooling path).
 - **Commits:** `f92b3ac` (fix, test).
+
+### DEF-62: the commit-checks build missed every check result of a banked episode
+- **Area:** training data (`sft.commit_checks`). **Status:** closed 2026-10-27. **Found:** 2026-10-27, the first build
+  on the it16b rollouts (`iterations/16-it16b-claim-rollouts`), before any training.
+- **Evidence:** 0 examples; `example drops: fail:no_check_result 206, pass:no_check_result 363` with 1,477 check results
+  read. run_eval banks a transcript under a fresh uuid (`BankRow.episode_id`) and keeps the run's id in
+  `extra.episode_id`; `sft.checklist_validation` and `sft.checklist_agreement --check-results` key by the run's id.
+  `load_inputs` also kept both copies of an episode given as bank and eval record (runbook 7: "episodes, bank"):
+  destructive points mined 3,198 from 1,600 episodes.
+- **Impact:** no archived number and no trained model (found on the first build). The per-task caps hid the
+  duplicates in the selection, not in the mined counts or the flip-test table.
+- **Fix:** `6a6ba52`: `episode_from_row` takes `extra.episode_id` when present (old banks keep theirs); an eval record
+  whose id a bank already gave is dropped as `duplicate_episode`. Rebuilt: 486 claim examples, 111 same-prefix pairs,
+  1,599 duplicates dropped, mined counts 1,600 per point.
+- **Closure test:** `tests/sft/test_commit_checks.py::test_a_bank_row_keeps_its_runs_episode_id_and_its_eval_record_is_not_mined_twice`.
