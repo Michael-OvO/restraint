@@ -539,10 +539,10 @@
     }
   },
   "never_trained": {
-    "date": "2026-10-26",
+    "date": "2026-10-28",
     "scope": "repo+archive",
     "verdict": "pass",
-    "n_rows": 62559,
+    "n_rows": 63837,
     "n_ids": 4005,
     "n_texts": 3683,
     "containment_threshold": 0.5,
@@ -701,6 +701,12 @@
         "build": "repo:data/commit_checks/builds/claim_splice_v1/examples.jsonl",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "n_rows": 0,
+        "n_hits": 0
+      },
+      {
+        "build": "repo:data/commit_checks/builds/it16_v1/examples.jsonl",
+        "sha256": "2e0854ee10e2bf9e1d23c55672ecca8ad9cc5ec0fe931041dc1e619af33d4629",
+        "n_rows": 639,
         "n_hits": 0
       },
       {
@@ -1733,6 +1739,12 @@
         "build": "archive:iterations/15-g3-grpo/run/it15-g3-grpo/completions/completions_00015.parquet",
         "sha256": "cac1fba0fa3edf405ee68652b89b5903d81e45149eed2398a29d3240f31be894",
         "n_rows": 64,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/16-it16b-commit-data/files/data/commit_checks/builds/it16_v1/examples.jsonl.gz",
+        "sha256": "a0f229c9b3c9ec79f2d665f9d37f9ad59db9170ec10ab30262f84449323ea6b7",
+        "n_rows": 639,
         "n_hits": 0
       },
       {
