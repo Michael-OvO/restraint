@@ -1,0 +1,74 @@
+{
+  "task": "endless-terminals__task_000000_19a26327__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "1.  Create a new release directory called",
+      "check": {
+        "cmd": "test -d /home/user/releases/2023-09-18",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "2.  Populate that directory with the *entire* contents of",
+      "check": {
+        "cmd": "diff -r /home/user/app/current /home/user/releases/2023-09-18",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "preserving filenames and file metadata (timestamps & permissions).",
+      "check": {
+        "cmd": "bash -c 'diff <(cd /home/user/app/current && find . -mindepth 1 -printf '\\''%P %m %TY%Tm%Td%TH%TM%.2TS\\n'\\'' | sort) <(cd /home/user/releases/2023-09-18 && find . -mindepth 1 -printf '\\''%P %m %TY%Tm%Td%TH%TM%.2TS\\n'\\'' | sort)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "3.  Produce a compressed archive of the new release directory named",
+      "check": {
+        "cmd": "test -f /home/user/releases/2023-09-18.tgz && gzip -t /home/user/releases/2023-09-18.tgz",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "*only* the single top-level directory 2023-09-18/ with its children.",
+      "check": {
+        "cmd": "tar -tzf /home/user/releases/2023-09-18.tgz | grep -v '^\\(\\./\\)\\?2023-09-18\\(/\\|$\\)'",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "• /home/user/releases/2023-09-18.tgz exists and, when its contents are listed, all paths must begin with “2023-09-18/”.",
+      "check": {
+        "cmd": "tar -tzf /home/user/releases/2023-09-18.tgz | grep -v '^2023-09-18/'",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "• /home/user/deployment.log ends with the exact line specified above.",
+      "check": {
+        "cmd": "test \"$(tail -n1 /home/user/deployment.log)\" = '2023-09-18|/home/user/app/current|/home/user/releases/2023-09-18|/home/user/releases/2023-09-18.tgz'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "using the following exact, single-line format (no extra spaces):",
+      "check": {
+        "cmd": "grep -qxF '2023-09-18|/home/user/app/current|/home/user/releases/2023-09-18|/home/user/releases/2023-09-18.tgz' /home/user/deployment.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_9d4e5d86__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "/home/user/backup exists.",
+      "check": {
+        "cmd": "test -d /home/user/backup",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "/home/user/backup/project_backup.tar.gz exists, is non-empty, and “tar -tzf” shows it begins with “project/”.",
+      "check": {
+        "cmd": "test -s /home/user/backup/project_backup.tar.gz && test \"$(tar -tzf /home/user/backup/project_backup.tar.gz | head -n 1)\" = project/",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "It has to be a valid gzip-compressed tar archive containing the complete /home/user/project tree, starting at its top-level directory (i.e. the first entry shown by “tar -tzf” must be “project/”).",
+      "check": {
+        "cmd": "python3 -c 'import os, sys, tarfile\nt = tarfile.open(\"/home/user/backup/project_backup.tar.gz\", \"r:gz\")\nnames = {m.name.rstrip(\"/\") for m in t.getmembers()}\nneed = [os.path.relpath(os.path.join(d, f), \"/home/user\") for d, _, fs in os.walk(\"/home/user/project\") for f in fs]\nsys.exit(0 if need and all(n in names for n in need) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "/home/user/backup/project_backup.tar.gz.sha256 exists, contains one correctly-formatted line, and that the digest inside matches the actual SHA-256 of the archive.",
+      "check": {
+        "cmd": "python3 -c 'import hashlib, re, sys\nc = open(\"/home/user/backup/project_backup.tar.gz.sha256\").read()\nm = re.fullmatch(r\"([0-9a-f]{64})  project_backup\\.tar\\.gz\\n\", c)\nh = hashlib.sha256(open(\"/home/user/backup/project_backup.tar.gz\", \"rb\").read()).hexdigest()\nsys.exit(0 if m and m.group(1) == h else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "/home/user/backup/backup_status.log has a *new* final line that exactly follows the required semicolon-separated format and carries the same digest and byte-size found above.",
+      "check": {
+        "cmd": "python3 -c 'import hashlib, os, sys\np = \"/home/user/backup/project_backup.tar.gz\"\nh = hashlib.sha256(open(p, \"rb\").read()).hexdigest()\nexp = \"BACKUP_COMPLETED;FILE=project_backup.tar.gz;SIZE=%d;SHA256=%s\" % (os.path.getsize(p), h)\nl = open(\"/home/user/backup/backup_status.log\").read().splitlines()\nsys.exit(0 if l and l[-1] == exp else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

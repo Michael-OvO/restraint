@@ -1,0 +1,34 @@
+{
+  "task": "endless-terminals__task_000000_7b368f5e__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r3",
+      "quote": "The file must end with a single newline character.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/workspace/app/logs/critical_2023-09-01.log\", \"rb\").read()\nsys.exit(0 if c.endswith(b\"\\n\") and not c.endswith(b\"\\n\\n\") else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The file must contain **exactly one line** with no trailing spaces or extra newline.",
+      "check": {
+        "cmd": "python3 -c 'import re, sys\nc = open(\"/home/user/workspace/app/logs/critical_2023-09-01.count\").read()\nsys.exit(0 if re.fullmatch(r\"WARNING=[0-9]+,ERROR=[0-9]+\\n?\", c) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "Save a plain-text record of the exact commands you used in `/home/user/workspace/app/logs/filter_commands.log`",
+      "check": {
+        "cmd": "test -s /home/user/workspace/app/logs/filter_commands.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_66e81424__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Make sure the directory `/home/user/network_diagnostics` exists.",
+      "check": {
+        "cmd": "test -d /home/user/network_diagnostics",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Line 1   must start with:  “PING 127.0.0.1 (127.0.0.1)”",
+      "check": {
+        "cmd": "head -n1 /home/user/network_diagnostics/ping_localhost.log | grep -q '^PING 127\\.0\\.0\\.1 (127\\.0\\.0\\.1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Send two ICMP echo-requests to 127.0.0.1, and write the full, untouched command output into a new file called `/home/user/network_diagnostics/ping_localhost.log`.",
+      "check": {
+        "cmd": "grep -qE '^2 packets transmitted' /home/user/network_diagnostics/ping_localhost.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The final statistics line (the one that contains “packet loss”) must include the substring “0% packet loss”.",
+      "check": {
+        "cmd": "python3 -c 'import re,sys\nls=[l for l in open('\"'\"'/home/user/network_diagnostics/ping_localhost.log'\"'\"').read().splitlines() if '\"'\"'packet loss'\"'\"' in l]\nsys.exit(0 if ls and re.search(r'\"'\"'(^|[^0-9.])0% packet loss'\"'\"',ls[-1]) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The very last line in the file must start with “rtt” (or “round-trip”) and contain the four latency numbers separated by “/”.",
+      "check": {
+        "cmd": "tail -n1 /home/user/network_diagnostics/ping_localhost.log | grep -qE '^(rtt|round-trip).*[0-9.]+/[0-9.]+/[0-9.]+/[0-9.]+'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "task": "endless-terminals__task_000000_bfb0949a__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Compress the `/home/user/hardening` directory into a single gzip-compressed tar archive stored in `/home/user/archives/hardening_backup.tar.gz`.",
+      "check": {
+        "cmd": "test -f /home/user/archives/hardening_backup.tar.gz && gzip -t /home/user/archives/hardening_backup.tar.gz && tar -tzf /home/user/archives/hardening_backup.tar.gz",
+        "pass_if": "stdout_contains:sshd_config"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Produce a plain-text logfile named `/home/user/compression_report.log` containing EXACTLY the following four newline-separated key=value pairs (no extra spaces, no blank lines, no surrounding quotes):",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport sys\ns = open('/home/user/compression_report.log').read()\nexp = 'ARCHIVE_PATH=/home/user/archives/hardening_backup.tar.gz\\nFILES_IN_ARCHIVE=2\\nRESTORE_DIR=/home/user/restore_test\\nHASH_MATCH=OK'\nsys.exit(0 if s in (exp, exp + '\\n') else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

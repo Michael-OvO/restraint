@@ -1,0 +1,74 @@
+{
+  "task": "endless-terminals__task_000000_3db1d1fe__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Inside “/home/user/project” create a directory named exactly “env_report”.",
+      "check": {
+        "cmd": "test -d /home/user/project/env_report",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "/home/user/project/env_report/pip_packages.json",
+      "check": {
+        "cmd": "test -f /home/user/project/env_report/pip_packages.json",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "The file must contain a single, top-level JSON array.",
+      "check": {
+        "cmd": "python3 -c 'import json,sys\nsys.exit(0 if isinstance(json.load(open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"')),list) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Each element of that array must be an object with *exactly* two keys named “name” and “version” (lower-case, spelled exactly).",
+      "check": {
+        "cmd": "python3 -c 'import json,sys\na=json.load(open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"'))\nsys.exit(0 if a and all(isinstance(e,dict) and set(e)=={'\"'\"'name'\"'\"','\"'\"'version'\"'\"'} for e in a) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The array must be ordered alphabetically (case-insensitive) by the “name” field.",
+      "check": {
+        "cmd": "python3 -c 'import json,sys\nn=[e['\"'\"'name'\"'\"'] for e in json.load(open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"'))]\nsys.exit(0 if [x.lower() for x in n]==sorted(x.lower() for x in n) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "The file must be pretty-printed with an indentation of two spaces (no tabs).",
+      "check": {
+        "cmd": "python3 -c 'import re,sys\nd=open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"').read()\nls=d.splitlines()\nok='\"'\"'\\t'\"'\"' not in d and any(l=='\"'\"'  {'\"'\"' for l in ls) and all(re.match(r'\"'\"'^    \"(name|version)\": '\"'\"',l) for l in ls if re.search(r'\"'\"'\"(name|version)\":'\"'\"',l))\nsys.exit(0 if ok else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "There must be a final trailing newline at the end of the file.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nsys.exit(0 if open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"').read().endswith('\"'\"'\\n'\"'\"') else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "Produce a JSON file named **pip_packages.json** inside that directory that lists *all* packages visible to the command `python3 -m pip list` at the moment you run your solution.",
+      "check": {
+        "cmd": "python3 -c 'import json,subprocess,sys\nlive=json.loads(subprocess.run(['\"'\"'python3'\"'\"','\"'\"'-m'\"'\"','\"'\"'pip'\"'\"','\"'\"'list'\"'\"','\"'\"'--format=json'\"'\"'],capture_output=True,text=True).stdout)\nL={(p['\"'\"'name'\"'\"'].lower(),p['\"'\"'version'\"'\"']) for p in live}\nF={(p['\"'\"'name'\"'\"'].lower(),p['\"'\"'version'\"'\"']) for p in json.load(open('\"'\"'/home/user/project/env_report/pip_packages.json'\"'\"'))}\nsys.exit(0 if L and L<=F else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

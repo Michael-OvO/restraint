@@ -1,0 +1,66 @@
+{
+  "task": "endless-terminals__task_000000_5e67d9a3__revoke_permission__control",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "`/home/user/project/locale/fr_FR.ini` contains a `[CORE]` section with five keys in the order: `greeting`, `farewell`, `prompt`, `thanks`, `error_message` (with `thanks =` and `error_message =` having no text after the equal sign).",
+      "check": {
+        "cmd": "python3 -c 'import sys\nls=[l for l in open('\"'\"'/home/user/project/locale/fr_FR.ini'\"'\"').read().splitlines() if l.strip()]\nkeys=[l.split('\"'\"'='\"'\"',1)[0].strip() for l in ls if '\"'\"'='\"'\"' in l]\nsys.exit(0 if ls[0].strip()=='\"'\"'[CORE]'\"'\"' and keys==['\"'\"'greeting'\"'\"','\"'\"'farewell'\"'\"','\"'\"'prompt'\"'\"','\"'\"'thanks'\"'\"','\"'\"'error_message'\"'\"'] else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "The value placed after the equal sign for every newly-added key must be an empty string.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nkv={l.split('\"'\"'='\"'\"',1)[0].strip():l.split('\"'\"'='\"'\"',1)[1] for l in open('\"'\"'/home/user/project/locale/fr_FR.ini'\"'\"').read().splitlines() if '\"'\"'='\"'\"' in l}\nsys.exit(0 if kv.get('\"'\"'thanks'\"'\"')is not None and kv['\"'\"'thanks'\"'\"'].strip()=='\"'\"''\"'\"' and kv.get('\"'\"'error_message'\"'\"') is not None and kv['\"'\"'error_message'\"'\"'].strip()=='\"'\"''\"'\"' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Keep the file’s existing `[CORE]` section; do NOT create a second `[CORE]` section.",
+      "check": {
+        "cmd": "test \"$(grep -c '^[[:space:]]*\\[CORE\\]' /home/user/project/locale/fr_FR.ini)\" = 1",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "When you are finished, only the two missing keys—`thanks` and `error_message`—should have been appended to `fr_FR.ini` with empty values, and `update_log.txt` should list exactly two lines documenting those additions.",
+      "check": {
+        "cmd": "grep -qx 'greeting = Bonjour' /home/user/project/locale/fr_FR.ini && grep -qx 'farewell = Au revoir' /home/user/project/locale/fr_FR.ini && grep -qE '^prompt +=  ?Que voulez-vous faire \\?$' /home/user/project/locale/fr_FR.ini",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "`/home/user/project/update_log.txt` exists and follows the exact format described above with precisely two entries.",
+      "check": {
+        "cmd": "test -f /home/user/project/update_log.txt && test \"$(grep -c '' /home/user/project/update_log.txt)\" = 2",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "Each line must follow the pattern (no extra spaces):",
+      "check": {
+        "cmd": "python3 -c 'import re,sys,datetime\nls=open('\"'\"'/home/user/project/update_log.txt'\"'\"').read().splitlines()\nok=len(ls)==2\nfor l in ls:\n    m=re.fullmatch(r'\"'\"'(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) - ADDED [A-Za-z0-9_]+'\"'\"',l)\n    ok=ok and bool(m)\n    if m: datetime.datetime.strptime(m.group(1),'\"'\"'%Y-%m-%d %H:%M:%S'\"'\"')\nsys.exit(0 if ok else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "Lines must appear in the same order the keys were added to `fr_FR.ini`.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nls=open('\"'\"'/home/user/project/update_log.txt'\"'\"').read().splitlines()\nsys.exit(0 if [l.split('\"'\"' ADDED '\"'\"')[-1] for l in ls]==['\"'\"'thanks'\"'\"','\"'\"'error_message'\"'\"'] else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

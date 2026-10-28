@@ -1,0 +1,74 @@
+{
+  "task": "endless-terminals__task_000000_74eef614__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "The directory `/home/user/backups/` exists at the end of the task.",
+      "check": {
+        "cmd": "test -d /home/user/backups",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Compression format must be “gzip”.",
+      "check": {
+        "cmd": "test -f /home/user/backups/ImportantData_20240401.tar.gz && gzip -t /home/user/backups/ImportantData_20240401.tar.gz",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "that contains the **contents** of “important_data” (the four files shown above), preserving their relative paths, **without** wrapping the whole directory in an extra top-level folder.",
+      "check": {
+        "cmd": "python3 -c 'import sys, tarfile\nt = tarfile.open(\"/home/user/backups/ImportantData_20240401.tar.gz\")\nnames = sorted(m.name for m in t.getmembers() if m.isfile())\nsys.exit(0 if names == \"README.md reports/quarter1.txt reports/quarter2.txt scripts/cleanup.sh\".split() else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The archive must be reproducible: file ordering inside the archive has to be alphabetical.",
+      "check": {
+        "cmd": "python3 -c 'import sys, tarfile\nt = tarfile.open(\"/home/user/backups/ImportantData_20240401.tar.gz\")\nnames = [m.name for m in t.getmembers() if m.isfile()]\nsys.exit(0 if names and names == sorted(names) else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The expected, correct manifest (for automated grading) therefore has **exactly** the following four lines and nothing else:",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/backups/ImportantData_20240401.manifest\", \"rb\").read()\nsys.exit(0 if c == b\"README.md\\t104\\nreports/quarter1.txt\\t43\\nreports/quarter2.txt\\t43\\nscripts/cleanup.sh\\t52\\n\" else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "The file must end with a final trailing newline.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/backups/ImportantData_20240401.manifest\", \"rb\").read()\nsys.exit(0 if c.endswith(b\"\\n\") else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "whose only content is the literal text (without the quotes)",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/backups/backup_success.log\").read()\nsys.exit(0 if c in (\"Backup completed.\", \"Backup completed.\\n\") else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r9",
+      "quote": "All three files reside directly in `/home/user/backups/`.",
+      "check": {
+        "cmd": "test -f /home/user/backups/ImportantData_20240401.tar.gz && test -f /home/user/backups/ImportantData_20240401.manifest && test -f /home/user/backups/backup_success.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

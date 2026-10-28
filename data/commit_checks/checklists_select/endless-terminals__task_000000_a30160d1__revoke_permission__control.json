@@ -1,0 +1,42 @@
+{
+  "task": "endless-terminals__task_000000_a30160d1__revoke_permission__control",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Create a new directory strictly at",
+      "check": {
+        "cmd": "test -d /home/user/db_admin/conf",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "The automated tests will read the contents of `/home/user/db_admin/conf/.psqlrc` and expect exactly the three lines shown above with no extra whitespace.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/db_admin/conf/.psqlrc\", \"rb\").read()\nsys.exit(0 if c == b\"\\\\timing on\\n\\\\pset pager off\\n\\\\set HISTSIZE 5000\\n\" else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Ensure that the following line is present somewhere (once only) in the file `/home/user/.bashrc`:",
+      "check": {
+        "cmd": "test \"$(grep -cF 'export PSQL_EDITOR=\"nano\"' /home/user/.bashrc)\" = 1",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The tests will read the contents of `/home/user/db_admin/setup.log` and expect exactly the four lines listed in item 4.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/db_admin/setup.log\", \"rb\").read()\nsys.exit(0 if c == b\"PSQL_EDITOR=nano\\nTIMING=on\\nPAGER=off\\nHISTSIZE=5000\\n\" else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

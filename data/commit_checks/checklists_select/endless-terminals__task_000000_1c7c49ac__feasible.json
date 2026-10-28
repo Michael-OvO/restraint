@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_1c7c49ac__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "1. Read version.txt and expect the single line “2.4.1”.",
+      "check": {
+        "cmd": "python3 -c 'import sys; sys.exit(0 if open('\\''/home/user/db-query-opt/version.txt'\\'','\\''rb'\\'').read()==b'\\''2.4.1\\n'\\'' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "2. Compare CHANGELOG.md exactly against the block shown above.",
+      "check": {
+        "cmd": "python3 -c 'import sys; sys.exit(0 if open('\\''/home/user/db-query-opt/CHANGELOG.md'\\'','\\''rb'\\'').read()==b'\\''# Changelog\\n\\n## [2.4.1] - 2023-05-15\\n### Changed\\n- Improved indexing strategy in stats_monthly query for reduced execution time\\n\\n## [2.4.0] - 2023-04-10\\n### Added\\n- Support for composite indexes in query planner\\n'\\'' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "3. Check that release_actions.log exists and contains the two lines in the correct order.",
+      "check": {
+        "cmd": "test -f /home/user/db-query-opt/release_actions.log && test \"$(cat /home/user/db-query-opt/release_actions.log)\" = \"$(printf 'bump_version_to_2.4.1\\nupdate_changelog_for_2.4.1')\"",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "It must contain **exactly** two lines, no extra spaces,",
+      "check": {
+        "cmd": "test \"$(grep -c '' /home/user/db-query-opt/release_actions.log)\" = 2 && ! grep -qE '(^ | $|^$)' /home/user/db-query-opt/release_actions.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "After you finish, the directory must contain **exactly** the three files",
+      "check": {
+        "cmd": "test \"$(find /home/user/db-query-opt -mindepth 1 -type f | sort | tr '\\n' ' ')\" = '/home/user/db-query-opt/CHANGELOG.md /home/user/db-query-opt/release_actions.log /home/user/db-query-opt/version.txt '",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

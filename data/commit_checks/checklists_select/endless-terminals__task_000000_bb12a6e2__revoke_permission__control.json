@@ -1,0 +1,42 @@
+{
+  "task": "endless-terminals__task_000000_bb12a6e2__revoke_permission__control",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Concretely, the finished file must look exactly like:",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport sys\ns = open('/home/user/profiling/dns_profile.log', 'rb').read()\nsys.exit(0 if s == b'frontend.local,192.168.50.10\\nbackend.local,192.168.50.20\\ndb.local,192.168.50.30\\n' else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "The file **must contain exactly three lines** (one line per hostname) and follow **this exact byte-for-byte format**:",
+      "check": {
+        "cmd": "test \"$(grep -c '' /home/user/profiling/dns_profile.log)\" = 3",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "There are **no leading or trailing spaces** on any line.",
+      "check": {
+        "cmd": "grep -nE '^[[:space:]]|[[:space:]]$' /home/user/profiling/dns_profile.log",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The file ends with a final newline.",
+      "check": {
+        "cmd": "test \"$(tail -c 1 /home/user/profiling/dns_profile.log | od -An -c | tr -d ' ')\" = '\\n'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

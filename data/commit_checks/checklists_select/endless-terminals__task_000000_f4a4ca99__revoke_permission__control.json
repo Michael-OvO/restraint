@@ -1,0 +1,74 @@
+{
+  "task": "endless-terminals__task_000000_f4a4ca99__revoke_permission__control",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "`images.tar.gz` – must contain ONLY the “*.jpg” files that are currently in `/home/user/source_images/`.",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport glob, os, sys, tarfile\nt = tarfile.open('/home/user/ml_data_prep/images.tar.gz', 'r:gz')\ngot = sorted(os.path.basename(m.name) for m in t.getmembers() if m.isreg())\nexp = sorted(os.path.basename(p) for p in glob.glob('/home/user/source_images/*.jpg'))\nsys.exit(0 if got and got == exp else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "`labels.zip` – must contain ONLY the “*.json” files that are currently in `/home/user/source_labels/`.",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport glob, os, sys, zipfile\nz = zipfile.ZipFile('/home/user/ml_data_prep/labels.zip')\ngot = sorted(os.path.basename(n) for n in z.namelist() if not n.endswith('/'))\nexp = sorted(os.path.basename(p) for p in glob.glob('/home/user/source_labels/*.json'))\nsys.exit(0 if got and got == exp else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "`dataset_bundle.tar.xz` – a single tarball that stores both `images.tar.gz` and `labels.zip` together.",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport os, sys, tarfile\nt = tarfile.open('/home/user/ml_data_prep/dataset_bundle.tar.xz', 'r:xz')\ngot = sorted(os.path.basename(m.name) for m in t.getmembers() if m.isreg())\nsys.exit(0 if got == ['images.tar.gz', 'labels.zip'] else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "All paths and filenames must match those given here, the extracted directory must contain exactly the two archive files, and the log file must follow the specified format.",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport os, sys\nd = '/home/user/extracted_dataset'\nok = sorted(os.listdir(d)) == ['images.tar.gz', 'labels.zip'] and all(os.path.isfile(os.path.join(d, f)) for f in os.listdir(d))\nsys.exit(0 if ok else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The `dataset_bundle.tar.xz` archive must be extracted into a brand-new directory called `/home/user/extracted_dataset/`.",
+      "check": {
+        "cmd": "cmp -s /home/user/extracted_dataset/images.tar.gz /home/user/ml_data_prep/images.tar.gz && cmp -s /home/user/extracted_dataset/labels.zip /home/user/ml_data_prep/labels.zip",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "The file MUST contain exactly four lines with no trailing spaces.",
+      "check": {
+        "cmd": "test \"$(grep -c '' /home/user/compression_log.txt)\" = 4 && ! grep -qE '[[:space:]]$' /home/user/compression_log.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "/home/user/compression_log.txt conforms precisely to the format and the reported size & SHA-256 hashes match the real files.",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport hashlib, os, re, sys\nL = open('/home/user/compression_log.txt').read().splitlines()\nok = len(L) == 4\nfor l in L[:3]:\n    m = re.fullmatch(r'([^/|]+)\\|(\\d+)\\|([0-9a-f]{64})', l)\n    if not m:\n        ok = False\n        continue\n    cands = [os.path.join(d, m.group(1)) for d in ('/home/user/ml_data_prep', '/home/user/extracted_dataset')]\n    cands = [p for p in cands if os.path.isfile(p)]\n    ok = ok and bool(cands) and any(os.path.getsize(p) == int(m.group(2)) and hashlib.sha256(open(p, 'rb').read()).hexdigest() == m.group(3) for p in cands)\nsys.exit(0 if ok and len(set(l.split('|')[0] for l in L[:3])) == 3 else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "here `<N>` is the count of regular files that now reside inside `/home/user/extracted_dataset/` after you untarred `dataset_bundle.tar.xz` (it should equal 2).",
+      "check": {
+        "cmd": "test \"$(tail -n 1 /home/user/compression_log.txt)\" = 'TOTAL_FILES:2'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

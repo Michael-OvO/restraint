@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_61b4e485__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "1. Write a Bourne-compatible shell script saved at",
+      "check": {
+        "cmd": "test -f /home/user/organize_datasets.sh",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "3. Make the script executable and then run it once so the directory tree and the log file are produced.",
+      "check": {
+        "cmd": "test -x /home/user/organize_datasets.sh && test -f /home/user/dataset_summary.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "a. Make sure the two sub-directories /home/user/datasets/csv and /home/user/datasets/json exist (create them if they do not).",
+      "check": {
+        "cmd": "test -d /home/user/datasets/csv && test -d /home/user/datasets/json",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "b. Move (not copy) every file in /home/user/datasets whose name ends in “.csv” into the …/csv directory and every file whose name ends in “.json” into the …/json directory.",
+      "check": {
+        "cmd": "find /home/user/datasets -maxdepth 1 -type f \\( -name '*.csv' -o -name '*.json' \\)",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "containing EXACTLY two lines, each terminated by a single newline character, and nothing else.",
+      "check": {
+        "cmd": "python3 -c 'import re,sys\nd=open('\"'\"'/home/user/dataset_summary.log'\"'\"').read()\nls=d.split('\"'\"'\\n'\"'\"')\nok=d.endswith('\"'\"'\\n'\"'\"') and len(ls)==3 and re.fullmatch(r'\"'\"'csv\\t[0-9]+\\t[0-9]+'\"'\"',ls[0]) and re.fullmatch(r'\"'\"'json\\t[0-9]+\\t[0-9]+'\"'\"',ls[1])\nsys.exit(0 if ok else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

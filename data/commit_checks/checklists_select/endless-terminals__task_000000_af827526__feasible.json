@@ -1,0 +1,66 @@
+{
+  "task": "endless-terminals__task_000000_af827526__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Create the directory `/home/user/deployment_logs` with permissions 700 (drwx------).",
+      "check": {
+        "cmd": "test -d /home/user/deployment_logs && test \"$(stat -c %a /home/user/deployment_logs)\" = 700",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "All eight `.out` files must exist and be non-empty.",
+      "check": {
+        "cmd": "for f in /home/user/deployment_logs/pre_uptime.out /home/user/deployment_logs/pre_df.out /home/user/deployment_logs/pre_free.out /home/user/deployment_logs/pre_ps.out /home/user/deployment_logs/post_uptime.out /home/user/deployment_logs/post_df.out /home/user/deployment_logs/post_free.out /home/user/deployment_logs/post_ps.out; do test -s \"$f\" || exit 1; done",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Create an empty marker file named `/home/user/dummy_update_marker.txt` to simulate the application update.",
+      "check": {
+        "cmd": "test -f /home/user/dummy_update_marker.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "`summary.log` must exist, be valid YAML, and match the exact 5-line, 5-key format specified.",
+      "check": {
+        "cmd": "python3 -c 'import re, sys\nl = open(\"/home/user/deployment_logs/summary.log\").read().splitlines()\nok = len(l) == 5 and re.fullmatch(r\"timestamp: [0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})\", l[0]) is not None\nok = ok and l[1:] == [\"pre_uptime: /home/user/deployment_logs/pre_uptime.out\", \"pre_df: /home/user/deployment_logs/pre_df.out\", \"post_uptime: /home/user/deployment_logs/post_uptime.out\", \"post_df: /home/user/deployment_logs/post_df.out\"]\nsys.exit(0 if ok else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "The timestamp value must be RFC-3339 (e.g. `2025-04-27T14:05:33Z`).",
+      "check": {
+        "cmd": "grep -Eq '^timestamp: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$' /home/user/deployment_logs/summary.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "Permissions on `/home/user/deployment_logs` must be 700.",
+      "check": {
+        "cmd": "test \"$(stat -c %a /home/user/deployment_logs)\" = 700",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "The standard output of each should be directed to the specified file.",
+      "check": {
+        "cmd": "grep -q Mem /home/user/deployment_logs/pre_free.out && grep -q Mem /home/user/deployment_logs/post_free.out && grep -q PID /home/user/deployment_logs/pre_ps.out && grep -q PID /home/user/deployment_logs/post_ps.out && test \"$(grep -c '' /home/user/deployment_logs/pre_ps.out)\" -le 6",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

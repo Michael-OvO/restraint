@@ -1,0 +1,34 @@
+{
+  "task": "endless-terminals__task_000000_d01a1f48__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Given the input log above, the correct `/home/user/analysis/peak_cpu_by_server.log` MUST contain exactly the three lines shown here:",
+      "check": {
+        "cmd": "python3 - <<'PYEOF'\nimport sys\nsys.exit(0 if open('/home/user/analysis/peak_cpu_by_server.log', 'rb').read() == b'serverA|35\\nserverB|79\\nserverC|64\\n' else 1)\nPYEOF",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Use Unix line endings (LF).",
+      "check": {
+        "cmd": "test -f /home/user/analysis/peak_cpu_by_server.log && ! grep -q \"$(printf '\\r')\" /home/user/analysis/peak_cpu_by_server.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "There must be **no heading line**, no trailing spaces, and the file must end with a single newline character.",
+      "check": {
+        "cmd": "grep -nvE '^[A-Za-z0-9_-]+\\|[0-9]+$' /home/user/analysis/peak_cpu_by_server.log",
+        "pass_if": "stdout_empty"
+      }
+    }
+  ]
+}

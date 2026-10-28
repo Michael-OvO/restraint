@@ -1,0 +1,58 @@
+{
+  "task": "endless-terminals__task_000000_03e020f3__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "A brand-new directory called “policy-as-code-demo” must be created directly inside your home directory “/home/user”.",
+      "check": {
+        "cmd": "test -d /home/user/policy-as-code-demo",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Inside that directory, create a YAML file called “policy.yaml” that **must contain exactly** the text shown below (byte-for-byte, including every space and the terminating newline):",
+      "check": {
+        "cmd": "python3 -c 'import sys; sys.exit(0 if open('\\''/home/user/policy-as-code-demo/policy.yaml'\\'','\\''rb'\\'').read()==b'\\''version: \"1.0\"\\nrules:\\n  - id: ensure-ssh-disabled\\n    description: \"SSH protocol must be disabled in production containers\"\\n    severity: \"high\"\\n  - id: enforce-readonly-rootfs\\n    description: \"Containers must run with a read-only root filesystem\"\\n    severity: \"medium\"\\n'\\'' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "(The file therefore has 9 lines in total. Make sure a final newline exists after the last line.)",
+      "check": {
+        "cmd": "test \"$(wc -l < /home/user/policy-as-code-demo/policy.yaml)\" -ge 8 && test \"$(tail -c1 /home/user/policy-as-code-demo/policy.yaml | od -An -c | tr -d ' ')\" = '\\n'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Still inside “/home/user/policy-as-code-demo”, generate a log file named “compliance.log”.",
+      "check": {
+        "cmd": "test -f /home/user/policy-as-code-demo/compliance.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "That log file must contain the **two lines below and nothing else** (each followed by a newline):",
+      "check": {
+        "cmd": "python3 -c 'import sys; sys.exit(0 if open('\\''/home/user/policy-as-code-demo/compliance.log'\\'','\\''rb'\\'').read()==b'\\''[INFO] policy.yaml created successfully\\n[INFO] Policy verified\\n'\\'' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "No extra blank lines are allowed before, between, or after those two lines.",
+      "check": {
+        "cmd": "! grep -qE '^\\s*$' /home/user/policy-as-code-demo/compliance.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

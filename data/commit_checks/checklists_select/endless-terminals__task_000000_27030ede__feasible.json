@@ -1,0 +1,50 @@
+{
+  "task": "endless-terminals__task_000000_27030ede__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "which must be created if it does not already exist:",
+      "check": {
+        "cmd": "test -d /home/user/scrape_output",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "• Must be UTF-8 text.",
+      "check": {
+        "cmd": "python3 -c 'open('\\''/home/user/scrape_output/device_metrics.csv'\\'','\\''rb'\\'').read().decode('\\''utf-8'\\'')'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "• The very first line is an exact header:",
+      "check": {
+        "cmd": "test \"$(head -n1 /home/user/scrape_output/device_metrics.csv)\" = device_id,temperature,humidity,battery,timestamp",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "• One data row per HTML page, **sorted by numerical device_id in ascending order**.",
+      "check": {
+        "cmd": "test \"$(($(grep -c '' /home/user/scrape_output/device_metrics.csv) - 1))\" = \"$(ls /home/user/iot_dashboard/pages/device_*.html | wc -l)\" && tail -n +2 /home/user/scrape_output/device_metrics.csv | cut -d, -f1 | sort -n -c",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "• scrape.log contains the correct “Processed …” lines.",
+      "check": {
+        "cmd": "! grep -vE '^Processed device_[^ ]*\\.html: .+$' /home/user/scrape_output/scrape.log && test -s /home/user/scrape_output/scrape.log",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

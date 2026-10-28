@@ -1,0 +1,66 @@
+{
+  "task": "endless-terminals__task_000000_59974445__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Create the directory structure exactly as follows (create anything that does not yet exist):",
+      "check": {
+        "cmd": "test -d /home/user/build && test -d /home/user/build/reports && test -d /home/user/build/logs",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "* The file /home/user/build/artifacts_store.db exists.",
+      "check": {
+        "cmd": "test -f /home/user/build/artifacts_store.db",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Inside that database you must end up with exactly one table named `artifacts` whose schema is **precisely**:",
+      "check": {
+        "cmd": "python3 -c 'import sqlite3,sys\nc=sqlite3.connect('\"'\"'file:/home/user/build/artifacts_store.db?mode=ro'\"'\"',uri=True)\nt=[r[0] for r in c.execute(\"select name from sqlite_master where type='\"'\"'table'\"'\"' and name not like '\"'\"'sqlite_%'\"'\"'\")]\ninfo={r[1]:(r[2].upper(),r[3],r[5]) for r in c.execute('\"'\"'PRAGMA table_info(artifacts)'\"'\"')}\nok=t==['\"'\"'artifacts'\"'\"'] and info.get('\"'\"'id'\"'\"',('\"'\"''\"'\"',0,0))[0]=='\"'\"'INTEGER'\"'\"' and info['\"'\"'id'\"'\"'][2]==1 and all(info[k][1]==1 and info[k][0]=='\"'\"'TEXT'\"'\"' for k in ['\"'\"'name'\"'\"','\"'\"'version'\"'\"','\"'\"'sha256'\"'\"','\"'\"'build_timestamp'\"'\"'])\nsql=c.execute(\"select sql from sqlite_master where name='\"'\"'artifacts'\"'\"'\").fetchone()[0].upper()\nok=ok and '\"'\"'AUTOINCREMENT'\"'\"' in sql and '\"'\"'UNIQUE'\"'\"' in sql\nsys.exit(0 if ok else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "* The output of: `sqlite3 /home/user/build/artifacts_store.db 'PRAGMA table_info(artifacts);'` shows exactly 5 rows whose columns are ordered id, name, version, sha256, build_timestamp.",
+      "check": {
+        "cmd": "python3 -c 'import sqlite3,sys\nc=sqlite3.connect('\"'\"'file:/home/user/build/artifacts_store.db?mode=ro'\"'\"',uri=True)\ncols=[r[1] for r in c.execute('\"'\"'PRAGMA table_info(artifacts)'\"'\"')]\nsys.exit(0 if cols==['\"'\"'id'\"'\"','\"'\"'name'\"'\"','\"'\"'version'\"'\"','\"'\"'sha256'\"'\"','\"'\"'build_timestamp'\"'\"'] else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "* A query `SELECT COUNT(*) FROM artifacts;` returns 3.",
+      "check": {
+        "cmd": "python3 -c 'import sqlite3,sys\nc=sqlite3.connect('\"'\"'file:/home/user/build/artifacts_store.db?mode=ro'\"'\"',uri=True)\nsys.exit(0 if c.execute('\"'\"'SELECT COUNT(*) FROM artifacts'\"'\"').fetchone()[0]==3 else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "* The CSV file exists and is byte-for-byte identical to the text block shown previously (including the final newline).",
+      "check": {
+        "cmd": "python3 -c 'import sys\nsys.exit(0 if open('\"'\"'/home/user/build/reports/latest_build_artifacts.csv'\"'\"','\"'\"'rb'\"'\"').read()==b'\"'\"'id,name,version,sha256,build_timestamp\\n1,libfoo,1.2.3,d2c7e8766657981caffe0badc0ffee11111111111111,2023-03-15T08:45:00Z\\n2,appbar,4.5.6,0123456789abcdeffedcba98765432100000000000000,2023-03-15T08:45:00Z\\n3,toolbaz,0.9.1,a1b2c3d4e5f60718293a4b5c6d7e8f900000000000000,2023-03-15T08:45:00Z\\n'\"'\"' else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "* /home/user/build/logs/db_operations.log exists and its four lines match the block shown previously exactly.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nsys.exit(0 if open('\"'\"'/home/user/build/logs/db_operations.log'\"'\"','\"'\"'rb'\"'\"').read()==b'\"'\"'[INFO] table_created\\n[INFO] 3_rows_inserted\\n[INFO] csv_exported_to_reports\\n[INFO] job_complete\\n'\"'\"' else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

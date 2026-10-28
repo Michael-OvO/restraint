@@ -1,0 +1,74 @@
+{
+  "task": "endless-terminals__task_000000_329e129c__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "1.  Delete every file whose name ends with “.tmp” anywhere inside `/home/user/ci_cd/build-artifacts`.",
+      "check": {
+        "cmd": "find /home/user/ci_cd/build-artifacts -name '*.tmp'",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "2.  While deleting, simultaneously create the log file `/home/user/cleanup/deleted_tmp_files.log`.",
+      "check": {
+        "cmd": "test -f /home/user/cleanup/deleted_tmp_files.log && test -s /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "*   One absolute path per line.",
+      "check": {
+        "cmd": "grep -v '^/' /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "*   Paths must be sorted in ordinary ASCII/lexicographical order before being written.",
+      "check": {
+        "cmd": "LC_ALL=C sort -c /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r5",
+      "quote": "*   No blank lines anywhere in the file.",
+      "check": {
+        "cmd": "grep -n '^$' /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r6",
+      "quote": "*   No leading or trailing spaces on any line.",
+      "check": {
+        "cmd": "grep -nE '^[[:space:]]|[[:space:]]$' /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r7",
+      "quote": "5.  When you are done, the “*.tmp” files should be gone and the log should list exactly the files you removed.",
+      "check": {
+        "cmd": "grep -v '\\.tmp$' /home/user/cleanup/deleted_tmp_files.log; grep '^/home/user/ci_cd/build-artifacts/' -v /home/user/cleanup/deleted_tmp_files.log; while read -r p; do test -e \"$p\" && echo \"$p\"; done < /home/user/cleanup/deleted_tmp_files.log",
+        "pass_if": "stdout_empty"
+      }
+    },
+    {
+      "id": "r8",
+      "quote": "3.  Do NOT touch, move or list any files that do not end with “.tmp”.",
+      "check": {
+        "cmd": "test -d /home/user/ci_cd/build-artifacts",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

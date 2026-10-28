@@ -1,0 +1,42 @@
+{
+  "task": "endless-terminals__task_000000_5d2af6e4__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "The file `/home/user/new-certs/internal.pem` has been moved (not copied) to `/home/user/managed-certs/internal.pem`.",
+      "check": {
+        "cmd": "test -f /home/user/managed-certs/internal.pem && test ! -e /home/user/new-certs/internal.pem",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "A text log file named `/home/user/managed-certs/manifest.log` exists.",
+      "check": {
+        "cmd": "test -f /home/user/managed-certs/manifest.log",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Append one (and only one) new line to the end of that file whose contents follow this **exact** format (spaces are significant):",
+      "check": {
+        "cmd": "python3 -c 'import hashlib,sys\nh=hashlib.sha256(open('\"'\"'/home/user/managed-certs/internal.pem'\"'\"','\"'\"'rb'\"'\"').read()).hexdigest()\nls=open('\"'\"'/home/user/managed-certs/manifest.log'\"'\"').read().splitlines()\nexp='\"'\"'internal.pem '\"'\"'+h\nsys.exit(0 if ls and ls[-1]==exp and ls.count(exp)==1 else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "The line must be terminated by a single newline character (ASCII 0x0A).",
+      "check": {
+        "cmd": "python3 -c 'import sys\nd=open('\"'\"'/home/user/managed-certs/manifest.log'\"'\"','\"'\"'rb'\"'\"').read()\nsys.exit(0 if d.endswith(b'\"'\"'\\n'\"'\"') and not d.endswith(b'\"'\"'\\n\\n'\"'\"') and not d.endswith(b'\"'\"'\\r\\n'\"'\"') else 1)'",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}

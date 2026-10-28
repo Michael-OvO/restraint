@@ -1,0 +1,42 @@
+{
+  "task": "endless-terminals__task_000000_78b6f2fb__feasible",
+  "source": "endless-terminals",
+  "author": "claude",
+  "inputs": [
+    "instruction.md"
+  ],
+  "requirements": [
+    {
+      "id": "r1",
+      "quote": "Create a new file at `/home/user/firewall_rule_8443.txt`",
+      "check": {
+        "cmd": "test -f /home/user/firewall_rule_8443.txt",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r2",
+      "quote": "Write **exactly one** line into that file—the rule itself—and nothing else.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/firewall_rule_8443.txt\", \"rb\").read()\nsys.exit(0 if c.rstrip(b\"\\n\") == b\"iptables -A INPUT -p tcp --dport 8443 -j ACCEPT\" else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r3",
+      "quote": "Be sure the file ends with a single trailing newline character.",
+      "check": {
+        "cmd": "python3 -c 'import sys\nc = open(\"/home/user/firewall_rule_8443.txt\", \"rb\").read()\nsys.exit(0 if c == b\"iptables -A INPUT -p tcp --dport 8443 -j ACCEPT\\n\" else 1)'",
+        "pass_if": "rc==0"
+      }
+    },
+    {
+      "id": "r4",
+      "quote": "Do not insert a she-bang, comments, or any additional blank lines.",
+      "check": {
+        "cmd": "test \"$(grep -c '' /home/user/firewall_rule_8443.txt)\" = 1 && ! grep -q '#' /home/user/firewall_rule_8443.txt && ! grep -q '^$' /home/user/firewall_rule_8443.txt",
+        "pass_if": "rc==0"
+      }
+    }
+  ]
+}
