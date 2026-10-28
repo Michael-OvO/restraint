@@ -1,0 +1,35 @@
+# Iteration 17 (docs/iteration-17-design.md): train only G2's confidence value, GRPO on Brier against the graded
+# outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: the items of the planned it17 data
+# rollout are not built yet; the it16b items are a placeholder for the dry run. Hyperparameters are not frozen until
+# the pre-registration (docs/iteration-17-prereg.md).
+#   uv run --extra train python -m honest_agents.train.confidence --config configs/it17_confidence.yaml --dry-run \
+#       model.name=Qwen/Qwen3.5-4B
+run_name: it17-confidence
+output_root: outputs/confidence
+seed: 0
+
+model:
+  name: outputs/it15/g2_merged             # G2 seed 1, merged (stage (c)'s merge recipe)
+  family: qwen3_5
+  tokenizer: Qwen/Qwen3.5-4B               # the same tokenizer and template as G2's base
+
+lora:
+  r: 16
+  alpha: 32
+
+data:
+  items: [runs/it17/items_it16b.jsonl]     # placeholder until the it17 rollout's items exist
+  max_prompt_tokens: 16384
+  heldout_fraction: 0.1
+
+grpo:
+  learning_rate: 1.0e-5
+  num_generations: 8
+  max_completion_length: 8                 # "0.85\n</parameter>" fits; only the first line is parsed
+  temperature: 1.0
+  beta: 0.04
+  per_device_train_batch_size: 8           # one prompt x 8 samples per device step
+  gradient_accumulation_steps: 4
+  num_train_epochs: 2
+  eval_steps: 25
+  report_to: wandb
