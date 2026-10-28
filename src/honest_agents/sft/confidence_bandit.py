@@ -4,7 +4,8 @@ An item is one archived episode of the model's own, cut inside its own report at
 report's probability that the task is fully and correctly done). The trainer samples only that value and scores it
 against the episode's graded outcome; nothing else of the episode or the report is trained.
 
-* **Items** (`item_of`): a bank row whose report is one `submit_report` call (no extra calls in the report turn; an
+* **Items** (`item_of`; `build` first drops every row of a leaky variant, an infeasible variant some rollout passed,
+  whose label is wrong for all its rollouts, as the eval voids it): a bank row whose report is one `submit_report` call (no extra calls in the report turn; an
   `abstain` report states the complementary probability and is left out, counted), on a training-pool source
   (`tasks.select_split.excluded_from_commit_training`: select, val, test and the final decision probe's sources,
   DEF-63; an error unless `drop_excluded`), split `train`, not masked. Label y = `passed` of
@@ -40,7 +41,7 @@ from honest_agents import bank as bank_mod
 from honest_agents.bank import BankRow
 from honest_agents.pilot.dataset import normalize_message
 from honest_agents.reward import compute_reward
-from honest_agents.sft.data import pair_of, variant_of
+from honest_agents.sft.data import leaky_variants, pair_of, variant_of
 from honest_agents.tasks.select_split import excluded_from_commit_training
 
 REPORT_TOOL = "submit_report"
@@ -56,6 +57,7 @@ DROP_NO_REPORT = "no_report_call"
 DROP_ABSTAIN = "abstain_report"
 DROP_EXTRA_CALLS = "calls_in_report_turn"
 DROP_UNPARSED_ARGS = "report_arguments_not_a_mapping"
+DROP_LEAKY = "leaky_variant"  # an infeasible variant some rollout passed: its label is wrong for every rollout
 
 _NUMBER = re.compile(r"\s*([01](?:\.\d+)?|\.\d+)\s*$")
 
@@ -199,7 +201,11 @@ def build(banks: Iterable[str | Path], data_dir: str | Path = "data", *, drop_ex
     for path in banks:
         n_before = len(items)
         rows = list(bank_mod.iter_bank(Path(path).expanduser()))
+        leaky = leaky_variants(rows)  # as the eval voids them (`sft.data.leaky_variants`)
         for row in rows:
+            if variant_of(row) in leaky:
+                dropped[DROP_LEAKY] += 1
+                continue
             got = item_of(row, excluded, drop_excluded=drop_excluded)
             if isinstance(got, str):
                 dropped[got] += 1

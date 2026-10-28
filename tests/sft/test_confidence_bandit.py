@@ -90,3 +90,16 @@ def test_the_qwen35_prompt_ends_where_a_real_confidence_value_is_written():
     full = tok.apply_chat_template(real, tools=tool_schemas(), tokenize=False, **kwargs)
     assert full.startswith(prefix) and full[len(prefix) :].startswith("0.7\n</parameter>")
     assert cb.parse_confidence(full[len(prefix) :]) == 0.7
+
+
+def test_every_rollout_of_a_leaky_variant_is_dropped(tmp_path: Path):
+    """An infeasible variant that one rollout passed: its label is wrong for all of them (the eval voids it)."""
+    data = tmp_path / "data"
+    (data / "decision").mkdir(parents=True)
+    (data / "select_sources.txt").write_text("sel/task_x\n")
+    (data / "split_seeds.json").write_text(json.dumps({SOURCE: "train", "src/task_002": "train"}))
+    (data / "decision" / "probe_prompts_surfaces.jsonl").write_text(json.dumps({"pair_id": "probe/task_p"}) + "\n")
+    leak = [row(episode=f"l{k}", passed=k == 0, feasible=False) for k in range(3)]
+    bank = write_bank(tmp_path / "bank", [*leak, row(episode="ok", source="src/task_002")])
+    b = cb.build([bank], data)
+    assert [i.id for i in b.items] == ["ok"] and b.dropped == {cb.DROP_LEAKY: 3}
