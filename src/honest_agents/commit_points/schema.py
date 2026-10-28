@@ -155,9 +155,11 @@ class Quota:
     max_outcome_ratio: float = 1.0  # within a point: the larger outcome <= ratio x the smaller
     min_per_cell: int = 50  # examples per point x outcome cell
     max_source_share: float = 0.02  # share of the whole build one source task may hold: no task dominates
+    max_task_share: float | None = None  # share of the whole build one task (variant) may hold; None = not checked
+    points: tuple[str, ...] = POINTS  # the points the build trains: `min_per_cell` and the balance apply to these
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return asdict(self) | {"points": list(self.points)}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any] | None) -> Quota:
@@ -165,6 +167,10 @@ class Quota:
         unknown = set(d) - {f.name for f in fields(cls)}
         if unknown:
             raise SchemaError(f"unknown quota keys {sorted(unknown)}")
+        if "points" in d:
+            if bad := set(d["points"]) - set(POINTS):
+                raise SchemaError(f"unknown points {sorted(bad)}")
+            d["points"] = tuple(d["points"])
         return cls(**d)
 
 

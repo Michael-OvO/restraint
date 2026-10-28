@@ -1,22 +1,23 @@
 """Coverage report of a commit-check build (L0: the manifest only, in memory; nothing is written).
 
     uv run python -m honest_agents.commit_points.coverage [--manifest data/commit/build_manifest.json] [--data-dir data] \\
-        [--cap-per-task N] [--max-source-share X] [--min-per-cell N] [--max-outcome-ratio R] [--strict] [--json out.json]
+        [--cap-per-task N] [--max-source-share X] [--max-task-share X] [--min-per-cell N] [--max-outcome-ratio R] [--strict] [--json out.json]
 
 Counts per commitment point x outcome x task (`schema`), and per cell the number of tasks and the largest task's share.
 The quotas come from the manifest's `quota` block; a flag overrides one.
 
 **Fails** (exit 1) when:
-- a task holds more than `cap_per_task` examples of one point x outcome cell, or a source task more than
-  `max_source_share` of the build (no task dominates);
+- a task holds more than `cap_per_task` examples of one point x outcome cell, more than `max_task_share` of the build
+  (when set), or a source task more than `max_source_share` of it (no task dominates);
+- an example's point is not one of the quota's `points` (the points the build trains);
 - an example's source is in `tasks.select_split.excluded_from_commit_training(--data-dir)` (select, val and test
   sources, and the final eval's decision-probe sources: DEF-63), or its recorded split is not `train`: eval sources
   never enter training data;
 - an example's decision is not the one its outcome licenses (committed after `pass`, not after `fail`);
 - a row breaks the schema, or two rows share an id.
 
-**Reported**, and failing only with `--strict`: cells under `min_per_cell` (a missing cell counts 0), and points whose
-larger outcome exceeds `max_outcome_ratio` times the smaller (the check should change the decision about half the time).
+**Reported**, and failing only with `--strict`: cells of the quota's `points` under `min_per_cell` (a missing cell counts
+0), and points whose larger outcome exceeds `max_outcome_ratio` times the smaller (the check should change the decision about half the time).
 Also reported: the origins per point, the hazards of the destructive examples and, for claims, the checklist agreement
 rate with the hidden tests (the data-quality metric).
 
@@ -82,6 +83,8 @@ class Coverage:
     checklist_agreement: dict[str, Any] = field(default_factory=dict)
     cap_violations: list[str] = field(default_factory=list)
     share_violations: list[str] = field(default_factory=list)
+    task_share_violations: list[str] = field(default_factory=list)
+    out_of_scope: list[str] = field(default_factory=list)
     excluded_sources: list[str] = field(default_factory=list)
     split_violations: list[str] = field(default_factory=list)
     decision_mismatches: list[str] = field(default_factory=list)
@@ -95,6 +98,8 @@ class Coverage:
         kinds = {
             "cap": self.cap_violations,
             "share": self.share_violations,
+            "task_share": self.task_share_violations,
+            "out_of_scope": self.out_of_scope,
             "excluded_source": self.excluded_sources,
             "split": self.split_violations,
             "decision": self.decision_mismatches,
@@ -117,6 +122,7 @@ def coverage(manifest: BuildManifest, excluded: set[str] | None) -> Coverage:
     q = manifest.quota
     counts: dict[str, dict[str, Counter[str]]] = {p: {o: Counter() for o in OUTCOMES} for p in POINTS}
     by_source: Counter[str] = Counter()
+    by_task: Counter[str] = Counter()
     tasks: set[str] = set()
     ids: Counter[str] = Counter()
     origins: dict[str, Counter[str]] = defaultdict(Counter)
@@ -129,8 +135,11 @@ def coverage(manifest: BuildManifest, excluded: set[str] | None) -> Coverage:
         if problems:
             r.schema_problems.append(f"{e.id}: {'; '.join(problems)}")
             continue
+        if e.point not in q.points:
+            r.out_of_scope.append(f"{e.id}: point {e.point} is not one of the build's points {list(q.points)}")
         counts[e.point][e.outcome][e.task] += 1
         by_source[e.source] += 1
+        by_task[e.task] += 1
         tasks.add(e.task)
         origins[e.point][e.origin] += 1
         if e.point == DESTRUCTIVE and e.hazard:
@@ -151,15 +160,16 @@ def coverage(manifest: BuildManifest, excluded: set[str] | None) -> Coverage:
         n_point = sum(n_out.values())
         r.fail_share[p] = round(n_out[FAIL] / n_point, 4) if n_point else None
         small, large = sorted((n_out[PASS], n_out[FAIL]))
-        if n_point and large > q.max_outcome_ratio * small:
+        if p in q.points and n_point and large > q.max_outcome_ratio * small:
             r.unbalanced.append(f"{p}: pass {n_out[PASS]} / fail {n_out[FAIL]} exceeds ratio {q.max_outcome_ratio}")
         for o in OUTCOMES:
             c = counts[p][o]
             n = n_out[o]
             top, top_n = c.most_common(1)[0] if c else (None, 0)
             share = round(top_n / n, 4) if n else None
-            r.cells.append(Cell(p, o, n, len(c), top, top_n, share, n < q.min_per_cell))
-            if n < q.min_per_cell:
+            under = p in q.points and n < q.min_per_cell
+            r.cells.append(Cell(p, o, n, len(c), top, top_n, share, under))
+            if under:
                 r.under_quota.append(f"{p}/{o}: {n} < {q.min_per_cell}")
             for task, k in sorted(c.items()):
                 if k > q.cap_per_task:
@@ -173,6 +183,12 @@ def coverage(manifest: BuildManifest, excluded: set[str] | None) -> Coverage:
             for source, n in sorted(by_source.items())
             if n / total > q.max_source_share
         ]
+        if q.max_task_share is not None:
+            r.task_share_violations = [
+                f"{task}: {n}/{total} = {n / total:.4f} > max_task_share {q.max_task_share}"
+                for task, n in sorted(by_task.items())
+                if n / total > q.max_task_share
+            ]
     r.origins = {p: dict(sorted(origins[p].items())) for p in POINTS}
     r.hazards = dict(sorted(hazards.items()))
     known = agree["agrees"] + agree["disagrees"]
@@ -204,6 +220,8 @@ def render(r: Coverage, strict: bool = False) -> str:
     for name, items in (
         ("over the per-task cap", r.cap_violations),
         ("over the source share", r.share_violations),
+        ("over the task share", r.task_share_violations),
+        ("points the build does not train", r.out_of_scope),
         ("sources excluded from training", r.excluded_sources),
         ("not split train", r.split_violations),
         ("decision not licensed by the outcome", r.decision_mismatches),
@@ -269,6 +287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--no-excluded-check", action="store_true", help="skip the excluded-source check (reported)")
     ap.add_argument("--cap-per-task", type=int, default=None)
     ap.add_argument("--max-source-share", type=float, default=None)
+    ap.add_argument("--max-task-share", type=float, default=None)
     ap.add_argument("--min-per-cell", type=int, default=None)
     ap.add_argument("--max-outcome-ratio", type=float, default=None)
     ap.add_argument("--strict", action="store_true", help="also fail on cells under quota and unbalanced points")
@@ -284,6 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         {
             "cap_per_task": args.cap_per_task,
             "max_source_share": args.max_source_share,
+            "max_task_share": args.max_task_share,
             "min_per_cell": args.min_per_cell,
             "max_outcome_ratio": args.max_outcome_ratio,
         },

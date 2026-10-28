@@ -4,7 +4,8 @@ One entrypoint for every SFT stage (`kind:` in the config picks the example buil
 hindsight SFT, `sft.hindsight`), reward-filtered best-of-N (`bestofn`) and the `combo` mixture of both (`sft.bestofn`),
 imitation of audited teacher trajectories (`teacher`, `sft.teacher_stage`), context distillation of hinted base-model
 rollouts (`selfdistill`, `sft.selfdistill`) and decision-point supervision at the model's own high_risk states
-(`decision`, `sft.decision`) and judgment items (`judgment`, `sft.judgment`, iteration 15); the last six register their builders with `register_stage`.
+(`decision`, `sft.decision`), judgment items (`judgment`, `sft.judgment`, iteration 15) and the frozen commit-data build
+(`commit_build`, `sft.commit_build`, iteration 16); all but `hindsight` register their builders with `register_stage`.
 A stage turns the fit rows and the held-out rows of a trajectory bank into `SFTExample`s; this module tokenises them
 with the loss mask of `sft.data`, wires TRL's `SFTTrainer` with PEFT LoRA and writes the adapter.
 
@@ -118,6 +119,7 @@ class SftConfig:
     judgment: dict[str, Any] = field(default_factory=dict)  # `judgment.JudgmentOptions` fields (kind judgment)
     splice: dict[str, Any] = field(default_factory=dict)  # `judgment_splice.SpliceOptions` fields (kind judgment_splice)
     read_rft: dict[str, Any] = field(default_factory=dict)  # `read_rft.ReadRftOptions` fields (kind read_rft)
+    commit_build: dict[str, Any] = field(default_factory=dict)  # `commit_build.CommitBuildOptions` (kind commit_build)
     train: TrainSection = field(default_factory=TrainSection)
     guard: GuardSection = field(default_factory=GuardSection)
 
@@ -144,6 +146,7 @@ STAGE_MODULES = {
     "judgment": "honest_agents.sft.judgment",
     "judgment_splice": "honest_agents.sft.judgment_splice",
     "read_rft": "honest_agents.sft.read_rft",
+    "commit_build": "honest_agents.sft.commit_build",
 }
 
 

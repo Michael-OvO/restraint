@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import random
 import time
+from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -385,3 +387,20 @@ def test_pairs_without_both_arms_are_counted_not_used() -> None:
     r = fa.analyse(pairs, rows)
     assert r["points"][S.CLAIM]["pairs"] == 0 and r["points"][S.CLAIM]["sensitivity"] is None
     assert r["counts"] == {"incomplete_claim_done": 1}
+
+
+def test_a_build_of_two_points_is_held_to_its_points_and_the_task_share_cap(tmp_path: Path) -> None:
+    """A build that trains claims and destructive steps only (it16, amendment 11): no blame cell is under quota, a
+    blame example is out of scope, and `max_task_share` (prereg 3.4: 1.5 %) caps one task's share of the build."""
+    ex = [e for e in balanced(10) if e.point != S.BLAME]
+    q = quota(points=(S.CLAIM, S.DESTRUCTIVE))
+    r = cov.coverage(S.BuildManifest.of(ex, q), set())
+    assert r.failures(strict=True) == {} and not any(c.under_quota for c in r.cells if c.point == S.BLAME)
+    assert cov.coverage(S.BuildManifest.of(ex, quota()), set()).failures(strict=True)["under_quota"] == 2
+    blame = [e for e in balanced(10) if e.point == S.BLAME][:1]
+    assert cov.coverage(S.BuildManifest.of([*ex, *blame], q), set()).failures() == {"out_of_scope": 1}
+    top = max(Counter(e.task for e in ex).values()) / len(ex)
+    assert cov.coverage(S.BuildManifest.of(ex, replace(q, max_task_share=top)), set()).failures() == {}
+    assert "task_share" in cov.coverage(S.BuildManifest.of(ex, replace(q, max_task_share=top / 2)), set()).failures()
+    m = S.write_manifest(S.BuildManifest.of(ex, q), tmp_path / "m.json")
+    assert S.read_manifest(m).quota == q
