@@ -88,3 +88,22 @@ valid for the commit that closes the ledger: integrity-gate.md step 4.
 
 `git branch --no-merged main`: only `design/rts` (worktree `/Users/michael/Documents/Github/restraint-rts`, RTS
 scoring design from another session, not a defect fix).
+
+## Sign-off for it16c (owner, 2026-10-28)
+
+- **Owner approval of the GPU spend:** "Rent 48215868 (Recommended)" (stage (c) on one RTX PRO 6000 96 GB VM, about 4 h,
+  about $7; a watcher stops the node when the chain ends). Data decisions the same day: "Add destructive
+  (Recommended)", "Source cap 4% (Recommended)" (prereg section 11).
+- **Ledger:** 63 entries, every one closed or waived for it16c (`gate.ledger check --experiment it16c` exits 0).
+  DEF-62 and DEF-63 were found and closed on the commit-data lane before any training.
+- **Data gates, run on the Mac before launch:** `commit_points.coverage --strict` on
+  `data/commit_checks/builds/it16_v1/build_manifest.json` passes; `final_benchmark never-trained --archive --record`
+  passes (0 hits over 4,005 ids and 3,683 texts; recorded in `4d44f9a`); the trainer's dry run of
+  `configs/sft_it16_commit_qwen35.yaml` builds 1,039 examples, none over `max_length`. The chain repeats all three.
+- **Sanity runs:** the chain's served models each run the 12-task sanity eval first (`g2_select`, `final_e*_select`).
+- **L1 validity:** `git diff 81bc68f HEAD` over `src/honest_agents` touches the commit-data builders (`sft.commit_checks`,
+  `sft.claim_splice`, the new `sft.destructive_splice` and `sft.commit_build`), `commit_points` (coverage quotas) and
+  `tasks/select_split.py` (a new exclusion function; `excluded_from_training` unchanged), plus one registry line in
+  `sft.train_sft`. No grader, verifier, harness, task build or metric code changes, so **the L1 results hold for
+  it16c**. `scripts/test.sh --fast`: 4,998 passed; the two failures were the never-trained scope (fixed by the record
+  above, then green) and the known timing-flaky L0 sweep budget (green on its own).
