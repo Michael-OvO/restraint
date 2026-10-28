@@ -60,6 +60,10 @@ EXCLUDES = (
     "/outputs", "/runs", "/wandb", "/.claude",
 )  # fmt: skip
 DATA_EXCLUDE = "/data"
+# Sent although an exclude above matches: a task directory's own files are task data (the RTS log-summary tasks ship
+# `.log` inputs; without them the node's task dirs hash differently from the frozen manifest). Before the excludes:
+# rsync applies the first matching rule.
+INCLUDES = ("/data/**/tasks/**/*.log",)
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
@@ -108,6 +112,7 @@ def sync_argv(node: Node, src: Path = REPO, with_data: bool = False, dry_run: bo
     if delete:
         argv.append("--delete")
     excludes = [*EXCLUDES] + ([] if with_data else [DATA_EXCLUDE])
+    argv += [f"--include={i}" for i in INCLUDES]
     argv += [f"--exclude={e}" for e in excludes]
     argv += [f"{src}/", f"{node.target}:{node.dest.rstrip('/')}/"]
     return argv

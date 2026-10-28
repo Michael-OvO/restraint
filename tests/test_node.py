@@ -64,6 +64,23 @@ def test_sync_sends_the_tree_without_data_or_outputs_over_the_vast_key():
     assert "--dry-run" not in argv and "--delete" not in argv
 
 
+def test_a_task_directorys_log_files_travel_and_other_logs_do_not(tmp_path):
+    """The RTS log-summary tasks ship `.log` inputs (rts verify failed on the node without them); build logs stay."""
+    import subprocess
+
+    src, dst = tmp_path / "repo", tmp_path / "node"
+    for rel in ("data/rts/v1/tasks/t/environment/app.log", "data/decision/outputs_run.log", "train.log", "data/x.txt"):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text("x")
+    argv = sync_argv(Node("h"), src=src, with_data=True)
+    rules = [a for a in argv if a.startswith(("--include=", "--exclude="))]
+    assert rules.index("--include=/data/**/tasks/**/*.log") < rules.index("--exclude=*.log")
+    dst.mkdir()
+    subprocess.run(["rsync", "-a", *rules, f"{src}/", f"{dst}/"], check=True)
+    sent = {p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file()}
+    assert sent == {"data/rts/v1/tasks/t/environment/app.log", "data/x.txt"}
+
+
 def test_sync_with_data_and_dry_run():
     argv = sync_argv(Node("me@h", 22, key="/k k/id", dest="/srv/r/"), src=Path("/repo"), with_data=True, dry_run=True)
     assert "--exclude=/data" not in argv
