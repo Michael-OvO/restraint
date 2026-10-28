@@ -237,6 +237,47 @@ def test_an_output_flood_is_cut_inside_the_sandbox_not_held_in_host_memory(facto
     assert f"head -c {MAX_CAPTURED_BYTES + 1}" in fake.calls[-1].command
 
 
+def test_a_backgrounded_process_does_not_hold_the_command_or_the_next_one(factory, task, tmp_path):
+    """DEF-65: `./deploy.sh &` used to keep the capture pipe open, so the command (and every later one) waited on the
+    host's 80 s backstop. Now the command returns with its own output and code, the backgrounded process keeps
+    running (a task may ask for a detached server), and the next command runs normally."""
+    import os
+    import signal
+    import time
+
+    pidfile = tmp_path / "bg.pid"
+    env = new_env(budget=EpisodeBudget(command_timeout_sec=30))
+    env.reset(task_dir=str(task))
+    t0 = time.time()
+    out = env.bash(f"(while :; do echo tick; sleep 0.05; done) & echo $! > {pidfile}; echo started")
+    elapsed = time.time() - t0
+    try:
+        assert elapsed < 10, elapsed  # the drain is at most CAPTURE_DRAIN_SEC after the command exits
+        assert "started" in out and env._history[-1]["rc"] == 0
+        pid = int(pidfile.read_text())
+        os.kill(pid, 0)  # still running: the process the agent started is not killed
+        t1 = time.time()
+        assert env.bash("echo next") == "[exit code: 0]\nnext\n" and time.time() - t1 < 5
+        assert env._history[-1]["rc"] == 0
+    finally:
+        if pidfile.exists():
+            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+
+
+def test_the_capture_leaves_no_file_behind_and_keeps_the_exit_code(factory, task, tmp_path):
+    """The FIFO and the capture file are unlinked before the command starts: the command cannot see them and nothing
+    is left in the temp directory; the command's exit code is its own."""
+    import tempfile
+
+    tmp = tmp_path / "t"
+    tmp.mkdir()
+    env = new_env()
+    env.reset(task_dir=str(task))
+    out = env.bash(f"export TMPDIR={tmp}; ls -A {tmp} | wc -l; exit 7")
+    assert env._history[-1]["rc"] == 7 and out.startswith("[exit code: 7]")
+    assert list(tmp.iterdir()) == [] and tempfile.gettempdir()  # nothing created under the command's own TMPDIR
+
+
 def test_the_boot_preflight_records_the_sandbox_umask(factory, task):
     """DEF-19: the boot preflight records the umask the agent's commands run under (0022 on the nodes; a local daemon's
     0000 if the pin were lost) on the episode, with the `timeout -k` probe in the same exec."""
