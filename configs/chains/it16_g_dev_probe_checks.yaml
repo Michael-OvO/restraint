@@ -1,0 +1,51 @@
+# Iteration 16, validation gate prep (docs/iteration-16-prereg.md section 10.3): the checks of the dev flip probe for
+# claims. CPU and Docker only (no GPU step). On the end states of G2's select-split run (`runs/eval/it16_g2_select`,
+# stage (c)'s `g2_select`, S = 2, bank kept), the select-split requirement checklists
+# (`data/commit_checks/checklists_select`, 126 tasks, instruction-only, audited) are run after a replay of each
+# episode and validated against the hidden tests (`sft.checklist_validation`, tests forced on), plus every task's
+# oracle state. The probe's claim pairs are then built on the Mac (`sft.commit_checks build` on the bank and these
+# results, then `commit_points.flip_probe`). Select-split sources only: never a training or final-benchmark item.
+# Needs the node that ran stage (c) (the select run is not archived with its end states elsewhere), or a node synced
+# with `runs/eval/it16_g2_select`. Runbook: docs/iteration-16-runbook.md.
+# NOT APPROVED, and gated as stage (c) work (`--experiment it16c`: the waivers name it16a-it16d): the first step
+# refuses while any defect in docs/defects.md is open.
+name: it16g
+state_dir: outputs/chain/it16g
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it16c
+      --ledger docs/defects.md
+      --json outputs/chain/it16g/gate_ledger.json
+      && mkdir -p outputs/chain/it16g/markers && touch outputs/chain/it16g/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it16g/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  - name: validate_select_states
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.checklist_validation --oracle
+      --episodes runs/eval/it16_g2_select/episodes.jsonl --tasks-root data/tasks
+      --checklists data/commit_checks/checklists_select
+      --out runs/eval/it16_g2_select/checklist_validation.jsonl --concurrency 16 --budget-min 90
+      && touch outputs/chain/it16g/markers/validate_select_states.done
+    gpus: []
+    done: outputs/chain/it16g/markers/validate_select_states.done
+    timeout_min: 120
+    on_failure: continue
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/eval/it16_g2_select, /root/.cache/honest-agents/gate/checklist_validation.v1.jsonl, outputs/logs]
+  archives:
+    - {iteration: 16, name: it16g-dev-probe-checks, eval: [runs/eval/it16_g2_select],
+       file: [runs/eval/it16_g2_select/checklist_validation.jsonl], keep_bank: true, no_weights: true,
+       note: "iteration 16 gate prep: checklist validation of G2's select-split end states (the dev flip probe's checks)"}
