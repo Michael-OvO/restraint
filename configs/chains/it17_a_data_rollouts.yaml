@@ -37,10 +37,15 @@ steps:
     on_failure: stop
 
   # The harness changed (DEF-65, 0ba4e2a): every L1 cache key includes the harness sources, so this re-runs the oracle
-  # gate's pairs and the S3 replays in full (about 860 sandbox boots; Docker work belongs on a node, not the Mac).
+  # gate's pairs (G1) and the S3 replays in full (about 860 sandbox boots; Docker work belongs on a node, not the Mac).
+  # Only the Docker checks run here: the L0 checks read the whole archive, which stays on the Mac (they pass there on
+  # the launch commit, docs/iteration-17-signoff.md). S3 replays two archived evals, which must be on the node first:
+  # `iterations/15-g2-splice-replay/eval/it15_g2_surface4` and `iterations/15-g0-judgment/eval/it15_sft_v2_surface4`
+  # under /root/Documents/honest-agents-archive (1.5 MB; rsync them before the launch).
   - name: gate_l1
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.gate sweep --level 1
+      --only G1 S3 S11
       --concurrency 16 --chains configs/chains/it17_a_data_rollouts.yaml --json outputs/chain/it17a/gate_l1.json
       && touch outputs/chain/it17a/markers/gate_l1.done
     gpus: []
