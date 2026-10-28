@@ -104,6 +104,8 @@ def env(tmp_path: Path) -> dict[str, Any]:
     data.mkdir()
     (data / "select_sources.txt").write_text("sel/task_x\n")
     (data / "split_seeds.json").write_text(json.dumps({"val/task_y": "val", "test/task_z": "test", SOURCE: "train"}))
+    (data / "decision").mkdir()
+    (data / "decision" / "probe_prompts_surfaces.jsonl").write_text(json.dumps({"pair_id": "probe/task_p"}) + "\n")
     tdir = tmp_path / "tasks" / TASK
     tdir.mkdir(parents=True)
     (tdir / "instruction.md").write_text(INSTRUCTION)

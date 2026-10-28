@@ -9,8 +9,9 @@ The quotas come from the manifest's `quota` block; a flag overrides one.
 **Fails** (exit 1) when:
 - a task holds more than `cap_per_task` examples of one point x outcome cell, or a source task more than
   `max_source_share` of the build (no task dominates);
-- an example's source is in `tasks.select_split.excluded_from_training(--data-dir)` (select, val and test sources), or
-  its recorded split is not `train`: eval sources never enter training data;
+- an example's source is in `tasks.select_split.excluded_from_commit_training(--data-dir)` (select, val and test
+  sources, and the final eval's decision-probe sources: DEF-63), or its recorded split is not `train`: eval sources
+  never enter training data;
 - an example's decision is not the one its outcome licenses (committed after `pass`, not after `fail`);
 - a row breaks the schema, or two rows share an id.
 
@@ -224,10 +225,11 @@ def with_overrides(quota: Quota, overrides: Mapping[str, Any]) -> Quota:
 
 
 def excluded_sources(data_dir: Path) -> set[str]:
-    """`tasks.select_split.excluded_from_training`: raises when the select file or the split seeds are missing."""
-    from honest_agents.tasks.select_split import excluded_from_training
+    """`tasks.select_split.excluded_from_commit_training`: raises when the select file, the split seeds or the final
+    decision probe are missing."""
+    from honest_agents.tasks.select_split import excluded_from_commit_training
 
-    return excluded_from_training(data_dir)
+    return excluded_from_commit_training(data_dir)
 
 
 def commit_coverage(ctx: Any = None, *, manifest: Path | None = None, repo: Path | None = None) -> Any:

@@ -85,13 +85,16 @@ def quota(**kw: Any) -> S.Quota:
     return S.Quota(**{"min_per_cell": 10, "cap_per_task": 2, "max_source_share": 0.2, **kw})
 
 
-def data_dir(root: Path, excluded: list[str] = (), *, select: bool = True) -> Path:
-    """A `select_split` data dir: `excluded` are val sources; one other select source."""
+def data_dir(root: Path, excluded: list[str] = (), *, select: bool = True, probe: list[str] = ()) -> Path:
+    """A `select_split` data dir: `excluded` are val sources, `probe` the final decision probe's; one other select
+    source."""
     d = root / "data"
-    d.mkdir(parents=True, exist_ok=True)
+    (d / "decision").mkdir(parents=True, exist_ok=True)
     (d / "split_seeds.json").write_text(json.dumps({s: "val" for s in excluded} | {"src/task_000": "train"}))
     if select:
         (d / "select_sources.txt").write_text("other/select_task\n")
+    rows = [{"pair_id": s} for s in (*probe, "other/probe_task")]
+    (d / "decision" / "probe_prompts_surfaces.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     return d
 
 
@@ -167,6 +170,17 @@ def test_excluded_sources_other_splits_and_unlicensed_decisions_fail(tmp_path: P
     # the excluded-source check cannot be skipped by a missing select file: the CLI refuses
     m = S.write_manifest(S.BuildManifest.of(ex, quota()), tmp_path / "m.json")
     assert cov.main(["--manifest", str(m), "--data-dir", str(data_dir(tmp_path / "x", select=False))]) == 2
+
+
+def test_a_source_of_the_final_decision_probe_is_excluded_and_a_missing_probe_file_is_refused(tmp_path: Path) -> None:
+    """DEF-63: the final eval's decision probe is spliced from train-split sources, so the split files miss them."""
+    ex = balanced(10)
+    probe = cov.excluded_sources(data_dir(tmp_path, probe=["src/task_004"]))
+    assert "src/task_004" in probe and "other/probe_task" in probe
+    assert cov.coverage(S.BuildManifest.of(ex, quota()), probe).failures() == {"excluded_source": 6}
+    (tmp_path / "data" / "decision" / "probe_prompts_surfaces.jsonl").unlink()
+    m = S.write_manifest(S.BuildManifest.of(ex, quota()), tmp_path / "m.json")
+    assert cov.main(["--manifest", str(m), "--data-dir", str(tmp_path / "data")]) == 2
 
 
 def test_cells_under_quota_and_unbalanced_points_fail_only_when_strict(tmp_path: Path) -> None:

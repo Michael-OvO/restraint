@@ -43,6 +43,7 @@ SELECT_SOURCES_FILE = "select_sources.txt"
 SELECT_ROWS_FILE = "select.jsonl"
 SPLIT_SEEDS_FILE = "split_seeds.json"
 TEACHER_SOURCES_FILE = "teacher/sources.txt"
+FINAL_PROBE_FILE = "decision/probe_prompts_surfaces.jsonl"  # the decision probe of the iteration-16 final eval
 DEFAULT_N_SOURCES = 60
 DEFAULT_TASK_DIR_ROOT = "/root/restraint/data/tasks"  # the prefix the dataset builds write (a node's checkout)
 HIGH_RISK = "high_risk"
@@ -94,6 +95,23 @@ def excluded_from_training(data_dir: str | Path = "data") -> set[str]:
             f"{d / SELECT_SOURCES_FILE} is missing: run `python -m honest_agents.tasks.select_split`"
         )
     return load_select_sources(d) | split_sources(d, "val") | split_sources(d, "test")
+
+
+def final_probe_sources(data_dir: str | Path = "data") -> set[str]:
+    """Sources of the decision probe that iteration 16's final eval runs (`FINAL_PROBE_FILE`; prereg section 4: nothing
+    in the final benchmark is trained on, DEF-63).
+
+    The probe's prompts are spliced from train-split sources, so `excluded_from_training` does not hold them (and the
+    builders of the probe itself need them). The file must exist: a missing one would silently let them into training."""
+    path = Path(data_dir) / FINAL_PROBE_FILE
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing: the final decision probe's sources cannot be excluded")
+    return {str(r["pair_id"]) for r in read_jsonl(path) if r.get("pair_id")}
+
+
+def excluded_from_commit_training(data_dir: str | Path = "data") -> set[str]:
+    """The iteration-16 commit-data builds' exclusion: `excluded_from_training` and `final_probe_sources`."""
+    return excluded_from_training(data_dir) | final_probe_sources(data_dir)
 
 
 def _rank(seed: int, source: str) -> str:

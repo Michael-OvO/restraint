@@ -26,9 +26,10 @@ from.
 
 **Inputs.** Bank rows (`honest_agents.bank`: full transcripts, the only input examples can be built from) and run_eval
 `episodes.jsonl[.gz]` records (commands, return codes and outcomes, no assistant text: mined and labelled only). Every
-input source is checked against `tasks.select_split.excluded_from_training` (select, validation and test sources): one
-excluded source anywhere is an error (`ExcludedSourceError`); `--drop-excluded` drops and counts them instead. The final
-examples and DPO pairs are asserted again, unconditionally.
+input source is checked against `tasks.select_split.excluded_from_commit_training` (select, validation and test
+sources, and the sources of the final eval's decision probe: DEF-63): one excluded source anywhere is an error
+(`ExcludedSourceError`); `--drop-excluded` drops and counts them instead. The final examples and DPO pairs are asserted
+again, unconditionally.
 
 **Checks for claims.** A checklist per task (`<checklists>/<task>.json`, task = the variant / task directory name,
 written by Claude from `instruction.md` only):
@@ -128,7 +129,7 @@ from honest_agents.sft.selfdistill import HINT_ECHO, hint_leaks
 from honest_agents.sft.teacher_stage import bash_commands, family_of
 from honest_agents.tasks import decision_probe as dp
 from honest_agents.tasks.analysis.labels import LABEL_RE
-from honest_agents.tasks.select_split import excluded_from_training
+from honest_agents.tasks.select_split import excluded_from_commit_training
 
 logger = logging.getLogger(__name__)
 
@@ -1088,7 +1089,7 @@ class BuildConfig:
 
 
 def build(cfg: BuildConfig) -> dict[str, Any]:
-    excluded = excluded_from_training(cfg.data_dir)
+    excluded = excluded_from_commit_training(cfg.data_dir)
     roots = [Path(r).expanduser() for r in cfg.tasks_roots]
     inputs = load_inputs(cfg.banks, cfg.episode_files, excluded, drop_excluded=cfg.drop_excluded)
     hr_tasks = [e.task for e in inputs.episodes if e.family == HIGH_RISK]
@@ -1287,7 +1288,7 @@ def main(argv: Sequence[str] | None = None, *, runner: Any = None) -> int:
 
     roots = [Path(p).expanduser() for p in args.tasks_root]
     inputs = load_inputs(
-        args.bank, args.episodes, excluded_from_training(args.data_dir), drop_excluded=args.drop_excluded
+        args.bank, args.episodes, excluded_from_commit_training(args.data_dir), drop_excluded=args.drop_excluded
     )
     # Claims on environment-infeasible variants yield no example (module docstring): never replayed.
     claim = [e for e in inputs.episodes if any(p.point == POINT_CLAIM and claim_buildable(p) for p in mine_points(e))]

@@ -58,8 +58,9 @@ matched pair without any new run, from what is already stored:
   than `max_source_share` of the build (the coverage report's bound). Every drop is counted by reason.
 
 High_risk twins get no claim pair: there the honest end is the destructive-step decision (`commit_checks.claim_buildable`).
-Every source is asserted against `tasks.select_split.excluded_from_training` (select, validation and test sources):
-the states, the prefixes and the final examples and DPO pairs (`ExcludedSourceError`).
+Every source is asserted against `tasks.select_split.excluded_from_commit_training` (select, validation and test
+sources, and the sources of the final eval's decision probe: DEF-63): the states, the prefixes and the final examples
+and DPO pairs (`ExcludedSourceError`).
 
 Output (`--out`): `examples.jsonl` (`sft.data.SFTExample`, `kind: commit_check`), `dpo_pairs.jsonl`, `summary.json`,
 `report.md` and `build_manifest.json` (`commit_points.schema.BuildManifest`, read by `commit_points.coverage`; its
@@ -98,7 +99,7 @@ from honest_agents.sft.checklist_agreement import REQ_REMOVAL, requirement_type
 from honest_agents.sft.checklist_validation import task_meta
 from honest_agents.sft.data import SFTExample
 from honest_agents.sft.dpo import PreferencePair
-from honest_agents.tasks.select_split import excluded_from_training
+from honest_agents.tasks.select_split import excluded_from_commit_training
 
 DEFAULT_CACHE = DEFAULT_CACHE_DIR / "checklist_validation.v1.jsonl"
 DEFAULT_CHECK_RESULTS = Path("data/commit_checks/check_results/it15_g4_sample.jsonl")
@@ -570,7 +571,7 @@ class Config:
 def build(cfg: Config) -> dict[str, Any]:
     if not 1 <= cfg.pairs_per_task <= cfg.quota.cap_per_task:
         raise ValueError(f"pairs_per_task must be in [1, cap_per_task={cfg.quota.cap_per_task}]")
-    excluded = excluded_from_training(cfg.data_dir)
+    excluded = excluded_from_commit_training(cfg.data_dir)
     roots = [Path(r).expanduser() for r in cfg.tasks_roots]
     records = {str(r["episode_id"]): r for p in cfg.episodes for r in read_jsonl(p)}
     source_of = {str(r.get("variant_id") or r.get("task_id")): str(r.get("pair_id")) for r in records.values()}
