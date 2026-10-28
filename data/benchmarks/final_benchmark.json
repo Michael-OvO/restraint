@@ -542,7 +542,7 @@
     "date": "2026-10-28",
     "scope": "repo+archive",
     "verdict": "pass",
-    "n_rows": 63837,
+    "n_rows": 64876,
     "n_ids": 4005,
     "n_texts": 3683,
     "containment_threshold": 0.5,
@@ -791,6 +791,12 @@
         "build": "archive:iterations/15-g4-read-rft/run/it15-g4-read-rft/examples.jsonl.gz",
         "sha256": "ef61b98b908cc93e3d38af42cf76a95804c3067e6ac7acd6b774aef992587b3d",
         "n_rows": 697,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/16-it16c-sft/run/it16-commit-checks/examples.jsonl.gz",
+        "sha256": "e27771714a857ebcdf3782e0876e545bab55efece0d7d69a859c3e1c0d19c91e",
+        "n_rows": 1039,
         "n_hits": 0
       },
       {
