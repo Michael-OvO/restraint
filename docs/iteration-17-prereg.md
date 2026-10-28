@@ -1,7 +1,8 @@
-# Iteration 17 pre-registration: calibrated confidence in the completion report (DRAFT, not approved)
+# Iteration 17 pre-registration: calibrated confidence in the completion report (APPROVED 2026-10-28)
 
 Design: [iteration-17-design.md](iteration-17-design.md). Proposal: [iteration-17-proposal.md](iteration-17-proposal.md).
-Written before any it17 episode exists. "Computed at build" values are filled in from the data and frozen, with their
+**Approved by the owner on 2026-10-28 ("Approve (Recommended)"), before any training.** Written before any it17
+episode exists. "Computed at build" values are filled in from the data and frozen, with their
 sha256s, before any training; after that, nothing here changes except by a dated owner amendment.
 
 ## 1. Hypothesis

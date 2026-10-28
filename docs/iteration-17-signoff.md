@@ -18,3 +18,14 @@
   and `it15_sft_v2_surface4` (94/96), k8 and prefix audits pass, replay bar met; S11 guards and the real egress probe
   pass. Two failed attempts before it, neither a finding: S3's two archived evals were not on the node (fixed in the
   job file, `455bc38`), then one S3 sandbox did not boot (boot failures are never cached; the retry booted it).
+
+## it17b (owner, 2026-10-28)
+
+- **Pre-registration approved:** "Approve (Recommended)" (docs/iteration-17-prereg.md as of this commit; section 9
+  holds the computed-at-build values and digests).
+- **GPU spend:** "Restart 58122470 (Recommended)": the it17a node (RTX 5090 32 GB, 64 cores, $1.11/h), about 5-5.5 h,
+  about $6; a watcher stops it when the chain ends.
+- **Ledger:** `gate.ledger check --experiment it17b` exits 0 (DEF-10, DEF-20, DEF-50 waived for it17a and it17b).
+- **Mac checks:** `scripts/test.sh --fast` 5,024 passed (the one failure, the L0 sweep's timing test, passes alone in
+  41 s); the job file passes the chain sanity rules; the exact trainer is tested against brute force and sampling and
+  smoke-runs on CPU; `logits_to_keep` is identical on Qwen3 and Qwen3.5.
