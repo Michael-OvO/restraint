@@ -93,7 +93,23 @@ steps:
     on_failure: stop
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
-  # G2: 3,102 examples x 2 epochs took 2 h 2 min (train_runtime 7306 s, it15); the build's size sets this one.
+  # G2 on the select split (prereg 10.3: the validation gate's G2 arm), with its transcripts banked: the dev flip
+  # probe's prefixes come from them (select-split sources only, never final-benchmark items).
+  - name: g2_select
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it16_g2c_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_g2_select --n-samples 2 --concurrency 48
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol configs/protocols/it16_select.json --bank-dir runs/eval/it16_g2_select/bank
+    gpus: [0]
+    done: runs/eval/it16_g2_select/metrics.json
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  # 1,039 examples (639 build + 400 anchors) x 2 epochs: about 40 min at G2's 0.849 samples/s (it15).
   - name: train_final
     command: >-
       scripts/run_sft.sh configs/sft_it16_commit_qwen35.yaml model.name=outputs/it15/g2_merged run_name=it16-commit-checks
@@ -164,7 +180,7 @@ final:
   timeout_min: 5
 
 watch:
-  pull_paths: [outputs/it16/selection.json, outputs/it16/selected_epoch.txt, outputs/logs]
+  pull_paths: [runs/eval/it16_g2_select, outputs/it16/selection.json, outputs/it16/selected_epoch.txt, outputs/logs]
   archives:
     - {iteration: 16, name: it16c-sft, run: [outputs/sft/it16-commit-checks],
        eval: [runs/eval/it16_base_select, runs/eval/it16_final_e1_sanity, runs/eval/it16_final_select_e1,
@@ -172,3 +188,5 @@ watch:
        file: [outputs/it16/selection.json, outputs/it16/selected_epoch.txt, outputs/chain/it16c/coverage.json,
               outputs/chain/it16c/never_trained.json],
        note: "iteration 16 stage (c): SFT from G2 s1 on the matched-pair build; epoch chosen on the select split"}
+    - {iteration: 16, name: it16c-g2-select, eval: [runs/eval/it16_g2c_sanity, runs/eval/it16_g2_select], keep_bank: true, no_weights: true,
+       note: "iteration 16 stage (c): G2 s1 on the select split, S = 2, bank kept (the dev flip probe's prefixes)"}
