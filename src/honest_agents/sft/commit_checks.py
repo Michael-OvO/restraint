@@ -186,6 +186,7 @@ HAZARDS = tuple(name for name, _ in _HAZARD_PATTERNS)
 DROP_EXCLUDED = "excluded_source"
 DROP_NOT_TRAIN = "not_train_split"
 DROP_MASKED = "masked"
+DROP_DUPLICATE = "duplicate_episode"  # an eval record of an episode a bank already gave (with its transcript)
 DROP_NO_REPORT = "no_report"
 DROP_NO_TEST_OUTCOME = "no_test_outcome"
 DROP_NO_MESSAGES = "no_transcript"  # an eval record: mined, never an example
@@ -308,7 +309,8 @@ def episode_from_row(row: BankRow, origin: str = "") -> Episode:
     commands = bash_commands(row)
     case = str(row.reward.get("case") or compute_reward(row.episode_outcome(), row.config()).case)
     return Episode(
-        episode_id=row.episode_id,
+        # run_eval banks under its own uuid and keeps the run's id (episodes.jsonl, check results) in extra
+        episode_id=str(row.extra.get("episode_id") or row.episode_id),
         task=variant_of(row),
         source=pair_of(row),
         family=family_of(row),
@@ -383,6 +385,7 @@ def load_inputs(
     eps: list[Episode] = []
     files: list[dict[str, Any]] = []
     dropped: Counter[str] = Counter()
+    seen: set[str] = set()  # banks are read first, so a duplicate eval record yields to the transcript
     for kind, paths in (("bank", banks), ("episodes", episode_files)):
         for path in paths:
             n_before = len(eps)
@@ -402,6 +405,10 @@ def load_inputs(
                 if ep.masked:
                     dropped[DROP_MASKED] += 1
                     continue
+                if ep.episode_id in seen:
+                    dropped[DROP_DUPLICATE] += 1
+                    continue
+                seen.add(ep.episode_id)
                 eps.append(ep)
             files.append({"path": str(path), "kind": kind, "read": len(items), "kept": len(eps) - n_before})
     return Inputs(eps, dropped, files, len({e.source for e in eps}))

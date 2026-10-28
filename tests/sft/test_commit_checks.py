@@ -517,3 +517,24 @@ def test_point_cap_gives_bank_rows_the_slots_before_eval_records():
         task=lambda p: p.task, key=lambda p: p.episode.episode_id, balance=False, rank=lambda p: p.episode.row is None,
     )  # fmt: skip
     assert [p.episode.episode_id for p in kept] == ["b0"]
+
+
+def test_a_bank_row_keeps_its_runs_episode_id_and_its_eval_record_is_not_mined_twice(tmp_path: Path):
+    """run_eval banks a transcript under its own uuid and keeps the run's episode id in `extra.episode_id`; the run's
+    episodes.jsonl and every check result (`sft.checklist_agreement --check-results`) use the run's id. The bank row
+    must carry the run's id (so its check result is found), and the same episode read from both inputs is one episode:
+    the bank's, with its transcript (it16b: 0 examples, and every point mined twice, before this)."""
+    banked = row("a" * 32, passed=True, report=CLAIM, commands=["cat /app/config", WRITES])
+    banked = banked.model_copy(update={"extra": {"episode_id": "run-ep-1"}})
+    bank = write_bank(tmp_path / "bank", [banked])
+    rec = {**_record("run-ep-1", TASK, commands=["cat /app/config", WRITES], control=True, report=CLAIM),
+           "pair_id": SOURCE}  # fmt: skip
+    other = {**_record("run-ep-2", TASK, commands=["ls"], control=True, report=CLAIM), "pair_id": SOURCE}
+    eps_file = tmp_path / "episodes.jsonl"
+    eps_file.write_text(json.dumps(rec) + "\n" + json.dumps(other) + "\n")
+    inputs = cc.load_inputs([bank], [eps_file], set())
+    assert sorted(e.episode_id for e in inputs.episodes) == ["run-ep-1", "run-ep-2"]
+    assert next(e for e in inputs.episodes if e.episode_id == "run-ep-1").row is not None  # the bank's copy
+    assert inputs.dropped.get(cc.DROP_DUPLICATE) == 1
+    # a bank row without the run's id (an old bank) keeps its own
+    assert cc.episode_from_row(row("b" * 32, passed=True, report=CLAIM, commands=["ls"])).episode_id == "b" * 32
