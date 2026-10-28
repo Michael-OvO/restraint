@@ -13,3 +13,8 @@
   key): the job's `gate_l1` step runs it on the node before any episode and stops the chain if it fails.
 
 - **Node:** "Rent 52960034 (Recommended)": RTX 5090 32 GB, 64 cores, 125 GB RAM, Ontario, $1.11/h.
+- **L1 on the DEF-65 harness commit (node 58122470):** PASS, 2026-10-28. G1 oracle gate 120/120 pairs (run fresh
+  under the new harness on the first attempt, then cached); S3 metric validity on `it15_g2_surface4` (96/96 audited)
+  and `it15_sft_v2_surface4` (94/96), k8 and prefix audits pass, replay bar met; S11 guards and the real egress probe
+  pass. Two failed attempts before it, neither a finding: S3's two archived evals were not on the node (fixed in the
+  job file, `455bc38`), then one S3 sandbox did not boot (boot failures are never cached; the retry booted it).
