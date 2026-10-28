@@ -1,7 +1,6 @@
 # Iteration 17 (docs/iteration-17-design.md): train only G2's confidence value, GRPO on Brier against the graded
-# outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: the items of the planned it17 data
-# rollout are not built yet; the it16b items are a placeholder for the dry run. Hyperparameters are not frozen until
-# the pre-registration (docs/iteration-17-prereg.md).
+# outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: frozen at build with the items' sha256s
+# (docs/iteration-17-prereg.md section 4); the it17a item files exist only after stage (a).
 #   uv run --extra train python -m honest_agents.train.confidence --config configs/it17_confidence.yaml --dry-run \
 #       model.name=Qwen/Qwen3.5-4B
 run_name: it17-confidence
@@ -18,9 +17,13 @@ lora:
   alpha: 32
 
 data:
-  items: [runs/it17/items_it16b.jsonl]     # placeholder until the it17 rollout's items exist
+  items:                                   # sft.confidence_bandit build outputs (prereg section 3); the it17a ones are
+    - runs/it17/items_it17a_feasible.jsonl  # built after stage (a) and frozen with their sha256s
+    - runs/it17/items_it17a_infeasible.jsonl
+    - runs/it17/items_it16b.jsonl
   max_prompt_tokens: 16384
-  heldout_fraction: 0.1
+  heldout_fraction: 0.3                    # by source (stable hash, seed it17-confidence): the dev set's half
+  seed: it17-confidence
 
 grpo:
   learning_rate: 1.0e-5
