@@ -46,6 +46,6 @@ exact:
   beta: 0.04                               # KL to G2 over the value's token tree
   max_grad_norm: 1.0
   warmup_ratio: 0.03
-  eval_steps: 50                           # held-out expected Brier and claims AUROC, logged; they select nothing
-  max_eval_items: 400
+  eval_steps: 100                          # held-out expected Brier and claims AUROC, logged; they select nothing
+  max_eval_items: 200                      # ~100 s per evaluation (forward only)
   report_to: wandb

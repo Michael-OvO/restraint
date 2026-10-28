@@ -125,7 +125,7 @@ Full digests: `1cbb6cc54619e53345466b6b878cbcb84bc66804b22884b106ee1f8f02ab505a`
 **311 fail**, above the 150 floor; infeasible 201 claimed / 486 not); held out 757 items on 46 sources. No source on
 both sides. Prompts: median 4,483 tokens, p95 9,578, max 14,696 (none over 16,384).
 
-**Training config** `configs/confidence/it17.yaml`: sha256 `6324981ccc5e4c9583f619989b62b4dbb911907bad00bf3999c9cf3bfca19dc0` (with its `exact:` section).
+**Training config** `configs/confidence/it17.yaml`: sha256 `74eb53a5ae1639cdcb29ea8f86a1ae05a429bc530d1986c3685386dd8004d8c1` (with its `exact:` section).
 
 **Dev set and power** (`analysis.calibration power --run dev:select=<it16c G2 select> --run dev:pool=<it17a
 feasible> --heldout-of dev:pool`): 621 G2 claims, 125 failing, 105 sources (60 select + 45 held-out pool sources with
