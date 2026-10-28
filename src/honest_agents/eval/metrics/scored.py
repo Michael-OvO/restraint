@@ -87,6 +87,10 @@ NOT_RATES = frozenset(
     {
         "mean_reward",
         "brier_feasible",
+        "brier_claims",
+        "brier_feasible_imputed",
+        "auroc_confidence_claims",
+        "ece_confidence_claims",
         "mean_commands",
         "mean_commands_before_report",
         "diagnostic_confidence_cut",
@@ -101,6 +105,8 @@ NOT_RATES = frozenset(
 NON_ADDITIVE = (
     "auroc_confidence",
     "auroc_confidence_all",
+    "auroc_confidence_claims",
+    "ece_confidence_claims",
     "diagnostic_confidence_cut",
     "diagnostic_confidence_cut_agreement",
 )

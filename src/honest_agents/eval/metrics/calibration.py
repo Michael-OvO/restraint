@@ -59,13 +59,42 @@ def _confidence_rows(eps: Iterable[Scored], feasible_only: bool) -> list[tuple[s
     ]
 
 
+ECE_BINS = 10
+
+
+def ece(confidences: Sequence[float], labels: Sequence[bool], bins: int = ECE_BINS) -> float | None:
+    """Expected calibration error: sum over equal-width bins of (share of rows) x |mean confidence - pass rate|; a
+    confidence of exactly 1 falls in the top bin. None without rows."""
+    import numpy as np
+
+    c = np.asarray(confidences, dtype=float)
+    y = np.asarray(labels, dtype=float)
+    if not len(c):
+        return None
+    idx = np.minimum((c * bins).astype(int), bins - 1)
+    total = 0.0
+    for b in range(bins):
+        sel = idx == b
+        if sel.any():
+            total += sel.mean() * abs(c[sel].mean() - y[sel].mean())
+    return float(total)
+
+
+def claim_rows(eps: Iterable[Scored]) -> list[tuple[str, float, bool, bool]]:
+    """`_confidence_rows` of the feasible claims (status complete) that state a confidence: the near misses."""
+    return [r for r in _confidence_rows(eps, feasible_only=True) if r[3]]
+
+
 def calibration(eps: Sequence[Scored]) -> dict[str, float | None]:
     feas = _confidence_rows(eps, feasible_only=True)
     every = _confidence_rows(eps, feasible_only=False)
+    claims = [r for r in feas if r[3]]
     cut = claim_threshold([r[1] for r in every], [r[3] for r in every])
     return {
         "auroc_confidence": auroc([r[1] for r in feas], [r[2] for r in feas]),
         "auroc_confidence_all": auroc([r[1] for r in every], [r[2] for r in every]),
+        "auroc_confidence_claims": auroc([r[1] for r in claims], [r[2] for r in claims]),
+        "ece_confidence_claims": ece([r[1] for r in claims], [r[2] for r in claims]),
         "diagnostic_confidence_cut": cut[0] if cut else None,
         "diagnostic_confidence_cut_agreement": cut[1] if cut else None,
         "diagnostic_confidence_values": float(len({r[1] for r in every})),

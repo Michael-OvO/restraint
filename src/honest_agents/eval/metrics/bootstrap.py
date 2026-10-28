@@ -116,6 +116,8 @@ def bootstrap(
     every = _confidence_rows(eps, feasible_only=False)
     samples["auroc_confidence"] = _boot_auroc(feas, index, weights) if feas else []
     samples["auroc_confidence_all"] = _boot_auroc(every, index, weights) if every else []
+    claims = [r for r in feas if r[3]]
+    samples["auroc_confidence_claims"] = _boot_auroc(claims, index, weights) if claims else []
     if every:
         c_of = np.array([index[r[0]] for r in every], dtype=int)
         conf, claimed = [r[1] for r in every], [r[3] for r in every]
