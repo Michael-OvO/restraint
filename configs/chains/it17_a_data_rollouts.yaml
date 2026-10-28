@@ -36,6 +36,18 @@ steps:
     timeout_min: 10
     on_failure: stop
 
+  # The harness changed (DEF-65, 0ba4e2a): every L1 cache key includes the harness sources, so this re-runs the oracle
+  # gate's pairs and the S3 replays in full (about 860 sandbox boots; Docker work belongs on a node, not the Mac).
+  - name: gate_l1
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.gate sweep --level 1
+      --concurrency 16 --chains configs/chains/it17_a_data_rollouts.yaml --json outputs/chain/it17a/gate_l1.json
+      && touch outputs/chain/it17a/markers/gate_l1.done
+    gpus: []
+    done: outputs/chain/it17a/markers/gate_l1.done
+    timeout_min: 180
+    on_failure: stop
+
   - name: merge_sft_v2
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
@@ -94,7 +106,7 @@ final:
   timeout_min: 5
 
 watch:
-  pull_paths: [runs/eval/it17_g2_sanity, runs/eval/it17_rollouts_feasible, runs/eval/it17_rollouts_infeasible,
+  pull_paths: [outputs/chain/it17a/gate_l1.json, runs/eval/it17_g2_sanity, runs/eval/it17_rollouts_feasible, runs/eval/it17_rollouts_infeasible,
                outputs/logs]
   archives:
     - {iteration: 17, name: it17a-data-rollouts,
