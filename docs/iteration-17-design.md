@@ -81,7 +81,7 @@ the result is read against what simple features already give.
    power of their differences at the select split (`analysis.power`).
 5. The pre-registration (`docs/iteration-17-prereg.md`), L1 on the harness commit of DEF-65, the ledger clear.
 
-## 7. Open questions for the owner
+## 7. Owner decisions
 
-- The method change of section 3 (offline, number-only, instead of online RL on tasks).
-- The data rollout of section 4 (GPU, about $5).
+- 2026-10-28, "Yes, revised method (Recommended)": the method of section 3 replaces the proposal's online RL, and the
+  data rollout of section 4 is planned (its GPU spend is asked for separately, as is the training run's).
