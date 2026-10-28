@@ -60,10 +60,10 @@ EXCLUDES = (
     "/outputs", "/runs", "/wandb", "/.claude",
 )  # fmt: skip
 DATA_EXCLUDE = "/data"
-# Sent although an exclude above matches: a task directory's own files are task data (the RTS log-summary tasks ship
-# `.log` inputs; without them the node's task dirs hash differently from the frozen manifest). Before the excludes:
-# rsync applies the first matching rule.
-INCLUDES = ("/data/**/tasks/**/*.log",)
+# Sent although an exclude above matches: everything under a task directory is task data, sent as it is (the RTS
+# log-summary tasks ship `.log` inputs and two frozen RTS tasks a `tests/.pytest_cache`; without them the node's task
+# dirs hash differently from the frozen manifest, DEF-64). Before the excludes: rsync applies the first matching rule.
+INCLUDES = ("/data/**/tasks/**",)
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 

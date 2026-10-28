@@ -65,20 +65,22 @@ def test_sync_sends_the_tree_without_data_or_outputs_over_the_vast_key():
 
 
 def test_a_task_directorys_log_files_travel_and_other_logs_do_not(tmp_path):
-    """The RTS log-summary tasks ship `.log` inputs (rts verify failed on the node without them); build logs stay."""
+    """Task dirs travel verbatim: the RTS log-summary tasks ship `.log` inputs and two frozen RTS tasks a
+    `tests/.pytest_cache` (rts verify failed on the node without them, DEF-64); build logs and caches elsewhere stay."""
     import subprocess
 
     src, dst = tmp_path / "repo", tmp_path / "node"
-    for rel in ("data/rts/v1/tasks/t/environment/app.log", "data/decision/outputs_run.log", "train.log", "data/x.txt"):
+    task_files = ("data/rts/v1/tasks/t/environment/app.log", "data/rts/v1/tasks/t/tests/.pytest_cache/v/cache/nodeids")
+    for rel in (*task_files, "data/decision/outputs_run.log", "train.log", "data/x.txt", ".pytest_cache/v/x"):
         (src / rel).parent.mkdir(parents=True, exist_ok=True)
         (src / rel).write_text("x")
     argv = sync_argv(Node("h"), src=src, with_data=True)
     rules = [a for a in argv if a.startswith(("--include=", "--exclude="))]
-    assert rules.index("--include=/data/**/tasks/**/*.log") < rules.index("--exclude=*.log")
+    assert rules.index("--include=/data/**/tasks/**") < rules.index("--exclude=*.log")
     dst.mkdir()
     subprocess.run(["rsync", "-a", *rules, f"{src}/", f"{dst}/"], check=True)
     sent = {p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file()}
-    assert sent == {"data/rts/v1/tasks/t/environment/app.log", "data/x.txt"}
+    assert sent == {*task_files, "data/x.txt"}
 
 
 def test_sync_with_data_and_dry_run():
