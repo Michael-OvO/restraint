@@ -46,3 +46,10 @@ def test_the_heldout_split_is_by_source_and_stable():
 def test_the_reward_is_the_brier_of_the_first_line():
     got = tc.brier_rewards(["0.9\n</parameter>", "0.2\n<", "maybe", "1"], [1, 0, 1, 0])
     assert got == pytest.approx([-0.01, -0.04, -1.0, -1.0])
+
+
+def test_the_it17_config_loads():
+    cfg = tc.load_config(Path(__file__).parents[1] / "configs" / "confidence" / "it17.yaml")
+    built = tc.build_grpo_config(cfg)
+    assert built.scale_rewards == "none" and built.gradient_checkpointing and built.beta == cfg.grpo["beta"]
+    assert cfg.data.heldout_fraction == 0.3 and cfg.grpo["beta"] > 0 and cfg.model.family == "qwen3_5"

@@ -32,7 +32,7 @@ makes that value discriminate G2's failing claims from its passing ones, without
 
 ## 4. Training
 
-`configs/it17_confidence.yaml`, frozen at build: LoRA r16 / alpha 32 from G2 (merged), GRPO over `num_generations` 8
+`configs/confidence/it17.yaml`, frozen at build: LoRA r16 / alpha 32 from G2 (merged), GRPO over `num_generations` 8
 completions of at most 8 tokens, temperature 1.0, Brier reward (`confidence_bandit.brier_reward`; unparsable = -1),
 `scale_rewards: none`, KL `beta` 0.04, learning rate 1e-5, effective batch 4 prompts x 8, 2 epochs, gradient
 checkpointing on, W&B (project honest-agents, group it17). Loss on the sampled value tokens only.

@@ -1,6 +1,6 @@
 """Train the report's confidence only: GRPO over the value of `confidence` (iteration 17, docs/iteration-17-design.md).
 
-    uv run --extra train python -m honest_agents.train.confidence --config configs/it17_confidence.yaml [--dry-run]
+    uv run --extra train python -m honest_agents.train.confidence --config configs/confidence/it17.yaml [--dry-run]
         [key=value overrides, e.g. model.name=outputs/it15/g2_merged]
 
 Each prompt is one `sft.confidence_bandit` item rendered with the served chat template and cut right before the

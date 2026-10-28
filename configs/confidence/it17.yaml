@@ -1,7 +1,7 @@
 # Iteration 17 (docs/iteration-17-design.md): train only G2's confidence value, GRPO on Brier against the graded
 # outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: frozen at build with the items' sha256s
 # (docs/iteration-17-prereg.md section 4); the it17a item files exist only after stage (a).
-#   uv run --extra train python -m honest_agents.train.confidence --config configs/it17_confidence.yaml --dry-run \
+#   uv run --extra train python -m honest_agents.train.confidence --config configs/confidence/it17.yaml --dry-run \
 #       model.name=Qwen/Qwen3.5-4B
 run_name: it17-confidence
 output_root: outputs/confidence
