@@ -17,6 +17,10 @@ iteration trains. y = 1 when the claim fails its tests (the event a calibrated c
 - `other_sample`: the same run's other samples of the task failed (S >= 2), a task-difficulty signal the model could
   learn; `other_runs`: the other runs' claims on the same task failed, an upper reference.
 
+A run is `NAME[:PART]=DIR`; runs sharing a NAME are pooled (the dev set: `dev:select` and `dev:pool`), and
+`--heldout-of NAME:PART` keeps that one run's claims on held-out sources only (`train.confidence.heldout`, the
+trainer's split).
+
 **power:** the source-cluster bootstrap SE of the claims AUROC of the `features` predictor (a stand-in for a trained
 confidence with real spread; the start model's own is near-constant), and from it the minimum detectable difference
 of two arms' AUROCs at 80 % power with the pre-registered one-sided 0.05 bar (90 % two-sided CI, LB > 0), at the
@@ -126,9 +130,15 @@ def features_of(e: dict[str, Any], instruction: str) -> tuple[float, ...]:
     )
 
 
-def load_claims(runs: dict[str, Path], roots: Sequence[Path]) -> list[Claim]:
+def load_claims(
+    runs: dict[str, Path] | Sequence[tuple[str, Path]],
+    roots: Sequence[Path],
+    keep_source: Any = None,
+) -> list[Claim]:
+    """Claims of every run; a run named `NAME:PART` is pooled under NAME. `keep_source(full name, source)` filters a
+    run's claims by source (the dev set's held-out sources)."""
     out = []
-    for name, run_dir in runs.items():
+    for name, run_dir in runs.items() if isinstance(runs, dict) else runs:
         for e in _episodes(run_dir):
             o = e["outcome"]
             r = o.get("report") or {}
@@ -136,8 +146,11 @@ def load_claims(runs: dict[str, Path], roots: Sequence[Path]) -> list[Claim]:
                 continue
             if e.get("infra_error") or o.get("masked_reason"):
                 continue
+            source = e.get("pair_id") or e.get("source_task") or e["task_id"]
+            if keep_source is not None and not keep_source(name, source):
+                continue
             conf = r.get("confidence")
-            out.append(Claim(name, e["task_id"], e.get("pair_id") or e.get("source_task") or e["task_id"],
+            out.append(Claim(name.split(":", 1)[0], e["task_id"], e.get("pair_id") or e.get("source_task") or e["task_id"],
                              int(e.get("sample") or 0), int(not o["tests_passed"]),
                              None if conf is None else float(conf),
                              features_of(e, _instruction(e.get("task_dir") or "", roots))))  # fmt: skip
@@ -317,13 +330,13 @@ def paired(rows: Sequence[tuple[str, int, float, float]], n_boot: int, seed: int
             "b_minus_a": diff, "ci90": ci}  # fmt: skip
 
 
-def _runs(pairs: Sequence[str]) -> dict[str, Path]:
-    out = {}
+def _runs(pairs: Sequence[str]) -> list[tuple[str, Path]]:
+    out = []
     for p in pairs:
         name, _, path = p.partition("=")
         if not path:
             raise SystemExit(f"--run takes NAME=DIR, got {p!r}")
-        out[name] = Path(path).expanduser()
+        out.append((name, Path(path).expanduser()))
     return out
 
 
@@ -340,6 +353,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if name == "power":
             p.add_argument("--samples", type=int, nargs="+", default=[2, 4])
             p.add_argument("--n-boot", type=int, default=2000)
+        p.add_argument("--heldout-of", nargs="*", default=[], help="runs reduced to their held-out sources")
+        p.add_argument("--heldout-fraction", type=float, default=0.3)
+        p.add_argument("--heldout-seed", default="it17-confidence")
     pp = sub.add_parser("paired", help="two arms' confidence on the same claims (eval.confidence_rescore rows)")
     pp.add_argument("--a", type=Path, required=True, help="reference arm rows")
     pp.add_argument("--b", type=Path, required=True, help="candidate arm rows")
@@ -355,7 +371,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(text)
         return 0
     roots = [Path(r) for r in (args.tasks_root or ["data/tasks"])]
-    claims = load_claims(_runs(args.run), roots)
+    from honest_agents.train.confidence import heldout
+
+    held = set(args.heldout_of)
+    keep = (lambda n, src: n not in held or heldout(src, args.heldout_fraction, args.heldout_seed)) if held else None
+    claims = load_claims(_runs(args.run), roots, keep)
     result = scope(claims) if args.cmd == "scope" else power(claims, args.samples, args.n_boot)
     text = json.dumps(result, indent=2)
     if args.json:

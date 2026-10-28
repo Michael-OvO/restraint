@@ -65,3 +65,11 @@ def test_paired_compares_two_arms_on_the_same_claims():
 
     with pytest.raises(ValueError, match="disagree"):
         cal.paired_claims(rows_a[:1], bad)
+
+
+def test_parts_pool_under_one_name_and_the_heldout_filter_hits_one_part(tmp_path: Path):
+    rows = [_episode(f"t{i}", f"src/{i}", 0, failed=i % 2 == 0, n_cmds=3) for i in range(20)]
+    run = _run(tmp_path, rows)
+    keep = lambda name, src: name != "dev:pool" or src in {"src/0", "src/1"}
+    claims = cal.load_claims([("dev:select", run), ("dev:pool", run)], [tmp_path], keep)
+    assert {c.run for c in claims} == {"dev"} and len(claims) == 20 + 2
