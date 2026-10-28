@@ -72,7 +72,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-62 | training data | closed 2026-10-27 | `sft.commit_checks build` keyed bank rows by the bank uuid, not the run's episode id: no check result matched (0 claim examples), and an episode given as bank and eval record was mined twice |
 | DEF-63 | training data | closed 2026-10-28 | the it16 commit-data builds trained on 45 sources of the final eval's decision probe: `excluded_from_training` holds select / val / test only, and the probe is spliced from train-split sources |
 | DEF-64 | tooling | closed 2026-10-28 | `node sync` excluded `*.log` and `.pytest_cache` everywhere, task directories included, so 12 rts/v1 task dirs differed on the node and failed the freeze check there |
-| DEF-65 | harness | open | an agent command that backgrounds a process keeping stdout open hangs every later exec of the episode (the `timeout -k` wrapper kills only its own child) and there is no per-episode wall clock |
+| DEF-65 | harness | closed 2026-10-28 | an agent command that backgrounds a process keeping stdout open hangs every later exec of the episode (the `timeout -k` wrapper kills only its own child) and there is no per-episode wall clock |
 
 ---
 
@@ -3319,7 +3319,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Closure test:** `tests/test_node.py::test_a_task_directorys_log_files_travel_and_other_logs_do_not` (a real rsync).
 
 ### DEF-65: a backgrounded process that holds the output pipe hangs the episode
-- **Area:** harness (command execution). **Status:** open. **Found:** 2026-10-28, it16c `final_e1_select` on node
+- **Area:** harness (command execution). **Status:** closed 2026-10-28. **Found:** 2026-10-28, it16c `final_e1_select` on node
   58059021: one episode (`endless-terminals__task_000000_bf24b7fb__feasible`, s0) ran
   `cd /home/user/deployment && bash deploy_app.sh &` three times; each backgrounded `deploy_app.sh` keeps the pipe to
   `head -c` open, so the command never returns (`timeout -k 5 60` kills only its direct child), harbor's 80 s exec
@@ -3336,7 +3336,21 @@ section 7 critique) and from re-checks against the code and the archive on that 
   (about 28 commands, about 37 minutes) and then finished. Every agent that backgrounds a long-lived process
   without redirecting its output can trigger it (servers, daemons): tasks that ask for one are exposed in every arm,
   and each such command costs 80 s of wall clock and returns `[sandbox unavailable]` instead of its output.
-- **Fix (to do):** capture each command's output through a file instead of a pipe, so a backgrounded child holds a
-  file nobody waits on and the command returns as an interactive shell would (killing the process group would break
-  the tasks that ask for a detached process). Closure test: `sleep 600 &` returns at once with its exit code, a
-  backgrounded process is still running afterwards, and the next command runs.
+- **Fix:** `0ba4e2a`: `env.capture_script`. The command writes into a FIFO read by `tee` (unbuffered on GNU and BSD) into
+  an unlinked capture file and on into `head -c` (the cap); the script waits for the command, gives the readers
+  `CAPTURE_DRAIN_SEC` (2 s) to finish, reads the file and exits. Nothing is killed (a backgrounded process keeps
+  running; readers it still holds drain its output, up to the cap, and hold none of the exec's streams). Without
+  `mktemp` / `mkfifo` it falls back to the old pipe. Killing the process group was rejected: tasks ask for detached
+  processes. Plain file capture was rejected: a flood would run to the timeout and write up to 1 GB.
+- **Verified** (behaviour kept): on `ubuntu:22.04` (GNU coreutils 8.32, `docker exec`) and the macOS test sandbox:
+  `echo` exact, `seq 1 60000` byte-exact, stderr merged, `exit 3` keeps 3, a flood (`yes`) is cut at 1,000,001 bytes
+  with rc 141 in 0.05 s, `sleep 30` under a 2 s timeout gives 124, no capture file is left or visible; the DEF-65
+  case (`bash d.sh &`) returns in 2.8 s and the process keeps running. Cost: about +30 ms per command (median 0.039 s
+  against 0.010 s on the Mac); +2 s only on a command that leaves a process holding its output.
+- **Comparability:** commands that do not background a process holding their output behave as before, so archived
+  base and G2 runs stay comparable; episodes that did background one were slowed by 80 s per command (and could
+  return `[sandbox unavailable]`) under the old harness. The harness is a gated file: L1 is re-run on this commit
+  before the next experiment.
+- **Closure tests:** `tests/test_env.py::test_a_backgrounded_process_does_not_hold_the_command_or_the_next_one`,
+  `tests/test_env.py::test_the_capture_leaves_no_file_behind_and_keeps_the_exit_code` (with the flood, timeout and
+  cap tests already there).
