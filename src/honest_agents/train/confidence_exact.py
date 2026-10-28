@@ -123,6 +123,15 @@ def exact_section(raw: dict[str, Any]) -> ExactSection:
     return s
 
 
+def load_model(name: str, dtype: str) -> Any:
+    """The model as TRL's trainers load it by name (the class its config declares): on GPU 0 when CUDA is there, else on
+    the CPU (never `device_map="auto"`, which picks MPS on a Mac and died there loading the weights)."""
+    import torch
+    from trl.trainer.utils import create_model_from_path
+
+    return create_model_from_path(name, dtype=dtype, device_map={"": 0} if torch.cuda.is_available() else None)
+
+
 def _node_logprobs(model: Any, ids: list[int], n_prompt: int) -> list[Any]:
     """Log-probabilities at the tree's three nodes. They are the sequence's last three positions (`prompt, "0", "."`),
     so only those logits are computed (`logits_to_keep`): full-vocabulary logits at every position of a 15k-token
@@ -199,7 +208,7 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
         return summary
     import torch
     from peft import LoraConfig, get_peft_model
-    from transformers import AutoModelForCausalLM, get_cosine_schedule_with_warmup
+    from transformers import get_cosine_schedule_with_warmup
 
     from honest_agents.models import family_spec, flash_linear_attention_available, lora_target_modules
 
@@ -211,9 +220,10 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
         )
     rng = random.Random(cfg.seed)
     torch.manual_seed(cfg.seed)
-    model = AutoModelForCausalLM.from_pretrained(cfg.model.name, dtype=getattr(torch, cfg.model.dtype))
-    if torch.cuda.is_available():
-        model = model.to("cuda")
+    # As TRL's trainers load a model by name (`create_model_from_path`: the class the checkpoint declares). Qwen3.5
+    # declares Qwen3_5ForConditionalGeneration, whose module names (`...language_model.layers...`) are what the LoRA
+    # targets, `sft.merge` and serving expect; AutoModelForCausalLM would build the text-only class and match nothing.
+    model = load_model(cfg.model.name, cfg.model.dtype)
     model.gradient_checkpointing_enable()
     model.config.use_cache = False
     targets = cfg.lora.target_modules

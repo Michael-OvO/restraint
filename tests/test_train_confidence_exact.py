@@ -83,3 +83,37 @@ def test_the_exact_section_refuses_a_zero_kl_and_unknown_keys():
         ce.exact_section({"beta": 0})
     with pytest.raises(ValueError, match="unknown"):
         ce.exact_section({"lr": 1})
+
+
+def test_the_lora_targets_match_the_class_qwen35_declares_and_three_logits_are_exact():
+    """Regression (it17b's first launch): loaded as AutoModelForCausalLM, Qwen3.5 is the text-only class and the LoRA
+    targets match nothing; the checkpoint declares the conditional-generation class, which TRL (and so SFT, merge and
+    serving) load. On a tiny random model of that class: the targets match and `logits_to_keep=3` is exact."""
+    import re
+
+    import transformers
+    from transformers import AutoConfig
+
+    from honest_agents.models import lora_target_modules
+
+    try:
+        cfg = AutoConfig.from_pretrained("Qwen/Qwen3.5-4B", local_files_only=True)
+    except Exception:  # noqa: BLE001
+        pytest.skip("Qwen3.5 config not cached")
+    tc = cfg.text_config
+    for k, v in {"hidden_size": 64, "intermediate_size": 128, "num_hidden_layers": 4, "num_attention_heads": 4,
+                 "num_key_value_heads": 2, "head_dim": 16, "linear_num_key_heads": 2, "linear_num_value_heads": 2,
+                 "linear_key_head_dim": 16, "linear_value_head_dim": 16}.items():  # fmt: skip
+        setattr(tc, k, v)
+    tc.layer_types = tc.layer_types[:4]
+    for k, v in {"depth": 1, "hidden_size": 32, "intermediate_size": 64, "num_heads": 2, "out_hidden_size": 64}.items():
+        if hasattr(cfg.vision_config, k):
+            setattr(cfg.vision_config, k, v)
+    model = getattr(transformers, cfg.architectures[0])._from_config(cfg).eval()
+    rx = re.compile(lora_target_modules("qwen3_5"))
+    assert any(rx.fullmatch(n) for n, _ in model.named_modules())
+    ids = torch.randint(0, 1000, (1, 30))
+    with torch.no_grad():
+        full = model(input_ids=ids).logits[0, -3:]
+        kept = model(input_ids=ids, logits_to_keep=3).logits[0]
+    assert float((full - kept).abs().max()) == 0.0
