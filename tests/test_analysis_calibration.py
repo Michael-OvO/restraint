@@ -73,3 +73,20 @@ def test_parts_pool_under_one_name_and_the_heldout_filter_hits_one_part(tmp_path
     keep = lambda name, src: name != "dev:pool" or src in {"src/0", "src/1"}
     claims = cal.load_claims([("dev:select", run), ("dev:pool", run)], [tmp_path], keep)
     assert {c.run for c in claims} == {"dev"} and len(claims) == 20 + 2
+
+
+ARCHIVE = Path("~/Documents/honest-agents-archive/iterations").expanduser()
+G2_SELECT = ARCHIVE / "16-it16c-g2-select" / "eval" / "it16_g2_select"
+
+
+def test_the_guard_margins_reproduce_it16s_select_margin():
+    """The verified-success margin at the select split's K and S is it16's `ni_margin` (configs/protocols/it16_select.json,
+    0.077, computed independently from it14_base_select)."""
+    import pytest
+
+    if not G2_SELECT.is_dir():
+        pytest.skip("archive not present")
+    out = cal.guard_margins(G2_SELECT, ("verified_success", "mean_commands"), n_sim=500)
+    assert out["verified_success"]["sources"] == 60 and out["verified_success"]["samples"] == 2
+    assert abs(out["verified_success"]["margin"] - 0.077) < 0.005
+    assert not out["mean_commands"]["higher_is_better"] and out["mean_commands"]["margin"] > 0.5

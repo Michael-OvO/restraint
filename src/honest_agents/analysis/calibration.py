@@ -330,6 +330,35 @@ def paired(rows: Sequence[tuple[str, int, float, float]], n_boot: int, seed: int
             "b_minus_a": diff, "ci90": ci}  # fmt: skip
 
 
+GUARD_METRICS = ("verified_success", "task_success", "claim_rate_feasible", "claim_rate_infeasible",
+                 "tier_control_decline", "zero_command_report", "mean_commands")  # fmt: skip
+
+
+def guard_margins(run_dir: Path, metrics: Sequence[str] = GUARD_METRICS, *, n_sim: int = 2000) -> dict[str, Any]:
+    """Each guard's non-inferiority margin at the run's own K and S (`analysis.power`): the formula ni10 (sampling
+    scenario) and the simulated clone margin; the margin is the larger, in the metric's units (a rate as a fraction)."""
+    from honest_agents.analysis import power as P
+
+    eps = P.load_tier_run(_episodes_file(run_dir))
+    out: dict[str, Any] = {}
+    for name in metrics:
+        metric = P.METRICS[name]
+        data = P.unit_data(eps, metric)
+        k = len(set(data.source))
+        s = int(np.max(data.n_samples))
+        v = P.design_variance({}, 2 * P.per_sample_sampling(data), data, P.Design(k, s))
+        formula = P.ni_margin(v, k)
+        sim = P.clone_margin(data, data, metric, samples=s, n_sim=n_sim, seed=0)
+        out[name] = {"value": P.values(data)[0], "units": data.n_units, "sources": k, "samples": s,
+                     "ni10_formula": formula, "ni10_sim": sim, "margin": max(formula, sim),
+                     "higher_is_better": metric.higher_is_better}  # fmt: skip
+    return out
+
+
+def _episodes_file(run_dir: Path) -> Path:
+    return next(p for p in (run_dir / "episodes.jsonl.gz", run_dir / "episodes.jsonl") if p.is_file())
+
+
 def _runs(pairs: Sequence[str]) -> list[tuple[str, Path]]:
     out = []
     for p in pairs:
@@ -356,12 +385,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         p.add_argument("--heldout-of", nargs="*", default=[], help="runs reduced to their held-out sources")
         p.add_argument("--heldout-fraction", type=float, default=0.3)
         p.add_argument("--heldout-seed", default="it17-confidence")
+    g = sub.add_parser("guards", help="the guards' non-inferiority margins at a run's own K and S")
+    g.add_argument("--run", type=Path, required=True, help="the reference arm's run_eval directory")
+    g.add_argument("--n-sim", type=int, default=2000)
+    g.add_argument("--json", type=Path, default=None)
     pp = sub.add_parser("paired", help="two arms' confidence on the same claims (eval.confidence_rescore rows)")
     pp.add_argument("--a", type=Path, required=True, help="reference arm rows")
     pp.add_argument("--b", type=Path, required=True, help="candidate arm rows")
     pp.add_argument("--n-boot", type=int, default=2000)
     pp.add_argument("--json", type=Path, default=None)
     args = ap.parse_args(argv)
+    if args.cmd == "guards":
+        text = json.dumps(guard_margins(args.run, n_sim=args.n_sim), indent=2)
+        if args.json:
+            args.json.write_text(text + "\n")
+        print(text)
+        return 0
     if args.cmd == "paired":
         read = lambda p: [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
         result = paired(paired_claims(read(args.a), read(args.b)), args.n_boot)
