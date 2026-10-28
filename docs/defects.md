@@ -71,6 +71,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-61 | tooling / tests | closed 2026-10-26 | `serve_and_run.sh` did not exit within 60 s of a SIGINT in `--fast` twice (2026-10-25 and 2026-10-26, machine loaded); it is the script every node chain uses to stop its vLLM server |
 | DEF-62 | training data | closed 2026-10-27 | `sft.commit_checks build` keyed bank rows by the bank uuid, not the run's episode id: no check result matched (0 claim examples), and an episode given as bank and eval record was mined twice |
 | DEF-63 | training data | closed 2026-10-28 | the it16 commit-data builds trained on 45 sources of the final eval's decision probe: `excluded_from_training` holds select / val / test only, and the probe is spliced from train-split sources |
+| DEF-64 | tooling | closed 2026-10-28 | `node sync` excluded `*.log` everywhere, so 20 RTS task files (`.log` inputs of the log-summary tasks) never reached the node and rts/v1 failed its freeze check there |
 
 ---
 
@@ -3301,3 +3302,15 @@ section 7 critique) and from re-checks against the code and the archive on that 
   sources. Rebuilt with `--drop-excluded`: 1,488 inputs dropped, 49 sources left, 285 claim examples (164 pass,
   121 fail; 69 same-prefix pairs), agreement on selected points 0.96.
 - **Closure test:** `tests/test_commit_points.py::test_a_source_of_the_final_decision_probe_is_excluded_and_a_missing_probe_file_is_refused`.
+
+### DEF-64: node sync dropped the `.log` inputs of the RTS tasks
+- **Area:** tooling (`node.sync_argv`). **Status:** closed 2026-10-28. **Found:** 2026-10-28, the it16c chain's
+  `rts_freeze_check` on node 58059021 (10 task dirs of `data/rts/v1/tasks` hash differently from the manifest).
+- **Evidence:** `node.EXCLUDES` holds `*.log` (meant for build and run logs). `data/rts/v1/tasks` holds 20 `.log` files
+  that are task inputs (the log-summary / log-analysis tasks). No other task set has any (`data/tasks`,
+  `data/decision/surfaces/tasks`: 0; the rest under `data/` are build logs).
+- **Impact:** none on an it16 number: the freeze check refused before any RTS episode, and stage (b)'s task set had no
+  `.log` file. **Not re-checked:** whether the rts/v1 gate nodes (57853485, 57874932, both destroyed) had these files
+  when they gated the affected pairs; the manifest and its hashes come from the Mac's copy, which has them.
+- **Fix:** `0aa3225`: `node.INCLUDES = ("/data/**/tasks/**/*.log",)`, passed before the excludes (rsync's first match wins).
+- **Closure test:** `tests/test_node.py::test_a_task_directorys_log_files_travel_and_other_logs_do_not` (a real rsync).
