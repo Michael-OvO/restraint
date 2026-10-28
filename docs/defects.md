@@ -70,6 +70,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-60 | stats | closed | the pre-registration's AbstentionBench over-abstention guard (6.3, `UB < +m`) takes its margin m from the calibration samples, which run TB2 and ImpossibleBench only, so no stage measures m (MASK's guard likewise) |
 | DEF-61 | tooling / tests | closed 2026-10-26 | `serve_and_run.sh` did not exit within 60 s of a SIGINT in `--fast` twice (2026-10-25 and 2026-10-26, machine loaded); it is the script every node chain uses to stop its vLLM server |
 | DEF-62 | training data | closed 2026-10-27 | `sft.commit_checks build` keyed bank rows by the bank uuid, not the run's episode id: no check result matched (0 claim examples), and an episode given as bank and eval record was mined twice |
+| DEF-63 | training data | closed 2026-10-28 | the it16 commit-data builds trained on 45 sources of the final eval's decision probe: `excluded_from_training` holds select / val / test only, and the probe is spliced from train-split sources |
 
 ---
 
@@ -3280,3 +3281,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   whose id a bank already gave is dropped as `duplicate_episode`. Rebuilt: 486 claim examples, 111 same-prefix pairs,
   1,599 duplicates dropped, mined counts 1,600 per point.
 - **Closure test:** `tests/sft/test_commit_checks.py::test_a_bank_row_keeps_its_runs_episode_id_and_its_eval_record_is_not_mined_twice`.
+
+### DEF-63: the commit-data builds did not exclude the final eval's decision-probe sources
+- **Area:** training data (`sft.commit_checks`, `sft.claim_splice`, `commit_points.coverage`). **Status:** closed
+  2026-10-28. **Found:** 2026-10-28, while scoping destructive-step pairs on the it16b rollouts, before any training.
+- **Evidence:** the it16b rollouts run `data/decision/read_rft_tasks.jsonl` (94 sources). 45 of them are sources of
+  `data/decision/probe_prompts_surfaces.jsonl`, the decision probe stage (d) runs (prereg section 4, "72 pairs, S = 8";
+  all 72 of its pairs' own-prefix and zero-prefix sets; 45 / 72 overlap). The probe's prompts are the same variants'
+  sandbox outputs (`sandbox_outputs_surfaces.jsonl`, all 400 it16b variants cached). Prereg section 4: "Nothing in it is
+  used for training". `tasks.select_split.excluded_from_training` holds the select, val and test sources only, and
+  `eval.final_benchmark never-trained` checks the external benchmarks; prereg 3.1 checked tier S, tier F and the
+  surface eval (0 overlap, re-checked: tier S 0 / 40, val 0 / 98, rts/v1 0 / 493) but not the probe.
+- **Impact:** no trained model and no archived number. The claim build of 2026-10-27 (486 examples, 85 sources) had
+  probe sources in it; destructive-step pairs on the same 94 sources would have trained the deletion flip test's own
+  prompts (`probe_sensitivity_own`, a pre-registered guard).
+- **Fix:** `29b51a8`: `select_split.final_probe_sources` (the probe file's `pair_id`s; a missing file raises) and
+  `excluded_from_commit_training` (= `excluded_from_training` | the probe's) in `sft.commit_checks`, `sft.claim_splice`
+  and `commit_points.coverage`. `excluded_from_training` itself is unchanged: the probe's own builders need those
+  sources. Rebuilt with `--drop-excluded`: 1,488 inputs dropped, 49 sources left, 285 claim examples (164 pass,
+  121 fail; 69 same-prefix pairs), agreement on selected points 0.96.
+- **Closure test:** `tests/test_commit_points.py::test_a_source_of_the_final_decision_probe_is_excluded_and_a_missing_probe_file_is_refused`.
