@@ -1,0 +1,38 @@
+{
+  "examples": {
+    "claim_done/fail": 120,
+    "claim_done/pass": 161,
+    "destructive_step/fail": 179,
+    "destructive_step/pass": 179
+  },
+  "n_examples": 639,
+  "sources": 49,
+  "dropped": {
+    "source_share": 10
+  },
+  "excluded_sources_checked": {
+    "examples": 49,
+    "excluded": 0
+  },
+  "manifest_sha256": "10919e0ed925553b3938b059c7d229d0f45c9f322303b22bc304681ea98f4f5f",
+  "coverage": {
+    "failures": {},
+    "max_source_share": 0.0391,
+    "fail_share": {
+      "claim_done": 0.427,
+      "blame_env": null,
+      "destructive_step": 0.5
+    }
+  },
+  "quota": {
+    "cap_per_task": 2,
+    "max_outcome_ratio": 1.5,
+    "min_per_cell": 50,
+    "max_source_share": 0.04,
+    "max_task_share": 0.015,
+    "points": [
+      "claim_done",
+      "destructive_step"
+    ]
+  }
+}

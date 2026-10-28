@@ -1,0 +1,49 @@
+# Iteration 16, stage (c) (docs/iteration-16-prereg.md sections 3 and 10-11): SFT of the final arm on the frozen
+# commit-data build. From G2 seed 1 (merged): LoRA r32/a64, lr 5e-5, TWO epochs (one adapter per epoch: the chain
+# selects one on the select split), effective batch 8, gradient checkpointing on, entropy guard off.
+# Data: data/commit_checks/builds/it16_v1 (`sft.commit_build merge`: 281 claim_done examples from sft.commit_checks and
+# 358 destructive_step examples from sft.destructive_splice, on the 49 it16b sources outside the final decision probe;
+# coverage --strict passes) + the 400 G2 own-success anchors (`decision.anchors`, as G2 and G4).
+# Loss: the build's own turns (claims: the check commands and the decision; destructive: the inspection reads, the
+# decision and the report); tool outputs and prefixes masked.
+#   python -m honest_agents.sft.train_sft --config configs/sft_it16_commit_qwen35.yaml --dry-run
+# On the node: model.name=outputs/it15/g2_merged data.bank=data/bank/passk.
+base: sft_judgment_splice_g2_qwen35.yaml
+kind: commit_build
+run_name: it16-commit-checks                 # output: outputs/sft/it16-commit-checks
+
+model:
+  name: outputs/it15/g2_merged               # G2 seed 1, merged
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  bank: data/bank/passk                      # the anchors are built from this bank (as G2)
+  min_examples: 900                          # 639 build examples + ~400 anchors, less the over-long ones
+  max_length: 24576
+
+decision:
+  anchors:
+    count: 400                               # as G2
+
+commit_build:                                # honest_agents.sft.commit_build.CommitBuildOptions
+  build: data/commit_checks/builds/it16_v1
+  manifest_sha256: 10919e0ed925553b3938b059c7d229d0f45c9f322303b22bc304681ea98f4f5f
+  data_dir: data
+
+train:
+  learning_rate: 5.0e-5
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8             # effective batch 8
+  gradient_checkpointing: true
+  report_to: wandb
+  extra:
+    run_name: it16-commit-checks             # the W&B run name
+    save_strategy: epoch                     # one adapter per epoch (the chain selects one on the select split)
+    save_total_limit: 2
+
+guard:
+  entropy_floor_ratio: null                  # OFF

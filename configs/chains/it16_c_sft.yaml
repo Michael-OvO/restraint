@@ -8,12 +8,11 @@
 # No epoch passes the gate: the selection step fails and the chain stops (prereg section 8: no default action; report to
 # the owner). The selected epoch's adapter is named in best_checkpoint.json so the archive keeps it (stage (d) rebuilds
 # the final model from it on any node). Runbook: docs/iteration-16-runbook.md.
-# NOT LAUNCHABLE YET (placeholders, which `node chain` and `node_chain run` refuse):
-#   <SFT_CONFIG>: the frozen SFT config. Its example builder (a `kind` that trains a prebuilt commit-check build) is not
-#     registered in sft.train_sft yet; the commit-data lane delivers it with the build.
-#   <SFT_BUILD_MANIFEST>: the frozen build's build_manifest.json (commit_points.coverage reads it).
-#   <SELECT_PROTOCOL>: a run_eval --protocol file whose ni_margin is max(5, the ni10 of verified_success at the select
-#     split's K and S), computed at build (prereg section 7); the runs record it and select_checkpoint applies it.
+# Filled 2026-10-28 (prereg section 11): the SFT config `configs/sft_it16_commit_qwen35.yaml` (kind commit_build), the
+# frozen build `data/commit_checks/builds/it16_v1` (manifest sha256 10919e0e...; coverage --strict passes) and the
+# select protocol `configs/protocols/it16_select.json` (ni_margin 0.077 = max(5, ni10 7.6) points: verified success at
+# the select split's K 60, S 2, from the archived base select run it14_base_select; simulated clone margin 7.63, formula
+# 7.56).
 # NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
 name: it16c
 state_dir: outputs/chain/it16c
@@ -71,8 +70,8 @@ steps:
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark never-trained
       --out outputs/chain/it16c/never_trained.json
       && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.commit_points.coverage
-      --manifest <SFT_BUILD_MANIFEST> --strict --max-outcome-ratio 1.5 --json outputs/chain/it16c/coverage.json
-      && DRY_RUN=1 scripts/run_sft.sh <SFT_CONFIG> model.name=outputs/it15/g2_merged run_name=it16-commit-checks
+      --manifest data/commit_checks/builds/it16_v1/build_manifest.json --strict --max-outcome-ratio 1.5 --json outputs/chain/it16c/coverage.json
+      && DRY_RUN=1 scripts/run_sft.sh configs/sft_it16_commit_qwen35.yaml model.name=outputs/it15/g2_merged run_name=it16-commit-checks
       train.extra.run_name=it16-commit-checks train.num_train_epochs=2 train.extra.save_strategy=epoch
       train.extra.save_total_limit=2 train.gradient_checkpointing=true train.report_to=wandb
       && touch outputs/chain/it16c/markers/data_gates.done
@@ -87,7 +86,7 @@ steps:
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_base_select --n-samples 2 --concurrency 48
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
-      --protocol <SELECT_PROTOCOL>
+      --protocol configs/protocols/it16_select.json
     gpus: [0]
     done: runs/eval/it16_base_select/metrics.json
     timeout_min: 90
@@ -97,7 +96,7 @@ steps:
   # G2: 3,102 examples x 2 epochs took 2 h 2 min (train_runtime 7306 s, it15); the build's size sets this one.
   - name: train_final
     command: >-
-      scripts/run_sft.sh <SFT_CONFIG> model.name=outputs/it15/g2_merged run_name=it16-commit-checks
+      scripts/run_sft.sh configs/sft_it16_commit_qwen35.yaml model.name=outputs/it15/g2_merged run_name=it16-commit-checks
       train.extra.run_name=it16-commit-checks train.num_train_epochs=2 train.extra.save_strategy=epoch
       train.extra.save_total_limit=2 train.gradient_checkpointing=true train.report_to=wandb
     gpus: [0]
@@ -123,7 +122,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_final_select_e1 --n-samples 2 --concurrency 48
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
-      --protocol <SELECT_PROTOCOL>
+      --protocol configs/protocols/it16_select.json
     gpus: [0]
     done: runs/eval/it16_final_select_e1/metrics.json
     timeout_min: 120
@@ -137,7 +136,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it16_final_select_e2 --n-samples 2 --concurrency 48
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
-      --protocol <SELECT_PROTOCOL>
+      --protocol configs/protocols/it16_select.json
     gpus: [0]
     done: runs/eval/it16_final_select_e2/metrics.json
     timeout_min: 120

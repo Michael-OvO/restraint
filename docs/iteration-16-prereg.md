@@ -436,3 +436,36 @@ Dropped from stage (d): the blind held-out family, Agentic Abstention and Absten
 (like MASK). RTS reports final − base only; its G2 − base comparison is not run. Samples per item stay as section 4
 says, so every margin stays as written. Base and G2 do not depend on the final model, so their arms may run on
 separate nodes of the same GPU type, before or beside the final arm.
+
+## 11. Amendment 2026-10-28: the training data as built
+
+Owner, 2026-10-28: "Add destructive (Recommended)" (claim and destructive-step pairs, no blame pairs this round) and
+"Source cap 4% (Recommended)". Written before any training and before any episode of the final arm. Where this section
+and section 3 disagree, this section holds.
+
+- **Sources.** The it16b rollouts (G2 on `data/decision/read_rft_tasks.jsonl`, 94 sources, archive
+  `iterations/16-it16b-claim-rollouts`). 45 of them are sources of the final eval's decision probe
+  (`data/decision/probe_prompts_surfaces.jsonl`, section 4), which `excluded_from_training` did not hold (DEF-63). They
+  are dropped from every build (`select_split.excluded_from_commit_training`); **49 sources** remain.
+- **Commitment points trained: (a) claims and (c) destructive steps.** (b) blaming the environment gets no pairs: the
+  rollouts hold 11 blame points on 49 sources, all of one outcome, too few to balance. The blame flip test and guards
+  of section 4 stay as written (measured, not trained).
+- **(a) claims** (`sft.commit_checks build`): own pass, own fail and spliced fail examples, checklist verdict agreeing
+  with the hidden tests (the 3.3 bar passed: agreement 0.981 [0.971, 0.992]; on the kept points 0.96).
+- **(c) destructive steps** (`sft.destructive_splice`): G2's own verified-success control episodes that delete the
+  target, cut where the episode first touches it, then the variant's inspection reads with each side's real sandbox
+  outputs (the iteration-14 surface splice). G2 reads before deleting, so its own reads are replaced by the injected
+  ones (172 of 182 kept pairs); an episode with any state change between its first read and the deletion is not used.
+  Twin reports grade `abstain_correct` and control rows `success_claimed` (all 249 checked); held-out pool pairs are
+  dropped. The pass side is the control (no hazard: delete), the fail side the twin (hazard found: hold and report).
+- **Quotas** (3.4 as applied, `commit_points.coverage --strict`): at most 2 examples per point × outcome × task; fail
+  share per point in [0.40, 0.60]; at least 50 examples per cell **of the two trained points**; no task (variant) above
+  **1.5 %** of the build (3.4 as written); no source above **4 %** of the build. The tool's default source cap of 2 % is
+  not met by any build of 49 sources (an even spread is 2.04 %); 4 % is about twice an even spread.
+- **The frozen build** `data/commit_checks/builds/it16_v1` (`sft.commit_build merge`): 639 examples on 49 sources,
+  claim_done 161 pass / 120 fail (fail share 0.43), destructive_step 179 / 179 (0.50); 10 examples dropped to the
+  source cap; largest source 3.9 %, largest task 0.9 %. `build_manifest.json` sha256
+  `10919e0ed925553b3938b059c7d229d0f45c9f322303b22bc304681ea98f4f5f`.
+- **The SFT** (`configs/sft_it16_commit_qwen35.yaml`, `kind: commit_build`): from G2 seed 1, LoRA r32/a64, lr 5e-5, two
+  epochs, effective batch 8; the build plus G2's 400 own-success anchors (1,039 examples; their sources are checked
+  against the same exclusion). The trainer refuses a build whose manifest digest is not the one above.

@@ -15,7 +15,7 @@ separate job file, launched and watched on its own:
 |---|---|---|---|
 | (a) | `configs/chains/it16_a_calibration.yaml` | calibration samples: base and G2 s1 on TB2 and ImpossibleBench LCB, S = 2, after a 12-task sanity run of each served model | yes, once the gate opens |
 | (b) | `configs/chains/it16_b_claim_rollouts.yaml` | G2 s1 own runs on the 400 training-pool surface tasks (`data/decision/read_rft_tasks.jsonl`), S = 4, transcripts (bank) and tool outputs kept; then the checklist validation of the new end states | yes, once the gate opens |
-| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | no: `<SFT_CONFIG>`, `<SFT_BUILD_MANIFEST>`, `<SELECT_PROTOCOL>` |
+| (c) | `configs/chains/it16_c_sft.yaml` | SFT from G2 s1 on the matched-pair build (W&B, gradient checkpointing on), two epochs, epoch chosen on the select split | yes, once the gate opens (filled 2026-10-28, prereg section 11) |
 | (d) | `configs/chains/it16_d_final_eval.yaml` | the final eval of base, G2 s1 and final on every benchmark of prereg section 4 except MASK, plus the RTS secondary endpoint (prereg 6.5) | no: `<SURFACE_VAL_V2>`, `<BLIND_FAMILY_SPLIT>`, `<FLIP_PROMPTS>`, `<ABENCH_JUDGE_URL>` |
 
 A `<PLACEHOLDER>` is refused by `python -m honest_agents.node chain` (without `--dry-run`) and by `node_chain run`. Each
@@ -204,9 +204,12 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
   `analysis.power.load_tier_run` (prereg 6.1). Compute m3 and the MDEs of P1 and P2 from the base
   arm (the external margins are stated in prereg 6.3, DEF-60), and write them into the pre-registration before any final-arm episode exists. Re-cost (d) from the Harbor job
   times.
-- **(b):** `sft.commit_checks build` and `sft.claim_splice` (commit-data lane) on `iterations/16-it16b-claim-rollouts`
-  (episodes, bank) and the pulled checklist-validation cache. Then the agreement bar (prereg 3.3) and the coverage report
-  (3.4). Resume the validation of any states left after its 150-minute budget at L1 first.
+- **(b):** done 2026-10-28 (prereg section 11). On `iterations/16-it16b-claim-rollouts` (episodes, bank) and the pulled
+  checklist-validation cache: `sft.checklist_agreement` (the 3.3 bar), `sft.commit_checks build --drop-excluded`
+  (claims), `sft.destructive_splice --drop-excluded` (destructive steps), then `sft.commit_build merge --points claim_done
+  destructive_step --max-outcome-ratio 1.5 --max-source-share 0.04 --max-task-share 0.015` into
+  `data/commit_checks/builds/it16_v1` (coverage `--strict` inside). `sft.claim_splice` was not needed: the rollouts'
+  own transcripts give the claim pairs.
 - **(c):** `selection.json`, `selected_epoch.txt`. Stage the selected adapter as `data/weights/it16/final-selected`
   (section 2) for (d).
 - **(d):** `runs/final/it16d/final_benchmark.json` (results and deltas vs base for TB2, ImpossibleBench LCB, Agentic
@@ -231,16 +234,15 @@ In this order (prereg section 8, gate step 5, and the training-log incident tabl
     The chain computes and reports the MDE before any trained arm's RTS run (`rts_mde`). Decided 2026-10-26 (owner):
     a headline above 12 or a tier above 20 J points of MDE is reported as underpowered, with its bar unchanged
     (prereg 6.5, "Power").
-  - The SFT example builder for a prebuilt commit-check build is not registered in `sft.train_sft` (no `kind`).
-  - `<SELECT_PROTOCOL>` is the `run_eval --protocol` file with `ni_margin` = max(5, ni10 at the select split), computed
-    at build.
+  - (c)'s three, filled 2026-10-28 (prereg section 11): `configs/sft_it16_commit_qwen35.yaml` (`kind: commit_build`,
+    `sft.commit_build`), the frozen build `data/commit_checks/builds/it16_v1` (639 examples, coverage `--strict`
+    passes) and `configs/protocols/it16_select.json` (`ni_margin` 0.077: the simulated ni10 of verified success at the
+    select split's K 60, S 2 on `it14_base_select`, 7.63 points; formula 7.56).
 - DEF-58: no rollout sends the per-(task, sample, turn) seeds the pre-registration promises. Implement
   them or amend the pre-registration before it is approved.
 - DEF-60: the AbstentionBench over-abstention guard's margin m (prereg 6.3) is to come from the
   calibration samples, but those are TB2 and ImpossibleBench only, so (a) gives no m for it (nor for MASK). (d) scores
   the guard's interval; the margin needs an owner decision before the pre-registration is approved.
-- DEF-59: `final_benchmark never-trained` does not read `data/commit_checks/builds/`, so (c)'s
-  `data_gates` would not see the build it trains on until that is fixed.
 - The ImpossibleBench instruction is the adapter's default "tuned" prompt. The manifest freezes the items and files but
   not the prompt variant, so the job files pin `--prompt tuned` explicitly.
 - DEF-43 (the select quarantine) decides what `data/select_quarantine.txt` holds. The select-split runs and

@@ -30,7 +30,7 @@ STAGES = {
 PENDING = {
     "a": set(),
     "b": set(),
-    "c": {"<SFT_CONFIG>", "<SFT_BUILD_MANIFEST>", "<SELECT_PROTOCOL>"},
+    "c": set(),  # filled 2026-10-28 (prereg section 11)
     "d": {"<SURFACE_VAL_V2>", "<BLIND_FAMILY_SPLIT>", "<FLIP_PROMPTS>", "<ABENCH_JUDGE_URL>"},
 }
 
