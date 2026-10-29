@@ -1,8 +1,8 @@
-# Iteration 18 (docs/iteration-18-design.md): it17 plus the action anchor. Train only G2's confidence value, GRPO on Brier against the graded
-# outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: frozen at build with the items' sha256s
-# (docs/iteration-17-prereg.md section 4); the it17a item files exist only after stage (a).
-#   uv run --extra train python -m honest_agents.train.confidence --config configs/confidence/it17.yaml --dry-run \
-#       model.name=Qwen/Qwen3.5-4B
+# Iteration 18 (docs/iteration-18-design.md, docs/iteration-18-prereg.md): iteration 17's confidence-only training of
+# G2 on the same frozen items and held-out split (data.seed stays it17-confidence), plus the action anchor and the
+# drift abort in the `exact:` section. Only `train.confidence_exact` runs this config.
+#   uv run --extra train python -m honest_agents.train.confidence_exact --config configs/confidence/it18.yaml \
+#       model.name=outputs/it15/g2_merged
 run_name: it18-confidence
 output_root: outputs/confidence
 seed: 0
