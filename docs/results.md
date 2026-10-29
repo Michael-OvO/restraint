@@ -3,7 +3,7 @@
 Model: Qwen3.5-4B with LoRA (iterations 0-12 also Qwen3-4B for bring-up). Tasks: Endless Terminals sandboxes with
 feasible tasks, near-miss controls and impossible "twins" (`high_risk`, `revoke_permission`, `remove_input`, plus
 held-out families and evidence surfaces). Unless a row says otherwise, differences are paired by source against the
-base model with 95 % intervals; iteration 17's are 90 %. "Six checks" means the final gate of iterations 13-15.
+base model with 95 % intervals; iterations 17-18's are 90 %. "Six checks" means the final gate of iterations 13-15.
 Every number links to the document it comes from (Sources, below); the full narrative is
 [training-log.md](training-log.md).
 
@@ -35,6 +35,7 @@ Every number links to the document it comes from (Sources, below); the full narr
 | 16 (b) | G2 claim rollouts for matched-pair data | 45 of 94 sources dropped as overlap with the final decision probe (DEF-63); a 639-example frozen build; claim flip sensitivity 0.72 | infrastructure |
 | 16 (c) | SFT from G2 on matched claim / destructive-step pairs | Select split (60 sources, S = 2), base / G2 / final: verified success 64.8 / 72.7 / 68.0 %; claims on infeasible 71.1 / 9.9 / 11.2 %; control decline 3.5 / 5.6 / 21.8 %; false claims G2 65 vs 53, under-claims 0 vs 16 | failed (not better than G2) |
 | 17 | Confidence-only training on G2's own transcripts: exact expected Brier on the `confidence` value, KL to G2 on that value | **Primary passes:** confidence AUROC for failure 0.591 → 0.774 (+0.182 [+0.135, +0.228]); **a guard fails:** claims on infeasible 8.6 → 32.9 % (+24.3 [+17.3, +31.4]); protected data destroyed on 53 / 120 twins vs 13 / 120 | failed (NO-GO) |
+| 18 | Iteration 17 plus a KL anchor from G2 over G2's own action tokens, a drift abort and read-before-destruction guards | Drift held at 0.009 per token (it17 0.18); **primary passes but small:** AUROC 0.591 → 0.664 (+0.073 [+0.033, +0.115]); failing claims still stated at 0.98; four guards grey (infeasible claims +11.8 [+6.1, +17.6]; twins destroyed 31 / 120 vs 13), none fails | no GO (grey) |
 
 Notes:
 - **Iteration 14, Agentic Abstention.** The recall is the re-scored value (DEF-28); an earlier "37 → 74 %" counted
@@ -68,6 +69,9 @@ Notes:
 - **A regularizer only protects the tokens it covers.** Iteration 17's KL anchored the confidence value only; the
   shared weights let the actions drift (blind deletions 4 → 30 of 120 twins; action KL from G2 0.18 nats per token).
   ([iteration-17-results.md](iteration-17-results.md))
+- **An anchor on the actions also held the calibration.** Iteration 18's anchor cut the action drift about 20x and
+  the twin damage about half, and the confident-but-failing claims stayed at 0.98: in a shared LoRA, doubting a claim
+  and changing the actions moved together. ([iteration-18-results.md](iteration-18-results.md))
 
 ## Sources
 
@@ -85,3 +89,5 @@ Paths under `docs/`; line numbers at commit `ef1ebd3`.
   [iteration-17-proposal.md](iteration-17-proposal.md) "Why pivot".
 - 17: [iteration-17-design.md](iteration-17-design.md), [iteration-17-prereg.md](iteration-17-prereg.md),
   [iteration-17-results.md](iteration-17-results.md).
+- 18: [iteration-18-design.md](iteration-18-design.md), [iteration-18-prereg.md](iteration-18-prereg.md),
+  [iteration-18-results.md](iteration-18-results.md).
