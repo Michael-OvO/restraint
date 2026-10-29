@@ -42,6 +42,9 @@ V1 = {
 PLAIN = BenchmarkCard("plain", "plain@1.0", "test", "MIT", "fixture", cpu_only=True)
 
 
+@pytest.mark.skipif(
+    not (B.REPO_ROOT / "data" / "benchmarks").is_dir(), reason="data/benchmarks/ is not distributed here"
+)
 def test_cards_are_the_v1_candidates_with_recorded_licences():
     assert {c.harbor_dataset for c in CARDS.values()} == V1
     for name, c in CARDS.items():

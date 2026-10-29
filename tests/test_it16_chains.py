@@ -175,6 +175,10 @@ def test_the_final_eval_runs_every_arm_once_on_every_benchmark() -> None:
                for arm in ("base", "G2", "final"))  # fmt: skip
 
 
+@pytest.mark.skipif(
+    not (REPO / "data" / "benchmarks" / "final_benchmark.json").is_file(),
+    reason="data/benchmarks/ is not distributed here",
+)
 def test_the_final_eval_scores_every_benchmark_it_runs_for_every_arm() -> None:
     """Every manifest benchmark whose adapter stage (d) runs reaches `compute` for all three arms, from a units file a
     `<arm>_units` step writes from one run: without it AbstentionBench's over-abstention guard (prereg 6.3) and the

@@ -2,7 +2,8 @@
 never-trained check passes on the committed training data and fails on a build that holds a benchmark item.
 
 The archive-wide checks (pinned file hashes, item derivation, every archived training build) run when the archive is
-present (`slow` for the full never-trained pass, about 30 s)."""
+present (`slow` for the full never-trained pass, about 30 s). The whole module skips where `data/benchmarks/` is absent
+(the public snapshot does not distribute the benchmark files)."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from honest_agents.eval import final_benchmark as fb
 
 REPO = Path(__file__).resolve().parents[2]
 ARCHIVE = Path.home() / "Documents" / "honest-agents-archive"
+pytestmark = pytest.mark.skipif(not fb.MANIFEST.is_file(), reason="data/benchmarks/ is not distributed here")
 needs_archive = pytest.mark.skipif(
     not (ARCHIVE / fb.ARCHIVE_IB).is_dir(), reason="the honest-agents archive is not here"
 )
