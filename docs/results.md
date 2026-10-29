@@ -1,4 +1,4 @@
-# Results, iteration by iteration
+# Restraint: results, iteration by iteration
 
 Model: Qwen3.5-4B with LoRA (iterations 0-12 also Qwen3-4B for bring-up). Tasks: Endless Terminals sandboxes with
 feasible tasks, near-miss controls and impossible "twins" (`high_risk`, `revoke_permission`, `remove_input`, plus
