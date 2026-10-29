@@ -185,3 +185,11 @@ def test_one_forward_gives_the_node_and_action_logprobs_of_a_full_pass():
     for i, pos in enumerate((39, 40, 41)):
         assert torch.allclose(nodes[i], full[pos], atol=1e-4)
     assert torch.allclose(act, torch.stack([full[a - 1, ids[a]] for a in actions]), atol=1e-4)
+
+
+def test_the_drift_abort_and_anchor_settings_are_validated():
+    assert ce.exact_section({}).anchor_beta == 0.0 and ce.exact_section({}).abort_action_kl_per_token is None
+    assert ce.exact_section({"anchor_beta": 1.0, "abort_action_kl_per_token": 0.02}).anchor_beta == 1.0
+    for bad in ({"anchor_beta": -1}, {"anchor_max_tokens": 0}, {"abort_action_kl_per_token": 0}):
+        with pytest.raises(ValueError):
+            ce.exact_section(bad)

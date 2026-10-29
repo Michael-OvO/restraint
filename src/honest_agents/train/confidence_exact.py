@@ -123,6 +123,9 @@ class ExactSection:
     # to `anchor_max_tokens` sampled positions. 0 switches it off (iteration 17's run, which let the actions drift).
     anchor_beta: float = 0.0
     anchor_max_tokens: int = 512
+    # Stop the run (an error: the chain fails before any evaluation) when the held-out action KL per token exceeds this
+    # at an evaluation; None = never. Iteration 17's adapter: 0.18 per token (134 nats per transcript, 20 items).
+    abort_action_kl_per_token: float | None = None
 
 
 def exact_section(raw: dict[str, Any]) -> ExactSection:
@@ -132,6 +135,8 @@ def exact_section(raw: dict[str, Any]) -> ExactSection:
     s = ExactSection(**raw)
     if s.beta <= 0:
         raise ValueError("exact.beta must be > 0: the KL keeps the value's distribution at the start model's")
+    if s.abort_action_kl_per_token is not None and s.abort_action_kl_per_token <= 0:
+        raise ValueError("exact.abort_action_kl_per_token must be > 0 (or null)")
     if s.anchor_beta < 0 or s.anchor_max_tokens < 1:
         raise ValueError("exact.anchor_beta must be >= 0 and exact.anchor_max_tokens >= 1")
     return s
@@ -356,7 +361,18 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
         if wb is not None:
             wb.log(record, step=step)
 
-    emit({"step": 0, **evaluate(model, held, t)})
+    class DriftAbort(RuntimeError):
+        pass
+
+    def check_drift(rec: dict[str, Any]) -> None:
+        limit, got = ex.abort_action_kl_per_token, rec.get("eval/action_kl_per_token")
+        if limit is not None and got is not None and got > limit:
+            log.write(json.dumps({"step": step, "abort": f"action KL per token {got:.4f} > {limit}"}) + "\n")
+            log.flush()
+            raise DriftAbort(f"held-out action KL per token {got:.4f} exceeds {limit} at step {step}: stopped")
+
+    first = {"step": 0, **evaluate(model, held, t)}
+    emit(first)
     for epoch in range(ex.num_train_epochs):
         order = list(range(len(train)))
         rng.shuffle(order)
@@ -382,13 +398,33 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
             if step % ex.eval_steps == 0:
                 rec |= evaluate(model, held, t)
             emit(rec)
+            check_drift(rec)
         model.save_pretrained(str(out_dir / f"epoch-{epoch + 1}"))
-        emit({"step": step, "epoch_end": epoch + 1, **evaluate(model, held, t)})
+        end = {"step": step, "epoch_end": epoch + 1, **evaluate(model, held, t)}
+        emit(end)
+        check_drift(end)
     model.save_pretrained(str(out_dir / "final"))
     log.close()
     if wb is not None:
         wb.finish()
     return summary
+
+
+def drift(cfg: tc.ConfidenceConfig, adapter: str, n_items: int, anchor_max_tokens: int = 512) -> dict[str, Any]:
+    """An adapter's held-out metrics against the start model (`cfg.model.name`), with no training: the drift monitor's
+    action KL and the value's expected Brier and claims AUROC, on `n_items` held-out items (stable sample)."""
+    from peft import PeftModel
+    from transformers import AutoTokenizer
+
+    from honest_agents.models import pinned_revision
+
+    name = cfg.model.tokenizer or cfg.model.name
+    tok = AutoTokenizer.from_pretrained(name, revision=pinned_revision(name))
+    t = TreeTokens.of(tok)
+    held = encode(tc.prepare(cfg, tok).eval, tok, t, anchor_max_tokens)
+    held = random.Random(cfg.seed).sample(held, min(len(held), n_items))
+    model = PeftModel.from_pretrained(load_model(cfg.model.name, cfg.model.dtype), adapter)
+    return {"adapter": adapter, **evaluate(model, held, t)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -397,10 +433,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ap.add_argument("--config", required=True)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--drift", metavar="ADAPTER", help="measure this adapter's held-out drift instead of training")
+    ap.add_argument("--drift-items", type=int, default=40)
     ap.add_argument("overrides", nargs="*")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     cfg = tc.load_config(args.config, args.overrides)
+    if args.drift:
+        print(json.dumps(drift(cfg, args.drift, args.drift_items), indent=2))
+        return 0
     out = run(cfg, exact_section(cfg.exact), dry_run=args.dry_run)
     json.dump(out["data"], sys.stdout, indent=2)
     print()

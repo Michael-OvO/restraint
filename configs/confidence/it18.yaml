@@ -1,0 +1,55 @@
+# Iteration 18 (docs/iteration-18-design.md): it17 plus the action anchor. Train only G2's confidence value, GRPO on Brier against the graded
+# outcome, on G2's own archived episodes (sft.confidence_bandit items). DRAFT: frozen at build with the items' sha256s
+# (docs/iteration-17-prereg.md section 4); the it17a item files exist only after stage (a).
+#   uv run --extra train python -m honest_agents.train.confidence --config configs/confidence/it17.yaml --dry-run \
+#       model.name=Qwen/Qwen3.5-4B
+run_name: it18-confidence
+output_root: outputs/confidence
+seed: 0
+
+model:
+  name: outputs/it15/g2_merged             # G2 seed 1, merged (stage (c)'s merge recipe)
+  family: qwen3_5
+  tokenizer: Qwen/Qwen3.5-4B               # the same tokenizer and template as G2's base
+
+lora:
+  r: 16
+  alpha: 32
+
+data:
+  items:                                   # sft.confidence_bandit build outputs (prereg section 3); the it17a ones are
+    - data/it17/items_it17a_feasible.jsonl  # built after stage (a) and frozen with their sha256s
+    - data/it17/items_it17a_infeasible.jsonl
+    - data/it17/items_it16b.jsonl
+  max_prompt_tokens: 16384
+  heldout_fraction: 0.3                    # by source (stable hash, seed it17-confidence): the dev set's half
+  seed: it17-confidence
+
+grpo:
+  learning_rate: 1.0e-5
+  num_generations: 8
+  max_completion_length: 8                 # "0.85\n</parameter>" fits; only the first line is parsed
+  temperature: 1.0
+  beta: 0.04
+  per_device_train_batch_size: 8           # one prompt x 8 samples per device step
+  gradient_accumulation_steps: 4
+  num_train_epochs: 2
+  eval_steps: 25
+  report_to: wandb
+
+# The training run uses `train.confidence_exact` (the same objective in closed form; prereg section 4): these settings.
+# The `grpo:` section above stays for the sampled estimator `train.confidence`, which the prereg does not use.
+exact:
+  learning_rate: 5.0e-5                    # the SFT stages' LoRA rate; the adapter must move the value off "1"
+  num_train_epochs: 2
+  gradient_accumulation_steps: 8           # 8 items per optimiser step: ~605 steps over 2,422 items x 2 epochs
+  beta: 0.04                               # KL to G2 over the value's token tree
+  max_grad_norm: 1.0
+  warmup_ratio: 0.03
+  eval_steps: 100                          # held-out expected Brier and claims AUROC, logged; they select nothing
+  max_eval_items: 200                      # ~100 s per evaluation (forward only)
+  report_to: wandb
+  # iteration 18: the action anchor and the drift abort (docs/iteration-18-design.md)
+  anchor_beta: 1.0                         # 1 x the KL from G2 over G2's own action tokens per transcript
+  anchor_max_tokens: 512                   # positions sampled per item (stable per item)
+  abort_action_kl_per_token: 0.02          # stop if held-out drift exceeds this (it17's adapter: 0.18)
