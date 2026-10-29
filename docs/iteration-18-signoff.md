@@ -10,3 +10,4 @@
 - **Reference reuse condition (prereg section 5):** `git diff 3cdb17c HEAD` on the evaluation path is empty at launch.
 - **Mac checks:** the job file passes `node_chain check`; the trainer, chain and node tests pass (93); the it18 config
   reproduces it17's split exactly (`train.confidence --dry-run`); the config's sha256 is the one the chain checks.
+  `scripts/test.sh --fast` 5,031 passed on 127f632 (the one failure, the L0 sweep's timing test, passes alone in 39 s).
