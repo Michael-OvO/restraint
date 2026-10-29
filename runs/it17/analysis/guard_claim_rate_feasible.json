@@ -1,0 +1,15 @@
+{
+ "reference": 0.9154411764705882,
+ "candidate": 0.8492647058823529,
+ "diff": -0.0661764705882353,
+ "se": 0.02825397323264438,
+ "lo": -0.11339148838655877,
+ "hi": -0.018961452789911813,
+ "df": 59,
+ "units": 136,
+ "sources": 60,
+ "pairs": null,
+ "p_signflip_source": 0.024997500249975,
+ "p_signflip_pair": null,
+ "significant": true
+}
