@@ -17,6 +17,13 @@ disabled) taken exactly over the same tree (`KL_1 + P(0) KL_2 + P(0) P(.) KL_3`,
 forward and backward pass per item instead of one per sample: about 8x cheaper than GRPO with 8 samples and with no
 sampling variance. Evaluation (the paired and the online runs) still samples the value as the model writes it.
 
+**Action anchor** (iteration 18, `exact.anchor_beta`): iteration 17's adapter, trained on the value alone with a KL on
+the value's tree only, eroded the start model's actions through the shared weights (blind deletions 4 -> 30 of 120
+high_risk twins). The anchor adds `anchor_beta` x the KL from the start model to the policy over the start model's own
+action tokens in each transcript (every assistant turn and the open report turn: `assistant_positions`), estimated with
+k3 on up to `anchor_max_tokens` sampled positions and scaled to the transcript's action-token count. The drift monitor
+logs that KL on the held-out transcripts at every evaluation, whatever `anchor_beta`.
+
 Data and the held-out split are `train.confidence`'s (`prepare`, `heldout`); the `exact:` section of the config holds
 the optimiser settings. Every `eval_steps` optimiser steps the held-out items' mean expected Brier and the AUROC of the
 expected value against failure on held-out feasible claims are logged; they select nothing.
@@ -111,6 +118,11 @@ class ExactSection:
     eval_steps: int = 50
     max_eval_items: int = 400
     report_to: str = "wandb"
+    # The action anchor (iteration 18): the KL from the start model to the policy over the start model's own action
+    # tokens in each transcript (every assistant turn, the open report turn up to the cut included), estimated on up
+    # to `anchor_max_tokens` sampled positions. 0 switches it off (iteration 17's run, which let the actions drift).
+    anchor_beta: float = 0.0
+    anchor_max_tokens: int = 512
 
 
 def exact_section(raw: dict[str, Any]) -> ExactSection:
@@ -119,7 +131,9 @@ def exact_section(raw: dict[str, Any]) -> ExactSection:
         raise ValueError(f"unknown key(s) {sorted(unknown)} in `exact:`; expected {sorted(allowed)}")
     s = ExactSection(**raw)
     if s.beta <= 0:
-        raise ValueError("exact.beta must be > 0: the KL keeps the policy at the start model off the reward's reach")
+        raise ValueError("exact.beta must be > 0: the KL keeps the value's distribution at the start model's")
+    if s.anchor_beta < 0 or s.anchor_max_tokens < 1:
+        raise ValueError("exact.anchor_beta must be >= 0 and exact.anchor_max_tokens >= 1")
     return s
 
 
@@ -132,38 +146,112 @@ def load_model(name: str, dtype: str) -> Any:
     return create_model_from_path(name, dtype=dtype, device_map={"": 0} if torch.cuda.is_available() else None)
 
 
-def _node_logprobs(model: Any, ids: list[int], n_prompt: int) -> list[Any]:
-    """Log-probabilities at the tree's three nodes. They are the sequence's last three positions (`prompt, "0", "."`),
-    so only those logits are computed (`logits_to_keep`): full-vocabulary logits at every position of a 15k-token
-    prompt would take about 7 GB."""
+@dataclass(frozen=True)
+class ChatMarkers:
+    """ChatML's turn markers: an assistant turn is the tokens after `<|im_start|>assistant\\n` up to and including its
+    `<|im_end|>` (the end-of-turn decision is the model's too)."""
+
+    im_start: int
+    im_end: int
+    header: tuple[int, ...]  # the tokens of "assistant\\n" after <|im_start|>
+
+    @classmethod
+    def of(cls, tokenizer: Any) -> ChatMarkers:
+        start, end = tokenizer.convert_tokens_to_ids("<|im_start|>"), tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if start is None or end is None or start == tokenizer.unk_token_id or end == tokenizer.unk_token_id:
+            raise ValueError("the tokenizer has no ChatML markers: the action anchor cannot find the assistant turns")
+        return cls(start, end, tuple(tokenizer("assistant\n", add_special_tokens=False).input_ids))
+
+
+def assistant_positions(ids: Sequence[int], m: ChatMarkers) -> list[int]:
+    """Indices of every token of an assistant turn in `ids` (the last turn may be open: it runs to the end)."""
+    out: list[int] = []
+    h = len(m.header)
+    i = 0
+    while i < len(ids):
+        if ids[i] == m.im_start and tuple(ids[i + 1 : i + 1 + h]) == m.header:
+            j = i + 1 + h
+            while j < len(ids) and ids[j] != m.im_end:
+                out.append(j)
+                j += 1
+            if j < len(ids):
+                out.append(j)  # the turn's own <|im_end|>
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def sample_positions(positions: Sequence[int], k: int, key: str) -> list[int]:
+    """At most `k` of `positions`, uniformly, with a stable seed per item (the same positions in every epoch)."""
+    if len(positions) <= k:
+        return list(positions)
+    return sorted(random.Random(f"anchor|{key}").sample(list(positions), k))
+
+
+def _forward(model: Any, ids: list[int], n_prompt: int, actions: Sequence[int]) -> tuple[list[Any], Any]:
+    """One pass: the log-probabilities at the value tree's three nodes, and of each action token at its own position.
+    Logits are computed only at those positions (`logits_to_keep` with an index tensor: identical to a full pass,
+    checked on Qwen3.5); full-vocabulary logits at every position of a 15k-token prompt would take about 7 GB."""
     import torch
 
     if len(ids) != n_prompt + 2:
         raise ValueError("an item is its prompt followed by exactly the two tokens 0 and .")
-    out = model(input_ids=torch.tensor([ids], device=model.device), use_cache=False, logits_to_keep=3)
-    logits = out.logits[0, -3:].float()
-    return [torch.log_softmax(logits[i], dim=-1) for i in range(3)]
+    keep = [a - 1 for a in actions] + [n_prompt - 1, n_prompt, n_prompt + 1]
+    idx = torch.tensor(keep, device=model.device)
+    out = model(input_ids=torch.tensor([ids], device=model.device), use_cache=False, logits_to_keep=idx)
+    logits = out.logits[0].float()
+    nodes = [torch.log_softmax(logits[-3 + i], dim=-1) for i in range(3)]
+    if not actions:
+        return nodes, logits.new_zeros(0)
+    act = torch.log_softmax(logits[: len(actions)], dim=-1)
+    targets = torch.tensor([ids[a] for a in actions], device=model.device)
+    return nodes, act.gather(1, targets[:, None])[:, 0]
 
 
-def item_loss(model: Any, ids: list[int], n_prompt: int, y: int, t: TreeTokens, beta: float) -> tuple[Any, dict]:
+def _node_logprobs(model: Any, ids: list[int], n_prompt: int) -> list[Any]:
+    return _forward(model, ids, n_prompt, ())[0]
+
+
+def action_kl(lp_actions: Any, ref_actions: Any, n_total: int) -> Any:
+    """KL(start model || policy) over the transcript's action tokens, from the start model's own samples: the mean of
+    the non-negative unbiased estimator k3 = (r - 1) - log r, r = p_policy / p_start, times the number of action
+    tokens in the transcript (`n_total`, not only the sampled ones)."""
+    if lp_actions.numel() == 0:
+        return lp_actions.sum()
+    log_r = lp_actions - ref_actions
+    return (log_r.exp() - 1 - log_r).mean() * n_total
+
+
+def item_loss(model: Any, item: Item, t: TreeTokens, ex: ExactSection) -> tuple[Any, dict]:
     import torch
 
+    ids, n_prompt, row, actions, n_actions = item
+    actions = actions if ex.anchor_beta > 0 else ()
     with torch.no_grad(), model.disable_adapter():
-        ref = _node_logprobs(model, ids, n_prompt)
-    lp = _node_logprobs(model, ids, n_prompt)
-    probs = tree_probabilities(*lp, t)
-    brier = expected_brier(probs, float(y))
-    kl = tree_kl(lp, ref, probs)
-    stats = {"brier": brier.item(), "kl": kl.item(), "p_other": probs["other"].item(),
-             "value": expected_value(probs).item(), "y": y}  # fmt: skip
-    return brier + beta * kl, stats
+        ref_nodes, ref_act = _forward(model, ids, n_prompt, actions)
+    nodes, act = _forward(model, ids, n_prompt, actions)
+    probs = tree_probabilities(*nodes, t)
+    brier = expected_brier(probs, float(row["y"]))
+    kl = tree_kl(nodes, ref_nodes, probs)
+    akl = action_kl(act, ref_act, n_actions)
+    stats = {"brier": brier.item(), "kl": kl.item(), "p_other": probs["other"].item(), "action_kl": akl.item(),
+             "value": expected_value(probs).item(), "y": int(row["y"])}  # fmt: skip
+    return brier + ex.beta * kl + ex.anchor_beta * akl, stats
 
 
-def encode(rows: Sequence[dict[str, Any]], tokenizer: Any, t: TreeTokens) -> list[tuple[list[int], int, dict]]:
+Item = tuple[list[int], int, dict, list[int], int]  # ids, prompt length, row, sampled action positions, action tokens
+
+
+def encode(rows: Sequence[dict[str, Any]], tokenizer: Any, t: TreeTokens, k: int = 512) -> list[Item]:
+    m = ChatMarkers.of(tokenizer)
     out = []
     for r in rows:
         prompt = tokenizer(r["prompt"], add_special_tokens=False).input_ids
-        out.append(([*prompt, t.zero, t.dot], len(prompt), r))
+        positions = assistant_positions(prompt, m)
+        out.append(
+            ([*prompt, t.zero, t.dot], len(prompt), r, sample_positions(positions, k, r["item_id"]), len(positions))
+        )
     return out
 
 
@@ -173,14 +261,23 @@ def _auroc_failure(values: Sequence[float], ys: Sequence[int]) -> float | None:
     return auroc([-v for v in values], [y == 0 for y in ys])
 
 
-def evaluate(model: Any, items: Sequence[tuple[list[int], int, dict]], t: TreeTokens) -> dict[str, Any]:
+def evaluate(model: Any, items: Sequence[Item], t: TreeTokens) -> dict[str, Any]:
+    """Held-out expected Brier, the claims AUROC of the expected value, and the drift monitor: the action KL from the
+    start model over the held-out transcripts' own actions (per token and per transcript), whatever `anchor_beta`."""
     import torch
 
     model.eval()
-    briers, values, ys, claims = [], [], [], []
+    briers, values, ys, claims, akl, akl_tok = [], [], [], [], [], []
     with torch.no_grad():
-        for ids, n, row in items:
-            probs = tree_probabilities(*_node_logprobs(model, ids, n), t)
+        for ids, n, row, actions, n_actions in items:
+            nodes, act = _forward(model, ids, n, actions)
+            with model.disable_adapter():
+                _, ref_act = _forward(model, ids, n, actions)
+            if actions:
+                kl = action_kl(act, ref_act, n_actions)
+                akl.append(float(kl))
+                akl_tok.append(float(kl) / n_actions)
+            probs = tree_probabilities(*nodes, t)
             briers.append(float(expected_brier(probs, float(row["y"]))))
             v = float(expected_value(probs))
             if row["cell"] == "feasible/complete":
@@ -188,8 +285,11 @@ def evaluate(model: Any, items: Sequence[tuple[list[int], int, dict]], t: TreeTo
                 ys.append(int(row["y"]))
             claims.append(v)
     model.train()
-    return {"eval/expected_brier": sum(briers) / max(len(briers), 1), "eval/claims_auroc": _auroc_failure(values, ys),
-            "eval/mean_value": sum(claims) / max(len(claims), 1), "eval/n": len(items)}  # fmt: skip
+    mean = lambda xs: sum(xs) / len(xs) if xs else None
+    return {"eval/expected_brier": mean(briers), "eval/claims_auroc": _auroc_failure(values, ys),
+            "eval/mean_value": mean(claims), "eval/n": len(items),
+            "eval/action_kl": mean(akl), "eval/action_kl_per_token": mean(akl_tok),
+            "eval/action_kl_max": max(akl) if akl else None}  # fmt: skip
 
 
 def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) -> dict[str, Any]:
@@ -231,8 +331,8 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
         bias="none", task_type="CAUSAL_LM",
         target_modules=lora_target_modules(cfg.model.family) if targets == "auto" else targets))  # fmt: skip
     model.enable_input_require_grads()
-    train = encode(prepared.train, tok, t)
-    held = encode(prepared.eval, tok, t)
+    train = encode(prepared.train, tok, t, ex.anchor_max_tokens)
+    held = encode(prepared.eval, tok, t, ex.anchor_max_tokens)
     held = rng.sample(held, min(len(held), ex.max_eval_items))
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=ex.learning_rate)
@@ -261,8 +361,7 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
         order = list(range(len(train)))
         rng.shuffle(order)
         for k in order:
-            ids, n, row = train[k]
-            loss, stats = item_loss(model, ids, n, int(row["y"]), t, ex.beta)
+            loss, stats = item_loss(model, train[k], t, ex)
             (loss / ex.gradient_accumulation_steps).backward()
             window.append(stats)
             acc += 1
@@ -277,6 +376,7 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
                    "train/expected_brier": sum(s["brier"] for s in window) / len(window),
                    "train/kl": sum(s["kl"] for s in window) / len(window),
                    "train/p_unparsable": sum(s["p_other"] for s in window) / len(window),
+                   "train/action_kl": sum(s["action_kl"] for s in window) / len(window),
                    "elapsed_s": time.time() - t0}  # fmt: skip
             window = []
             if step % ex.eval_steps == 0:

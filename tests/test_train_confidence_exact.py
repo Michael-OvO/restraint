@@ -117,3 +117,71 @@ def test_the_lora_targets_match_the_class_qwen35_declares_and_three_logits_are_e
         full = model(input_ids=ids).logits[0, -3:]
         kept = model(input_ids=ids, logits_to_keep=3).logits[0]
     assert float((full - kept).abs().max()) == 0.0
+
+
+def test_assistant_positions_cover_the_models_turns_and_nothing_else():
+    """On a real it17 item rendered with the served Qwen3.5 template: every anchored token is inside an assistant turn
+    (the commands and the open report turn), none is system, user or tool text."""
+    import json
+    from pathlib import Path
+
+    from transformers import AutoTokenizer
+
+    from honest_agents.eval.rollout import tool_schemas
+    from honest_agents.models import family_spec
+    from honest_agents.sft import confidence_bandit as cb
+
+    items = Path(__file__).parents[1] / "data" / "it17" / "items_it16b.jsonl"
+    try:
+        tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B", local_files_only=True)
+    except Exception:  # noqa: BLE001
+        pytest.skip("Qwen3.5 tokenizer not cached")
+    if not items.is_file():
+        pytest.skip("it17 items not built")
+    item = cb.Item.from_json(json.loads(items.read_text().splitlines()[0]))
+    prompt = cb.render_prefix(item.messages, tok, tool_schemas(), dict(family_spec("qwen3_5").chat_template_kwargs))
+    ids = tok(prompt, add_special_tokens=False).input_ids
+    pos = ce.assistant_positions(ids, ce.ChatMarkers.of(tok))
+    anchored = tok.decode([ids[p] for p in pos])
+    commands = [c["function"]["arguments"]["command"] for m in item.messages if m.get("role") == "assistant"
+                for c in m.get("tool_calls") or [] if c["function"]["name"] == "bash"]  # fmt: skip
+    assert commands and all(c.split()[0] in anchored for c in commands)
+    assert "submit_report" in anchored and "<parameter=status>" in anchored  # the open report turn, up to the cut
+    tool_texts = [str(m["content"]) for m in item.messages if m.get("role") == "tool" and len(str(m["content"])) > 40]
+    assert tool_texts and not any(t[:40] in anchored for t in tool_texts)
+    assert item.messages[1]["content"][:60] not in anchored  # the instruction
+    assert pos[-1] == len(ids) - 1  # the open report turn runs to the cut
+
+
+def test_the_action_kl_is_zero_at_the_reference_nonnegative_and_scales_to_the_transcript():
+    ref = torch.log(torch.tensor([0.9, 0.5, 0.99, 0.2]))
+    assert float(ce.action_kl(ref, ref, 100)) == 0.0
+    moved = torch.log(torch.tensor([0.6, 0.5, 0.5, 0.25]))
+    k = float(ce.action_kl(moved, ref, 100))
+    assert k > 0 and float(ce.action_kl(moved, ref, 200)) == pytest.approx(2 * k)
+    assert float(ce.action_kl(torch.zeros(0), torch.zeros(0), 10)) == 0.0
+
+
+def test_sampled_positions_are_bounded_and_stable():
+    pos = list(range(5000))
+    a, b = ce.sample_positions(pos, 512, "item-1"), ce.sample_positions(pos, 512, "item-1")
+    assert a == b and len(a) == 512 and a == sorted(a) and ce.sample_positions(pos, 512, "item-2") != a
+    assert ce.sample_positions(pos[:10], 512, "x") == pos[:10]
+
+
+def test_one_forward_gives_the_node_and_action_logprobs_of_a_full_pass():
+    from transformers import AutoModelForCausalLM
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base", local_files_only=True, dtype=torch.float32)
+    except Exception:  # noqa: BLE001
+        pytest.skip("Qwen3-0.6B not cached")
+    model.eval()
+    ids = list(range(100, 140)) + [15, 13]  # a prompt of 40, then two tokens
+    actions = [5, 17, 30, 39]
+    with torch.no_grad():
+        nodes, act = ce._forward(model, ids, 40, actions)
+        full = torch.log_softmax(model(input_ids=torch.tensor([ids])).logits[0].float(), dim=-1)
+    for i, pos in enumerate((39, 40, 41)):
+        assert torch.allclose(nodes[i], full[pos], atol=1e-4)
+    assert torch.allclose(act, torch.stack([full[a - 1, ids[a]] for a in actions]), atol=1e-4)
