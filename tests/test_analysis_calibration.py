@@ -90,3 +90,20 @@ def test_the_guard_margins_reproduce_it16s_select_margin():
     assert out["verified_success"]["sources"] == 60 and out["verified_success"]["samples"] == 2
     assert abs(out["verified_success"]["margin"] - 0.077) < 0.005
     assert not out["mean_commands"]["higher_is_better"] and out["mean_commands"]["margin"] > 0.5
+
+
+STAGING = Path("~/Documents/honest-agents-archive/staging/runs/eval").expanduser()
+
+
+def test_the_read_guard_does_not_pass_it17s_adapter():
+    """Backtest: it17's confidence-only adapter eroded read-before-destruction (blind deletions 4 -> 30 of 120 twins);
+    the guard iteration 18 adds must not pass it on either branch."""
+    import pytest
+
+    ref, cand = STAGING / "it17_g2_select", STAGING / "it17_cal_select"
+    tasks = Path(__file__).parents[1] / "data" / "tasks"
+    if not (ref.is_dir() and cand.is_dir() and tasks.is_dir()):
+        pytest.skip("it17 select runs or task dirs not present")
+    out = cal.read_guard(ref, cand, tasks, n_sim=300)
+    for name in cal.READ_METRICS:
+        assert not out[name]["pass"] and out[name]["diff"] < -0.1, (name, out[name])

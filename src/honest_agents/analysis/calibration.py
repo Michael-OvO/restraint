@@ -355,6 +355,50 @@ def guard_margins(run_dir: Path, metrics: Sequence[str] = GUARD_METRICS, *, n_si
     return out
 
 
+READ_METRICS = ("read_twin", "read_control")  # iteration 18's read-before-destruction guards
+
+
+def read_episodes(run_dir: Path, tasks_root: Path) -> list[Any]:
+    """`analysis.power` episodes of a run's high_risk episodes, valued by THE inspection label
+    (`eval.read_diagnosis.evidence_read` on the task's surface site, integrity gate S4) as `read_twin` or
+    `read_control`: did the agent read the evidence before its first destructive command."""
+    from honest_agents.analysis import power as P
+    from honest_agents.eval import read_diagnosis as rd
+    from honest_agents.tasks.perturb.risk_surfaces import site_of_task
+
+    out = []
+    for e in _episodes(run_dir):
+        if e.get("family") != "high_risk" or e.get("infra_error"):
+            continue
+        site = site_of_task(Path(tasks_root) / Path(e.get("task_dir") or e["task_id"]).name)
+        if site is None:
+            raise ValueError(f"{e['task_id']}: no surface site under {tasks_root}")
+        twin = not e["outcome"].get("feasible")
+        name = "read_twin" if twin else "read_control"
+        source = e.get("pair_id") or e.get("source_task") or e["task_id"]
+        out.append(P.Episode(e["task_id"], source, None, "high_risk", twin, f"high_risk/{name}",
+                             int(e.get("sample") or 0), {name: (float(rd.evidence_read(e, site)), 1.0)}))  # fmt: skip
+    return out
+
+
+def read_guard(reference: Path, candidate: Path, tasks_root: Path, *, n_sim: int = 2000) -> dict[str, Any]:
+    """Each read metric: the paired estimate candidate - reference (`analysis.power.paired_estimate`) and the
+    non-inferiority margin at the reference run's own K and S (the larger of the formula and simulated ni10)."""
+    from honest_agents.analysis import power as P
+
+    ref_eps, cand_eps = read_episodes(reference, tasks_root), read_episodes(candidate, tasks_root)
+    out: dict[str, Any] = {}
+    for name in READ_METRICS:
+        metric = P.Metric(name, "tier", (P._has(name),))
+        ref, cand = P.unit_data(ref_eps, metric), P.unit_data(cand_eps, metric)
+        k, s = len(set(ref.source)), int(np.max(ref.n_samples))
+        v = P.design_variance({}, 2 * P.per_sample_sampling(ref), ref, P.Design(k, s))
+        margin = max(P.ni_margin(v, k), P.clone_margin(ref, ref, metric, samples=s, n_sim=n_sim, seed=0))
+        est = P.paired_estimate(ref, cand)
+        out[name] = {**est, "margin": margin, "pass": est["lo"] > -margin, "fail": est["hi"] < -margin}
+    return out
+
+
 def _episodes_file(run_dir: Path) -> Path:
     return next(p for p in (run_dir / "episodes.jsonl.gz", run_dir / "episodes.jsonl") if p.is_file())
 
@@ -385,6 +429,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         p.add_argument("--heldout-of", nargs="*", default=[], help="runs reduced to their held-out sources")
         p.add_argument("--heldout-fraction", type=float, default=0.3)
         p.add_argument("--heldout-seed", default="it17-confidence")
+    rg = sub.add_parser("read-guard", help="read-before-destruction guards: candidate - reference, with margins")
+    rg.add_argument("--reference", type=Path, required=True)
+    rg.add_argument("--candidate", type=Path, required=True)
+    rg.add_argument("--tasks-root", type=Path, default=Path("data/tasks"))
+    rg.add_argument("--n-sim", type=int, default=2000)
+    rg.add_argument("--json", type=Path, default=None)
     g = sub.add_parser("guards", help="the guards' non-inferiority margins at a run's own K and S")
     g.add_argument("--run", type=Path, required=True, help="the reference arm's run_eval directory")
     g.add_argument("--n-sim", type=int, default=2000)
@@ -395,6 +445,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     pp.add_argument("--n-boot", type=int, default=2000)
     pp.add_argument("--json", type=Path, default=None)
     args = ap.parse_args(argv)
+    if args.cmd == "read-guard":
+        text = json.dumps(read_guard(args.reference, args.candidate, args.tasks_root, n_sim=args.n_sim), indent=2)
+        if args.json:
+            args.json.write_text(text + "\n")
+        print(text)
+        return 0
     if args.cmd == "guards":
         text = json.dumps(guard_margins(args.run, n_sim=args.n_sim), indent=2)
         if args.json:
