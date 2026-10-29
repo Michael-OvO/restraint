@@ -1,8 +1,8 @@
-# Iteration 18 pre-registration: calibrated confidence with the actions anchored (DRAFT, not approved)
+# Iteration 18 pre-registration: calibrated confidence with the actions anchored (APPROVED 2026-10-29)
 
 Design: [iteration-18-design.md](iteration-18-design.md). It reuses
 [iteration-17-prereg.md](iteration-17-prereg.md) wherever this file does not say otherwise; section numbers below
-follow it. Written before any it18 training. After the owner approves it, nothing here changes except by a dated
+follow it. **Approved by the owner on 2026-10-29 ("Approve (Recommended)"), before any it18 training.** From here, nothing here changes except by a dated
 owner amendment.
 
 ## 1. Hypothesis
@@ -81,12 +81,13 @@ G2-cal18 on the select split (S = 2, quarantine excluded, `configs/protocols/it1
 - **Any guard fails:** no final-benchmark spend; reported with the failing guard.
 - A grey region in any endpoint is reported as grey; there is no default action.
 
-## 8. Before any GPU spend (open)
+## 8. Before any GPU spend
 
 - **Ledger:** DEF-10, DEF-20 and DEF-50 are waived for it16a-it16d and it17a-it17b only, so
-  `gate.ledger check --experiment it18b` refuses until the owner waives them for it18b (or closes them). DEF-10 (bars
+  `gate.ledger check --experiment it18b` refused until the owner waived them for it18b: **granted 2026-10-29**
+  ("Waive for it18b (Recommended)"; `gate.ledger check --experiment it18b` exits 0, it18c stays shut). DEF-10 (bars
   at a point estimate) and DEF-20 (guard power) are what sections 5 and 6 address with computed MDEs and margins;
   DEF-50 (AbstentionBench unfrozen) concerns only the final benchmark, which this stage does not run.
 - **L1:** not re-run. The evaluation path is unchanged since the L1 that passed on the DEF-65 harness commit
   (it17 sign-off), and this stage adds no task, grader or harness change.
-- Owner approval of this pre-registration and of the GPU spend (design section 5: about 3.5-4 h, about $4-5).
+- Owner approval of this pre-registration and of the GPU spend: **granted 2026-10-29** (docs/iteration-18-signoff.md).

@@ -1,4 +1,4 @@
-# Iteration 18 design: calibrated confidence with the actions anchored (DRAFT)
+# Iteration 18 design: calibrated confidence with the actions anchored
 
 Follows [iteration-17-results.md](iteration-17-results.md) (NO-GO: the primary passed, the infeasible claim-rate guard
 failed). The owner, on the cause: "I thought we had kl divergence no?". Iteration 17's KL covered the value's token
@@ -75,5 +75,5 @@ evals about 20 min. About 3.5-4 h, about $4-5. If the abort fires, the chain sto
 
 ## 6. Owner decisions
 
-- (pending) this design, the pre-registration ([iteration-18-prereg.md](iteration-18-prereg.md)), the waivers the
-  ledger needs for it18b, and the GPU spend.
+- 2026-10-29: the pre-registration ([iteration-18-prereg.md](iteration-18-prereg.md)) approved, DEF-10, DEF-20 and
+  DEF-50 waived for it18b, and the GPU spend approved ([iteration-18-signoff.md](iteration-18-signoff.md)).

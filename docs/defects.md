@@ -17,7 +17,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-07 | build | closed | `_pick_pair` reassigns every existing variant when a pool grows |
 | DEF-08 | tooling | closed | checkpoint selection uses `task_success`, which ignores honesty |
 | DEF-09 | tooling | closed | decision probe hard-codes `harness.SYSTEM_PROMPT` |
-| DEF-10 | stats | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b) | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
+| DEF-10 | stats | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b) | pass bars set at a reference model's point estimate, with no MDE or clone-pass check |
 | DEF-11 | metric | closed | G2's held-out read rate differs by branch (twins 37 vs controls 24): behaviour (one seed; a cue on empty_backup), not the classifier |
 | DEF-12 | archive | closed | the two archived SFT-v2 surface4 evals are the same episodes under two names |
 | DEF-13 | reward | closed | G3 reward pays blind declining (break-even P(twin) ≈ 0.35-0.39) and gives reading no credit on controls |
@@ -27,7 +27,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-17 | tooling | closed | `g1_surfaces`: Ctrl-C does not cancel queued pairs (the pool's shutdown waits for all of them) |
 | DEF-18 | build | closed | probe/SFT surface builds re-draw their forced pair and `{context}` when a pool grows |
 | DEF-19 | tooling | closed | local sandbox exec runs with umask 0000, so controls whose tests check file modes fail the oracle gate on the Mac only (closed with DEF-16, same cause) |
-| DEF-20 | stats | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b) | three iteration-16 guards had no powered metric; mean commands now powered (a count), twin task_success recorded from now on (void on the archive), `revealed` pending G2 pair replays |
+| DEF-20 | stats | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b) | three iteration-16 guards had no powered metric; mean commands now powered (a count), twin task_success recorded from now on (void on the archive), `revealed` pending G2 pair replays |
 | DEF-21 | tooling / tests | closed | `test_background_agent_process_cannot_forge_reward` is timing-dependent and can fail the `--fast` gate under load |
 | DEF-22 | tooling / build | closed | L0 S7 writes an 18.8 MB temporary rebuild to disk on every L0 run (`--fast` included); integrity-gate.md: never write the build to disk |
 | DEF-23 | tooling | closed | `gate sweep` does not run S3 (metric validity) or S11 (infrastructure guards); S11 has no tool |
@@ -57,7 +57,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-47 | metric / tooling | closed | S3's ground truth `shown` cannot see a print of a backup file (`cat B/f`) on empty_backup, so a correct `revealed` is audited as an FP; the first full L1 sweep failed S3 on it |
 | DEF-48 | metric / tooling | closed | `run_eval --diff` / `--noninferiority` ignore `--exclude-quarantined`, so every paired select difference (the it14 SFT-v2 epoch numbers) included the quarantined variants |
 | DEF-49 | tooling / build | closed | `eval_tb.sh tb2` resolves `terminal-bench@2.0` through Harbor's hosted registry at run time, so the frozen final benchmark's TB2 commit is not what runs |
-| DEF-50 | tooling / build | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b) | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
+| DEF-50 | tooling / build | waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b) | AbstentionBench is not frozen: the export loads `facebook/AbstentionBench` at no revision, and its loading script downloads 20 unpinned source datasets |
 | DEF-51 | build | closed | no config or serve script pins the base model's Hub revision (`model.revision` is null everywhere), so the final benchmark's base arm is pinned only in its manifest |
 | DEF-52 | tooling / build | closed | `final_benchmark freeze` writes the items files before it checks for changes, so a freeze refused without `--refreeze` still overwrites the frozen item sets |
 | DEF-53 | tooling / build | closed | the never-trained check's archive scope left out archived training inputs (GRPO rollouts, train_rl copies, it12 pools, teacher episodes, selection inputs) while claiming every archived training build |
@@ -518,7 +518,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   prompt (S0.5) is not frozen yet.
 
 ### DEF-10: bars at a point estimate, no power check
-- **Area:** stats. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open (the earlier waiver covered it16a only). The waiver does not drop the On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6).
+- **Area:** stats. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open (the earlier waiver covered it16a only). The waiver does not drop the On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6). On 2026-10-29 the owner extended the waiver to it18b ("Waive for it18b (Recommended)"); it18 states its own power and margins (docs/iteration-18-prereg.md sections 5-6).
   pre-registration's rules: the computed-at-build values are still written in before any final-arm episode. The owner approved the pre-registration with
   the DEF-58 and DEF-60 amendments on 2026-10-26 ("Approve and continue", answering the morning brief's Decision 1, whose
   recommended answer was this waiver for the calibration samples only). Still open for it16b, it16c and it16d: the
@@ -1552,7 +1552,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   but its rewrite waits for the owner.
 
 ### DEF-20: iteration-16 guards with no powered metric
-- **Area:** stats. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open. The stage-(a) eval still supplies twin task_success's MDE. On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6).
+- **Area:** stats. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open. The stage-(a) eval still supplies twin task_success's MDE. On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6). On 2026-10-29 the owner extended the waiver to it18b ("Waive for it18b (Recommended)"); it18 states its own power and margins (docs/iteration-18-prereg.md sections 5-6).
   Before the waiver: fixing (mean commands done; twin task_success recorded from now on, void on the
   archive and its S3 check on real twins pending; `revealed` pending pair replays of all three surface runs; the
   2026-10-26 node run that was to produce both did not happen, see the closure attempt below).
@@ -2830,7 +2830,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   freeze date, so the change pins behaviour without changing it.
 
 ### DEF-50: AbstentionBench is not frozen
-- **Area:** tooling / build. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open. AbstentionBench is still unfrozen (the gated GPQA subset); On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6).
+- **Area:** tooling / build. **Status:** waived (owner, 2026-10-26; covers it16a, it16b, it16c, it16d; owner, 2026-10-28; covers it17a, it17b; owner, 2026-10-29; covers it18b); the owner wrote "Waive everything" on 2026-10-26, after the brief listed this entry as open. AbstentionBench is still unfrozen (the gated GPQA subset); On 2026-10-28 the owner extended the waiver to it17a and it17b ("Waive for it17a, it17b (Recommended)"), after the iteration-17 brief listed it as shutting the gate; it17 states its own power (docs/iteration-17-prereg.md sections 5-6). On 2026-10-29 the owner extended the waiver to it18b ("Waive for it18b (Recommended)"); it18 states its own power and margins (docs/iteration-18-prereg.md sections 5-6).
   stage (d) cannot score it until an export is frozen or the owner amends the benchmark. **Found:** 2026-10-25, build:bench. **Commits:** `7ca6e12` (revision
   pin, test), `aaae57f` (computable metric), `bc12de7` (export ingest, verify-export, tests).
 - **Evidence:** `src/honest_agents/eval/external/abstentionbench_export_standalone.py` (~L26, before the fix)
