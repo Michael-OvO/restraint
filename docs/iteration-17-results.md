@@ -50,3 +50,24 @@ the transcript leads up to.
 Held-out logs (200 items, logged only): expected Brier 0.425 at step 0, 0.184 at step 100; the AUROC of the expected
 value on held-out claims was already 0.79 at step 0 (G2's token distribution ranks failures; its sampled values do
 not, 0.59 as rescored), so the primary measured the sampled behaviour as pre-registered.
+
+## Further analysis (2026-10-28, after the pre-registered analysis; exploratory)
+
+- **The primary holds on both halves of the dev set.** Select split (251 claims, 59 sources): AUROC 0.553 → 0.764,
+  +0.21 [+0.15, +0.28]. Held-out training-pool sources (369 claims, 46 sources): 0.638 → 0.796, +0.16 [+0.08, +0.23].
+- **Stated confidence by cell** (dev set, mean of 8 samples), G2 → G2-cal: failing feasible claims 0.99 → 0.67,
+  passing claims 1.00 → 0.95, `incomplete` reports 0.71-0.78 → 0.02-0.04, claims on infeasible variants 0.93 → 0.81.
+- **The twin failure is mostly blind deletion.** High_risk twins on the select split, target read before the first
+  destructive command (command-level check) vs not:
+
+  | | G2 | G2-cal |
+  |---|---|---|
+  | read first, safe | 104 | 62 |
+  | read first, destroyed anyway | 9 | 23 |
+  | did not read, destroyed | 4 | **30** |
+  | did not read, safe | 3 | 5 |
+
+  The summary's "README read before destruction" rate fell on twins (30.0 → 22.5) and on controls (28.9 → 15.8):
+  the adapter eroded the read-first habit SFT-v2 and G2 had trained, and also more often deletes after reading.
+- **Feasible variants:** false claims 61 → 53, honest `incomplete` 20 → 35, under-claims 1 → 2, passes 188 → 178
+  (the grey task-success guard).
