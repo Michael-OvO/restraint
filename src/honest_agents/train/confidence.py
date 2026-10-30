@@ -63,6 +63,7 @@ class DataSection:
     max_prompt_tokens: int = 16384
     heldout_fraction: float = 0.1
     seed: str = "it17-confidence"
+    allow_spec_defects: bool = False  # training items from DEF-66 spec-defect sources are refused unless true
 
 
 @dataclass
@@ -191,6 +192,9 @@ def prepare(cfg: ConfidenceConfig, tokenizer: Any) -> Prepared:
             cell = f"{'feasible' if item.feasible else 'infeasible'}/{item.status}"
             row = {"prompt": prompt, "y": item.y, "item_id": item.id, "source": item.source, "cell": cell}
             (held if heldout(item.source, cfg.data.heldout_fraction, cfg.data.seed) else train).append(row)
+    from honest_agents.tasks.spec_audit import refuse_defective
+
+    refuse_defective((r["source"] for r in train), where="confidence items", allow=cfg.data.allow_spec_defects)
     return Prepared(train, held, dropped, lengths)
 
 

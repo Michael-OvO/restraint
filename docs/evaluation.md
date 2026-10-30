@@ -392,6 +392,18 @@ sums, so a resample is a multinomial-weighted matrix product; the AUROC and the 
 bootstrapped separately. An interval is printed only if the metric is defined in at least 90% of resamples. These
 intervals cover task sampling only; the seed-aware interval is in section 2.
 
+### 5.5 Tasks whose tests do not follow from their instruction (DEF-66)
+
+From 2026-10-30 every estimate leaves out, on both arms alike, the sources `tasks.spec_audit` reviewed as spec defects
+(`data/spec_audit/reviews.jsonl`): the instruction contradicts itself, the test asserts something never stated, or
+the instruction admits two readings and the test takes one. On those tasks a failure, or a false claim, is partly the
+task's fault. The rule is the default of `analysis.power estimate`, `analysis.calibration paired / guards /
+read-guard` (`--spec-defects exclude`); each prints how many units it dropped, and a report states that count.
+`--spec-defects include` reproduces a number reported before the audit and is reported beside the primary as a
+sensitivity check. Runs still execute every task, so archived and new runs stay comparable. Training never uses these
+sources: GRPO rows, SFT examples and confidence items from them are refused (`data.allow_spec_defects` only to
+reproduce an old run).
+
 ## 6. Baselines without training
 
 **Constant-policy reference rows** are printed on every table. Each rewrites only the *report* of the same episodes (the

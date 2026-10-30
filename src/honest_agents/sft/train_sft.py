@@ -73,6 +73,7 @@ class DataSection:
     min_examples: int = 16  # refuse a run with fewer fit examples
     row_filter: dict[str, Any] = field(default_factory=dict)  # `data.RowFilter` fields
     dump_examples: bool = True  # write `examples.jsonl` next to the run, for reading the labels by eye
+    allow_spec_defects: bool = False  # examples from DEF-66 spec-defect sources are refused unless true
 
 
 @dataclass
@@ -117,7 +118,9 @@ class SftConfig:
     selfdistill: dict[str, Any] = field(default_factory=dict)  # `selfdistill.SelfDistillOptions` (kind selfdistill)
     decision: dict[str, Any] = field(default_factory=dict)  # `decision.DecisionOptions` fields (kind decision)
     judgment: dict[str, Any] = field(default_factory=dict)  # `judgment.JudgmentOptions` fields (kind judgment)
-    splice: dict[str, Any] = field(default_factory=dict)  # `judgment_splice.SpliceOptions` fields (kind judgment_splice)
+    splice: dict[str, Any] = field(
+        default_factory=dict
+    )  # `judgment_splice.SpliceOptions` fields (kind judgment_splice)
     read_rft: dict[str, Any] = field(default_factory=dict)  # `read_rft.ReadRftOptions` fields (kind read_rft)
     commit_build: dict[str, Any] = field(default_factory=dict)  # `commit_build.CommitBuildOptions` (kind commit_build)
     train: TrainSection = field(default_factory=TrainSection)
@@ -185,7 +188,9 @@ def parse_config(raw: dict[str, Any], *, check_kind: bool = True) -> SftConfig:
     if not 0.0 <= cfg.data.holdout_fraction < 1.0:
         raise ValueError("data.holdout_fraction must be in [0, 1)")
     if cfg.data.partition_by not in data.PARTITION_KEYS:
-        raise ValueError(f"data.partition_by must be one of {sorted(data.PARTITION_KEYS)}, got {cfg.data.partition_by!r}")
+        raise ValueError(
+            f"data.partition_by must be one of {sorted(data.PARTITION_KEYS)}, got {cfg.data.partition_by!r}"
+        )
     return cfg
 
 
@@ -248,7 +253,9 @@ def build_stage_data(cfg: SftConfig) -> tuple[StageData, dict[str, Any]]:
     """Read the bank, partition it by variant and build the stage's examples. Returns the data and a summary."""
     flt = data.RowFilter(**cfg.data.row_filter)
     sel = data.read_rows(cfg.data.bank, flt)
-    fit, held = data.partition(sel.usable, cfg.data.holdout_fraction, cfg.seed, data.PARTITION_KEYS[cfg.data.partition_by])
+    fit, held = data.partition(
+        sel.usable, cfg.data.holdout_fraction, cfg.seed, data.PARTITION_KEYS[cfg.data.partition_by]
+    )
     if cfg.data.max_rows is not None:
         fit = _stable_order(fit)[: cfg.data.max_rows]
     stage = STAGES[cfg.kind](cfg, fit, held, sel.scorable)
@@ -361,6 +368,9 @@ def load_tokenizer(cfg: SftConfig):
 
 def tokenize_stage(stage: StageData, cfg: SftConfig, family: ModelFamily, tokenizer: Any):
     """(train dataset, eval dataset or None, tokenisation summary)."""
+    from honest_agents.tasks.spec_audit import refuse_defective
+
+    refuse_defective((ex.variant for ex in stage.train), where="sft examples", allow=cfg.data.allow_spec_defects)
     renderer = data.make_renderer(tokenizer, family)
     train_tok, _, dropped = data.tokenize_examples(stage.train, renderer, cfg.data.max_length)
     eval_tok, _, dropped_eval = data.tokenize_examples(stage.eval, renderer, cfg.data.max_length)

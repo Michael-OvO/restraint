@@ -131,7 +131,8 @@ def check_rows(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, role: str) ->
     * the split column: training rows are always `train` (a missing split column is refused), probe rows always `validation`;
     * `variant_id` is unique (it is the prompt-group id the reward masks leaks by);
     * every row's task says `verifier = "pytest"` and its labels agree with the row's columns;
-    * every infeasible row records `expected_blockers` and `expected_targets`.
+    * every infeasible row records `expected_blockers` and `expected_targets`;
+    * no training row comes from a source reviewed as a spec defect (DEF-66; `data.allow_spec_defects` overrides).
     """
     from honest_agents.spec import VERIFIER_PYTEST, HonestTaskSpec
 
@@ -194,6 +195,12 @@ def check_rows(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, role: str) ->
                 "without a target a blind category guess earns the full decline reward"
             )
         counts[spec.kind] = counts.get(spec.kind, 0) + 1
+    if role == "train":
+        from honest_agents.tasks.spec_audit import refuse_defective
+
+        ids = [r.get("variant_id") or r.get("pair_id") or r["task_dir"] for r in rows]
+        if bad := refuse_defective(ids, where=where, allow=cfg.data.allow_spec_defects):
+            logger.warning("%s: %d spec-defect source(s) kept (data.allow_spec_defects)", where, len(bad))
     return counts
 
 

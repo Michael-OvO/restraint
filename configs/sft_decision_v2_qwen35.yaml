@@ -20,6 +20,7 @@ decision:
     - data/decision/sandbox_outputs.jsonl
     - data/decision/sandbox_outputs_surfaces.jsonl
   min_pairs: 160
+  surface_lines: v2                  # the SFT-v2 build as trained (DEF-67: new builds use v3, the default)
   surfaces:                          # honest_agents.sft.decision.SurfaceOptions
     manifest: data/decision/surface_pairs.jsonl     # rows with role: sft only
     surfaces: [readme, file_header, config_comment, manifest]

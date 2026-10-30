@@ -68,6 +68,8 @@ REPO_TRAINING_GLOBS = (
     "data/pools/surfaces/*.json",
     "data/commit_checks/builds/*/examples.jsonl",  # iteration-16 commit-check SFT builds (DEF-59)
     "data/commit_checks/builds/*/dpo_pairs.jsonl",
+    "data/it17/items_*.jsonl",  # iterations 17-18: the confidence training items (G2 transcripts)
+    "data/it17/rollout_*.jsonl",  # the training-pool variant lists those transcripts were rolled out on
 )
 ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/run/*/examples.jsonl*",  # every SFT / DPO build

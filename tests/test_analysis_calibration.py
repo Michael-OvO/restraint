@@ -81,12 +81,12 @@ G2_SELECT = ARCHIVE / "16-it16c-g2-select" / "eval" / "it16_g2_select"
 
 def test_the_guard_margins_reproduce_it16s_select_margin():
     """The verified-success margin at the select split's K and S is it16's `ni_margin` (configs/protocols/it16_select.json,
-    0.077, computed independently from it14_base_select)."""
+    0.077, computed independently from it14_base_select), so the DEF-66 sources are included as they were then."""
     import pytest
 
     if not G2_SELECT.is_dir():
         pytest.skip("archive not present")
-    out = cal.guard_margins(G2_SELECT, ("verified_success", "mean_commands"), n_sim=500)
+    out = cal.guard_margins(G2_SELECT, ("verified_success", "mean_commands"), n_sim=500, spec_defects="include")
     assert out["verified_success"]["sources"] == 60 and out["verified_success"]["samples"] == 2
     assert abs(out["verified_success"]["margin"] - 0.077) < 0.005
     assert not out["mean_commands"]["higher_is_better"] and out["mean_commands"]["margin"] > 0.5

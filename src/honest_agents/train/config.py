@@ -92,6 +92,9 @@ class DataSection:
     check_tasks: bool = True  # read every row's task.toml (verifier, labels); off only for synthetic unit-test rows
     require_expected_targets: bool = True  # an infeasible row without expected_targets lets a blind guess earn m = 1
     allow_custom_system_prompt: bool = False  # rows must use harness.SYSTEM_PROMPT (one prompt in train and eval)
+    # training rows from a source reviewed as a spec defect (DEF-66, `tasks.spec_audit`) are refused; true only to
+    # reproduce a run that predates the audit
+    allow_spec_defects: bool = False
     # test_ids.txt of the dataset build: a train or validation row whose pair_id is in it is refused. None = the file
     # next to `train_file` if there is one (tasks.build writes it there), else no check.
     holdout_ids: str | None = None

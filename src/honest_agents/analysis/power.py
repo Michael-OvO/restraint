@@ -391,7 +391,9 @@ METRICS: dict[str, Metric] = {
 }
 
 # Why a metric can have no units on a run, for the report (DEF-20: the guard is listed, not silently left out).
-_NEEDS_REPLAYS = "pair replays of every episode of all three surface runs (`analysis.replay_episodes --pair`, `--replays`)"
+_NEEDS_REPLAYS = (
+    "pair replays of every episode of all three surface runs (`analysis.replay_episodes --pair`, `--replays`)"
+)
 NEEDS = {
     "twin_task_success": (
         "the twin's feasible-part verdict (`extra.feasible_part`), recorded by the grader since DEF-20; "
@@ -1235,6 +1237,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ep.add_argument("reference", type=Path)
     ep.add_argument("candidate", type=Path)
     ep.add_argument("--metric", required=True, choices=sorted(METRICS))
+    ep.add_argument("--spec-defects", choices=("exclude", "include"), default="exclude",
+                    help="DEF-66 sources: excluded by default; `include` reproduces numbers from before the audit")  # fmt: skip
     rt = sub.add_parser("rts", help="the RTS MDE from the base arm's scoreboard units alone")
     rt.add_argument("--units", type=Path, required=True, help="the base row's units file (scoreboard --units-dir)")
     rt.add_argument("--n-boot", type=int, default=2000)
@@ -1259,8 +1263,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             load: Callable[[Path], list[Episode]] = (
                 (lambda p: load_surface_run(p, args.tasks_root)) if metric.kind == "surface" else load_tier_run
             )
-            result: Any = paired_estimate(unit_data(load(args.reference), metric),
-                                          unit_data(load(args.candidate), metric), seed=args.seed)  # fmt: skip
+            from honest_agents.tasks.spec_audit import drop_defective
+
+            def arm(p: Path) -> list[Episode]:
+                return drop_defective(load(p), lambda e: e.task, args.spec_defects)
+
+            result: Any = paired_estimate(unit_data(arm(args.reference), metric),
+                                          unit_data(arm(args.candidate), metric), seed=args.seed)  # fmt: skip
             pp = "-" if result["p_signflip_pair"] is None else f"{result['p_signflip_pair']:.3f}"
             sc = metric.scale
             print(f"{args.metric}: reference {_p(result['reference'], scale=sc)} candidate "

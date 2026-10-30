@@ -47,6 +47,11 @@ Notes:
 - **Iteration 16.** Stage (a) (calibration samples) was dropped by an owner amendment. Stage (c)'s epoch 2 passed its
   select-split gate against the base (verified success non-inferior), but it was not better than G2, so the RL stage
   (c2), the validation gate and the final benchmark (d) did not run; the owner chose the iteration-17 pivot instead.
+- **Task defects (DEF-66, found 2026-10-30).** 75 sources have hidden tests that do not follow from their
+  instruction, 8 of them in the select split. Every select-split number in this table includes them, as it was
+  measured; from 2026-10-30 estimates exclude them by default (docs/evaluation.md section 5.5). Paired comparisons are
+  unaffected in direction (it18's infeasible-claim guard: +11.8 with them, +13.5 without), but absolute rates move
+  (G2's select verified success 69.1 % with them, 81.0 % without the first 29 found).
 - **Iteration 17.** Its guards compare against a G2 re-run under the current harness (verified success 69.1 %), not
   the iteration-16 G2 run (72.7 %); the harness changed in between (DEF-65).
 

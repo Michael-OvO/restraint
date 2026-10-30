@@ -17,8 +17,10 @@ The audit is behavioural, then human:
   test that asks for something the instruction does not say: agents do the task and lose on one detail. On the 7 known
   defects the rule flags 5; the two it misses are contradictions that agents sometimes resolve the test's way.
 * **reviews** (`data/spec_audit/reviews.jsonl`, one row per reviewed source) hold the verdict of reading the
-  instruction against the tests: `defect` (with its kind, the evidence and the ledger ID) or `ok`. Sources can be
-  reviewed without being candidates.
+  instruction against the tests: `defect` (with its kind, the evidence and the ledger ID) or `ok`. A defect stands only
+  when a second, independent reader asked to refute it confirmed it (`second_review: confirmed`); a refuted claim is
+  recorded as `ok` with the refutation as its evidence and the claim kept in `first_review`. Sources can be reviewed
+  without being candidates.
 * **check** (integrity sweep S12, L0) fails while a candidate has no review, a defect names no ledger entry or one that
   is not in the ledger, a row is malformed, or the archive holds more eval runs than the candidates were scanned from.
 * **defective** prints the sources reviewed as defects, for pool builders and analyses to exclude.
@@ -46,7 +48,7 @@ LEDGER = REPO / "docs" / "defects.md"
 EPISODE_GLOBS = ("*/eval/*/episodes.jsonl.gz", "*/eval/*/episodes.jsonl")
 VERDICTS = ("defect", "ok")
 KINDS = ("contradiction", "hidden_requirement", "ambiguous", "other")
-_SOURCE = re.compile(r"(endless-terminals)__(task_\d+_[0-9a-f]{8})")
+_SOURCE = re.compile(r"(endless-terminals)(?:__|/)(task_\d+_[0-9a-f]{8})")
 _DEF_ID = re.compile(r"^DEF-[A-Za-z0-9-]+$")
 
 
@@ -87,7 +89,7 @@ class SourceStats:
 
 
 def source_of(task_id: str) -> str | None:
-    """`endless-terminals/task_000000_1978f062` for any variant id of that source."""
+    """`endless-terminals/task_000000_1978f062` for any variant id, task dir or source string of that source."""
     m = _SOURCE.search(task_id)
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
@@ -173,6 +175,10 @@ def review_problems(reviews: Sequence[dict[str, Any]], ledger_ids: set[str]) -> 
         if not str(r.get("evidence") or "").strip():
             out.append(f"{where}: no evidence")
         if verdict == "defect":
+            if r.get("second_review") != "confirmed":
+                out.append(
+                    f"{where}: a defect needs `second_review: confirmed` (an independent reader tried to refute it)"
+                )
             if r.get("kind") not in KINDS:
                 out.append(f"{where}: kind {r.get('kind')!r} is not one of {KINDS}")
             did = r.get("def_id")
@@ -202,6 +208,37 @@ def check(candidates: dict[str, Any], reviews: Sequence[dict[str, Any]], ledger_
 
 def defective_sources(reviews_path: Path = REVIEWS) -> set[str]:
     return {r["source"] for r in load_reviews(reviews_path) if r.get("verdict") == "defect"}
+
+
+def refuse_defective(task_ids: Iterable[str], *, where: str, allow: bool = False, reviews: Path = REVIEWS) -> set[str]:
+    """The training guard (DEF-66): the defective sources among `task_ids` (variant ids, task dirs or sources). Raises
+    unless `allow` (a config's `allow_spec_defects`, set only to reproduce a run that predates the audit)."""
+    bad = {s for t in task_ids if (s := source_of(str(t))) is not None} & defective_sources(reviews)
+    if bad and not allow:
+        raise ValueError(
+            f"{where}: {len(bad)} source(s) reviewed as spec defects (DEF-66, {reviews}), e.g. {min(bad)}; drop them "
+            "(`python -m honest_agents.tasks.spec_audit defective`) or set allow_spec_defects to reproduce an old run"
+        )
+    return bad
+
+
+SPEC_DEFECT_CHOICES = ("exclude", "include")
+
+
+def drop_defective(items: Iterable[Any], key: Any, policy: str = "exclude") -> list[Any]:
+    """The analysis rule (DEF-66, 2026-10-30): estimates exclude the sources reviewed as spec defects, on both arms
+    alike; `policy="include"` reproduces a number reported before the audit. `key` maps an item to its task id or
+    source. The count dropped is printed to stderr so a report can state it."""
+    items = list(items)
+    if policy == "include":
+        return items
+    if policy != "exclude":
+        raise ValueError(f"spec-defect policy {policy!r} is not one of {SPEC_DEFECT_CHOICES}")
+    bad = defective_sources()
+    kept = [x for x in items if source_of(str(key(x))) not in bad]
+    if len(kept) < len(items):
+        print(f"spec audit: {len(items) - len(kept)} of {len(items)} units dropped (DEF-66 sources)", file=sys.stderr)
+    return kept
 
 
 def main(argv: Sequence[str] | None = None) -> int:

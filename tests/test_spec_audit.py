@@ -48,11 +48,12 @@ def test_check_needs_a_review_for_every_candidate_and_a_ledger_id_for_every_defe
     cands = {"eval_runs": 3, "candidates": [{"source": SRC}]}
     assert sa.check(cands, [], LEDGER) == [f"candidate {SRC} has no review"]
     good = {"source": SRC, "verdict": "defect", "kind": "contradiction", "evidence": "instruction l3 vs test l9",
-            "def_id": "DEF-70"}  # fmt: skip
+            "def_id": "DEF-70", "second_review": "confirmed"}  # fmt: skip
     assert sa.check(cands, [good], LEDGER) == []
     assert any("not in the ledger" in p for p in sa.check(cands, [{**good, "def_id": "DEF-99"}], LEDGER))
     assert any("needs `def_id`" in p for p in sa.check(cands, [{**good, "def_id": None}], LEDGER))
     assert any("kind" in p for p in sa.check(cands, [{**good, "kind": "typo"}], LEDGER))
+    assert any("second_review" in p for p in sa.check(cands, [{**good, "second_review": None}], LEDGER))
     assert any("no evidence" in p for p in sa.check(cands, [{**good, "evidence": ""}], LEDGER))
     ok = {"source": SRC, "verdict": "ok", "evidence": "the test asserts what the instruction states"}
     assert sa.check(cands, [ok], LEDGER) == []
@@ -70,3 +71,34 @@ def test_the_committed_audit_is_consistent() -> None:
     cands = json.loads(sa.CANDIDATES.read_text())
     assert sa.check(cands, sa.load_reviews(sa.REVIEWS), sa.LEDGER.read_text()) == []
     assert cands["rule"] == {"min_episodes": 8, "max_pass_rate": 0.2, "min_median_fail_fraction": 0.6}
+
+
+def test_training_refuses_a_defective_source_unless_allowed(tmp_path) -> None:
+    import pytest
+
+    reviews = tmp_path / "reviews.jsonl"
+    reviews.write_text(json.dumps({"source": SRC, "verdict": "defect", "kind": "contradiction", "evidence": "x",
+                                   "def_id": "DEF-70"}) + "\n")  # fmt: skip
+    ids = ["endless-terminals__task_000000_aaaaaaaa__high_risk__control", "endless-terminals/task_000000_bbbbbbbb"]
+    with pytest.raises(ValueError, match="spec defects"):
+        sa.refuse_defective(ids, where="rows", reviews=reviews)
+    assert sa.refuse_defective(ids, where="rows", allow=True, reviews=reviews) == {SRC}
+    assert sa.refuse_defective(ids[1:], where="rows", reviews=reviews) == set()
+
+
+def test_the_grpo_row_check_applies_the_guard(monkeypatch) -> None:
+    import pytest
+
+    from honest_agents.train import rows as tr
+    from honest_agents.train.config import TrainRunConfig
+
+    monkeypatch.setattr(sa, "defective_sources", lambda reviews=sa.REVIEWS: {SRC})
+    cfg = TrainRunConfig()
+    cfg.data.check_tasks = False
+    row = {"split": "train", "task_dir": "/x/endless-terminals__task_000000_aaaaaaaa__feasible", "pair_id": SRC}
+    with pytest.raises(ValueError, match="spec defects"):
+        tr.check_rows([row], cfg, role="train")
+    cfg.data.allow_spec_defects = True
+    assert tr.check_rows([row], cfg, role="train")["rows"] == 1
+    cfg.data.allow_spec_defects = False
+    assert tr.check_rows([{**row, "split": "val"}], cfg, role="validation")["rows"] == 1  # the probe: any source

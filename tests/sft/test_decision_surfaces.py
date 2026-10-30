@@ -14,7 +14,13 @@ from honest_agents.sft import decision as dec
 from honest_agents.sft.selfdistill import HINT_ECHO
 from honest_agents.tasks import decision_probe as dp
 from honest_agents.tasks import decision_surfaces as dsurf
-from honest_agents.tasks.perturb.risk_surfaces import SURFACES, SURFACES_HELDOUT, SURFACES_TRAIN, get_pool, inspection_commands
+from honest_agents.tasks.perturb.risk_surfaces import (
+    SURFACES,
+    SURFACES_HELDOUT,
+    SURFACES_TRAIN,
+    get_pool,
+    inspection_commands,
+)
 from tests.decision_fixtures import (
     TARGET,
     SurfaceFixture,
@@ -310,8 +316,8 @@ def test_anchor_variant_cap_option():
 
 
 def test_shipped_v2_config_parses():
-    from tests.sft.test_train_sft import ROOT
     from honest_agents.sft import train_sft
+    from tests.sft.test_train_sft import ROOT
 
     cfg = train_sft.load_config(ROOT / "configs" / "sft_decision_v2_qwen35.yaml")
     opts = dec.parse_options(cfg.decision)
@@ -364,7 +370,7 @@ def test_probe_targets_are_the_protected_paths():
     from honest_agents.tasks.perturb.risk_surfaces import SurfaceSite
 
     link = dp.VariantMeta("v", "p", "infeasible", T, "r", "w", "w", None, "inbound_link",
-                          SurfaceSite("inbound_link", T, (f"/srv/vol/vault/README",), (T, "/srv/vol/vault"), (T, "/srv/vol/vault"), (), real="/srv/vol/vault"), "link-1")  # fmt: skip
+                          SurfaceSite("inbound_link", T, ("/srv/vol/vault/README",), (T, "/srv/vol/vault"), (T, "/srv/vol/vault"), (), real="/srv/vol/vault"), "link-1")  # fmt: skip
     assert dp.sentinel_targets(link) == [T, "/srv/vol/vault"] and dp.sentinel_targets(link, T) == [T, "/srv/vol/vault"]
     assert classify([ToolCall("bash", {"command": "rm -rf /srv/vol/vault"})], dp.sentinel_targets(link)) == CLASS_DESTROY
     assert classify([ToolCall("bash", {"command": "rm -rf /srv/vol/vault"})], [T]) != CLASS_DESTROY  # what the old `[target]` missed
@@ -411,3 +417,29 @@ def test_probe_sources_per_surface_keep_empty_backup_zero_prefix_only():
     assert all(probe_src.for_surface(s) == ["a", "b"] for s in TRAIN)
     assert probe_src.for_surface("inbound_link") == ["a", "b", "s"] and probe_src.for_surface("empty_backup") == ["s"]
     assert "empty_backup" not in dsurf.OWN_PREFIX_SURFACES and "inbound_link" in dsurf.OWN_PREFIX_SURFACES
+
+
+def test_v3_surface_lines_decide_on_the_quoted_evidence_not_on_a_keep_keyword():
+    """DEF-67: the v2 control lines argued from a missing keep instruction, a rule G2 applied to twins."""
+    import re
+
+    for line in (*dec.CONTROL_SURFACE_LINES_V3, *dec.TWIN_SURFACE_LINES_V3):
+        assert "{quote}" in line and "{dir}" in line
+        assert not re.search(r"\bkeep|\bkept\b|must stay|must not", line, re.IGNORECASE), line
+        assert not HINT_ECHO.search(line)
+    assert dec.DecisionOptions().surface_lines == "v3"
+    with pytest.raises(ValueError, match="surface_lines"):
+        dec.DecisionOptions(surface_lines="v9")
+
+
+def test_a_v3_build_quotes_each_side_its_own_evidence(sfx: SurfaceFixture):
+    ds = build_surface(sfx)
+    lines = {"control": [], "twin": []}
+    for p in (p for p in ds.pairs if p.from_pool):
+        for side, ex in (("control", p.control), ("twin", p.twin)):
+            if (i := ex.meta["loss_roles"]["decision"]) is not None:  # a report-only twin has no decision turn
+                lines[side].append(ex.messages[i]["content"])
+    assert lines["control"]  # the fixture's twins are report-only: their quote is in the report (SURFACE_REPORT_TEMPLATES)
+    for line in lines["control"] + lines["twin"]:
+        assert line[line.index('"') + 1 : line.rindex('"')].strip(), line  # a non-empty quote of what this side read
+    assert not set(lines["control"]) & set(lines["twin"])

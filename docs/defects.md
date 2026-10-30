@@ -73,8 +73,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-63 | training data | closed 2026-10-28 | the it16 commit-data builds trained on 45 sources of the final eval's decision probe: `excluded_from_training` holds select / val / test only, and the probe is spliced from train-split sources |
 | DEF-64 | tooling | closed 2026-10-28 | `node sync` excluded `*.log` and `.pytest_cache` everywhere, task directories included, so 12 rts/v1 task dirs differed on the node and failed the freeze check there |
 | DEF-65 | harness | closed 2026-10-28 | an agent command that backgrounds a process keeping stdout open hangs every later exec of the episode (the `timeout -k` wrapper kills only its own child) and there is no per-episode wall clock |
-| DEF-66 | task data | fixing | 29 sources' hidden tests do not follow from their instruction (self-contradiction, unstated requirement or two readings), invisible to the oracle gate; 10 of the 60 select sources |
-| DEF-67 | training data | open | the iteration-14 decision SFT's control lines teach a lexical rule ("nothing there says X has to be kept, so it is safe to remove"), which G2 applies to twins whose evidence never says "keep" |
+| DEF-66 | task data | closed 2026-10-30 | 75 sources' hidden tests do not follow from their instruction (self-contradiction, unstated requirement or two readings), invisible to the oracle gate; 8 of the 60 select sources, 34 of 253 train-pool sources |
+| DEF-67 | training data | closed 2026-10-30 | the iteration-14 decision SFT's control lines teach a lexical rule ("nothing there says X has to be kept, so it is safe to remove"), which G2 applies to twins whose evidence never says "keep" |
+| DEF-68 | tooling / benchmark | closed 2026-10-30 | the never-trained check did not read the iteration-17/18 confidence items (`data/it17/`), so its recorded pass predated their training |
 
 ---
 
@@ -3358,46 +3359,71 @@ section 7 critique) and from re-checks against the code and the archive on that 
   cap tests already there).
 
 ### DEF-66: hidden tests that do not follow from the instruction
-- **Area:** task data (Endless Terminals sources). **Status:** fixing (the audit is built and run; the downstream
-  exclusions and the eval disposition are open). **Found:** 2026-10-30, the iteration-19 bad-case analysis
-  ([iteration-19-research/badcase.md](iteration-19-research/badcase.md)): of G2's 95 false claims on the select split,
-  36 sat on 7 sources whose instruction contradicts itself or never states what the test asserts.
+- **Area:** task data (Endless Terminals sources). **Status:** closed 2026-10-30. **Found:** 2026-10-30, the
+  iteration-19 bad-case analysis ([iteration-19-research/badcase.md](iteration-19-research/badcase.md)): many of G2's
+  false claims on the select split sat on sources whose instruction contradicts itself or never states what the test
+  asserts.
 - **Why the gates missed it:** the oracle gate checks the reference solution against the tests, and the reference
-  solution is written to the test's reading, so it passes. No audit compared the instruction with the tests.
-- **Audit:** `tasks.spec_audit` (a scan of every archived eval; rule: at least 8 graded feasible episodes, pass rate
-  at most 0.2, median failing pass fraction at least 0.6) flagged 32 of 567 sources from 83 eval runs. Those 32 plus
-  the two known defects the rule misses (03e020f3, 7b368f5e: agents sometimes resolve them the test's way) were
-  reviewed by reading instruction against tests and failing pytest logs (four reviewers, two verdicts re-checked by
-  hand). Verdicts in `data/spec_audit/reviews.jsonl`: **29 defects** (13 hidden requirements, 11 contradictions, 5
-  ambiguous) and 5 ok. Examples: 03e020f3 says "9 lines" over an 8-line block, the test wants 8; 9fd868fd asks for the
-  "third" field where the level is the second; bfb0949a's test needs `--strip-components=1`, never stated; 658f04e0's
-  test caps the script at 5-10 lines, never stated.
-- **Exposure:** select 10 / 60 sources (03e020f3, 38af60bb, 59974445, 74eef614, 7b368f5e, 878bfeb5, a922a301,
-  be2a64e9, bfb0949a, efe31ef4); train_pool 11 / 253; val 4 / 98; test 4 / 156 (only 56 test sources have enough
-  archived episodes to be scanned); `data/it17/rollout_feasible.jsonl` 10 / 205 (the it17/it18 confidence items).
-- **Impact:** every select-split false-claim and verified-success number since iteration 16 includes these sources (a
-  false claim there is partly the task's fault); the it17/18 confidence labels on the 10 rollout sources are noisy;
-  RL on the 11 train-pool sources would pay for guessing the grader. Comparisons between arms on the same tasks stay
-  paired and valid; absolute rates are biased up for false claims and down for success.
-- **Fix so far:** integrity sweep S12 (`gate.checks.s12_spec_audit`, L0): every candidate has a reviewed verdict, every
-  defect names this entry, and the scan is re-run when the archive grows. Tests: `tests/test_spec_audit.py`.
-- **Remaining before closure:** (1) exclude `spec_audit defective` sources in every pool builder used for training
-  from now on; (2) a pre-registered disposition for the select / internal held-out analyses (exclude, or report with
-  and without), fixed before the next experiment's results; (3) a review pass over the test-split and train-pool
-  sources the scan cannot see (too few archived episodes).
+  solution is written to the test's reading, so it passes. No audit compared the instruction with the tests. A static
+  check (the test's literals against the instruction) was tried and rejected: code literals swamp it and it catches no
+  contradiction.
+- **Audit** (`tasks.spec_audit`, `data/spec_audit/`): (1) a scan of every archived eval (83 runs, 567 sources; rule: at
+  least 8 graded feasible episodes, pass rate at most 0.2, median failing pass fraction at least 0.6) flagged 32
+  sources; (2) those, the 2 known defects the rule misses, every source of the train pool, select, val, validation and
+  test splits with a near-miss pattern under a wider rule (pass rate at most 0.7) and every source of those splits with
+  too few archived episodes to scan (100 test, 1 train-pool, 28 validation-only) were read instruction against tests,
+  initial state and failing pytest logs: 264 sources; (3) every defect verdict was re-read by an independent reader
+  asked to refute it, and stands only when confirmed (`second_review`). Result: **75 defects** (41 hidden
+  requirements, 18 contradictions, 16 ambiguous), 189 ok; 32 first-round defect claims were refuted and recorded as ok
+  with the refutation. Examples: 03e020f3 says "9 lines" over an 8-line block, the test wants 8; 9fd868fd asks for the
+  "third" field where the level is the second; bfb0949a's test needs `--strip-components=1`, never stated; 1be74973
+  asks for "world-readable" and the test demands mode 0644.
+- **Exposure:** select 8 / 60 sources (03e020f3, 38af60bb, 59974445, 74eef614, 7b368f5e, 878bfeb5, be2a64e9,
+  bfb0949a); train_pool 34 / 253; train 18 / 78; train_rl_v3 11 / 64; val 9 / 98; test 21 / 156; validation 67 / 535;
+  `data/it17/rollout_feasible.jsonl` 28 / 205 (the it17/18 confidence items).
+- **Impact:** every select-split false-claim and verified-success number since iteration 16 includes these sources:
+  absolute false-claim rates are biased up and success down (G2's select verified success is 81.0 % without the first
+  29 flagged sources against 69.1 % with them). Paired comparisons on the same tasks stay valid; it18's verdict (no
+  GO, the infeasible-claim guard grey) holds with them excluded (+13.5 [+6.7, +20.3]). The it17/18 confidence labels on
+  28 rollout sources and the G3 RL pool (11 of 64 sources) were noisy.
+- **Fix:** (1) training refuses them: GRPO rows (`train.rows.check_rows`), SFT examples (`sft.train_sft`) and confidence
+  items (`train.confidence.prepare`) from a defect source raise unless the config sets `data.allow_spec_defects`,
+  which exists only to reproduce a run that predates the audit; (2) analysis excludes them by default on both arms
+  (`--spec-defects exclude` in `analysis.power estimate` and `analysis.calibration`; `include` reproduces old numbers
+  and is reported as a sensitivity check; docs/evaluation.md section 5.5); (3) integrity sweep S12
+  (`gate.checks.s12_spec_audit`, L0) fails while a candidate has no verdict, a defect lacks a confirmed second review
+  or a ledger ID, or the archive has more eval runs than the last scan.
+- **Not reviewed:** sources whose archived pass rate is above 0.7 or whose failures are not near misses. A spec defect
+  there would make passing rare or failures partial, so such a source would have been picked up; the residual is
+  stated, not zero. A new task build, and every new archived eval, re-enters the audit through S12.
+- **Closure tests:** `tests/test_spec_audit.py` (rule, review rows, second review, the training guard, the committed
+  audit), `tests/test_gate.py` (S12 in the L0 sweep), `tests/test_analysis_calibration.py`.
 
 ### DEF-67: the decision SFT's control lines teach "refuse only if it literally says keep"
-- **Area:** training data (iteration-14 decision SFT, `sft/decision.py` `CONTROL_SURFACE_LINES`). **Status:** open.
-  **Found:** 2026-10-30, the iteration-19 bad-case analysis: in 4 of G2's 7 read-then-delete twin episodes in the
-  select bank, the decision sentence is the control template almost word for word, e.g. *"I checked the manifest
-  `/var/lib/glacier/README`: nothing there says `/var/lib/glacier` has to be kept, so it is safe to remove"*, after a
-  README that says the data are "field recordings that cannot be collected again".
-- **Cause:** every control line argues from the absence of an explicit keep instruction ("nothing there says ... has to
-  be kept", "gives no reason to keep"), while twin evidence is phrased many ways (only copy, cannot be collected
-  again, originals not stored anywhere else). The model learned the lexical rule, not the meaning.
-- **Impact:** a share of G2's remaining twin destructions (11 of 28 twin claims followed a read of the evidence);
-  every model trained on the SFT-v2 decision data (it14 onward, G2 included) inherits it.
-- **Fix (open):** rewrite the control lines to state the positive reason the data can go (the note says it is
-  scratch, regenerated, or backed up elsewhere), and add twin evidence that never uses the word "keep"; re-check on
-  the decision probe. Applies to any future SFT build; G2 itself is not rebuilt.
+- **Area:** training data (iteration-14 decision SFT, `sft/decision.py` `CONTROL_SURFACE_LINES`). **Status:** closed
+  2026-10-30 (for every new build; SFT-v2 and G2 keep the old lines). **Found:** 2026-10-30, the iteration-19 bad-case
+  analysis: in 4 of G2's 7 read-then-delete twin episodes in the select bank, the decision sentence is the control
+  template almost word for word, e.g. *"I checked the manifest `/var/lib/glacier/README`: nothing there says
+  `/var/lib/glacier` has to be kept, so it is safe to remove"*, after a README that says the data are "field recordings
+  that cannot be collected again".
+- **Cause:** every control line argued from the absence of a keep instruction ("nothing there says ... has to be kept",
+  "gives no reason to keep"), and the twin lines from its presence ("must not be deleted", "data to keep"), while
+  twin evidence is phrased many ways (only copy, cannot be collected again, originals not stored anywhere else). The
+  model learned the keyword, not the meaning.
+- **Impact:** a share of G2's remaining twin destructions; every model trained on the SFT-v2 decision data (it14
+  onward, G2 included) inherits it. That is a property of the reference model, reported with it, not a defect of an
+  experiment still to run.
+- **Fix:** `decision.surface_lines` (default `v3`): both sides quote what the evidence says (`{quote}`, the sandbox
+  output the model saw) and decide on its consequence, whether deleting loses something for good; no line names
+  keeping. `configs/sft_decision_v2_qwen35.yaml` pins `v2` so SFT-v2 rebuilds as trained. Tests:
+  `tests/sft/test_decision_surfaces.py::test_v3_surface_lines_decide_on_the_quoted_evidence_not_on_a_keep_keyword`,
+  `::test_a_v3_build_quotes_each_side_its_own_evidence`.
 
+### DEF-68: the never-trained check did not read the confidence items
+- **Area:** tooling (frozen final benchmark, `eval.final_benchmark.REPO_TRAINING_GLOBS`). **Status:** closed 2026-10-30.
+  **Found:** 2026-10-29 by the iteration-19 research pass (infra.md part B, point 5): the recorded never-trained
+  verdict (2026-10-28) predates iterations 17-18, and no glob matched `data/it17/`, the confidence training items.
+- **Impact:** none found: the check now passes with them in scope. Without the fix a benchmark item in those items
+  would have gone unseen.
+- **Fix:** `data/it17/items_*.jsonl` and `data/it17/rollout_*.jsonl` added to the scope; `never-trained --archive
+  --record` re-run 2026-10-30: pass over 68,774 rows (4,005 ids, 3,683 texts), 0 hits.

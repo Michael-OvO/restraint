@@ -334,12 +334,14 @@ GUARD_METRICS = ("verified_success", "task_success", "claim_rate_feasible", "cla
                  "tier_control_decline", "zero_command_report", "mean_commands")  # fmt: skip
 
 
-def guard_margins(run_dir: Path, metrics: Sequence[str] = GUARD_METRICS, *, n_sim: int = 2000) -> dict[str, Any]:
+def guard_margins(run_dir: Path, metrics: Sequence[str] = GUARD_METRICS, *, n_sim: int = 2000,
+                  spec_defects: str = "exclude") -> dict[str, Any]:  # fmt: skip
     """Each guard's non-inferiority margin at the run's own K and S (`analysis.power`): the formula ni10 (sampling
     scenario) and the simulated clone margin; the margin is the larger, in the metric's units (a rate as a fraction)."""
     from honest_agents.analysis import power as P
+    from honest_agents.tasks.spec_audit import drop_defective
 
-    eps = P.load_tier_run(_episodes_file(run_dir))
+    eps = drop_defective(P.load_tier_run(_episodes_file(run_dir)), lambda e: e.task, spec_defects)
     out: dict[str, Any] = {}
     for name in metrics:
         metric = P.METRICS[name]
@@ -381,12 +383,15 @@ def read_episodes(run_dir: Path, tasks_root: Path) -> list[Any]:
     return out
 
 
-def read_guard(reference: Path, candidate: Path, tasks_root: Path, *, n_sim: int = 2000) -> dict[str, Any]:
+def read_guard(reference: Path, candidate: Path, tasks_root: Path, *, n_sim: int = 2000,
+               spec_defects: str = "exclude") -> dict[str, Any]:  # fmt: skip
     """Each read metric: the paired estimate candidate - reference (`analysis.power.paired_estimate`) and the
     non-inferiority margin at the reference run's own K and S (the larger of the formula and simulated ni10)."""
     from honest_agents.analysis import power as P
+    from honest_agents.tasks.spec_audit import drop_defective
 
-    ref_eps, cand_eps = read_episodes(reference, tasks_root), read_episodes(candidate, tasks_root)
+    ref_eps, cand_eps = (drop_defective(read_episodes(r, tasks_root), lambda e: e.task, spec_defects)
+                         for r in (reference, candidate))  # fmt: skip
     out: dict[str, Any] = {}
     for name in READ_METRICS:
         metric = P.Metric(name, "tier", (P._has(name),))
@@ -435,31 +440,45 @@ def main(argv: Sequence[str] | None = None) -> int:
     rg.add_argument("--tasks-root", type=Path, default=Path("data/tasks"))
     rg.add_argument("--n-sim", type=int, default=2000)
     rg.add_argument("--json", type=Path, default=None)
+    rg.add_argument("--spec-defects", choices=("exclude", "include"), default="exclude",
+                    help="DEF-66 sources: excluded by default; `include` reproduces pre-audit numbers")  # fmt: skip
     g = sub.add_parser("guards", help="the guards' non-inferiority margins at a run's own K and S")
     g.add_argument("--run", type=Path, required=True, help="the reference arm's run_eval directory")
     g.add_argument("--n-sim", type=int, default=2000)
     g.add_argument("--json", type=Path, default=None)
+    g.add_argument("--spec-defects", choices=("exclude", "include"), default="exclude",
+                    help="DEF-66 sources: excluded by default; `include` reproduces pre-audit numbers")  # fmt: skip
     pp = sub.add_parser("paired", help="two arms' confidence on the same claims (eval.confidence_rescore rows)")
     pp.add_argument("--a", type=Path, required=True, help="reference arm rows")
     pp.add_argument("--b", type=Path, required=True, help="candidate arm rows")
     pp.add_argument("--n-boot", type=int, default=2000)
     pp.add_argument("--json", type=Path, default=None)
+    pp.add_argument("--spec-defects", choices=("exclude", "include"), default="exclude",
+                    help="DEF-66 sources: excluded by default; `include` reproduces pre-audit numbers")  # fmt: skip
     args = ap.parse_args(argv)
     if args.cmd == "read-guard":
-        text = json.dumps(read_guard(args.reference, args.candidate, args.tasks_root, n_sim=args.n_sim), indent=2)
+        text = json.dumps(
+            read_guard(
+                args.reference, args.candidate, args.tasks_root, n_sim=args.n_sim, spec_defects=args.spec_defects
+            ),
+            indent=2,
+        )
         if args.json:
             args.json.write_text(text + "\n")
         print(text)
         return 0
     if args.cmd == "guards":
-        text = json.dumps(guard_margins(args.run, n_sim=args.n_sim), indent=2)
+        text = json.dumps(guard_margins(args.run, n_sim=args.n_sim, spec_defects=args.spec_defects), indent=2)
         if args.json:
             args.json.write_text(text + "\n")
         print(text)
         return 0
     if args.cmd == "paired":
         read = lambda p: [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
-        result = paired(paired_claims(read(args.a), read(args.b)), args.n_boot)
+        from honest_agents.tasks.spec_audit import drop_defective
+
+        a, b = (drop_defective(read(p), lambda r: r["source"], args.spec_defects) for p in (args.a, args.b))
+        result = paired(paired_claims(a, b), args.n_boot)
         text = json.dumps(result, indent=2)
         if args.json:
             args.json.write_text(text + "\n")
