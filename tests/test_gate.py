@@ -65,11 +65,11 @@ def test_the_l0_sweep_boots_nothing_writes_nothing_and_fits_its_budget(monkeypat
     results = sweep.sweep(0, ctx=ctx)
     wall = time.monotonic() - t0
     by = {r.check: r for r in results}
-    assert sorted(by) == sorted(["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9", "S10"])
+    assert sorted(by) == sorted(["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S12"])
     assert not [r for r in results if r.status == checks.ERROR], [(r.check, r.detail) for r in results]
     assert sum(r.boots for r in results) == 0 and ctx.index_stats.bytes_written == 0
     assert all(r.bytes_written == 0 for r in results), [(r.check, r.bytes_written) for r in results]
-    for c in ("S1", "S2", "S4", "S5", "S6", "S7", "S8", "S10"):
+    for c in ("S1", "S2", "S4", "S5", "S6", "S7", "S8", "S10", "S12"):
         assert by[c].status in (checks.PASS, checks.SKIP), (c, by[c].detail)
     assert wall <= sweep.BUDGET_SEC[0], wall
 

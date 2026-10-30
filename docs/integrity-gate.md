@@ -79,6 +79,7 @@ is done by hand, its result is written into the sign-off, and building the tool 
 | S9 | **Reward audit** (RL experiments only). Score blind policies (always decline, always proceed) and adversarial episodes offline through `compute_reward` | Each blind policy scores below the start policy, and the break-even P(twin) is documented | DEF-13 |
 | S10 | **Selection and bars.** Checkpoint selection uses the pre-registered endpoint. Every bar is a paired difference with its computed MDE, and a sampling-only clone of the reference fails it ≤10% of the time | Written into the pre-registration | DEF-08, DEF-10 |
 | S11 | **Infrastructure guards.** The guards in the training log's incident table still run: egress preflight, masked-share stop, sanity run, `balance_floor` | Each guard is exercised once in the dry run | existing table |
+| S12 | **Spec audit.** Every source whose archived episodes look like a hidden or contradictory requirement (nobody passes it reliably, and the failures are near misses: `tasks.spec_audit`'s rule) has a verdict from reading its instruction against its tests; defects are in this ledger and excluded downstream | No unreviewed candidate; each defect names its ledger entry; the scan is not older than the archive's eval runs | DEF-66 |
 
 The sweep also includes an open search: one pass over every eval cell whose rate is 0%, 100%, or differs by more than 20
 points between twins and controls with no explanation. Most of the current defects were found this way.
@@ -112,6 +113,7 @@ files.
 | S9 reward audit | L0 | `compute_reward` is pure; blind policies are scored on the archive index |
 | S10 bars and power | L0 | The estimator runs on the archive index; bootstrap seeds fixed, ≤2,000 resamples at L0 and more only for the pre-registration |
 | S11 infra guards | L1 | Exercised once in the dry run against the fake sandbox. Only the egress preflight needs a real container |
+| S12 spec audit | L0 | Reads the committed `data/spec_audit/candidates.json` and `reviews.jsonl`; the archive is only globbed to count eval runs. `spec_audit scan` (about a minute) refreshes the candidates when new evals are archived |
 
 **The result cache** (L1).
 - **Location:** `~/.cache/honest-agents/gate/` on the Mac and `/root/.cache/honest-agents/gate/` on a node, outside the

@@ -20,6 +20,8 @@ Each returns a `CheckResult`; `gate.sweep` runs them, measures them and prints t
 * S9 reward audit: `reward_gate.evaluate` on the reference surface eval from the index, under the archived and the
   symmetric config; the verdict is the symmetric config's (DEF-13).
 * S10 bars and power: the estimator's input files are in the archive and the L0 resample budgets hold.
+* S12 spec audit: every candidate of `tasks.spec_audit` (sources nobody passes whose failures are near misses) has a
+  reviewed verdict, every defect names a ledger entry, and the scan is not older than the archive's eval runs.
 """
 
 from __future__ import annotations
@@ -623,6 +625,20 @@ def s10_power_inputs(ctx: Context) -> CheckResult:
     return _result("S10", "bars and power", not missing and not budget, detail, missing=missing)
 
 
+def s12_spec_audit(ctx: Context) -> CheckResult:
+    from honest_agents.tasks import spec_audit as sa
+
+    if not sa.CANDIDATES.is_file():
+        return _result("S12", "spec audit", False, f"no candidates file {sa.CANDIDATES}: run `spec_audit scan`")
+    candidates = json.loads(sa.CANDIDATES.read_text())
+    runs = len(sa.episode_files(ctx.archive)) if ctx.archive.is_dir() else None
+    problems = sa.check(candidates, sa.load_reviews(sa.REVIEWS), sa.LEDGER.read_text(), runs)
+    n, defects = len(candidates.get("candidates", [])), len(sa.defective_sources())
+    detail = f"{n} candidates from {candidates.get('eval_runs')} eval runs; {defects} sources reviewed as defects"
+    return _result("S12", "spec audit", not problems, detail + (f"; {len(problems)} problem(s)" if problems else ""),
+                   problems=problems)  # fmt: skip
+
+
 L0_CHECKS: tuple[Callable[[Context], CheckResult], ...] = (
     s1_branch_consistency,
     s2_passability,
@@ -633,4 +649,5 @@ L0_CHECKS: tuple[Callable[[Context], CheckResult], ...] = (
     s8_archive_hygiene,
     s9_reward_audit,
     s10_power_inputs,
+    s12_spec_audit,
 )

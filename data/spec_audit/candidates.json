@@ -1,0 +1,267 @@
+{
+ "rule": {
+  "min_episodes": 8,
+  "max_pass_rate": 0.2,
+  "min_median_fail_fraction": 0.6
+ },
+ "eval_runs": 83,
+ "sources_seen": 567,
+ "candidates": [
+  {
+   "source": "endless-terminals/task_000000_29a7ed5f",
+   "episodes": 16,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.6,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_307a08f0",
+   "episodes": 24,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.6,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_658f04e0",
+   "episodes": 91,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.7143,
+   "runs": 33
+  },
+  {
+   "source": "endless-terminals/task_000000_87a54d0a",
+   "episodes": 8,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.75,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_8e1ea113",
+   "episodes": 53,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.75,
+   "runs": 14
+  },
+  {
+   "source": "endless-terminals/task_000000_911a5c92",
+   "episodes": 24,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.6667,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_9aa135c8",
+   "episodes": 8,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.8,
+   "runs": 1
+  },
+  {
+   "source": "endless-terminals/task_000000_9bc5c5e6",
+   "episodes": 8,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.619,
+   "runs": 1
+  },
+  {
+   "source": "endless-terminals/task_000000_a922a301",
+   "episodes": 44,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.7143,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_ca4ffb19",
+   "episodes": 16,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.875,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_cb215599",
+   "episodes": 24,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.7778,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_efe31ef4",
+   "episodes": 66,
+   "passes": 0,
+   "pass_rate": 0.0,
+   "median_fail_fraction": 0.8333,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_82c8af2a",
+   "episodes": 53,
+   "passes": 1,
+   "pass_rate": 0.0189,
+   "median_fail_fraction": 0.75,
+   "runs": 14
+  },
+  {
+   "source": "endless-terminals/task_000000_59974445",
+   "episodes": 44,
+   "passes": 1,
+   "pass_rate": 0.0227,
+   "median_fail_fraction": 0.8182,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_be2a64e9",
+   "episodes": 44,
+   "passes": 2,
+   "pass_rate": 0.0455,
+   "median_fail_fraction": 0.6667,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_34490c5e",
+   "episodes": 16,
+   "passes": 1,
+   "pass_rate": 0.0625,
+   "median_fail_fraction": 0.9091,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_3aa91448",
+   "episodes": 16,
+   "passes": 1,
+   "pass_rate": 0.0625,
+   "median_fail_fraction": 0.8571,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_9919d9c0",
+   "episodes": 16,
+   "passes": 1,
+   "pass_rate": 0.0625,
+   "median_fail_fraction": 0.6923,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_878bfeb5",
+   "episodes": 44,
+   "passes": 3,
+   "pass_rate": 0.0682,
+   "median_fail_fraction": 0.6,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_38af60bb",
+   "episodes": 44,
+   "passes": 4,
+   "pass_rate": 0.0909,
+   "median_fail_fraction": 0.8,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_74eef614",
+   "episodes": 44,
+   "passes": 5,
+   "pass_rate": 0.1136,
+   "median_fail_fraction": 0.6667,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_bfb0949a",
+   "episodes": 66,
+   "passes": 8,
+   "pass_rate": 0.1212,
+   "median_fail_fraction": 0.6667,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_0bd20ada",
+   "episodes": 8,
+   "passes": 1,
+   "pass_rate": 0.125,
+   "median_fail_fraction": 0.8333,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_11d7c0e5",
+   "episodes": 8,
+   "passes": 1,
+   "pass_rate": 0.125,
+   "median_fail_fraction": 0.6667,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_7674ac16",
+   "episodes": 16,
+   "passes": 2,
+   "pass_rate": 0.125,
+   "median_fail_fraction": 0.75,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_fe4e7759",
+   "episodes": 32,
+   "passes": 5,
+   "pass_rate": 0.1562,
+   "median_fail_fraction": 0.8,
+   "runs": 3
+  },
+  {
+   "source": "endless-terminals/task_000000_bc815cb3",
+   "episodes": 44,
+   "passes": 7,
+   "pass_rate": 0.1591,
+   "median_fail_fraction": 0.8333,
+   "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_38bfdb17",
+   "episodes": 24,
+   "passes": 4,
+   "pass_rate": 0.1667,
+   "median_fail_fraction": 0.619,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_6887ba94",
+   "episodes": 24,
+   "passes": 4,
+   "pass_rate": 0.1667,
+   "median_fail_fraction": 0.6667,
+   "runs": 2
+  },
+  {
+   "source": "endless-terminals/task_000000_5735d4fb",
+   "episodes": 53,
+   "passes": 10,
+   "pass_rate": 0.1887,
+   "median_fail_fraction": 0.8889,
+   "runs": 14
+  },
+  {
+   "source": "endless-terminals/task_000000_1be74973",
+   "episodes": 10,
+   "passes": 2,
+   "pass_rate": 0.2,
+   "median_fail_fraction": 0.75,
+   "runs": 3
+  },
+  {
+   "source": "endless-terminals/task_000000_9fd868fd",
+   "episodes": 10,
+   "passes": 2,
+   "pass_rate": 0.2,
+   "median_fail_fraction": 0.6667,
+   "runs": 3
+  }
+ ]
+}

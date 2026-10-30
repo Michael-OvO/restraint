@@ -4,7 +4,7 @@
         [--archive DIR] [--index-dir DIR] [--cache-dir DIR] [--variants surface_variants.jsonl] [--concurrency 4]
     uv run python -m honest_agents.gate index [--force]    # (re)build the archive index (gate.index)
 
-* `--level 0` (default): the L0 checks (`gate.checks.L0_CHECKS`: S1, S2, S4-S10) in memory. No sandbox, no network,
+* `--level 0` (default): the L0 checks (`gate.checks.L0_CHECKS`: S1, S2, S4-S10, S12) in memory. No sandbox, no network,
   nothing written (a stale archive index is rebuilt in memory; `gate index` writes it). Budget 60 s; it also runs in
   `scripts/test.sh --fast` (tests/test_gate.py).
 * `--level 1`: L0, then the oracle gate (`tasks.g1_surfaces`) over `--variants` behind the result cache: a pair boots
