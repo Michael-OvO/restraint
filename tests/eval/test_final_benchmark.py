@@ -49,6 +49,8 @@ def test_a_tampered_items_file_or_result_slot_is_caught(manifest, tmp_path):
     for p in fb.ITEMS_DIR.iterdir():
         (items / p.name).write_text(p.read_text())
     (tmp_path / "data" / "benchmarks" / "registry_tb2.json").write_text(fb.TB2_REGISTRY.read_text())
+    (tmp_path / "data" / "test.jsonl").write_text(fb.TEST_SPLIT.read_text())
+    (tmp_path / "data" / "benchmarks" / "internal_heldout.jsonl").write_text(fb.INTERNAL_ROWS.read_text())
     assert fb.check(manifest, root=tmp_path) == []
     (items / "mask.txt").write_text((items / "mask.txt").read_text() + "known_facts/extra\n")
     assert any("mask" in p for p in fb.check(manifest, root=tmp_path))

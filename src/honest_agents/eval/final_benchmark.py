@@ -47,6 +47,12 @@ BENCH_DATA = REPO / "data" / "benchmarks"
 MANIFEST = BENCH_DATA / "final_benchmark.json"
 ITEMS_DIR = BENCH_DATA / "items"
 TB2_REGISTRY = BENCH_DATA / "registry_tb2.json"
+# The internal held-out benchmark (amendment 2026-10-31, docs/iteration-19-prereg-baseline.md): the frozen test split
+# less the 20 sources the iteration-12 transfer check ran on and the DEF-66 spec-defect sources; eval runs read the
+# derived rows file, which `check` verifies against the manifest.
+TEST_SPLIT = REPO / "data" / "test.jsonl"
+TRANSFER_SPLIT = REPO / "data" / "transfer_v1.jsonl"
+INTERNAL_ROWS = BENCH_DATA / "internal_heldout.jsonl"
 ARMS = ("base", "G2", "final")
 DIRECTIONS = frozenset({"up", "down", "non_inferior", "report"})
 SCHEMA = 1
@@ -169,6 +175,68 @@ def ids_sha256(ids: Iterable[str]) -> str:
 # ── benchmark definitions ────────────────────────────────────────────────────────────────────────────────────────────
 
 
+def _jsonl(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def internal_heldout_excluded() -> dict[str, list[str]]:
+    """The test-split sources left out of the internal held-out benchmark, by reason."""
+    from honest_agents.tasks.spec_audit import defective_sources
+
+    test = {r["pair_id"] for r in _jsonl(TEST_SPLIT)}
+    return {
+        "iteration12_transfer": sorted({r["pair_id"] for r in _jsonl(TRANSFER_SPLIT)} & test),
+        "spec_defect_def66": sorted(defective_sources() & test),
+    }
+
+
+def internal_heldout_rows() -> list[dict[str, Any]]:
+    excluded = {s for v in internal_heldout_excluded().values() for s in v}
+    return [r for r in _jsonl(TEST_SPLIT) if r["pair_id"] not in excluded]
+
+
+def _rows_text(rows: Sequence[dict[str, Any]]) -> str:
+    return "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows)
+
+
+def write_internal_rows(path: Path = INTERNAL_ROWS) -> Path:
+    path.write_text(_rows_text(internal_heldout_rows()))
+    return path
+
+
+def _internal_heldout() -> dict[str, Any]:
+    excluded = internal_heldout_excluded()
+    return {
+        "role": "headline (internal)",
+        "status": "frozen",
+        "sources": [
+            {"kind": "split", "file": TEST_SPLIT.relative_to(REPO).as_posix(), "sha256": sha256_file(TEST_SPLIT)},
+            {
+                "kind": "exclusion",
+                "reason": "iteration-12 transfer check",
+                "sources_sha256": ids_sha256(excluded["iteration12_transfer"]),
+                "n": len(excluded["iteration12_transfer"]),
+            },
+            {
+                "kind": "exclusion",
+                "reason": "DEF-66 spec defects (tasks.spec_audit)",
+                "sources_sha256": ids_sha256(excluded["spec_defect_def66"]),
+                "n": len(excluded["spec_defect_def66"]),
+            },
+            {
+                "kind": "rows",
+                "file": INTERNAL_ROWS.relative_to(REPO).as_posix(),
+                "sha256": hashlib.sha256(_rows_text(internal_heldout_rows()).encode()).hexdigest(),
+            },
+        ],
+        "adapter": "honest_agents.eval.run_eval on data/benchmarks/internal_heldout.jsonl + honest_agents.eval.metrics",
+        "metrics": [
+            _metric("heldout", "false_claim", "false completion claims", "down", headline=True),
+            _metric("heldout", "success", "task success", "non_inferior"),
+        ],
+    }
+
+
 def _metric(side: str, metric: str, name: str, direction: str, *, headline: bool = False) -> dict[str, Any]:
     return {"side": side, "metric": metric, "name": name, "direction": direction, "headline": headline}
 
@@ -212,6 +280,8 @@ def benchmark_ids(name: str, archive: Path) -> list[str] | None:
         ]
     if name == "mask":
         return [mask.item_id(r) for r in mask.load_rows(archive / ARCHIVE_MASK / "hf")]
+    if name == "internal_heldout":
+        return [r["variant_id"] for r in internal_heldout_rows()]
     if name == "terminal_bench_2":
         return tb2_task_names()
     if name == "agentic_abstention":
@@ -288,18 +358,7 @@ def definitions(archive: Path) -> dict[str, dict[str, Any]]:
 
     aa_commit = "ebbf1f51671f8e6d5da42a4188ff8c9254ee978e"  # scripts/eval_common.sh AGENTIC_ABSTENTION_COMMIT
     return {
-        "internal_heldout": {
-            "role": "headline (internal)",
-            "status": "pending",
-            "pending_reason": "the held-out build (68+ sources after the S0 fixes, plus a blind held-out family) is frozen "
-            "when the iteration-16 eval build is signed off (docs/integrity-gate.md step 3)",
-            "sources": [],
-            "adapter": "honest_agents.eval.run_eval + honest_agents.eval.metrics",
-            "metrics": [
-                _metric("heldout", "false_claim", "false completion claims", "down", headline=True),
-                _metric("heldout", "success", "task success", "non_inferior"),
-            ],
-        },
+        "internal_heldout": _internal_heldout(),
         "terminal_bench_2": {
             "role": "headline",
             "status": "frozen",
@@ -486,6 +545,8 @@ def freeze(
     if changes:
         refrozen.append({"date": _today(), "previous_frozen": old["frozen"], "changed": changes})
     items_dir.mkdir(parents=True, exist_ok=True)
+    if "internal_heldout" in benches and out == MANIFEST:
+        write_internal_rows()
     for name, ids in item_ids.items():
         (items_dir / f"{name}.txt").write_text("".join(f"{i}\n" for i in ids))
     manifest = {
@@ -551,6 +612,10 @@ def check(manifest: dict[str, Any], *, archive: Path | None = None, root: Path =
             if derived is not None and ids_sha256(derived) != items["sha256"]:
                 bad.append(f"{name}: the item ids no longer derive from the pinned sources")
         for src in b.get("sources", []):
+            if src.get("kind") in ("split", "rows"):
+                f = root / src["file"]
+                if not f.is_file() or sha256_file(f) != src["sha256"]:
+                    bad.append(f"{name}: {src['file']} missing or changed")
             if src.get("kind") == "harbor_registry":
                 if sha256_file(root / src["registry_file"]) != src["sha256"]:
                     bad.append(f"{name}: {src['registry_file']} changed")
