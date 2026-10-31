@@ -1,11 +1,11 @@
-# Iteration 19, stage (a): headline baseline, pre-registration (DRAFT, not approved)
+# Iteration 19, stage (a): headline baseline, pre-registration (APPROVED 2026-10-31)
 
 Plan: [iteration-19-proposal.md](iteration-19-proposal.md), step 2. Job file: `configs/chains/it19_a_baseline.yaml`.
 This amends the final-benchmark plan of [iteration-16-prereg.md](iteration-16-prereg.md) sections 4, 8 and 10:
 sections 10.3-10.4 allowed the final benchmark only after a validation GO and ran base, not G2, on TB2 and
 ImpossibleBench. Here base and G2 run now, before any new training, so that every later claim has a public-benchmark
-baseline. Written before any episode of this stage exists; after the owner approves it, nothing here changes except by
-a dated owner amendment.
+baseline. **Approved by the owner on 2026-10-31 ("Approve (Recommended)"), before any episode of this stage.** From
+here nothing changes except by a dated owner amendment.
 
 ## 1. Purpose
 
