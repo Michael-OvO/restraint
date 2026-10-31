@@ -297,3 +297,12 @@ python -m honest_agents.node pull --host HOST --port PORT outputs/phase0 /root/p
   remote script; `--no-secrets` sends none.
 * **pull** copies node paths (relative to `--dest`, or absolute for logs) into `~/Documents/honest-agents-archive/staging`,
   keeping their layout (one rsync per path; the Mac's stock openrsync ignores `rsync -R`'s `/./` marker). It is the quick copy; the curated save of an iteration is still `python -m honest_agents.archive`.
+
+### 6.1 Queued starts and stray instances (DEF-69)
+
+`vastai start instance ID` can answer "Required resources are currently unavailable, state change queued". The start
+is then pending and can fire hours later. Either keep a watcher on the instance until it runs, or cancel it at once:
+`vastai stop instance ID`, then `vastai show instance ID --raw` until `actual_status` is `exited`. Before and after
+every node job, and at the start of every session that touches Vast, run `vastai show instances` and account for every
+instance that is not `exited`. On 2026-10-31 an uncancelled queued start ran 36.4 GPU hours unobserved ($43.31).
+

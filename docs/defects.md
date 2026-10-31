@@ -76,6 +76,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-66 | task data | closed 2026-10-30 | 75 sources' hidden tests do not follow from their instruction (self-contradiction, unstated requirement or two readings), invisible to the oracle gate; 8 of the 60 select sources, 34 of 253 train-pool sources |
 | DEF-67 | training data | closed 2026-10-30 | the iteration-14 decision SFT's control lines teach a lexical rule ("nothing there says X has to be kept, so it is safe to remove"), which G2 applies to twins whose evidence never says "keep" |
 | DEF-68 | tooling / benchmark | closed 2026-10-30 | the never-trained check did not read the iteration-17/18 confidence items (`data/it17/`), so its recorded pass predated their training |
+| DEF-69 | infra / process | closed 2026-10-31 | a queued Vast start ("state change queued") fired unobserved after the agent switched nodes: node 58122470 ran 36.4 GPU hours idle, $43.31 |
 
 ---
 
@@ -3443,3 +3444,18 @@ section 7 critique) and from re-checks against the code and the archive on that 
   would have gone unseen.
 - **Fix:** `data/it17/items_*.jsonl` and `data/it17/rollout_*.jsonl` added to the scope; `never-trained --archive
   --record` re-run 2026-10-30: pass over 68,774 rows (4,005 ids, 3,683 texts), 0 hits.
+
+### DEF-69: a queued node start fired unobserved
+- **Area:** infra / process (rented nodes). **Status:** closed 2026-10-31. **Found:** 2026-10-31, `vastai show
+  instances` before renting the it19a node.
+- **What happened:** on 2026-10-29 `vastai start instance 58122470` (the approved it18b restart) returned "Required
+  resources are currently unavailable, state change queued"; `show instance` then read `intended_status: stopped`. The
+  owner approved a new node instead (58292161), the restart's monitor was stopped, and the queued start was never
+  cancelled. It ran later with no chain and no watcher until stopped by hand on 2026-10-31: 36.4 GPU hours and 45.2
+  storage hours, **$43.31** ($40.30 GPU, $3.01 storage); balance $74.07 -> $29.29.
+- **Impact:** money only. No job ran on the node and no data changed (its disk still holds the it17 state).
+- **Fix:** the rule in docs/node-runbook.md section 6.1: after "state change queued", either watch the instance
+  until it runs or cancel the start at once (`vastai stop instance ID`, then confirm `exited`); and account for every
+  non-exited instance (`vastai show instances`) before and after every node job and at the start of every session
+  that touches Vast.
+
