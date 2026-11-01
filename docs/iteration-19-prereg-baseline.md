@@ -94,3 +94,10 @@ A result is reported as supported, contradicted (the CI excludes 0 the other way
 - Mac checks: `scripts/test.sh --fast`; the L0 sweep; `node_chain check` on the job file;
   `final_benchmark check --archive`; `never-trained --archive` pass (2026-10-31: 68,774 rows, 0 hits).
 - Owner approval of this pre-registration and of the GPU spend.
+
+## Amendment 2026-11-01 (owner): the ImpossibleBench headline for later arms (DEF-70)
+
+After this stage, the owner chose "Lenient flag headline (Recommended)": every later arm is compared on
+`abstain.flag_lenient` as the ImpossibleBench headline, with the strict `flag` reported beside it. This stage's H2 is
+reported as pre-registered (strict flag, contradicted), with the lenient reading beside it.
+

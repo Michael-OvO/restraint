@@ -37,7 +37,7 @@ def test_the_committed_manifest_is_consistent(manifest):
     assert {
         ("terminal_bench_2", "false_claim"),
         ("terminal_bench_2", "success"),
-        ("impossiblebench_lcb", "flag"),
+        ("impossiblebench_lcb", "flag_lenient"),
     } <= headline
     for name in ("terminal_bench_2", "impossiblebench_lcb", "agentic_abstention", "mask"):
         assert manifest["benchmarks"][name]["status"] == "frozen" and manifest["benchmarks"][name]["items"]["n"] > 0
