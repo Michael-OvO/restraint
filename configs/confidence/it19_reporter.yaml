@@ -1,0 +1,58 @@
+# Iteration 19, stage (c), the reporter (docs/iteration-19-design-reporter.md): the K2a objective (the claim decision at
+# the status token, -ΔL·z) without the action anchor, since a reporter never chooses an action: 3 epochs, lr 1e-4, node
+# KL beta 0.01. Same items and held-out split as it17-K2a; DEF-66 sources dropped.
+#   uv run --extra train python -m honest_agents.train.confidence_exact --config configs/confidence/it19_reporter.yaml \
+#       model.name=outputs/it15/g2_merged
+run_name: it19-reporter
+output_root: outputs/confidence
+seed: 0
+
+model:
+  name: outputs/it15/g2_merged             # G2 seed 1, merged (stage (c)'s merge recipe)
+  family: qwen3_5
+  tokenizer: Qwen/Qwen3.5-4B               # the same tokenizer and template as G2's base
+
+lora:
+  r: 16
+  alpha: 32
+
+data:
+  items:                                   # sft.confidence_bandit build outputs (prereg section 3); the it17a ones are
+    - data/it17/items_it17a_feasible.jsonl  # built after stage (a) and frozen with their sha256s
+    - data/it17/items_it17a_infeasible.jsonl
+    - data/it17/items_it16b.jsonl
+  max_prompt_tokens: 16384
+  heldout_fraction: 0.3                    # by source (stable hash, seed it17-confidence): the dev set's half
+  seed: it17-confidence
+  drop_spec_defects: true                  # DEF-66: leave the 75 defect sources out, counted
+
+grpo:
+  learning_rate: 1.0e-5
+  num_generations: 8
+  max_completion_length: 8                 # "0.85\n</parameter>" fits; only the first line is parsed
+  temperature: 1.0
+  beta: 0.04
+  per_device_train_batch_size: 8           # one prompt x 8 samples per device step
+  gradient_accumulation_steps: 4
+  num_train_epochs: 2
+  eval_steps: 25
+  report_to: wandb
+
+# The training run uses `train.confidence_exact` (the same objective in closed form; prereg section 4): these settings.
+# The `grpo:` section above stays for the sampled estimator `train.confidence`, which the prereg does not use.
+exact:
+  learning_rate: 1.0e-4                    # twice K2a's: no anchor holds it back
+  num_train_epochs: 3
+  gradient_accumulation_steps: 8           # 8 items per optimiser step: ~605 steps over 2,422 items x 2 epochs
+  beta: 0.01                               # node KL only, against a degenerate status vocabulary
+  max_grad_norm: 1.0
+  warmup_ratio: 0.03
+  eval_steps: 100                          # held-out expected Brier and claims AUROC, logged; they select nothing
+  max_eval_items: 200                      # ~100 s per evaluation (forward only)
+  report_to: wandb
+  target: status                           # the claim decision (K2a), not the confidence value
+  z_max: 6.0
+  # iteration 18: the action anchor and the drift abort (docs/iteration-18-design.md)
+  anchor_beta: 0.0                         # no action anchor: the reporter never acts
+  anchor_max_tokens: 512                   # positions sampled per item (stable per item)
+  abort_action_kl_per_token: null          # drift is irrelevant for a reporter (still logged)
