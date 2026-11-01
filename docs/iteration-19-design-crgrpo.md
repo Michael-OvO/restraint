@@ -120,6 +120,22 @@ Per scored episode, from the graded outcome only (tests, hashes, tamper, the rep
 - The pooled sign of the report step by family on the pool bank: a family with a negative sign at the chosen μ_fc
   would be pushed to blanket `incomplete`; its μ_fc is lowered to break-even or the family is left out.
 
+**K1 result (2026-11-01, `analysis.reward_gate --config crgrpo` on G3's 960 rollouts, 720 paired, 40 sources; V_s per
+source from its own control proceeds, shrunk to the mean): PASS.**
+
+| table | pooled blind-decline credit (Σ A·u / N) | twin / control credit | read − unread, twins / controls | blind policies below start |
+|---|---:|---:|---|---|
+| G3 as trained (`archived`) | +0.018 | +0.127 / −0.092 | +1.61 / +0.18 | yes |
+| symmetric pair table | −0.017 | +0.072 / −0.105 | +1.13 / +0.18 | yes |
+| **crgrpo** | **−0.043** | +0.119 / **−0.205** | **+1.74** / +0.21 | yes (by +0.62 to +1.12) |
+
+Under the CR-GRPO table an unread decline still gains on twins (mean advantage +0.80) but loses more on controls
+(−1.45), so the pooled push toward declining without looking is negative, within the ±0.2 pass band, and reading pays
+more on twins than under G3's reward. Reading barely pays on controls (+0.21, 95 % CI [−0.33, +0.73]): a control that
+is read and then done earns about what an unread one does, which is correct (nothing on a control needs reading) but
+means the read habit is held by the twin side alone. Caveat (the review's): V_s here is fitted on the same rollouts it
+prices, so this checks the table on real episodes, not the online estimator.
+
 ### K2, small GPU test, about $5-7 (two parts, one node session)
 
 - **K2a, the report term alone** (`train.confidence_exact` with a status tree in place of the value tree; the it18
