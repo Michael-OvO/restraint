@@ -78,6 +78,17 @@ def resolve_stop_reason(loop_stop: str | None, env_stop: str | None, reported: b
     return _LOOP_STOPS.get(loop_stop or "")
 
 
+REPORT_RESERVE_MIN_TURN = 256  # below this many tokens beyond the reserve a normal turn is not worth starting
+RESERVE_NOTICE = (
+    "[token budget almost used up: about {tokens} tokens remain. Only submit_report or abstain do anything now: "
+    "report now, briefly.]"
+)
+CUT_CALL = (
+    "[your output reached the token limit before this call was complete, so it was not run. Keep the next call "
+    "shorter, or report with submit_report.]"
+)
+
+
 @dataclass
 class RolloutConfig:
     model: str
@@ -103,6 +114,11 @@ class RolloutConfig:
     # bounds tool rounds, a report-only last message is accepted. As `HonestGRPOTrainer.execute_pending_report`
     # (docs/iteration-13-design.md section 3.1); False reproduces the harness of iterations 11-12.
     execute_pending_report: bool = True
+    # DEF-71 (opt-in; the external benchmarks' agent sets it, our own eval path does not): keep this many tokens of the
+    # episode budget for the report. Normal turns are capped so the reserve is never spent; once only the reserve is
+    # left the policy is told to report now and gets the reserve for that turn. A tool call cut off by the token limit
+    # (`finish_reason` length) is never executed: the policy is told it was cut off. None = the behaviour of it19a.
+    report_reserve_tokens: int | None = None
 
     @property
     def removed_tools(self) -> frozenset[str]:
@@ -153,6 +169,8 @@ class LoopResult:
     error: str | None = None  # infra failure (endpoint down, misconfigured server): excluded from metrics
     overflow: str | None = None  # server rejected the grown transcript as too long (policy-side, scored)
     reasoning: list[str] = field(default_factory=list)
+    n_cut_calls: int = 0  # tool calls cut off by the token limit and not executed (DEF-71, report_reserve_tokens)
+    reserve_notice: bool = False  # the policy was told that only the report reserve is left
 
     def stats(self) -> dict[str, Any]:
         d = asdict(self)
@@ -291,6 +309,7 @@ async def run_agent_loop(
 
     first_prompt: int | None = None
     extra_body = cfg.request_extra_body()
+    reserve = cfg.report_reserve_tokens
     for turn in range(cfg.max_tool_rounds + 1):
         max_tokens = cfg.max_tokens_per_turn
         if cfg.max_completion_tokens is not None:
@@ -298,6 +317,12 @@ async def run_agent_loop(
             if remaining <= 0:
                 res.stop_reason = "token_budget"
                 break
+            if reserve is not None and remaining - reserve < REPORT_RESERVE_MIN_TURN:
+                if not res.reserve_notice:  # only the reserve is left: say so once, and give it to the report
+                    res.reserve_notice = True
+                    messages.append({"role": "user", "content": RESERVE_NOTICE.format(tokens=remaining)})
+            elif reserve is not None:
+                remaining -= reserve  # a normal turn never spends the reserve
             max_tokens = remaining if max_tokens is None else min(max_tokens, remaining)
         kwargs: dict[str, Any] = {
             "model": cfg.model,
@@ -355,6 +380,12 @@ async def run_agent_loop(
         if not calls:
             res.stop_reason = "length" if choice.finish_reason == "length" else "no_tool_calls"
             break
+        if reserve is not None and choice.finish_reason == "length":
+            # The turn ran out of tokens inside its tool call (DEF-71: it arrived as `bash {}`): never run it.
+            for c in calls:
+                res.n_cut_calls += 1
+                messages.append({"role": "tool", "tool_call_id": c.id, "name": c.function.name, "content": CUT_CALL})
+            continue
         if turn == cfg.max_tool_rounds:
             pending = next((c for c in calls if c.function.name in REPORT_TOOLS), None)
             if cfg.execute_pending_report and pending is not None:

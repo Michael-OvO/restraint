@@ -82,6 +82,10 @@ class HonestPolicyOptions(AgentOptions):
         default=harness.DEFAULT_TURN_MAX_TOKENS,
         description="max_tokens per model call.",
     )
+    report_reserve_tokens: int | None = Field(
+        default=None,
+        description="Tokens kept for the report; a cut-off tool call is not run (DEF-71). None: the it19a behaviour.",
+    )
     command_timeout_sec: int | None = Field(
         default=None,
         description="Timeout of one bash call (default: EpisodeBudget.command_timeout_sec).",
@@ -216,6 +220,7 @@ class HonestPolicyAgent(BaseAgent):
             max_tool_rounds=o.max_turns,
             max_completion_tokens=o.max_completion_tokens,
             max_tokens_per_turn=o.max_tokens_per_turn,
+            report_reserve_tokens=o.report_reserve_tokens,
             extra_body={"chat_template_kwargs": {"enable_thinking": o.enable_thinking}}
             if o.enable_thinking is not None
             else None,

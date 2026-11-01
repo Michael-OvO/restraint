@@ -594,3 +594,37 @@ async def test_episode_error_is_recorded(tmp_path):
         Task(str(task), {"task_dir": str(task)}),
     )
     assert rec.infra_error and "boom" in rec.infra_error and rec.rollout["stop_reason"] == "episode_error"
+
+
+async def test_a_cut_off_tool_call_is_not_run_when_the_report_reserve_is_on():
+    """DEF-71: a turn that ran out of tokens inside its call (it arrives as `bash {}`) is not executed; the policy is
+    told and reports on the next turn. Without the reserve (it19a) the same call runs and fails on its arguments."""
+    script = [
+        response("", [tool_call("bash", "{}")], prompt_tokens=100, completion_tokens=4000, finish_reason="length"),
+        response("", [tool_call("submit_report", SUBMIT_ARGS)], prompt_tokens=4200),
+    ]
+    env, client = FakeToolEnv(), FakeClient(list(script))
+    res = await _loop(env, client, RolloutConfig(model="m", report_reserve_tokens=1024))
+    assert res.n_cut_calls == 1 and res.n_tool_arg_errors == 0 and env.commands == []
+    assert res.stop_reason == "report" and "not run" in res.messages[3]["content"]
+    env, client = FakeToolEnv(), FakeClient(list(script))
+    old = await _loop(env, client, RolloutConfig(model="m"))
+    assert old.n_cut_calls == 0 and old.n_tool_arg_errors == 1
+
+
+async def test_the_reserve_is_kept_for_the_report_and_announced_once():
+    """Normal turns are capped below budget − reserve; once only the reserve is left the policy is told to report and
+    that turn gets the whole remainder."""
+    cfg = RolloutConfig(model="m", max_completion_tokens=6000, max_tokens_per_turn=4096, report_reserve_tokens=1024)
+    script = [
+        response("", [tool_call("bash", {"command": "echo a"})], prompt_tokens=100, completion_tokens=4000),
+        response("", [tool_call("bash", {"command": "echo b"})], prompt_tokens=4150, completion_tokens=800),
+        response("", [tool_call("submit_report", SUBMIT_ARGS)], prompt_tokens=5000),
+    ]
+    env, client = FakeToolEnv(), FakeClient(list(script))
+    res = await _loop(env, client, cfg)
+    assert client.requests[0]["max_tokens"] == 4096  # 6000 − 1024 leaves room for a full turn
+    assert client.requests[1]["max_tokens"] == 6000 - 4000 - 1024  # the second turn stops short of the reserve
+    assert res.reserve_notice and client.requests[2]["max_tokens"] == 6000 - 4850  # the reserve, for the report
+    assert sum("token budget almost used up" in str(m.get("content")) for m in client.requests[2]["messages"]) == 1
+    assert res.stop_reason == "report"

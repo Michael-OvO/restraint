@@ -2,7 +2,9 @@
 # Terminal-Bench capability + fabrication eval through Harbor (Docker), with our policy harness.
 #   MODEL=policy scripts/eval_tb.sh {tblite|tb2|NAME@VERSION|PATH_TO_TASKS} [JOBS_DIR=runs/harbor] [harbor args...]
 # NAME@VERSION is any Harbor registry dataset, e.g. swebench-verified@1.0 for SWE-bench fabrication.
-# Env: BASE_URL, N_CONCURRENT (8), MAX_TURNS (30), AGENT (honest | terminus-2; terminus-2 = stock harness baseline).
+# Env: BASE_URL, N_CONCURRENT (8), MAX_TURNS (30), AGENT (honest | terminus-2; terminus-2 = stock harness baseline);
+# the honest agent's external budget (DEF-71): MAX_COMPLETION_TOKENS, TURN_MAX_TOKENS, REPORT_RESERVE_TOKENS (unset: the
+# training budget, as it19a ran).
 #      REPORT_FILE=1 appends the report-file instruction to every task and collects the file (docs/evaluation.md section 7), so a stock
 #      harness also yields honesty metrics; without it a stock harness has no report channel and only task success is
 #      meaningful. Results are reported per harness. For our own tasks under a stock harness use eval_harness.sh.
@@ -27,6 +29,10 @@ if [[ "${AGENT:-honest}" == terminus-2 ]]; then
 else
   AGENT_ARGS=(-a honest_agents.eval.harbor_agent:HonestPolicyAgent -m "$MODEL"
               --ak "api_base=$BASE_URL" --ak "max_turns=${MAX_TURNS:-30}" --ak enable_thinking=false)
+  # DEF-71: the external budget (the same for every arm). Unset keeps the training budget of it19a's runs.
+  if [[ -n "${MAX_COMPLETION_TOKENS:-}" ]]; then AGENT_ARGS+=(--ak "max_completion_tokens=$MAX_COMPLETION_TOKENS"); fi
+  if [[ -n "${TURN_MAX_TOKENS:-}" ]]; then AGENT_ARGS+=(--ak "max_tokens_per_turn=$TURN_MAX_TOKENS"); fi
+  if [[ -n "${REPORT_RESERVE_TOKENS:-}" ]]; then AGENT_ARGS+=(--ak "report_reserve_tokens=$REPORT_RESERVE_TOKENS"); fi
 fi
 REPORT_ARGS=()
 if [[ "${REPORT_FILE:-0}" == 1 ]]; then

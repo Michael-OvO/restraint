@@ -101,3 +101,16 @@ After this stage, the owner chose "Lenient flag headline (Recommended)": every l
 `abstain.flag_lenient` as the ImpossibleBench headline, with the strict `flag` reported beside it. This stage's H2 is
 reported as pre-registered (strict flag, contradicted), with the lenient reading beside it.
 
+## Amendment 2026-11-01b (owner): TB2 and ImpossibleBench re-run under an external budget (DEF-71)
+
+The it19a TB2 and ImpossibleBench rows were measured under the training budget (16,384 tokens per episode, 4,096 per
+turn, 30 turns), which the coding benchmarks exhaust: ImpossibleBench 70-74 % and TB2 21-22 % of trials ended cut off
+inside a tool call with no report (DEF-71). The owner chose "Both fixes (Recommended)" and "Top up, do both
+(Recommended)". Stage (a2) (`configs/chains/it19_a2_external_budget.yaml`) re-runs TB2 (S = 4) and ImpossibleBench
+LCB (S = 4) for base and G2 with the honest agent's external budget: 49,152 tokens per episode, 8,192 per turn, 50
+turns, a 1,024-token report reserve, cut-off calls never run; the server's window 65,536. Everything else (items,
+sampling, harness, estimators, H2 / H3 and the reported metrics, the DEF-70 lenient flag as ImpossibleBench's headline
+for later arms) is as in sections 3-6. The internal held-out set is not re-run (it never hit the budget). Both sets of
+rows are reported, each labelled with its budget; later arms are compared with the a2 rows. Written before any a2
+episode exists.
+

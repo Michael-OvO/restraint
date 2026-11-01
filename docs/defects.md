@@ -78,7 +78,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-68 | tooling / benchmark | closed 2026-10-30 | the never-trained check did not read the iteration-17/18 confidence items (`data/it17/`), so its recorded pass predated their training |
 | DEF-69 | infra / process | closed 2026-10-31 | a queued Vast start ("state change queued") fired unobserved after the agent switched nodes: node 58122470 ran 36.4 GPU hours idle, $43.31 |
 | DEF-70 | metric | closed 2026-11-01 | ImpossibleBench's headline `flag` counts only the `abstain` tool, which G2 never uses (it declines with `submit_report` incomplete): the pre-registered flag reads G2 as 0 % while the explained-decline reading is 27.7 % |
-| DEF-71 | harness / external eval | open | on the Harbor agent path (TB2, ImpossibleBench) the model's bash calls arrive with empty arguments in 15 % of TB2 and 30-37 % of ImpossibleBench trials ("bash() missing 1 required positional argument: 'command'"), against 0.2 % in our own harness |
+| DEF-71 | harness / external eval | closed 2026-11-01 | on the Harbor agent path (TB2, ImpossibleBench) the model's bash calls arrive with empty arguments in 15 % of TB2 and 30-37 % of ImpossibleBench trials ("bash() missing 1 required positional argument: 'command'"), against 0.2 % in our own harness |
 
 ---
 
@@ -3483,7 +3483,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   Test: `tests/eval/test_final_benchmark.py::test_the_committed_manifest_is_consistent` (the headline set).
 
 ### DEF-71: empty bash calls on the Harbor agent path
-- **Area:** harness / external evaluation (`HonestPolicyAgent`, `scripts/eval_tb.sh`). **Status:** open. **Found:**
+- **Area:** harness / external evaluation (`HonestPolicyAgent`, `scripts/eval_tb.sh`). **Status:** closed 2026-11-01 (the fix; the re-run is stage a2). **Found:**
   2026-11-01, reading the it19a transcripts (`staging/runs/harbor/it19a_*`).
 - **Evidence:** trials with at least one tool result "HonestPolicyAgent.run.<locals>.bash() missing 1 required
   positional argument: 'command'": TB2 base 53 / 357, G2 56 / 357; ImpossibleBench base 373 / 1,237, G2 453 / 1,237.
@@ -3509,4 +3509,13 @@ section 7 critique) and from re-checks against the code and the archive on that 
   arm (owner decision; e.g. 48k tokens, 8k per turn, 50 commands); (3) then TB2 and ImpossibleBench re-run for base and
   G2 on the fixed path (a prereg amendment: the it19a TB2 / ImpossibleBench rows are reported as measured under the
   training budget).
+- **Closure (owner, 2026-11-01, "Both fixes (Recommended)"):** (1) `RolloutConfig.report_reserve_tokens` (opt-in;
+  `HonestPolicyAgent.report_reserve_tokens`): normal turns are capped so the reserve is never spent, the policy is told
+  once when only the reserve is left and that turn gets it, and a tool call cut off by the token limit is never run (the
+  policy is told). Our own eval path leaves it unset, so its behaviour, and the internal comparisons with it19a, are
+  unchanged. (2) `scripts/eval_tb.sh` passes `MAX_COMPLETION_TOKENS`, `TURN_MAX_TOKENS`, `REPORT_RESERVE_TOKENS` to the
+  honest agent when set (unset: it19a's training budget). (3) Stage a2 re-runs TB2 and ImpossibleBench for base and G2
+  with 49,152 / 8,192 / 50 turns / 1,024 reserve (prereg amendment 2026-11-01b). Tests:
+  `tests/eval/test_rollout.py::test_a_cut_off_tool_call_is_not_run_when_the_report_reserve_is_on`,
+  `::test_the_reserve_is_kept_for_the_report_and_announced_once`.
 

@@ -1,0 +1,142 @@
+# Iteration 19, stage (a2): Terminal-Bench 2 and ImpossibleBench re-run for base and G2 under the external budget
+# (DEF-71; docs/iteration-19-prereg-baseline.md, amendment 2026-11-01b). Same items, harness and sampling as it19a;
+# the honest agent gets MAX_COMPLETION_TOKENS 49152, TURN_MAX_TOKENS 8192, MAX_TURNS 50 and a 1,024-token report
+# reserve (a cut-off call is never run), the server a 65,536-token window. The internal held-out set is not re-run (it
+# never hit the budget: 99 % of G2's episodes end in a report). One look per benchmark per arm.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+name: it19a2
+state_dir: outputs/chain/it19a2
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it19a2
+      --ledger docs/defects.md
+      --json outputs/chain/it19a2/gate_ledger.json
+      && mkdir -p outputs/chain/it19a2/markers && touch outputs/chain/it19a2/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  # The frozen manifest is consistent (items, the internal rows file, the TB2 registry) and no training build of this
+  # tree holds a benchmark item (never-trained).
+  - name: freeze_checks
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark check
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark never-trained
+      --out outputs/chain/it19a2/never_trained.json
+      && touch outputs/chain/it19a2/markers/freeze_checks.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/freeze_checks.done
+    timeout_min: 20
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: ib_tasks
+    command: >-
+      (cd data/ext/impossiblebench && sha256sum --check --strict --quiet MANIFEST.sha256)
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench
+      materialize --data data/ext/impossiblebench/hf/impossible_livecodebench --out outputs/it19/ib_lcb_tuned
+      --prompt tuned
+      && touch outputs/chain/it19a2/markers/ib_tasks.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/ib_tasks.done
+    timeout_min: 20
+    on_failure: stop
+
+  - name: base_eval
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19a2_base_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- env N_CONCURRENT=12 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      scripts/eval_tb.sh tb2 runs/harbor/it19a2_base_tb2 -k 4
+      -- env N_CONCURRENT=24 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19a2_base_ib -k 4
+      && touch outputs/chain/it19a2/markers/base_eval.done
+    gpus: [0]
+    done: outputs/chain/it19a2/markers/base_eval.done
+    timeout_min: 720
+    on_failure: stop
+    stall_min: 45
+    progress: {pattern: 'serve_and_run: command (\d+):', total: 3}
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: base_units
+    command: >-
+      mkdir -p runs/final/it19a2
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --single --bench terminal_bench_2 runs/harbor/it19a2_base_tb2/tb2__* --out runs/final/it19a2/base_tb2_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it19a2_base_ib/ib_lcb_tuned__* --out runs/final/it19a2/base_ib_summary.json
+      && touch outputs/chain/it19a2/markers/base_units.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/base_units.done
+    timeout_min: 30
+    on_failure: stop
+
+  - name: g2_eval
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19a2_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- env N_CONCURRENT=12 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      scripts/eval_tb.sh tb2 runs/harbor/it19a2_g2_tb2 -k 4
+      -- env N_CONCURRENT=24 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19a2_g2_ib -k 4
+      && touch outputs/chain/it19a2/markers/g2_eval.done
+    gpus: [0]
+    done: outputs/chain/it19a2/markers/g2_eval.done
+    timeout_min: 720
+    on_failure: stop
+    stall_min: 45
+    progress: {pattern: 'serve_and_run: command (\d+):', total: 3}
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: g2_units
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --single --bench terminal_bench_2 runs/harbor/it19a2_g2_tb2/tb2__* --out runs/final/it19a2/g2_tb2_units.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it19a2_g2_ib/ib_lcb_tuned__* --out runs/final/it19a2/g2_ib_summary.json
+      && touch outputs/chain/it19a2/markers/g2_units.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/g2_units.done
+    timeout_min: 30
+    on_failure: stop
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it19a2_base_tb2, runs/harbor/it19a2_base_ib, runs/harbor/it19a2_g2_tb2, runs/harbor/it19a2_g2_ib,
+               runs/final/it19a2, outputs/chain/it19a2/never_trained.json, outputs/logs]
+  archives:
+    - {iteration: 19, name: it19a2-external-budget, no_weights: true,
+       eval: [runs/eval/it19a2_base_sanity, runs/eval/it19a2_g2_sanity],
+       file: [runs/final/it19a2/base_tb2_units.json, runs/final/it19a2/g2_tb2_units.json,
+              runs/final/it19a2/base_ib_summary.json, runs/final/it19a2/g2_ib_summary.json,
+              outputs/chain/it19a2/never_trained.json],
+       note: "iteration 19 stage (a2): TB2 and ImpossibleBench for base and G2 under the external budget (DEF-71)"}
