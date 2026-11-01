@@ -1,0 +1,122 @@
+# Iteration 19, stage (b), K2 (docs/iteration-19-design-crgrpo.md, section 3): the report term alone, then behaviour.
+# 1. K2a: `train.confidence_exact` with configs/confidence/it19_k2a.yaml (exact.target status: the claim decision at
+#    the status token, -ΔL·z from the CR-GRPO table, the it18 action anchor and drift abort) from G2 seed 1 merged, on
+#    the it17 items (sha256s below; DEF-66 sources dropped). W&B project honest-agents, group it19.
+# 2. The paired readout: π(claim) of G2 (adapter off) and the K2a adapter on the dev set's G2 episodes, exactly from the
+#    logits (`--status-score`); the Mac runs `analysis.calibration paired` on the two files.
+# 3. K2b: the K2a adapter merged, served, its 12-task sanity run, then the select split's 60 high_risk twins x 2 (the
+#    behaviour that broke it17 and it18); the Mac compares it with it17's G2 re-run (`analysis.calibration read-guard`,
+#    destroyed twins).
+# Timing (estimates): K2a about 1.2-1.5 h (264 steps), the readout about 20 min, K2b about 20 min.
+# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+name: it19b
+state_dir: outputs/chain/it19b
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it19b
+      --ledger docs/defects.md
+      --json outputs/chain/it19b/gate_ledger.json
+      && mkdir -p outputs/chain/it19b/markers && touch outputs/chain/it19b/markers/gate_ledger.done
+    gpus: []
+    done: outputs/chain/it19b/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  - name: inputs_frozen
+    command: >-
+      printf '%s\n'
+      '1cbb6cc54619e53345466b6b878cbcb84bc66804b22884b106ee1f8f02ab505a  data/it17/items_it17a_feasible.jsonl'
+      '109c8ed02c28fe6402dfc1449c59467544154ddfc160099f9d622313623d9ade  data/it17/items_it17a_infeasible.jsonl'
+      '9fdf06fde8457be3dbd4c7e360d7baddecd8fc1f354c211f930732c92193368b  data/it17/items_it16b.jsonl'
+      '3e5a000f2d5890ae5b7c8790dd4bf53c45fc4dec8b9c06e29dc8ccdb2f16c2a6  data/it17/dev_banks/select/bank-3226506.jsonl.gz'
+      'fec866a2f37396f3d2f856734a62a2fca0b158507354d833131708f153c5656e  data/it17/dev_banks/pool/bank-125051.jsonl.gz'
+      '1e826f4de3f2b17ace8f48c444462b5ad85225119a8471687bf3632ab282d69f  configs/confidence/it19_k2a.yaml'
+      '61d523d9d1b4b02e4d271f1906f6cf5b3020426a2e0a6c3d1999a01a621b56c1  data/it19/select_high_risk_twins.jsonl'
+      | sha256sum -c -
+      && touch outputs/chain/it19b/markers/inputs_frozen.done
+    gpus: []
+    done: outputs/chain/it19b/markers/inputs_frozen.done
+    timeout_min: 5
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: train_k2a
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.train.confidence_exact
+      --config configs/confidence/it19_k2a.yaml model.name=outputs/it15/g2_merged
+    gpus: [0]
+    done: outputs/confidence/it19-k2a-status/final/adapter_config.json
+    timeout_min: 300
+    on_failure: stop
+    stall_min: 30
+    env: {CUDA_VISIBLE_DEVICES: "0", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: status_score
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.train.confidence_exact
+      --config configs/confidence/it19_k2a.yaml model.name=outputs/it15/g2_merged
+      --status-score outputs/confidence/it19-k2a-status/final
+      --bank data/it17/dev_banks/select --heldout-bank data/it17/dev_banks/pool --out runs/it19/k2a_status
+      && touch outputs/chain/it19b/markers/status_score.done
+    gpus: [0]
+    done: outputs/chain/it19b/markers/status_score.done
+    timeout_min: 90
+    on_failure: stop
+    env: {CUDA_VISIBLE_DEVICES: "0", PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: merge_k2a
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/confidence/it19-k2a-status/final --out outputs/it19/k2a_merged
+    gpus: []
+    done: outputs/it19/k2a_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: k2b_twins
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/k2a_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19b_k2a_sanity --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19b_k2a_twins --n-samples 2
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    done: runs/eval/it19b_k2a_twins/metrics.json
+    timeout_min: 90
+    on_failure: stop
+    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/it19, runs/eval/it19b_k2a_twins, runs/eval/it19b_k2a_sanity,
+               outputs/confidence/it19-k2a-status/train_log.jsonl, outputs/logs]
+  archives:
+    - {iteration: 19, name: it19b-k2, run: [outputs/confidence/it19-k2a-status],
+       eval: [runs/eval/it19b_k2a_sanity, runs/eval/it19b_k2a_twins],
+       file: [runs/it19/k2a_status_g2.jsonl, runs/it19/k2a_status_cand.jsonl],
+       note: "iteration 19 stage (b) K2: the report term alone (K2a) and its twin behaviour (K2b)"}

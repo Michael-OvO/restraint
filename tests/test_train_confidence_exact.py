@@ -265,3 +265,41 @@ def test_a_status_step_moves_the_claim_decision_in_the_payoff_direction():
         _, after = ce.status_item_loss(model, item, t, ex)
         assert (after["pi_claim"] - stats["pi_claim"]) * delta > 0
         base = model.unload()
+
+
+def test_the_status_scorer_writes_paired_rows_for_g2_and_the_candidate(tmp_path, monkeypatch):
+    """`--status-score` on three real dev items with the small cached model and an untrained adapter: both files hold
+    one row per item in the rescore format, and an untrained adapter scores exactly as the start model."""
+    from pathlib import Path
+
+    from peft import LoraConfig, get_peft_model
+    from transformers import AutoModelForCausalLM
+
+    from honest_agents.eval import confidence_rescore as cr
+    from honest_agents.train import confidence as tc
+
+    bank = Path(__file__).parents[1] / "data" / "it17" / "dev_banks" / "select"
+    try:
+        base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B-Base", local_files_only=True, dtype=torch.float32)
+    except Exception:  # noqa: BLE001
+        pytest.skip("Qwen3-0.6B not cached")
+    if not bank.is_dir():
+        pytest.skip("dev banks not present")
+    adapter = tmp_path / "adapter"
+    get_peft_model(base, LoraConfig(r=4, lora_alpha=8, target_modules=["q_proj"])).save_pretrained(str(adapter))
+    real = cr.items_of
+    monkeypatch.setattr(cr, "items_of", lambda *a, **k: (real(*a, **k)[0][:3], {}))
+    cfg = tc.ConfidenceConfig()
+    cfg.model.name = cfg.model.tokenizer = "Qwen/Qwen3-0.6B-Base"
+    cfg.model.family = "qwen3"
+    cfg.model.dtype = "float32"
+    monkeypatch.setattr(ce.StatusTokens, "of", staticmethod(_qwen3_status))  # Qwen3's ids, not Qwen3.5's
+    g2, cand = ce.status_score(cfg, str(adapter), [str(bank)], [])
+    assert len(g2) == len(cand) == 3 and all(0.0 <= r["mean"] <= 1.0 for r in g2 + cand)
+    assert all(abs(a["mean"] - b["mean"]) < 1e-5 for a, b in zip(g2, cand, strict=True))  # LoRA B starts at zero
+
+
+def _qwen3_status(tok):
+    c = tok("complete", add_special_tokens=False).input_ids
+    i = tok("incomplete", add_special_tokens=False).input_ids
+    return ce.StatusTokens(c[0], i[0])

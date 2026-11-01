@@ -41,6 +41,7 @@ import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from honest_agents.train import confidence as tc
@@ -550,6 +551,49 @@ def drift(cfg: tc.ConfidenceConfig, adapter: str, n_items: int, anchor_max_token
     return {"adapter": adapter, **evaluate(model, held, t)}
 
 
+def status_score(
+    cfg: tc.ConfidenceConfig, adapter: str, banks: Sequence[str], heldout_banks: Sequence[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """K2a's paired readout: π(claim) at the status token for every dev item (`eval.confidence_rescore.items_of`: the
+    banks in full, the held-out banks on the sources held out from training), from the start model (adapter off, G2)
+    and the candidate (adapter on), exactly from the logits. Rows in `eval.confidence_rescore`'s format (`mean` = π),
+    so `analysis.calibration paired` compares them; DEF-66 sources are left out (`--spec-defects` there too)."""
+    from peft import PeftModel
+    from transformers import AutoTokenizer
+
+    from honest_agents.eval import confidence_rescore as cr
+    from honest_agents.eval.rollout import tool_schemas
+    from honest_agents.models import family_spec, pinned_revision
+
+    name = cfg.model.tokenizer or cfg.model.name
+    tok = AutoTokenizer.from_pretrained(name, revision=pinned_revision(name))
+    t = StatusTokens.of(tok)
+    items, _ = cr.items_of(banks, heldout_banks, fraction=cfg.data.heldout_fraction, seed=cfg.data.seed)
+    kwargs = dict(family_spec(cfg.model.family).chat_template_kwargs)
+    tools = tool_schemas()
+    model = PeftModel.from_pretrained(load_model(cfg.model.name, cfg.model.dtype), adapter)
+    model.eval()
+    import torch
+
+    rows_g2, rows_cand = [], []
+    with torch.no_grad():
+        for item in items:
+            ids = tok(_status_prompt(item, tok, tools, kwargs), add_special_tokens=False).input_ids
+            node, _ = _status_forward(model, ids, len(ids), ())
+            with model.disable_adapter():
+                ref, _ = _status_forward(model, ids, len(ids), ())
+            for rows, lp in ((rows_g2, ref), (rows_cand, node)):
+                pi = float(torch.sigmoid(lp[t.complete] - lp[t.incomplete]))
+                rows.append({**cr.row_of(item, []), "samples": [pi], "mean": pi, "parsed": 1})
+    return rows_g2, rows_cand
+
+
+def _status_prompt(item: Any, tok: Any, tools: Any, kwargs: dict[str, Any]) -> str:
+    from honest_agents.sft import confidence_bandit as cb
+
+    return cb.render_prefix(cb.status_messages(item.messages), tok, tools, kwargs)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m honest_agents.train.confidence_exact", description=__doc__.split("\n")[0]
@@ -558,12 +602,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--drift", metavar="ADAPTER", help="measure this adapter's held-out drift instead of training")
     ap.add_argument("--drift-items", type=int, default=40)
+    ap.add_argument("--status-score", metavar="ADAPTER", help="K2a: pi(claim) of G2 and ADAPTER on the dev items")
+    ap.add_argument("--bank", action="append", default=[], help="with --status-score: banks scored in full")
+    ap.add_argument("--heldout-bank", action="append", default=[], help="with --status-score: held-out sources only")
+    ap.add_argument("--out", default=None, help="with --status-score: prefix of the two rows files (_g2, _cand)")
     ap.add_argument("overrides", nargs="*")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     cfg = tc.load_config(args.config, args.overrides)
     if args.drift:
         print(json.dumps(drift(cfg, args.drift, args.drift_items), indent=2))
+        return 0
+    if args.status_score:
+        if not args.out or not (args.bank or args.heldout_bank):
+            ap.error("--status-score needs --out and at least one --bank or --heldout-bank")
+        g2, cand = status_score(cfg, args.status_score, args.bank, args.heldout_bank)
+        for suffix, rows in (("_g2", g2), ("_cand", cand)):
+            path = Path(f"{args.out}{suffix}.jsonl")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        print(json.dumps({"items": len(g2), "out": args.out}))
         return 0
     out = run(cfg, exact_section(cfg.exact), dry_run=args.dry_run)
     json.dump(out["data"], sys.stdout, indent=2)
