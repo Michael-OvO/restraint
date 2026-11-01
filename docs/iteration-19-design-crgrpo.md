@@ -152,6 +152,17 @@ controls +0.73 (396, 0.869), revoke_permission controls +0.78 (182, 0.907), remo
 - If K2a moves the decision but K2b fails, the shared-weight coupling of it17 / it18 holds for the decision token
   too: the design switches to a separate reporter adapter, and the claim becomes "the system is honest".
 
+### Owner decisions after K2 (2026-11-01)
+
+- **The full run goes ahead although K2 was grey** (owner, the realignment review: "CR-GRPO full run (Recommended)").
+  This overrides the gate below ("only if K0-K2 pass"). K2a's crossing bar failed (9.5 % against 25 %) and K2b came
+  within the kill limits (21 of 120, read −9.2). The full run keeps K2b's rule as stop rule 1b, so a repeat of the
+  coupling stops it.
+- **The report term stays, and the ablation runs** (owner: "Keep it + run the ablation (Recommended)"): the method arm
+  as designed, and a second arm with everything but `ℓ_rep`, same seed, steps and probes, so a change in false claims
+  can be attributed to the constraints or to the report term. The ablation is no longer optional.
+- The reporter adapter (stage c) is demoted (docs/roadmap.md).
+
 ### Full run, only if K0-K2 pass
 
 - 30 steps from G2, 8 prompts × 8 generations, constraints and neutral pairs as above, the report term, KL β 0.04 to
