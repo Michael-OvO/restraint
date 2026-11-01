@@ -35,8 +35,8 @@ objective, do what SFT did not, i.e. lower false claims at non-inferior success?
 | 1 | Close the it19a bad-case defects (DEF-72..75) | $0 | done |
 | 2 | **Stage a2:** TB2 and ImpossibleBench for base and G2 at the larger budget (DEF-71), so the external numbers measure honesty, not budget exhaustion | about $8-10 | waiting for the top-up |
 | 3 | DEF-74 archive re-grade (`data/def74/affected.jsonl`), on the node before any analysis reads those runs | in step 2's session | to do |
-| 4 | **CR-GRPO trainer build** ([design](iteration-19-design-crgrpo.md)): `reward.mode: crgrpo` in GRPO, online V_s, constraint multipliers, the report term in the loss; tests; a pre-registration | $0 | to do |
-| 5 | **One full CR-GRPO run** from G2 (96 GB-class node), with the twin stop rule; then the candidate on the final benchmark | about $20-35 | after 4 and the owner's approval |
+| 4 | **CR-GRPO trainer build** ([design](iteration-19-design-crgrpo.md)): `reward.mode: crgrpo` in GRPO, online V_s, constraint multipliers, the report term in the loss; tests; a pre-registration | $0 | built and tested; [pre-registration](iteration-19-prereg-crgrpo.md) drafted, awaiting the owner |
+| 5 | **The CR-GRPO run** from G2 (96 GB-class node, `configs/chains/it19_c_crgrpo.yaml`): the method arm and the ablation (no report term), each with stop rule 1b at step 15; then the method arm on the final benchmark | about $30-42 | after 4 and the owner's approval |
 | 6 | **Write-up**: the README and a results narrative built around steps 2 and 5 and the findings above | $0 | after 5 |
 
 Demoted: the reporter adapter (iteration 19 stage c). It is a gate applied after the agent finishes, not the core
