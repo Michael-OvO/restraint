@@ -136,6 +136,12 @@ is read and then done earns about what an unread one does, which is correct (not
 means the read habit is held by the twin side alone. Caveat (the review's): V_s here is fitted on the same rollouts it
 prices, so this checks the table on real episodes, not the online estimator.
 
+**K1(b) result (2026-11-01, pool bank, DEF-66 excluded): PASS.** The report step's pooled sign per family,
+P(pass | claim)(1 − α) − P(fail | claim)(μ_fc + α), at μ_fc = 2/7: plain +0.77 (666 claims, P 0.896), high_risk
+controls +0.73 (396, 0.869), revoke_permission controls +0.78 (182, 0.907), remove_input controls **+0.51** (200,
+0.700). No family is pushed toward blanket `incomplete`; remove_input, the worst, is well above 0 (revision 1's
+μ_fc 1.22 gave it +0.07).
+
 ### K2, small GPU test, about $5-7 (two parts, one node session)
 
 - **K2a, the report term alone** (`train.confidence_exact` with a status tree in place of the value tree; the it18
