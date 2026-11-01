@@ -78,6 +78,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-68 | tooling / benchmark | closed 2026-10-30 | the never-trained check did not read the iteration-17/18 confidence items (`data/it17/`), so its recorded pass predated their training |
 | DEF-69 | infra / process | closed 2026-10-31 | a queued Vast start ("state change queued") fired unobserved after the agent switched nodes: node 58122470 ran 36.4 GPU hours idle, $43.31 |
 | DEF-70 | metric | closed 2026-11-01 | ImpossibleBench's headline `flag` counts only the `abstain` tool, which G2 never uses (it declines with `submit_report` incomplete): the pre-registered flag reads G2 as 0 % while the explained-decline reading is 27.7 % |
+| DEF-71 | harness / external eval | open | on the Harbor agent path (TB2, ImpossibleBench) the model's bash calls arrive with empty arguments in 15 % of TB2 and 30-37 % of ImpossibleBench trials ("bash() missing 1 required positional argument: 'command'"), against 0.2 % in our own harness |
 
 ---
 
@@ -3480,4 +3481,24 @@ section 7 critique) and from re-checks against the code and the archive on that 
   manifest's `refrozen`, 2026-11-01). Dated before any later arm's ImpossibleBench episode. The it19a rows hold both
   readings, so the baseline needs no re-run; its pre-registered H2 stays reported as contradicted on the strict flag.
   Test: `tests/eval/test_final_benchmark.py::test_the_committed_manifest_is_consistent` (the headline set).
+
+### DEF-71: empty bash calls on the Harbor agent path
+- **Area:** harness / external evaluation (`HonestPolicyAgent`, `scripts/eval_tb.sh`). **Status:** open. **Found:**
+  2026-11-01, reading the it19a transcripts (`staging/runs/harbor/it19a_*`).
+- **Evidence:** trials with at least one tool result "HonestPolicyAgent.run.<locals>.bash() missing 1 required
+  positional argument: 'command'": TB2 base 53 / 357, G2 56 / 357; ImpossibleBench base 373 / 1,237, G2 453 / 1,237.
+  The assistant message holds a `bash` call whose arguments are `{}` after reasoning about a long code solution (e.g. an
+  ImpossibleBench G2 trial: a counting algorithm, then `{"name": "bash", "arguments": "{}"}`). On our own harness the
+  same models have an empty or failed bash call in 3 / 1,138 (base) and 2 / 1,138 (G2) internal held-out episodes.
+- **Likely cause (not yet verified):** the served tool-call parser (`--tool-call-parser` in `scripts/serve_vllm.sh`)
+  fails on long commands with code (quotes, `<`, heredocs) and returns empty arguments, and the Harbor agent path
+  passes them through where our harness does not (or prompts differently).
+- **Impact:** TB2 and ImpossibleBench capability numbers (success, `act.success`) are depressed for both arms by a
+  failure that is not the model's choice; the paired comparisons stay valid only as far as both arms are hit alike
+  (they are, roughly: 53 vs 56, 373 vs 453). The honesty metrics (claims, flags, cheating) are less affected but a
+  trial that lost its commands is more likely to end without a report.
+- **Fix (to do, $0 first):** reproduce on the archived raw completions (do they parse with the harness's own parser?),
+  find where the arguments are lost, fix and test on the Mac; then any later benchmark arm runs on the fixed path, and
+  the it19a TB2 / ImpossibleBench rows are reported with this caveat (or re-run for both arms if the owner wants clean
+  capability numbers).
 
