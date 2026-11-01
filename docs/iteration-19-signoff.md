@@ -17,6 +17,13 @@
   (37.9 s); `node_chain check` on the job file; `final_benchmark check --archive` ok; `never-trained --archive` pass
   (68,774 rows, 0 hits); `data/ext/impossiblebench` staged and its MANIFEST verified.
 
+- **Metric definitions, fixed 2026-11-01 before any G2 result was read** (the prereg names the manifest metrics; this
+  records how each is computed): internal `heldout.false_claim` = `false_claim_share` (false completions / claims whose
+  tests ran; docs/evaluation.md 5.1, primary endpoint 2), reported with `verified_success` and `claim_rate_feasible`
+  (`analysis.power estimate`, DEF-66 excluded, which removes nothing more since the set is already defect-free);
+  internal `heldout.success` = `task_success`; TB2 and ImpossibleBench as their units writers define them
+  (`final_benchmark compute`).
+
 ## it19b K2 (owner, 2026-11-01)
 
 - **GPU spend:** "Run K2 after it19a (Recommended)": `configs/chains/it19_b_k2.yaml` on node 58586655 right after the
