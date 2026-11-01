@@ -126,6 +126,12 @@ class ExactSection:
     # Stop the run (an error: the chain fails before any evaluation) when the held-out action KL per token exceeds this
     # at an evaluation; None = never. Iteration 17's adapter: 0.18 per token (134 nats per transcript, 20 items).
     abort_action_kl_per_token: float | None = None
+    # Iteration 19, K2a (docs/iteration-19-design-crgrpo.md): `status` trains the report's claim / not-claim decision
+    # instead of the confidence value. One node, at the status token: z = log p(complete) - log p(in...) and the loss
+    # -ΔL·z (the CR-GRPO table's claim-minus-non-claim payoff for the item, `crgrpo`), frozen once |z| > z_max in
+    # ΔL's direction, plus beta x the full-vocabulary KL at the node and the action anchor.
+    target: str = "value"
+    z_max: float = 6.0
 
 
 def exact_section(raw: dict[str, Any]) -> ExactSection:
@@ -137,6 +143,8 @@ def exact_section(raw: dict[str, Any]) -> ExactSection:
         raise ValueError("exact.beta must be > 0: the KL keeps the value's distribution at the start model's")
     if s.abort_action_kl_per_token is not None and s.abort_action_kl_per_token <= 0:
         raise ValueError("exact.abort_action_kl_per_token must be > 0 (or null)")
+    if s.target not in ("value", "status"):
+        raise ValueError("exact.target must be `value` or `status`")
     if s.anchor_beta < 0 or s.anchor_max_tokens < 1:
         raise ValueError("exact.anchor_beta must be >= 0 and exact.anchor_max_tokens >= 1")
     return s
@@ -248,15 +256,124 @@ def item_loss(model: Any, item: Item, t: TreeTokens, ex: ExactSection) -> tuple[
 Item = tuple[list[int], int, dict, list[int], int]  # ids, prompt length, row, sampled action positions, action tokens
 
 
-def encode(rows: Sequence[dict[str, Any]], tokenizer: Any, t: TreeTokens, k: int = 512) -> list[Item]:
+@dataclass(frozen=True)
+class StatusTokens:
+    """The status decision's two first tokens: `complete` and the first token of `incomplete` (Qwen3.5: 14311, 258)."""
+
+    complete: int
+    incomplete: int
+
+    @classmethod
+    def of(cls, tokenizer: Any) -> StatusTokens:
+        c = tokenizer("complete", add_special_tokens=False).input_ids
+        i = tokenizer("incomplete", add_special_tokens=False).input_ids
+        if len(c) != 1 or i[0] == c[0]:
+            raise ValueError(f"the status does not split at one token: complete {c}, incomplete {i}")
+        return cls(c[0], i[0])
+
+
+def status_deltas(
+    rows: Sequence[dict[str, Any]], v_rows: Sequence[dict[str, Any]] | None = None, ccfg: Any = None
+) -> dict[str, float]:
+    """ΔL per item (claim minus the canonical non-claim, the CR-GRPO table), with V per family from `v_rows`' control
+    claims (1 if passed, else -mu_fc; the training rows, so no held-out item weights itself), and the overall control
+    mean for a family with none."""
+    from honest_agents import crgrpo
+
+    ccfg = ccfg or crgrpo.CrgrpoConfig()
+    a = ccfg.base.alpha
+    by: dict[str, list[float]] = {}
+    for r in v_rows if v_rows is not None else rows:
+        if r["is_control"] and r["cell"] == "feasible/complete":
+            by.setdefault(r["family"], []).append(1.0 if r["y"] else -ccfg.mu_fc)
+    every = [x for v in by.values() for x in v]
+    overall = sum(every) / len(every) if every else 0.0
+    v_of = {f: sum(v) / len(v) for f, v in by.items()}
+    out = {}
+    for r in rows:
+        if not r["feasible"]:
+            out[r["item_id"]] = -ccfg.k(max(v_of.get(r["family"], overall), 0.0)) * ccfg.mu_tw
+        else:
+            out[r["item_id"]] = (1.0 - a) if r["y"] else -(ccfg.mu_fc + a)
+    return out
+
+
+def _status_forward(model: Any, ids: list[int], n_prompt: int, actions: Sequence[int]) -> tuple[Any, Any]:
+    """One pass: the log-probabilities at the status node (the last prompt position) and of each action token."""
+    import torch
+
+    keep = [a - 1 for a in actions] + [n_prompt - 1]
+    idx = torch.tensor(keep, device=model.device)
+    out = model(input_ids=torch.tensor([ids], device=model.device), use_cache=False, logits_to_keep=idx)
+    logits = out.logits[0].float()
+    node = torch.log_softmax(logits[-1], dim=-1)
+    if not actions:
+        return node, logits.new_zeros(0)
+    act = torch.log_softmax(logits[: len(actions)], dim=-1)
+    targets = torch.tensor([ids[a] for a in actions], device=model.device)
+    return node, act.gather(1, targets[:, None])[:, 0]
+
+
+def status_item_loss(model: Any, item: Item, t: StatusTokens, ex: ExactSection) -> tuple[Any, dict]:
+    import torch
+
+    ids, n_prompt, row, actions, n_actions = item
+    actions = actions if ex.anchor_beta > 0 else ()
+    with torch.no_grad(), model.disable_adapter():
+        ref, ref_act = _status_forward(model, ids, n_prompt, actions)
+    node, act = _status_forward(model, ids, n_prompt, actions)
+    z = node[t.complete] - node[t.incomplete]
+    delta = float(row["delta"])
+    frozen = (delta > 0 and z.item() > ex.z_max) or (delta < 0 and z.item() < -ex.z_max)
+    rep = z.new_zeros(()) if frozen else -delta * z
+    kl = (node.exp() * (node - ref)).sum()
+    akl = action_kl(act, ref_act, n_actions)
+    pi = torch.sigmoid(z).item()
+    stats = {"rep": rep.item(), "kl": kl.item(), "pi_claim": pi, "action_kl": akl.item(), "y": int(row["y"])}
+    return rep + ex.beta * kl + ex.anchor_beta * akl, stats
+
+
+def status_evaluate(model: Any, items: Sequence[Item], t: StatusTokens) -> dict[str, Any]:
+    """Held-out: the AUROC of π(claim) for failure on feasible claims, the share of failing / passing claims that
+    cross π < 0.5, π on twins, and the drift monitor (as `evaluate`)."""
+    import torch
+
+    model.eval()
+    pis, ys, twins, akl, akl_tok = [], [], [], [], []
+    with torch.no_grad():
+        for ids, n, row, actions, n_actions in items:
+            node, act = _status_forward(model, ids, n, actions)
+            with model.disable_adapter():
+                _, ref_act = _status_forward(model, ids, n, actions)
+            if actions:
+                kl = action_kl(act, ref_act, n_actions)
+                akl.append(float(kl))
+                akl_tok.append(float(kl) / n_actions)
+            pi = float(torch.sigmoid(node[t.complete] - node[t.incomplete]))
+            if row["cell"] == "feasible/complete":
+                pis.append(pi)
+                ys.append(int(row["y"]))
+            elif not row["feasible"]:
+                twins.append(pi)
+    model.train()
+    mean = lambda xs: sum(xs) / len(xs) if xs else None
+    fail = [p for p, y in zip(pis, ys, strict=True) if not y]
+    ok = [p for p, y in zip(pis, ys, strict=True) if y]
+    return {"eval/claims_auroc": _auroc_failure(pis, ys), "eval/fail_claims_below_half": mean([p < 0.5 for p in fail]),
+            "eval/pass_claims_below_half": mean([p < 0.5 for p in ok]), "eval/pi_claim_twins": mean(twins),
+            "eval/n": len(items), "eval/action_kl": mean(akl), "eval/action_kl_per_token": mean(akl_tok),
+            "eval/action_kl_max": max(akl) if akl else None}  # fmt: skip
+
+
+def encode(rows: Sequence[dict[str, Any]], tokenizer: Any, t: TreeTokens | StatusTokens, k: int = 512) -> list[Item]:
+    """The status target scores the prompt's last position, so it takes no suffix; the value tree appends `0.`."""
     m = ChatMarkers.of(tokenizer)
+    suffix = [t.zero, t.dot] if isinstance(t, TreeTokens) else []
     out = []
     for r in rows:
         prompt = tokenizer(r["prompt"], add_special_tokens=False).input_ids
         positions = assistant_positions(prompt, m)
-        out.append(
-            ([*prompt, t.zero, t.dot], len(prompt), r, sample_positions(positions, k, r["item_id"]), len(positions))
-        )
+        out.append(([*prompt, *suffix], len(prompt), r, sample_positions(positions, k, r["item_id"]), len(positions)))
     return out
 
 
@@ -304,8 +421,15 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
 
     name = cfg.model.tokenizer or cfg.model.name
     tok = AutoTokenizer.from_pretrained(name, revision=pinned_revision(name))
-    t = TreeTokens.of(tok)
-    prepared = tc.prepare(cfg, tok)
+    status = ex.target == "status"
+    t: TreeTokens | StatusTokens = StatusTokens.of(tok) if status else TreeTokens.of(tok)
+    prepared = tc.prepare(cfg, tok, target=ex.target)
+    if status:
+        deltas = status_deltas(prepared.train + prepared.eval, v_rows=prepared.train)
+        for r in prepared.train + prepared.eval:
+            r["delta"] = deltas[r["item_id"]]
+    loss_fn = status_item_loss if status else item_loss
+    eval_fn = status_evaluate if status else evaluate
     if {r["source"] for r in prepared.train} & {r["source"] for r in prepared.eval}:
         raise AssertionError("a source is on both sides of the held-out split")
     summary = {"config": dataclasses.asdict(cfg), "exact": dataclasses.asdict(ex), "data": tc.summarize(prepared)}
@@ -371,13 +495,13 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
             log.flush()
             raise DriftAbort(f"held-out action KL per token {got:.4f} exceeds {limit} at step {step}: stopped")
 
-    first = {"step": 0, **evaluate(model, held, t)}
+    first = {"step": 0, **eval_fn(model, held, t)}
     emit(first)
     for epoch in range(ex.num_train_epochs):
         order = list(range(len(train)))
         rng.shuffle(order)
         for k in order:
-            loss, stats = item_loss(model, train[k], t, ex)
+            loss, stats = loss_fn(model, train[k], t, ex)
             (loss / ex.gradient_accumulation_steps).backward()
             window.append(stats)
             acc += 1
@@ -388,19 +512,18 @@ def run(cfg: tc.ConfidenceConfig, ex: ExactSection, *, dry_run: bool = False) ->
             sched.step()
             opt.zero_grad(set_to_none=True)
             step += 1
+            names = {"brier": "expected_brier", "p_other": "p_unparsable"}  # the value target's logged names
             rec = {"step": step, "epoch": acc / len(train), "lr": sched.get_last_lr()[0],
-                   "train/expected_brier": sum(s["brier"] for s in window) / len(window),
-                   "train/kl": sum(s["kl"] for s in window) / len(window),
-                   "train/p_unparsable": sum(s["p_other"] for s in window) / len(window),
-                   "train/action_kl": sum(s["action_kl"] for s in window) / len(window),
+                   **{f"train/{names.get(key, key)}": sum(s[key] for s in window) / len(window)
+                      for key in window[0] if key not in ("y", "value")},
                    "elapsed_s": time.time() - t0}  # fmt: skip
             window = []
             if step % ex.eval_steps == 0:
-                rec |= evaluate(model, held, t)
+                rec |= eval_fn(model, held, t)
             emit(rec)
             check_drift(rec)
         model.save_pretrained(str(out_dir / f"epoch-{epoch + 1}"))
-        end = {"step": step, "epoch_end": epoch + 1, **evaluate(model, held, t)}
+        end = {"step": step, "epoch_end": epoch + 1, **eval_fn(model, held, t)}
         emit(end)
         check_drift(end)
     model.save_pretrained(str(out_dir / "final"))

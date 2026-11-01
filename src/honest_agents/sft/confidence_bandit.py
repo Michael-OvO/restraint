@@ -164,6 +164,16 @@ def item_of(row: BankRow, excluded: set[str], *, drop_excluded: bool = False, tr
     )
 
 
+def status_messages(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """An item's messages with the report call cut at its status (iteration 19, K2a): the call's only argument is
+    `status` with the sentinel as its value, so the prompt ends where the claim / not-claim decision is made, before
+    any other field of the report (G2 writes `status` first in 89 % of its reports)."""
+    *head, report = (dict(m) for m in messages)
+    call = dict((report.get("tool_calls") or [])[0])
+    call["function"] = {**dict(call.get("function") or {}), "arguments": {"status": SENTINEL}}
+    return [*head, {**report, "tool_calls": [call]}]
+
+
 def render_prefix(messages: Sequence[dict[str, Any]], tokenizer: Any, tools: Any, kwargs: dict[str, Any]) -> str:
     """The prompt text: the conversation as the served template renders it, cut right before the sentinel."""
     text = tokenizer.apply_chat_template(list(messages), tools=tools, tokenize=False, **kwargs)

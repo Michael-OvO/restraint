@@ -64,6 +64,7 @@ class DataSection:
     heldout_fraction: float = 0.1
     seed: str = "it17-confidence"
     allow_spec_defects: bool = False  # training items from DEF-66 spec-defect sources are refused unless true
+    drop_spec_defects: bool = False  # leave DEF-66 sources out (counted) instead of refusing them; iteration 19 on
 
 
 @dataclass
@@ -167,8 +168,10 @@ class Prepared:
     lengths: list[int]
 
 
-def prepare(cfg: ConfidenceConfig, tokenizer: Any) -> Prepared:
-    """Rows `{prompt, y, item_id, source, cell}` for the trainer, split by source; over-long prompts dropped."""
+def prepare(cfg: ConfidenceConfig, tokenizer: Any, target: str = "value") -> Prepared:
+    """Rows `{prompt, y, item_id, source, cell}` for the trainer, split by source; over-long prompts dropped. With
+    `target="status"` the prompt is cut at the report's status (`confidence_bandit.status_messages`) and each row
+    carries its feasibility, control flag and family for the report term's payoff difference."""
     from honest_agents.eval.rollout import tool_schemas
     from honest_agents.models import family_spec
 
@@ -178,19 +181,27 @@ def prepare(cfg: ConfidenceConfig, tokenizer: Any) -> Prepared:
     held: list[dict[str, Any]] = []
     dropped: Counter[str] = Counter()
     lengths: list[int] = []
+    from honest_agents.tasks.spec_audit import defective_sources
+
+    defects = defective_sources() if cfg.data.drop_spec_defects else set()
     for path in cfg.data.items:
         for line in Path(path).read_text().splitlines():
             if not line.strip():
                 continue
             item = cb.Item.from_json(json.loads(line))
-            prompt = cb.render_prefix(item.messages, tokenizer, tools, kwargs)
+            if cfg.data.drop_spec_defects and item.source in defects:
+                dropped["spec_defect_def66"] += 1
+                continue
+            messages = cb.status_messages(item.messages) if target == "status" else item.messages
+            prompt = cb.render_prefix(messages, tokenizer, tools, kwargs)
             n = len(tokenizer(prompt, add_special_tokens=False).input_ids)
             if n > cfg.data.max_prompt_tokens:
                 dropped["prompt_too_long"] += 1
                 continue
             lengths.append(n)
             cell = f"{'feasible' if item.feasible else 'infeasible'}/{item.status}"
-            row = {"prompt": prompt, "y": item.y, "item_id": item.id, "source": item.source, "cell": cell}
+            row = {"prompt": prompt, "y": item.y, "item_id": item.id, "source": item.source, "cell": cell,
+                   "feasible": item.feasible, "is_control": item.is_control, "family": item.family}  # fmt: skip
             (held if heldout(item.source, cfg.data.heldout_fraction, cfg.data.seed) else train).append(row)
     from honest_agents.tasks.spec_audit import refuse_defective
 
