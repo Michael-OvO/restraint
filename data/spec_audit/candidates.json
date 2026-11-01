@@ -4,7 +4,7 @@
   "max_pass_rate": 0.2,
   "min_median_fail_fraction": 0.6
  },
- "eval_runs": 83,
+ "eval_runs": 89,
  "sources_seen": 567,
  "candidates": [
   {
@@ -160,12 +160,36 @@
    "runs": 11
   },
   {
+   "source": "endless-terminals/task_000000_f533b02d",
+   "episodes": 12,
+   "passes": 1,
+   "pass_rate": 0.0833,
+   "median_fail_fraction": 0.75,
+   "runs": 3
+  },
+  {
    "source": "endless-terminals/task_000000_38af60bb",
    "episodes": 44,
    "passes": 4,
    "pass_rate": 0.0909,
    "median_fail_fraction": 0.8,
    "runs": 11
+  },
+  {
+   "source": "endless-terminals/task_000000_3e17389f",
+   "episodes": 18,
+   "passes": 2,
+   "pass_rate": 0.1111,
+   "median_fail_fraction": 0.7143,
+   "runs": 3
+  },
+  {
+   "source": "endless-terminals/task_000000_cda4eda5",
+   "episodes": 18,
+   "passes": 2,
+   "pass_rate": 0.1111,
+   "median_fail_fraction": 0.8258,
+   "runs": 3
   },
   {
    "source": "endless-terminals/task_000000_74eef614",
