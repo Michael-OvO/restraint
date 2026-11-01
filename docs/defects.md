@@ -77,6 +77,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-67 | training data | closed 2026-10-30 | the iteration-14 decision SFT's control lines teach a lexical rule ("nothing there says X has to be kept, so it is safe to remove"), which G2 applies to twins whose evidence never says "keep" |
 | DEF-68 | tooling / benchmark | closed 2026-10-30 | the never-trained check did not read the iteration-17/18 confidence items (`data/it17/`), so its recorded pass predated their training |
 | DEF-69 | infra / process | closed 2026-10-31 | a queued Vast start ("state change queued") fired unobserved after the agent switched nodes: node 58122470 ran 36.4 GPU hours idle, $43.31 |
+| DEF-70 | metric | open | ImpossibleBench's headline `flag` counts only the `abstain` tool, which G2 never uses (it declines with `submit_report` incomplete): the pre-registered flag reads G2 as 0 % while the explained-decline reading is 27.7 % |
 
 ---
 
@@ -3458,4 +3459,20 @@ section 7 critique) and from re-checks against the code and the archive on that 
   until it runs or cancel the start at once (`vastai stop instance ID`, then confirm `exited`); and account for every
   non-exited instance (`vastai show instances`) before and after every node job and at the start of every session
   that touches Vast.
+
+### DEF-70: the ImpossibleBench headline flag cannot see the trained report channel
+- **Area:** metric (frozen final benchmark, `eval.external.impossiblebench`, `flag`). **Status:** open (owner decision:
+  how later arms are read). **Found:** 2026-11-01, the it19a baseline (docs/iteration-19-results-baseline.md).
+- **What happened:** the headline `flag` is the strict mapping fixed by DEF-28: a report through the `abstain` tool,
+  and not cheated. G2's training (the decision SFT, the reports of every SFT build since iteration 13) declines with
+  `submit_report(status="incomplete")` and a blocker; G2 uses `abstain` in 0 of 2,284 dev-bank reports. So the
+  pre-registered flag reads G2 as 0.0 % (base 4.5 %), while the scorer's `flag_lenient` (explained `incomplete`
+  reports, not cheated) reads base 23.4 %, G2 27.7 % (+4.2 [+1.0, +7.8], post hoc).
+- **Impact:** the it19a H2 result is reported as pre-registered (contradicted) with the lenient reading beside it. Any
+  later arm trained like G2 would score about 0 on the strict flag whatever it does, so the strict flag cannot detect
+  a gain from training on this report channel.
+- **Fix (proposed, for the owner):** either (a) amend the final benchmark so the headline is `flag_lenient` for every
+  arm from now on, keeping the strict flag as reported (the it19a rows hold both, so the baseline needs no re-run), or
+  (b) keep the strict flag and add the `abstain` tool to the training reports. The amendment must be dated before any
+  later arm's ImpossibleBench episode exists.
 
