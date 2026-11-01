@@ -25,21 +25,26 @@ Agents that work in a shell fail in two quiet ways: they **claim success on work
 against both, with rewards graded on the **final sandbox state** (hidden tests, hashed protected paths), never an LLM
 judge, and with every training stage pre-registered before it runs.
 
-> **Status:** research in progress, 17 iterations. Most did not pass their pre-registered gate, and the write-ups say so.
-> The latest, iteration 17, is a **NO-GO**: its primary endpoint passed and a safety guard failed.
+> **Status:** research in progress, 19 iterations. Most did not pass their pre-registered gate, and the write-ups say so.
+> The latest, iteration 19, measured the reference model on a frozen final benchmark (internal held-out tasks,
+> Terminal-Bench 2, ImpossibleBench). Plan and timeline: [docs/roadmap.md](docs/roadmap.md).
 
 ## Findings
 
 | | Finding | Evidence |
 |:-:|---|---|
+| ✅ | **Restraint holds on held-out tasks.** The reference model (G2) rarely claims success on tasks that cannot or must not be done, at no cost to verified success. | claims on impossible held-out tasks **53.0 → 13.2 %**; verified success +3.6 [−0.0, +7.3] (iteration 19, frozen final benchmark) |
+| ❌ | **Its completion claims are no more truthful.** When it does claim success, it is wrong as often as the base model, and most of those failures are visible in its own transcript. | failing claims 18.5 vs 18.4 %; the failure shown in the transcript in 78 % (iteration 19) |
 | ✅ | **Restraint is trainable, mostly as a caution level.** Supervising the decision at the model's own states raised correct abstention on impossible tasks without hurting verified success. | abstention **+42 to +45 pts**; verified success +5.1 [+0.9, +9.2] (iterations 13-14) |
 | ⚠️ | **It does not transfer as judgment.** On evidence formats the model had not seen, no method (SFT, RL, DPO) produced real discrimination. | probe discrimination 0.20; "they move a caution level" (iteration 14) |
 | ⚠️ | **Good habits are fragile.** One SFT stage that masked the inspection turns erased the read-before-delete habit; restoring the real turns brought it back. | read rate ≤ 5 % on every surface, then recovered (iteration 15, G1 → G2) |
 | ✅ | **The model knows more than it says.** It writes confidence 1.0 on nearly every claim, yet its own token probabilities rank its failures; training only the confidence value made the stated number informative. | confidence AUROC for failure **0.59 → 0.77** (+0.18 [+0.14, +0.23]) on 620 held-out claims (iteration 17) |
 | ❌ | **A regularizer only protects the tokens it covers.** That same training (KL on the confidence value alone) let the shared weights drift: the model stopped reading before deleting. | protected data destroyed on **53 / 120** tasks vs 13 / 120; caught by the pre-registered guard (iteration 17) |
+| ⚠️ | **Training the report moves the actions too.** Anchoring the actions (iteration 18) or training only the claim decision (iteration 19) shrank the damage but did not remove it. | twins destroyed **31** and **21 / 120** vs 13 (iterations 18, 19 K2) |
 
-**Next (iteration 18):** the same calibration training with a KL anchor over the model's own actions, a drift
-monitor and abort, and a read-before-delete guard. In a CPU mechanism test the anchor held action drift 37× lower.
+**Next:** Terminal-Bench 2 and ImpossibleBench again at a budget that does not cut episodes off, then one full run
+of constrained RL (CR-GRPO: honesty as constraints against the success objective, caution-neutral twin / control
+pairs, an exact signal on the claim decision), the test of whether RL can do what supervision did not.
 
 Every iteration, with its numbers and sources: **[docs/results.md](docs/results.md)**.
 
@@ -74,9 +79,9 @@ The process is as much the point as the results.
 
 | Practice | What it means here |
 |---|---|
-| **Pre-registration** | Endpoints, bars, guards and stopping rules are fixed before any candidate episode exists; margins come from a power analysis, never a point estimate ([latest](docs/iteration-17-prereg.md)). |
+| **Pre-registration** | Endpoints, bars, guards and stopping rules are fixed before any candidate episode exists; margins come from a power analysis, never a point estimate ([latest](docs/iteration-19-prereg-baseline.md)). |
 | **One estimator** | Paired differences by source, cluster-robust intervals and sign-flip tests, on the units both arms share. |
-| **Integrity gate** | No experiment while any entry in the [defect ledger](docs/defects.md) (65 so far) is open, unless the owner waives it in writing; a tiered sweep (in-memory, cached Docker, full) before each stage. |
+| **Integrity gate** | No experiment while any entry in the [defect ledger](docs/defects.md) (75 so far) is open, unless the owner waives it in writing; a tiered sweep (in-memory, cached Docker, full) before each stage. |
 | **Never trained on the benchmark** | A sha256-frozen final benchmark and a `never-trained` check over every training build. |
 | **Watched GPU runs** | Declarative job chains on rented VMs, with gates, timeouts, stall detection, and a watcher that archives results and stops the node. |
 

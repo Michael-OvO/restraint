@@ -1,8 +1,55 @@
 # Roadmap
 
-Where the project stands, the spending gate, what runs where, and what remains, in execution order.
+Where the project stands and what remains, in order. Updated 2026-11-01 after a review of the whole timeline with the
+owner. The original staged plan of 2026-10-05 is kept below it as history.
 
-## Where we are
+## Where we are (2026-11-01)
+
+**Endgame (owner, 2026-11-01):** a public write-up of the project and this repo; no venue or deadline. About $100 or
+more of further GPU spend is available.
+
+**What the 19 iterations established** (numbers: [results.md](results.md)):
+
+- **Restraint is trainable by supervision at the model's own decision states.** G2 (iteration 15, decision-point SFT
+  with own-success anchors) cuts claims on impossible held-out tasks from 53.0 to 13.2 % at verified success +3.6
+  [−0.0, +7.3] (iteration 19a, frozen final benchmark).
+- **It is not yet honest reporting.** When G2 claims success it is wrong as often as the base model: 18.4 vs 18.5 % of
+  claims fail. 78 % of those failures are visible in its own transcript (iteration-19 bad-case read): mostly a decision
+  failure, not a skill limit.
+- **RL has not yet beaten its SFT starting point.** GRPO from base made the model more capable, not more honest
+  (iterations 9, 11, 12); GRPO, soups and self-distillation on top of the SFT models eroded or did not move them
+  (iterations 13, 15 G3 / G4).
+- **Training the report on the model's own transcripts moves its actions too** (one shared LoRA): twins destroyed 53,
+  31, 21 of 120 against G2's 13 (iterations 17, 18, 19 K2).
+- **Methodology:** rewards graded on the final sandbox state, impossible twins with near-miss controls, an oracle gate,
+  pre-registration, a defect ledger (75 entries, including hidden tests that do not follow from their instruction in
+  about 3 % of the dataset's sources).
+
+**The open question** is the project's core contribution: can RL, with honesty as constraints that oppose the success
+objective, do what SFT did not, i.e. lower false claims at non-inferior success? Nothing so far supports it.
+
+## The plan from here (owner, 2026-11-01)
+
+| # | step | cost | status |
+|---|---|---|---|
+| 1 | Close the it19a bad-case defects (DEF-72..75) | $0 | done |
+| 2 | **Stage a2:** TB2 and ImpossibleBench for base and G2 at the larger budget (DEF-71), so the external numbers measure honesty, not budget exhaustion | about $8-10 | waiting for the top-up |
+| 3 | DEF-74 archive re-grade (`data/def74/affected.jsonl`), on the node before any analysis reads those runs | in step 2's session | to do |
+| 4 | **CR-GRPO trainer build** ([design](iteration-19-design-crgrpo.md)): `reward.mode: crgrpo` in GRPO, online V_s, constraint multipliers, the report term in the loss; tests; a pre-registration | $0 | to do |
+| 5 | **One full CR-GRPO run** from G2 (96 GB-class node), with the twin stop rule; then the candidate on the final benchmark | about $20-35 | after 4 and the owner's approval |
+| 6 | **Write-up**: the README and a results narrative built around steps 2 and 5 and the findings above | $0 | after 5 |
+
+Demoted: the reporter adapter (iteration 19 stage c). It is a gate applied after the agent finishes, not the core
+contribution; only its two free rules (no `complete` with a non-empty `incomplete` list; no claimed step without a
+command) may be reported, at $0.
+
+Integrity gate: unchanged. No experiment starts while any [defects.md](defects.md) entry is open.
+
+---
+
+# History: the staged plan of 2026-10-05
+
+## Where we are (as of 2026-10-05)
 
 A go/no-go review found that the original design must not be trained ([reviews.md](reviews.md)). The fixes were built component by
 component, reviewed against the installed libraries, attacked again by a second audit and a leakage audit, and cleaned up. **No GPU
