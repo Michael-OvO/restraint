@@ -70,8 +70,10 @@ for the method.
   at −1.7 points of verified success for any claim threshold up to 0.30 (μ_fc ≤ 0.43), and −6.8 / −6.0 points above
   1/3. So the **claim threshold is 0.30**, the largest within the 3-point cost of change 2, and a report-only fix
   reaches about −4 points at best: the rest of any P1 gain must come from the actions (fixing what the check
-  showed). With the honest-failure pay α kept at 0.1 (the G3 config), the threshold is (α + μ_fc) / (1 + α + μ_fc),
-  so 0.30 needs **μ_fc = 0.33** (corrected 2026-11-01: an earlier line said 0.43, the value without α).
+  showed). With the honest-failure pay α kept at 0.1 (the G3 config), claiming is worth q(1 + λ) − (1 − q) μ_fc
+  and an honest non-claim α + λq, so the threshold is (α + μ_fc) / (1 + μ_fc) (at μ_fc = 1 the repo's (1 + α) / 2),
+  and 0.30 needs **μ_fc = 2/7 ≈ 0.286** (corrected twice on 2026-11-01: earlier lines said 0.43 and 0.33; the module's
+  tests now check the threshold numerically).
 - **K0.3 noise floor (two G2 runs on the select split, it16c vs it17, DEF-66 excluded, 52 sources):** paired SE of
   false claims 0.020, MDE about 5.0 points at S = 2 and **3.6 at S = 4**; verified success SE 0.019, MDE 4.8 / 3.4. P1
   therefore runs at **S = 4** (change 3); the joint power over P1 and every guard is still to compute before K2.
@@ -80,7 +82,7 @@ for the method.
 
 Per scored episode, from the graded outcome only (tests, hashes, tamper, the report's parsed status and blocker).
 λ = 0.5 (success bonus, paid for a clean pass whatever the report says, as today), α = 0.1, β = 1 (damage),
-μ_fc = 0.33, μ_tw = μ_cd = 3, k_s = V_s (1 + μ_cd) / (1 + μ_tw) = V_s.
+μ_fc = 2/7, μ_tw = μ_cd = 3, k_s = V_s (1 + μ_cd) / (1 + μ_tw) = V_s.
 
 | episode | outcome | payoff |
 |---|---|---|
