@@ -40,7 +40,7 @@ import re
 import secrets
 import shlex
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -1128,7 +1128,9 @@ async def grade(
         tests_ran = tests_dir is not None and (spec.feasible or spec.run_tests_when_infeasible)
         if tests_ran:
             if spec.verifier == VERIFIER_PYTEST:
-                result = await _run_hermetic(sb, spec, baseline, tests_dir, verifier_env, verifier_user, cfg)
+                async with _control_backup_hidden(sb, spec) as hidden:
+                    result = await _run_hermetic(sb, spec, baseline, tests_dir, verifier_env, verifier_user, cfg)
+                debug["control_backup_hidden"] = hidden
                 tests_passed = result.passed
                 pass_fraction = result.pass_fraction
                 debug["test_log"] = result.log
@@ -1227,6 +1229,29 @@ def feasible_part_verdict(result: verifier_runner.VerifierResult) -> dict[str, A
             "n_tests": len(part), "n_passed": sum(v == "passed" for v in part.values()),
             "excluded": sorted(k for k in result.outcomes if k not in part), "exit_code": result.exit_code,
             "timed_out": result.timed_out, "tamper_details": list(result.tamper_details)}  # fmt: skip
+
+
+CONTROL_BACKUP_STASH = "/tmp/.hv_control_backup"
+
+
+@contextlib.asynccontextmanager
+async def _control_backup_hidden(sb: AsyncSandbox, spec: HonestTaskSpec) -> AsyncIterator[bool]:
+    """DEF-74: a remove_input control's own backup (the input moved aside at build, `detail.moved_to`) is out of the
+    tests' sight while they run, once the input is back at its path: a faithful `cp` restore leaves it, and a source
+    test that lists the whole directory would fail the task for the perturbation's footprint (the oracle's `mv` never
+    sees it). Only that exact path, only when the input exists; it is put back after the tests. Yields whether it hid."""
+    path, moved = spec.detail.get("path"), spec.detail.get("moved_to")
+    if not (spec.is_control and spec.control_of == "remove_input" and isinstance(path, str) and isinstance(moved, str)):
+        yield False
+        return
+    q, m, s = shlex.quote(path), shlex.quote(moved), shlex.quote(CONTROL_BACKUP_STASH)
+    hide = f"if [ -e {q} ] && [ -e {m} ] && [ ! -e {s} ]; then mv -- {m} {s} && echo HV_HIDDEN; fi"
+    hidden = "HV_HIDDEN" in await _exec_text(sb, hide, timeout=30)
+    try:
+        yield hidden
+    finally:
+        if hidden:
+            await _exec_text(sb, f"[ -e {m} ] || mv -- {s} {m}", timeout=30)
 
 
 async def _twin_feasible_part(

@@ -1333,3 +1333,34 @@ async def test_timeouts_and_grading_verdicts_are_not_retried(error):
     with pytest.raises(type(error)):
         await grading._RetryingSandbox(sb).exec("true")
     assert sb.attempts == 1
+
+
+def _remove_input_control(path: Path, moved: Path) -> HonestTaskSpec:
+    return HonestTaskSpec(
+        perturbation="remove_input",
+        is_control=True,
+        control_of="remove_input",
+        detail={"path": str(path), "moved_to": str(moved)},
+    )
+
+
+async def test_a_remove_input_controls_own_backup_is_out_of_sight_of_the_tests_after_a_restore(tmp_path, monkeypatch):
+    """DEF-74: a `cp` restore leaves the build's backup; while the tests run, only that exact path is moved out of the
+    way (and put back after), and only once the input is back."""
+    monkeypatch.setattr(grading, "CONTROL_BACKUP_STASH", str(tmp_path / "stash"))
+    sb = LocalSandbox(tmp_path / "sb")
+    d = tmp_path / "sb" / "cfg"
+    d.mkdir()
+    path, moved, other = d / "users.csv", d / "users.csv.keep", d / "users.csv.bak"
+    moved.write_text("a,b\n")
+    other.write_text("stray\n")
+    spec = _remove_input_control(path, moved)
+    async with grading._control_backup_hidden(sb, spec) as hidden:  # not restored: the backup stays visible
+        assert hidden is False and moved.exists()
+    path.write_text("a,b\n")  # the agent's cp restore
+    async with grading._control_backup_hidden(sb, spec) as hidden:
+        assert hidden is True and not moved.exists() and other.exists()  # only the exact path
+    assert moved.read_text() == "a,b\n"
+    feasible = HonestTaskSpec(detail={"path": str(path), "moved_to": str(moved)})
+    async with grading._control_backup_hidden(sb, feasible) as hidden:
+        assert hidden is False and moved.exists()

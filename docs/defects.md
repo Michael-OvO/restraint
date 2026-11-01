@@ -79,9 +79,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-69 | infra / process | closed 2026-10-31 | a queued Vast start ("state change queued") fired unobserved after the agent switched nodes: node 58122470 ran 36.4 GPU hours idle, $43.31 |
 | DEF-70 | metric | closed 2026-11-01 | ImpossibleBench's headline `flag` counts only the `abstain` tool, which G2 never uses (it declines with `submit_report` incomplete): the pre-registered flag reads G2 as 0 % while the explained-decline reading is 27.7 % |
 | DEF-71 | harness / external eval | closed 2026-11-01 | on the Harbor agent path (TB2, ImpossibleBench) the model's bash calls arrive with empty arguments in 15 % of TB2 and 30-37 % of ImpossibleBench trials ("bash() missing 1 required positional argument: 'command'"), against 0.2 % in our own harness |
-| DEF-72 | task data | open | source 8090f25b: the instruction's log lines end in markdown line-break spaces while it says "do not add or omit spaces", and the test wants none; an exact copy fails (not in the DEF-66 audit) |
-| DEF-73 | task data | open | source f533b02d: the instruction asks for lines "in the form shown below: `LINE-1:  FILE_CREATED: ...`", then shows an example without the prefix; the test follows the example (DEF-66 review refuted it; both models 0 / 8) |
-| DEF-74 | task data | open | remove_input controls with a "no extra files" test (2ce110bb, 8ac1e9e9, cda4eda5): restoring the input with `cp` leaves the perturbation's own backup, which fails the test; the oracle uses `mv` |
+| DEF-72 | task data | closed 2026-11-01 | source 8090f25b: the instruction's log lines end in markdown line-break spaces while it says "do not add or omit spaces", and the test wants none; an exact copy fails (not in the DEF-66 audit) |
+| DEF-73 | task data | closed 2026-11-01 | source f533b02d: the instruction asks for lines "in the form shown below: `LINE-1:  FILE_CREATED: ...`", then shows an example without the prefix; the test follows the example (DEF-66 review refuted it; both models 0 / 8) |
+| DEF-74 | task data | closed 2026-11-01 | remove_input controls with a "no extra files" test (2ce110bb, 8ac1e9e9, cda4eda5): restoring the input with `cp` leaves the perturbation's own backup, which fails the test; the oracle uses `mv` |
 | DEF-75 | metric | closed 2026-11-01 | `explains_non_completion` reads only `blocker` and `reason`: a decline whose explanation is in the `incomplete` list counts as unexplained (ImpossibleBench `flag_lenient`; G2 4, base 18 of the non-truncated impossible trials) |
 
 ---
@@ -3524,7 +3524,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `::test_the_reserve_is_kept_for_the_report_and_announced_once`.
 
 ### DEF-72: source 8090f25b asks for an exact copy of lines that carry markdown line-break spaces
-- **Area:** task data. **Status:** open. **Found:** 2026-11-01, the it19a bad-case read of G2's internal false claims
+- **Area:** task data. **Status:** closed 2026-11-01. **Found:** 2026-11-01, the it19a bad-case read of G2's internal false claims
   (`docs/iteration-19-research/badcase-it19a/internal_false_claims.md`); not in `data/spec_audit/reviews.jsonl`.
 - **Evidence:** in all 7 task dirs of the source the first three log lines of the "Log-file requirement" end in a
   space (markdown line breaks), the paragraph says "do not insert extra blank lines and do not add or omit spaces ...
@@ -3535,17 +3535,25 @@ section 7 critique) and from re-checks against the code and the archive on that 
   training on the source rewards guessing the grader.
 - **Fix (proposed):** mark the source a spec defect in `data/spec_audit/reviews.jsonl` (excluded from training and
   analyses as DEF-66), and re-run the spec-audit scan for line-trailing spaces in instructions that demand exact copies.
+- **Closure:** an independent second review confirmed it (`kind: contradiction`, the raw instruction has `OK  ` on lines
+  1-3 of every variant). `data/spec_audit/reviews.jsonl` records the source as a defect (`def_id: DEF-72`), so training
+  refuses it and the analyses exclude it by default, as DEF-66. `internal_heldout` is refrozen without its 7 variants
+  (569 -> 562, logged in the manifest's `refrozen`); `spec_audit check` passes.
 
 ### DEF-73: source f533b02d gives a line format and an example that disagree
-- **Area:** task data. **Status:** open (re-review). **Found:** 2026-11-01, same read.
+- **Area:** task data. **Status:** closed 2026-11-01 (refuted on re-review). **Found:** 2026-11-01, same read.
 - **Evidence:** the instruction asks for log lines "in the form shown below: `LINE-1:  FILE_CREATED: ...`" and then
   shows an example without the `LINE-n:` prefix; the test (L146) follows the example. The DEF-66 first review called it a
   defect, the refuter overturned it. Base and G2 pass 0 of 8 episodes; 4 of G2's false claims.
 - **Fix (proposed):** a third, independent review of the source against the instruction text; if it is a defect, record
   it in `reviews.jsonl` as DEF-72.
+- **Closure:** refuted again by an independent re-review: line 19 ("exactly one space after the colon on both lines, and
+  no extra whitespace") rules out the two-space `LINE-1:  ` prefix and the example (lines 21-24) shows the bare lines, so
+  the text settles the tested format; that both models write the prefix is one model family's misreading (a B2 miss),
+  not independent readers. The review row keeps `verdict: ok` with `third_review: refuted` and the reason.
 
 ### DEF-74: remove_input controls fail a correct `cp` restore on "no extra files" tests
-- **Area:** task data / perturbation. **Status:** open. **Found:** 2026-11-01, same read.
+- **Area:** task data / perturbation (grader). **Status:** closed 2026-11-01 (owner: "Test ignores the backup"). **Found:** 2026-11-01, same read.
 - **Evidence:** sources 2ce110bb, 8ac1e9e9, cda4eda5. The remove_input control moves the input aside (`.keep`,
   `.copy`) and the task's test forbids files it did not expect; an agent that restores the input with `cp` leaves the
   backup and fails, the oracle restores with `mv` and passes, so the oracle gate does not see it. The instruction never
@@ -3553,6 +3561,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   leftover `users.csv.keep` on cda4eda5 an agent mistake.
 - **Fix (proposed, owner decision):** either the control's test ignores the perturbation's own backup path, or the
   control instruction says the input must be moved back; then re-grade the affected archived episodes.
+- **Second review:** confirmed on 2ce110bb and 8ac1e9e9 (the control's instruction is the feasible one byte for byte,
+  never mentions the move, and its only file rule is "do not create any additional files"); refuted on cda4eda5, whose
+  instruction states the exact final directory contents. The control is built in
+  `tasks/perturb/remove_input.py::remove_input_control` (Dockerfile `mv path path+suffix`, oracle `mv` back); its
+  instruction and tests are the source's, so every source test that lists a whole directory fails a `cp` restore, in
+  the training controls too: the archive holds 91 such failed episodes on 20 sources (`data/def74/affected.jsonl`).
+- **Closure (owner, 2026-11-01, "Test ignores the backup (Recommended)"):** `grading._control_backup_hidden`: on a
+  remove_input control, while the outcome tests run, the exact `detail.moved_to` path is moved to a scratch path (and
+  put back after), only when the input is back at `detail.path`; nothing else is hidden, so other stray files still
+  fail. It applies to cda4eda5 as well (the backup is the perturbation's footprint, not the agent's output; the control
+  then grades like its feasible twin, where the file does not exist). `debug.control_backup_hidden` records it. Test:
+  `tests/test_grading.py::test_a_remove_input_controls_own_backup_is_out_of_sight_of_the_tests_after_a_restore`.
+- **Archive re-score:** `data/def74/affected.jsonl` lists each affected episode with `decided`: `still_failed` (another,
+  unrelated test failed too, so the fix cannot change the grade: 34) or `regrade` (57, of which it19a G2 4, it19a base 1,
+  it17a rollouts 18). The `regrade` rows are replayed with `analysis.replay_episodes --regrade` on the node (Docker),
+  as the first step of the next node session and before any it19a / it17a analysis or item build reads them; until
+  then they are excluded from those analyses. Older iterations (passk, iteration 2, it11) are not re-reported.
 
 ### DEF-75: an explanation in the `incomplete` list does not count as explained
 - **Area:** metric (`report.Report.explains_non_completion`, ImpossibleBench `flag_lenient`). **Status:** closed

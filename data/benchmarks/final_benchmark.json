@@ -275,6 +275,76 @@
           }
         }
       }
+    },
+    {
+      "date": "2026-11-01",
+      "previous_frozen": "2026-10-25",
+      "changed": {
+        "internal_heldout": {
+          "items": {
+            "before": {
+              "file": "data/benchmarks/items/internal_heldout.txt",
+              "n": 569,
+              "sha256": "fac26d7abc7db4c92f838cac952be9f9e97a23023072a9ef23bb2672c65ab36c"
+            },
+            "after": {
+              "file": "data/benchmarks/items/internal_heldout.txt",
+              "n": 562,
+              "sha256": "a75ceda070d2c5cbe8a247228e659be5da2e84b1acce26ce5bc7f7ce2149add6"
+            }
+          },
+          "sources": {
+            "before": [
+              {
+                "kind": "split",
+                "file": "data/test.jsonl",
+                "sha256": "5946bca6c1267002eee68f0ae3a3ba098c3e8c482a4068a92eb360dc75953985"
+              },
+              {
+                "kind": "exclusion",
+                "reason": "iteration-12 transfer check",
+                "sources_sha256": "043eef0164e8df188302e94e073016cca48a77492f3c5d5ebe0a489fb28abba7",
+                "n": 20
+              },
+              {
+                "kind": "exclusion",
+                "reason": "DEF-66 spec defects (tasks.spec_audit)",
+                "sources_sha256": "0b2f343057eeb1531b11f22e1af3f3c0bd215393af70fce40b6fdeaae4e0e5c9",
+                "n": 21
+              },
+              {
+                "kind": "rows",
+                "file": "data/benchmarks/internal_heldout.jsonl",
+                "sha256": "f77d340fe4a80fb0da7752b9dc136a9d17607ca3724e2349cb1a96f0a60aa39f"
+              }
+            ],
+            "after": [
+              {
+                "kind": "split",
+                "file": "data/test.jsonl",
+                "sha256": "5946bca6c1267002eee68f0ae3a3ba098c3e8c482a4068a92eb360dc75953985"
+              },
+              {
+                "kind": "exclusion",
+                "reason": "iteration-12 transfer check",
+                "sources_sha256": "043eef0164e8df188302e94e073016cca48a77492f3c5d5ebe0a489fb28abba7",
+                "n": 20
+              },
+              {
+                "kind": "exclusion",
+                "reason": "DEF-66 spec defects (tasks.spec_audit)",
+                "sources_sha256": "6a8557fbca7076faac5b46bb7da37065ff92cc5e32264ffd1cad6cff6689f19f",
+                "n": 22
+              },
+              {
+                "kind": "rows",
+                "file": "data/benchmarks/internal_heldout.jsonl",
+                "sha256": "627039a2276b57800c486c2fdbf7608ef523017487bfe4a454a6ad6771475714"
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "description": "iteration-16 final benchmark: arms base / G2 / final, deltas vs base with cluster-bootstrap 95% CIs; every benchmark is never trained on (`never_trained`)",
@@ -318,13 +388,13 @@
         {
           "kind": "exclusion",
           "reason": "DEF-66 spec defects (tasks.spec_audit)",
-          "sources_sha256": "0b2f343057eeb1531b11f22e1af3f3c0bd215393af70fce40b6fdeaae4e0e5c9",
-          "n": 21
+          "sources_sha256": "6a8557fbca7076faac5b46bb7da37065ff92cc5e32264ffd1cad6cff6689f19f",
+          "n": 22
         },
         {
           "kind": "rows",
           "file": "data/benchmarks/internal_heldout.jsonl",
-          "sha256": "f77d340fe4a80fb0da7752b9dc136a9d17607ca3724e2349cb1a96f0a60aa39f"
+          "sha256": "627039a2276b57800c486c2fdbf7608ef523017487bfe4a454a6ad6771475714"
         }
       ],
       "adapter": "honest_agents.eval.run_eval on data/benchmarks/internal_heldout.jsonl + honest_agents.eval.metrics",
@@ -346,8 +416,8 @@
       ],
       "items": {
         "file": "data/benchmarks/items/internal_heldout.txt",
-        "n": 569,
-        "sha256": "fac26d7abc7db4c92f838cac952be9f9e97a23023072a9ef23bb2672c65ab36c"
+        "n": 562,
+        "sha256": "a75ceda070d2c5cbe8a247228e659be5da2e84b1acce26ce5bc7f7ce2149add6"
       },
       "results": {
         "base": {
