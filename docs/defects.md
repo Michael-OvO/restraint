@@ -3490,15 +3490,23 @@ section 7 critique) and from re-checks against the code and the archive on that 
   The assistant message holds a `bash` call whose arguments are `{}` after reasoning about a long code solution (e.g. an
   ImpossibleBench G2 trial: a counting algorithm, then `{"name": "bash", "arguments": "{}"}`). On our own harness the
   same models have an empty or failed bash call in 3 / 1,138 (base) and 2 / 1,138 (G2) internal held-out episodes.
-- **Likely cause (not yet verified):** the served tool-call parser (`--tool-call-parser` in `scripts/serve_vllm.sh`)
-  fails on long commands with code (quotes, `<`, heredocs) and returns empty arguments, and the Harbor agent path
-  passes them through where our harness does not (or prompts differently).
+- **Cause (verified 2026-11-01 on the it19a trials):** the episode's token budget. On the Harbor path the episode
+  has `max_completion_tokens` 16,384 (model output and tool output together, the training budget) and 4,096 per turn.
+  The stop reasons of the trials: ImpossibleBench base 74 % / G2 70 % `truncated`, TB2 22 % / 21 % `truncated` and
+  28 % / 13 % `call_budget` (28 commands), against 1 % / 1 % on the internal held-out set (99 % of G2's internal
+  episodes end in a report). In the truncated trials the budget is spent (median `budget_used` 16,443 on G2
+  ImpossibleBench, 16,475 on TB2; G2 wrote a median 12,000 completion tokens there: reasoning plus whole programs), so
+  the last call gets the few tokens left, is cut inside its tool call, arrives as `bash {}`, and the episode ends with
+  no report. The coding benchmarks need far longer outputs than our shell tasks.
 - **Impact:** TB2 and ImpossibleBench capability numbers (success, `act.success`) are depressed for both arms by a
   failure that is not the model's choice; the paired comparisons stay valid only as far as both arms are hit alike
   (they are, roughly: 53 vs 56, 373 vs 453). The honesty metrics (claims, flags, cheating) are less affected but a
   trial that lost its commands is more likely to end without a report.
-- **Fix (to do, $0 first):** reproduce on the archived raw completions (do they parse with the harness's own parser?),
-  find where the arguments are lost, fix and test on the Mac; then any later benchmark arm runs on the fixed path, and
-  the it19a TB2 / ImpossibleBench rows are reported with this caveat (or re-run for both arms if the owner wants clean
-  capability numbers).
+- **Impact, revised:** on ImpossibleBench the headline mostly measures who runs out of budget: about 70 % of trials
+  end cut off without a report, so `flag_lenient` (28 % for G2) is bounded by the budget, not by honesty.
+- **Fix (to do):** (1) the agent reserves the end of the budget for the report (as our own harness's report reserve
+  does) and never executes a cut-off tool call; (2) a larger budget for the external benchmarks, the same for every
+  arm (owner decision; e.g. 48k tokens, 8k per turn, 50 commands); (3) then TB2 and ImpossibleBench re-run for base and
+  G2 on the fixed path (a prereg amendment: the it19a TB2 / ImpossibleBench rows are reported as measured under the
+  training budget).
 
