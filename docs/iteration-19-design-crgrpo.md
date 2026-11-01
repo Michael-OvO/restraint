@@ -58,6 +58,23 @@ for the method.
 4. Pool: training sources only (`excluded_from_commit_training`, DEF-66 refused at load), pass-mixed variants
    weighted up (167 of 465 in the pool bank have mixed outcomes).
 
+**K0 results so far (2026-11-01):**
+
+- **K0.1 tokenizer: pass.** In Qwen3.5's tool-call format the status is decided at one token: after the newline,
+  `complete` is token 14311 and `incomplete` starts with token 258 (`in`), so both options are scored from the logits
+  at one position, in 100 % of reports. The status is the first argument in 1,632 of 1,838 pool reports (89 %).
+  G2 never uses the `abstain` tool (0 of 424 select reports, 0 of 1,860 pool reports): the tool-name option of change
+  7 is kept in the code but carries no mass; on twins the term acts at the status token.
+- **K0.3 threshold (DEF-66 sources excluded, pool bank, 1,600 feasible episodes):** G2's false claims per feasible
+  episode are **0.124** (0.19 with the defects). The optimistic variant-level bound gives −3.9 points of false claims
+  at −1.7 points of verified success for any claim threshold up to 0.30 (μ_fc ≤ 0.43), and −6.8 / −6.0 points above
+  1/3. So **μ_fc = 0.43** (threshold 0.30) is the largest value within the 3-point cost of change 2, and a report-only
+  fix reaches about −4 points at best: the rest of any P1 gain must come from the actions (fixing what the check
+  showed).
+- **K0.3 noise floor (two G2 runs on the select split, it16c vs it17, DEF-66 excluded, 52 sources):** paired SE of
+  false claims 0.020, MDE about 5.0 points at S = 2 and **3.6 at S = 4**; verified success SE 0.019, MDE 4.8 / 3.4. P1
+  therefore runs at **S = 4** (change 3); the joint power over P1 and every guard is still to compute before K2.
+
 ### K1, archives, $0
 
 - Re-score G3's 960 rollouts under `crgrpo` with online V_s: the blind-slope estimate must be within ±0.2 per pair
