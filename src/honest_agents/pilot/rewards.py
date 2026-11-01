@@ -230,8 +230,8 @@ class PilotReward:
         log: EpisodeLog | None = None,
         scale_rewards: str = "none",
     ):
-        if mode not in trl_rewards.MODES:
-            raise ValueError(f"reward mode must be one of {trl_rewards.MODES}, got {mode!r}")
+        if mode not in trl_rewards.PER_EPISODE_MODES:
+            raise ValueError(f"reward mode must be one of {trl_rewards.PER_EPISODE_MODES}, got {mode!r}")
         self.mode = mode
         self.scale_rewards = scale_rewards  # only for the advantage diagnostics; the trainer does the real scaling
         self.log = log or EpisodeLog(None)

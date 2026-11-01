@@ -455,3 +455,13 @@ def test_harbor_runner_regrade_grades_in_a_real_env(tmp_path, monkeypatch, gradi
         task, ["echo no > hello.txt"], parse_report({"status": "complete"}), RewardConfig()
     )
     assert outcome2.tests_passed is False and br2.case == "fabrication"
+
+
+def test_episode_ids_are_read_from_a_jsonl_or_plain_lines(tmp_path):
+    from honest_agents.analysis.replay_episodes import read_episode_ids
+
+    j = tmp_path / "a.jsonl"
+    j.write_text('{"episode_id": "a/b", "task_id": "t"}\n\n{"episode_id": "c"}\n')
+    p = tmp_path / "ids.txt"
+    p.write_text("x\n  y \n")
+    assert read_episode_ids(j) == {"a/b", "c"} and read_episode_ids(p) == {"x", "y"}

@@ -1,0 +1,54 @@
+# Iteration 19, stage (b): the CR-GRPO method arm (docs/iteration-19-design-crgrpo.md; pre-registration
+# docs/iteration-19-prereg-crgrpo.md). GRPO from G2 seed 1 merged on pool v4 (configs/tasks/rl_pool_v4.yaml: 15 steps of
+# 8 prompts, two passes = 30 steps), one >= 80 GB GPU with vLLM colocated (grpo_it12_96gb.yaml lineage, as G3).
+#   python -m honest_agents.train.run --config configs/grpo_it19_crgrpo.yaml model.name=outputs/it15/g2_merged
+# What differs from G3 (configs/grpo_it15_g3.yaml):
+#   reward.mode crgrpo: the CR-GRPO table priced per step (honest_agents.crgrpo): online V_s from the step's own controls,
+#     multipliers for C1 false claims, C2 twin claim or damage, C3 control refusal, one damped update after step 15;
+#   the report term: the status token learns only from l_rep (HonestGRPOTrainer.crgrpo), c_rep 10;
+#   grpo.beta 0.04: a KL to G2 (the adapter off) on ALL completion tokens (the it17 lesson);
+#   30 steps, checkpoints every 5, probes at 0 / 15 / 30; the run is trained in two segments (job file) with stop rule
+#     1b (analysis.calibration twin-stop on the 120 select twins) between them.
+base: grpo_it15_g3.yaml
+output_root: outputs/it19
+run_name: it19-crgrpo
+data:
+  train_file: data/train_rl_v4.jsonl   # file order = step order (grpo.shuffle_dataset false, data.pair_batches false)
+reward:
+  mode: crgrpo
+  config:
+    alpha: 0.1
+    false_blame: -0.4
+    implicit_abstain: 0.0
+  crgrpo:
+    mu_fc: 0.2857142857142857   # 2/7: claim threshold (alpha + mu_fc) / (1 + mu_fc) = 0.30 (design K0.3)
+    mu_tw: 3.0
+    mu_cd: 3.0
+    min_substantive: 3
+    shrink: 4.0
+    # G2's control proceeds on its pool bank priced by the table (python -m honest_agents.crgrpo family-means
+    # --episodes .../17-it17a-data-rollouts/eval/it17_rollouts_feasible/episodes.jsonl.gz; DEF-66 sources left out)
+    family_means: {high_risk: 0.8088, remove_input: 0.5686, revoke_permission: 0.8338}
+    v_default: 0.75
+    family_ema: 0.9
+    # G2 on the same bank: C1 0.124 per feasible episode, C2 0.186 of twins, C3 0.087 of controls
+    targets: {fc: 0.09, tw: 0.15, cd: 0.10}
+    update_steps: [15]
+    update_window: 10
+    update_rate: 0.5
+    report_term: true
+    c_rep: 10.0
+    z_max: 6.0
+    grad_clip: 20.0
+wandb:
+  name: it19-crgrpo
+  group: it19
+grpo:
+  beta: 0.04
+  max_steps: 30
+  save_steps: 5
+probe:
+  steps: [15, 30]
+  # DEF-08: the candidate is the final checkpoint, fixed before the run (segment 1 of the job file overrides both to 15)
+  fixed_checkpoint_step: 30
+  preregistration: docs/iteration-19-prereg-crgrpo.md

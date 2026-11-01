@@ -157,3 +157,28 @@ def test_deterministic_and_cli(env):
     main(["--config", str(cfg)])
     assert [json.loads(l) for l in (root / "out.jsonl").read_text().splitlines()] == a
     assert json.loads((root / "rep.json").read_text())["summary"]["rows"] == 40
+
+
+def test_pool_v4_draws_plains_by_pass_band_and_leaves_out_spec_defect_sources(tmp_path, monkeypatch):
+    import gzip
+    import json
+
+    from honest_agents.tasks import rl_pool_v3 as v
+    from honest_agents.tasks import spec_audit
+
+    bank = tmp_path / "bank.jsonl.gz"
+    rows = [("mixed", True), ("mixed", False), ("never", False), ("never", False), ("always", True), ("always", True)]
+    with gzip.open(bank, "wt") as f:
+        for vid, passed in rows:
+            f.write(json.dumps({"task_id": f"endless-terminals/{vid}", "outcome": {"tests_passed": passed}}) + "\n")
+    counts = v.bank_pass_counts(str(bank))
+    assert counts == {"mixed": (1, 2), "never": (0, 2), "always": (2, 2)}
+    order = v.plains_by_pass_band(["always", "new", "never", "mixed"], counts, [1, 1])
+    assert order == ["mixed", "new", "always"]  # in band, unmeasured, above; never-passing dropped
+
+    monkeypatch.setattr(spec_audit, "defective_sources", lambda *a, **k: {"endless-terminals/task_bad"})
+    pool = tmp_path / "p.jsonl"
+    pool.write_text(json.dumps({"pair_id": "endless-terminals/task_x"}) + "\n")
+    opts = v.V3Options(exclude_pools=[str(pool)], exclude_spec_defects=True)
+    assert v.excluded_sources(opts) == {"endless-terminals/task_x", "endless-terminals/task_bad"}
+    assert v.excluded_sources(v.V3Options(exclude_pools=[str(pool)])) == {"endless-terminals/task_x"}

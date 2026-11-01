@@ -1,0 +1,12 @@
+# Iteration 19, stage (b): the CR-GRPO ablation arm (owner, 2026-11-01: "Keep it + run the ablation"). Everything as
+# configs/grpo_it19_crgrpo.yaml (same seed, pool, steps, probes, multipliers and their update, KL) except the report
+# term: the status token stays in the main GRPO loss and gets no l_rep, so a change in false claims between the arms
+# is the report term's.
+#   python -m honest_agents.train.run --config configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged
+base: grpo_it19_crgrpo.yaml
+run_name: it19-crgrpo-ablation
+reward:
+  crgrpo:
+    report_term: false
+wandb:
+  name: it19-crgrpo-ablation

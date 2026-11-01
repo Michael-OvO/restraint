@@ -6,9 +6,11 @@ import dataclasses
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
+from honest_agents import crgrpo as crgrpo_module
 from honest_agents.models import (
     check_end_of_turn_token,
     check_tool_flow_template,
@@ -72,7 +74,11 @@ def add_callbacks(trainer: Any, plan: Plan) -> None:
     if plan.eval_dataset is not None:
         p = plan.cfg.probe
         probe = ValidationProbe(
-            out, p.selection_metric, p.greater_is_better, fixed_step=p.fixed_checkpoint_step, selection=check_selection(plan.cfg)
+            out,
+            p.selection_metric,
+            p.greater_is_better,
+            fixed_step=p.fixed_checkpoint_step,
+            selection=check_selection(plan.cfg),
         )
         trainer.add_callback(probe)
     if wandb_enabled(plan.grpo_config.report_to):
@@ -187,6 +193,43 @@ def trainer_model(cfg: Any) -> str:
     )
 
 
+CRGRPO_STATE_FILE = "crgrpo_state.jsonl"
+
+
+def install_crgrpo(trainer: Any, cfg: Any, *, output_dir: Path | None = None) -> crgrpo_module.Runtime | None:
+    """`reward.mode: crgrpo`: the runtime the reward function prices each step with (on the run's own reward config,
+    its state appended to `<output_dir>/crgrpo_state.jsonl` every step), and, with the report term on, the trainer's
+    settings and status tokens. Other modes: cleared. `resume_crgrpo` continues the state on a resume."""
+    from honest_agents.train.derive import build_reward_config
+    from honest_agents.train.grpo import check_crgrpo
+
+    settings = check_crgrpo(cfg)
+    if settings is None:
+        crgrpo_module.set_runtime(None)
+        trainer.crgrpo = None
+        return None
+    state_file = Path(output_dir) / CRGRPO_STATE_FILE if output_dir is not None else None
+    runtime = crgrpo_module.Runtime(settings, build_reward_config(cfg), state_file=state_file)
+    crgrpo_module.set_runtime(runtime)
+    trainer.crgrpo = settings
+    if settings.report_term:
+        from honest_agents.train.confidence_exact import StatusTokens
+
+        t = StatusTokens.of(trainer.processing_class)
+        trainer.status_tokens = (t.complete, t.incomplete)
+    return runtime
+
+
+def resume_crgrpo(runtime: crgrpo_module.Runtime | None, checkpoint_step: int) -> None:
+    """On a resume from the checkpoint of `checkpoint_step`, load the runtime state its steps left; without one the
+    multipliers and family means would silently restart from the config."""
+    if runtime is None or runtime.state_file is None:
+        return
+    if not runtime.resume(runtime.state_file, checkpoint_step):
+        raise RuntimeError(f"resuming a crgrpo run at step {checkpoint_step} but {runtime.state_file} has no state "
+                           "from before it")  # fmt: skip
+
+
 def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     """Everything `train()` does before the first step: guards, bank and quarantine paths, the trainer, the template and
     prompt-budget checks, the callbacks. `sync_check` builds the same trainer so it tests the code path that trains."""
@@ -217,6 +260,7 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     trainer.trim_padding = plan.cfg.trainer.trim_padding
     trainer.sort_micro_batches = plan.cfg.trainer.sort_micro_batches
     trainer.execute_pending_report = plan.cfg.trainer.execute_pending_report
+    trainer._crgrpo_runtime = install_crgrpo(trainer, plan.cfg, output_dir=Path(plan.grpo_config.output_dir))
     check_training_template(trainer, plan.family, strict=plan.cfg.model.strict_template)
     check_tool_flow_template(trainer, strict=plan.cfg.model.strict_template)
     check_end_of_turn_token(trainer, strict=plan.cfg.model.strict_template)
@@ -242,7 +286,9 @@ def train(plan: Plan, resume: bool = False) -> bool:
         logger.info("verifier bundle: %s", bundle)
     from honest_agents.env import preflight_network_policy
 
-    preflight_network_policy(plan.cfg.env.environment_type, plan.cfg.env.enforce_network_policy)  # before vLLM and boots
+    preflight_network_policy(
+        plan.cfg.env.environment_type, plan.cfg.env.enforce_network_policy
+    )  # before vLLM and boots
     out = Path(plan.grpo_config.output_dir)
     ckpt = _last_checkpoint(out) if resume else None
     if resume and ckpt is None:
@@ -260,6 +306,13 @@ def train(plan: Plan, resume: bool = False) -> bool:
         dashboard = init_run(plan.cfg, out, resuming=ckpt is not None)
     try:
         trainer = make_trainer(plan)
+        runtime = getattr(trainer, "_crgrpo_runtime", None)
+        if ckpt is not None:
+            resume_crgrpo(runtime, int(Path(ckpt).name.rsplit("-", 1)[1]))
+        elif runtime is not None and runtime.state_file is not None and runtime.state_file.is_file():
+            stale = runtime.state_file.with_suffix(f".stale-{int(time.time())}.jsonl")
+            runtime.state_file.rename(stale)  # a fresh run must not inherit an earlier life's multipliers
+            logger.warning("fresh crgrpo run: moved the earlier state to %s", stale)
         report = getattr(trainer.model, "print_trainable_parameters", None)
         if trainer.accelerator.is_main_process and report is not None:
             report()

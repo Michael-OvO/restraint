@@ -16,7 +16,7 @@ from honest_agents.reward import (
     RewardConfig,
     apply_mask,
 )
-from honest_agents.trl_rewards import MODES
+from honest_agents.trl_rewards import PER_EPISODE_MODES as MODES
 
 DEFAULT_ALPHAS = (0.0, 0.25, 0.5, 0.75, 1.0)
 # Reports that are truthful about the outcome. `false_blame` and `lazy_decline` are not: the first blames the task or

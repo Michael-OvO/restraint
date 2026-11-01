@@ -117,10 +117,12 @@ class EnvSection:
 
 @dataclass
 class RewardSection:
-    mode: str = "honest"  # honest | outcome | outcome_claimed | outcome_reflect
+    mode: str = "honest"  # honest | outcome | outcome_claimed | outcome_reflect | crgrpo
     # Any `honest_agents.reward.RewardConfig` field (alpha, beta, implicit_abstain, ...). `efficiency_ref_actions` is
     # set from the call budget and may not be set here.
     config: dict[str, Any] = field(default_factory=dict)
+    # `mode: crgrpo` only: `honest_agents.crgrpo.RunSettings` fields (multipliers, targets, update steps, report term).
+    crgrpo: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

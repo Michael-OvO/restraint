@@ -13,7 +13,8 @@ from honest_agents.reward import (
     EpisodeOutcome,
     RewardBreakdown,
 )
-from honest_agents.trl_rewards import MODES, mode_reward
+from honest_agents.trl_rewards import PER_EPISODE_MODES as MODES
+from honest_agents.trl_rewards import mode_reward
 
 # ── episode-level metrics ────────────────────────────────────────────────
 

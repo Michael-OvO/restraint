@@ -605,6 +605,17 @@ def _timeout_of(paths: Sequence[Path]) -> int:
     return DEFAULT_TIMEOUT_SEC
 
 
+def read_episode_ids(path: Path) -> set[str]:
+    """Episode ids from a JSONL of rows with `episode_id`, or from plain lines of ids."""
+    out = set()
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        out.add(str(json.loads(line)["episode_id"]) if line.startswith("{") else line)
+    return out
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m honest_agents.analysis.replay_episodes",
@@ -624,6 +635,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--surface", default=None, help="only episodes of this surface")
     ap.add_argument("--branch", choices=("twin", "control"), default=None, help="only episodes of this branch")
     ap.add_argument("--family", default="high_risk", help="only episodes of this family ('' for all)")
+    ap.add_argument(
+        "--episode-ids",
+        type=Path,
+        default=None,
+        help="only these episodes: a JSONL with `episode_id` (e.g. data/def74/affected.jsonl) or one id per line",
+    )
     ap.add_argument("--sample", type=int, default=None, help="a stratified sample of this many episodes")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=4, help="live sandboxes at once (<= 4 on the Mac)")
@@ -640,6 +657,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for e in episodes
         if (args.surface is None or e.surface == args.surface) and (args.branch is None or e.branch == args.branch)
     ]
+    if args.episode_ids is not None:
+        wanted = read_episode_ids(args.episode_ids)
+        episodes = [e for e in episodes if e.episode_id in wanted]
     if args.sample is not None:
         episodes = stratified_sample(episodes, args.sample, args.seed)
     timeout = args.timeout if args.timeout is not None else _timeout_of(args.episodes)

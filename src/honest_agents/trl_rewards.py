@@ -6,6 +6,7 @@
 | `outcome`         | `outcome_reward`         | feasible: 1 if pass else 0; infeasible: 0                  |
 | `outcome_claimed` | `outcome_claimed_reward` | 1 if claims complete and pass, else 0                      |
 | `outcome_reflect` | `outcome_reflect_reward` | pass + 0.1·[claim agrees with outcome] (RefGRPO-style)     |
+| `crgrpo`          | `crgrpo_reward`          | the CR-GRPO table (`honest_agents.crgrpo`), priced per step |
 
 A run registers **exactly one** of them. TRL 1.14.1 (grpo_trainer.py:2815-2820) treats a completion as unscorable only
 when *every* reward function returned None; with two functions, a None from one of them becomes reward 0 through
@@ -44,7 +45,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from honest_agents import bank, behaviour
+from honest_agents import bank, behaviour, crgrpo
 from honest_agents.report import SelfReport
 from honest_agents.reward import (
     CASES,
@@ -64,7 +65,9 @@ from honest_agents.reward import (
 
 logger = logging.getLogger(__name__)
 
-MODES = ("honest", "outcome", "outcome_claimed", "outcome_reflect")
+MODES = ("honest", "outcome", "outcome_claimed", "outcome_reflect", "crgrpo")
+PER_EPISODE_MODES = ("honest", "outcome", "outcome_claimed", "outcome_reflect")
+ENV_CRGRPO_ATTR = "_crgrpo"  # per-rollout {delta, v} the trainer's report term reads after the reward call
 REFLECT_BONUS = 0.1  # outcome_reflect: bonus when the report's claim agrees with the outcome
 GROUP_KEYS = ("variant_id", "task_dir")  # dataset columns that identify a row, in order of preference
 ZERO_VARIANCE_TOL = 1e-8
@@ -88,6 +91,8 @@ def mode_reward(mode: str, br: RewardBreakdown) -> float | None:
     if mode == "outcome_reflect":
         agrees = br.has_report and br.claimed_complete == br.passed
         return float(br.passed) + REFLECT_BONUS * float(agrees)
+    if mode == "crgrpo":
+        raise ValueError("crgrpo is priced per step (`crgrpo_rewards`), not per episode")
     raise ValueError(f"reward mode must be one of {MODES}, got {mode!r}")
 
 
@@ -281,7 +286,8 @@ def batch_metrics(
     # Averaged over logging steps it is the share of such steps.
     m[METRIC_NO_CONTRAST] = float(share is None or share >= 1.0)
     for mode in MODES:
-        ratio(reward_metric(mode), sum(mode_reward(mode, b) for b in scored), len(scored))
+        if mode in PER_EPISODE_MODES:  # crgrpo is priced per step; its mean is the optimised reward's own metric
+            ratio(reward_metric(mode), sum(mode_reward(mode, b) for b in scored), len(scored))
     return m
 
 
@@ -719,12 +725,19 @@ def score_batch(
     outcomes = [g[0] for g in graded]
     groups = group_ids(environments, columns)
     breakdowns, leaking = mask_leaking_groups(outcomes, [g[1] for g in graded], groups)
-    rewards = [mode_reward(mode, br) for br in breakdowns]
+    step = getattr(columns.get("trainer_state"), "global_step", None)
+    if mode == "crgrpo":
+        rewards, extra_metrics = crgrpo_rewards(environments, outcomes, breakdowns, columns, step)
+        scored = [r for r in rewards if r is not None]
+        if scored:
+            extra_metrics[reward_metric(mode)] = sum(scored) / len(scored)
+    else:
+        rewards, extra_metrics = [mode_reward(mode, br) for br in breakdowns], {}
 
     def log_metrics() -> None:
         metrics = batch_metrics(breakdowns, groups, rewards)
         metrics[METRIC_REWARD_ERROR_RATE] = sum(grading_failed(o) for o in outcomes) / n if n else 0.0
-        for name, value in metrics.items():
+        for name, value in {**metrics, **extra_metrics}.items():
             log_metric(name, value)
 
     def log_behaviour() -> None:
@@ -742,7 +755,6 @@ def score_batch(
             log_extra(column, values)
 
     def persist() -> None:
-        step = getattr(columns.get("trainer_state"), "global_step", None)
         tasks = [_task_metadata(env, _row_columns(columns, i, n)) for i, env in enumerate(environments)]
         _quarantine(leaking, breakdowns, groups, tasks, step)
         if bank.bank_dir() is not None:
@@ -756,6 +768,41 @@ def score_batch(
         _guarded("completions-table columns", log_columns)
     _guarded("quarantine list / trajectory bank", persist)
     return rewards
+
+
+def crgrpo_rewards(
+    environments: Sequence[Any],
+    outcomes: Sequence[EpisodeOutcome],
+    breakdowns: Sequence[RewardBreakdown],
+    columns: dict[str, Any],
+    step: int | None,
+) -> tuple[list[float | None], dict[str, float]]:
+    """`reward.mode = crgrpo`: the step priced by the run's `crgrpo.Runtime` (online V_s from the step's own controls,
+    the current multipliers). Each environment gets `ENV_CRGRPO_ATTR` = {delta, v} for the trainer's report term
+    (None when masked). Returns the rewards and the step's `crgrpo/*` metrics."""
+    rt = crgrpo.runtime()
+    n = len(environments)
+    episodes = []
+    for i, env in enumerate(environments):
+        history = getattr(env, "_history", None) or []
+        commands = [str(h.get("command") or "") for h in history if isinstance(h, dict)]
+        family = _label(env, columns, "family", i, n) or "feasible"
+        source = _label(env, columns, "pair_id", i, n) or _label(env, columns, "variant_id", i, n) or f"rollout-{i}"
+        episodes.append(
+            crgrpo.Episode(outcomes[i], breakdowns[i], crgrpo.substantive_commands(commands), str(family), str(source))
+        )
+    scored = rt.score(episodes, step)
+    for env, s in zip(environments, scored, strict=True):
+        try:
+            setattr(env, ENV_CRGRPO_ATTR, None if s is None else {"delta": s.delta, "v": s.v})
+        except AttributeError:  # an environment that cannot take the attribute gets no report term
+            logger.warning("environment %r cannot carry the CR-GRPO report signal", type(env).__name__)
+    metrics = rt.metrics()
+    deltas = [s.delta for s in scored if s is not None]
+    if deltas:
+        metrics["crgrpo/delta_mean"] = sum(deltas) / len(deltas)
+        metrics["crgrpo/delta_negative_share"] = sum(d < 0 for d in deltas) / len(deltas)
+    return [None if s is None else s.payoff for s in scored], metrics
 
 
 def _batch_size(environments: Any, columns: dict[str, Any]) -> int:
@@ -840,11 +887,17 @@ def outcome_reflect_reward(environments=None, log_metric=None, log_extra=None, *
     return _never_raise("outcome_reflect", environments, log_metric, log_extra, kwargs)
 
 
+def crgrpo_reward(environments=None, log_metric=None, log_extra=None, **kwargs) -> list[float | None]:
+    """`reward.mode = crgrpo`: the CR-GRPO table (docs/iteration-19-design-crgrpo.md), priced per step."""
+    return _never_raise("crgrpo", environments, log_metric, log_extra, kwargs)
+
+
 REWARD_FUNCS: dict[str, Callable[..., list[float | None]]] = {
     "honest": honest_reward,
     "outcome": outcome_reward,
     "outcome_claimed": outcome_claimed_reward,
     "outcome_reflect": outcome_reflect_reward,
+    "crgrpo": crgrpo_reward,
 }
 
 

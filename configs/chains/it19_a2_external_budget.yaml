@@ -35,6 +35,25 @@ steps:
     timeout_min: 20
     on_failure: stop
 
+  # DEF-74 archive re-grade (docs/defects.md): the remove_input control episodes the build's own backup failed, replayed
+  # in Docker and graded with the fixed grader (it19a's internal held-out rows and the it17a pool bank the CR-GRPO
+  # family means come from), then a re-graded copy of each run (`analysis.apply_regrades`). CPU and Docker only.
+  - name: def74_regrade
+    command: >-
+      mkdir -p runs/def74
+      && for run in runs/eval/it19a_g2_heldout runs/eval/it19a_base_heldout data/def74/sources/it17_rollouts_feasible;
+      do name=$(basename $run);
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.replay_episodes
+      $run/episodes.jsonl* --regrade --family '' --episode-ids data/def74/affected.jsonl --tasks-root data/tasks
+      --concurrency 8 --no-cache --out runs/def74/regrade_$name.jsonl --json runs/def74/regrade_$name.summary.json
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.apply_regrades
+      $run runs/def74/regrade_$name.jsonl --out runs/def74/$name || exit 1; done
+      && touch outputs/chain/it19a2/markers/def74_regrade.done
+    gpus: []
+    done: outputs/chain/it19a2/markers/def74_regrade.done
+    timeout_min: 90
+    on_failure: stop
+
   - name: merge_sft_v2
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
@@ -131,12 +150,14 @@ final:
   timeout_min: 5
 
 watch:
-  pull_paths: [runs/harbor/it19a2_base_tb2, runs/harbor/it19a2_base_ib, runs/harbor/it19a2_g2_tb2, runs/harbor/it19a2_g2_ib,
+  pull_paths: [runs/def74, runs/harbor/it19a2_base_tb2, runs/harbor/it19a2_base_ib, runs/harbor/it19a2_g2_tb2, runs/harbor/it19a2_g2_ib,
                runs/final/it19a2, outputs/chain/it19a2/never_trained.json, outputs/logs]
   archives:
     - {iteration: 19, name: it19a2-external-budget, no_weights: true,
-       eval: [runs/eval/it19a2_base_sanity, runs/eval/it19a2_g2_sanity],
+       eval: [runs/eval/it19a2_base_sanity, runs/eval/it19a2_g2_sanity, runs/def74/it19a_g2_heldout,
+              runs/def74/it19a_base_heldout, runs/def74/it17_rollouts_feasible],
        file: [runs/final/it19a2/base_tb2_units.json, runs/final/it19a2/g2_tb2_units.json,
               runs/final/it19a2/base_ib_summary.json, runs/final/it19a2/g2_ib_summary.json,
-              outputs/chain/it19a2/never_trained.json],
+              outputs/chain/it19a2/never_trained.json, runs/def74/regrade_it19a_g2_heldout.jsonl,
+              runs/def74/regrade_it19a_base_heldout.jsonl, runs/def74/regrade_it17_rollouts_feasible.jsonl],
        note: "iteration 19 stage (a2): TB2 and ImpossibleBench for base and G2 under the external budget (DEF-71)"}

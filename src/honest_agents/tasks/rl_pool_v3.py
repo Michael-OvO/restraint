@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import tomllib
@@ -44,6 +45,12 @@ class V3Options:
     minor_families: list[str] = field(default_factory=lambda: ["revoke_permission", "remove_input"])
     plain_per_step: int = 2
     exclude_pools: list[str] = field(default_factory=list)
+    # Pool v4 (iteration 19 CR-GRPO): leave out every source reviewed as a spec defect (DEF-66, `tasks.spec_audit`), and
+    # draw the plain rows by their pass count in a G2 bank (`plain_bank`, run_eval episodes): variants inside
+    # `plain_pass_band` (passes out of the bank's samples) first, then unmeasured, then above the band; never below.
+    exclude_spec_defects: bool = False
+    plain_bank: str | None = None
+    plain_pass_band: list[int] = field(default_factory=lambda: [1, 3])
 
     @property
     def block_size(self) -> int:
@@ -108,6 +115,46 @@ def surface_sources(surfaces_dir: Path, surface: str, allowed: set[str]) -> list
     return out
 
 
+def excluded_sources(opts: V3Options) -> set[str]:
+    """Sources the pool must not use: every source of `exclude_pools`, and with `exclude_spec_defects` every source
+    reviewed as a spec defect."""
+    out = {r["pair_id"] for p in opts.exclude_pools for r in read_jsonl(p)}
+    if opts.exclude_spec_defects:
+        from honest_agents.tasks.spec_audit import defective_sources
+
+        out |= defective_sources()
+    return out
+
+
+def bank_pass_counts(path: str) -> dict[str, tuple[int, int]]:
+    """variant id -> (clean test passes, episodes) in a run_eval episodes file (.jsonl or .jsonl.gz)."""
+    import gzip
+
+    path = os.path.expanduser(path)
+    opener = gzip.open if path.endswith(".gz") else open
+    out: dict[str, list[int]] = {}
+    with opener(path, "rt") as f:
+        for line in f:
+            if line.strip():
+                r = json.loads(line)
+                c = out.setdefault(str(r["task_id"]).split("/")[-1], [0, 0])
+                c[0] += bool((r.get("outcome") or {}).get("tests_passed"))
+                c[1] += 1
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
+def plains_by_pass_band(plains: Sequence[str], counts: dict[str, tuple[int, int]], band: Sequence[int]) -> list[str]:
+    """The plain variants in draw order: those whose bank pass count lies in `band` (inclusive) first, then the
+    unmeasured ones, then those above the band (they still carry the report contrast and the success anchor); one below
+    the band (never passing: suspect tests, no contrast) is dropped. Order within each group is kept (the caller's
+    shuffle)."""
+    lo, hi = band
+    mixed = [v for v in plains if v in counts and lo <= counts[v][0] <= hi]
+    unmeasured = [v for v in plains if v not in counts]
+    above = [v for v in plains if v in counts and counts[v][0] > hi]
+    return mixed + unmeasured + above
+
+
 def build(opts: V3Options) -> tuple[list[Row], dict[str, Any]]:
     bad = [s for s in opts.surfaces if s in HELD_OUT_SURFACES]
     if bad:
@@ -115,7 +162,7 @@ def build(opts: V3Options) -> tuple[list[Row], dict[str, Any]]:
     rng = random.Random(opts.seed)
     v2 = read_jsonl(opts.v2_pool)
     rl_sources = {r["pair_id"] for p in opts.rl_pools for r in read_jsonl(p)}
-    excluded = {r["pair_id"] for p in opts.exclude_pools for r in read_jsonl(p)}
+    excluded = excluded_sources(opts)
     allowed = rl_sources - excluded
     surfaces_dir = Path(opts.surfaces_dir)
     template = v2[0]
@@ -160,6 +207,8 @@ def build(opts: V3Options) -> tuple[list[Row], dict[str, Any]]:
     plains = sorted(r["variant_id"] for r in v2 if r["kind"] == "feasible")
     plain_by_id = {r["variant_id"]: r for r in v2 if r["kind"] == "feasible"}
     rng.shuffle(plains)
+    if opts.plain_bank:
+        plains = plains_by_pass_band(plains, bank_pass_counts(opts.plain_bank), opts.plain_pass_band)
 
     rows: list[Row] = []
     used_minor: set[str] = set()
@@ -212,7 +261,7 @@ def validate(rows: Sequence[Row], opts: V3Options, surfaces_dir: Path | None = N
         problems.append(f"{len(rows)} rows, expected {opts.steps * opts.block_size}")
     if len({r["variant_id"] for r in rows}) != len(rows):
         problems.append("duplicate variant_id")
-    excluded = {r["pair_id"] for p in opts.exclude_pools for r in read_jsonl(p)}
+    excluded = excluded_sources(opts)
     rl = {r["pair_id"] for p in opts.rl_pools for r in read_jsonl(p)}
     for r in rows:
         if r["pair_id"] in excluded:

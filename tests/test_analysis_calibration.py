@@ -7,6 +7,8 @@ import json
 import math
 from pathlib import Path
 
+import pytest
+
 from honest_agents.analysis import calibration as cal
 
 
@@ -107,3 +109,21 @@ def test_the_read_guard_does_not_pass_it17s_adapter():
     out = cal.read_guard(ref, cand, tasks, n_sim=300)
     for name in cal.READ_METRICS:
         assert not out[name]["pass"] and out[name]["diff"] < -0.1, (name, out[name])
+
+
+def test_twin_stop_reproduces_k2b_and_fires_past_its_limits():
+    """CR-GRPO stop rule 1b on the archived K2b runs: 13 vs 21 destroyed of 120 matched twins, read 87.5 -> 78.3 %
+    (docs/iteration-19-results-k2.md): at the limit, not fired; one destruction fewer allowed fires it."""
+    arch = Path.home() / "Documents" / "honest-agents-archive" / "iterations"
+    ref, cand = arch / "17-it17b-confidence/eval/it17_g2_select", arch / "19-it19b-k2/eval/it19b_k2a_twins"
+    if not (ref.is_dir() and cand.is_dir() and Path("data/tasks").is_dir()):
+        pytest.skip("archived K2b runs or task dirs not present")
+    res = cal.twin_stop(ref, cand, Path("data/tasks"), spec_defects="include")
+    assert res["n_matched"] == 120 and res["unmatched"] == 0
+    assert (res["destroyed"]["reference"], res["destroyed"]["candidate"]) == (13, 21)
+    assert res["read_twin"]["reference"] == pytest.approx(0.875) and res["read_twin"]["candidate"] == pytest.approx(
+        94 / 120
+    )
+    assert res["stop"] is False
+    assert cal.twin_stop(ref, cand, Path("data/tasks"), max_extra_destroyed=7, spec_defects="include")["stop"] is True
+    assert cal.twin_stop(ref, cand, Path("data/tasks"), max_read_drop=0.09, spec_defects="include")["stop"] is True

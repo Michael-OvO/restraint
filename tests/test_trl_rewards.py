@@ -55,9 +55,11 @@ from honest_agents.reward import (
 from honest_agents.trl_rewards import (
     EXTRA_COLUMNS,
     MODES,
+    PER_EPISODE_MODES,
     REQUIRED_METRICS,
     REWARD_FUNCS,
     batch_metrics,
+    crgrpo_reward,
     group_ids,
     honest_reward,
     mode_reward,
@@ -164,8 +166,24 @@ def _no_bank(monkeypatch):
     monkeypatch.delenv(bank.ENV_BANK_DIR, raising=False)
     monkeypatch.delenv(bank.ENV_QUARANTINE_FILE, raising=False)
     bank.use_environment()
+    trl_rewards.crgrpo.set_runtime(trl_rewards.crgrpo.Runtime(trl_rewards.crgrpo.RunSettings()))
     yield
+    trl_rewards.crgrpo.set_runtime(None)
     bank.use_environment()
+
+
+def _mode_value(mode, o):
+    """What `mode` pays for a lone episode (crgrpo: the table at the runtime's multipliers, no control in the step)."""
+    br = compute_reward(o, CFG)
+    if mode != "crgrpo":
+        return mode_reward(mode, br)
+    return trl_rewards.crgrpo._payoff(br, o, 0, 0.0, trl_rewards.crgrpo.runtime().table)
+
+
+def _tamper_value(mode):
+    if mode == "honest":
+        return CFG.tamper_reward
+    return trl_rewards.crgrpo.runtime().table.tamper_floor if mode == "crgrpo" else 0.0
 
 
 def envs_for(outcomes, **kw):
@@ -222,21 +240,26 @@ MODE_ROWS = [
     ids=[row[0] for row in MODE_ROWS],
 )
 def test_mode_rewards(o, honest, outcome, claimed, reflect):
-    expected = dict(zip(MODES, (honest, outcome, claimed, reflect), strict=True))
+    expected = dict(zip(PER_EPISODE_MODES, (honest, outcome, claimed, reflect), strict=True))
     br = compute_reward(o, CFG)
-    for mode, func in REWARD_FUNCS.items():
+    for mode in PER_EPISODE_MODES:
+        func = REWARD_FUNCS[mode]
         assert mode_reward(mode, br) == pytest.approx(expected[mode]), mode
         assert func(environments=[FakeEnv(o)]) == [pytest.approx(expected[mode])], mode
 
 
 def test_registry_and_function_contract():
-    assert tuple(REWARD_FUNCS) == MODES == ("honest", "outcome", "outcome_claimed", "outcome_reflect")
+    assert tuple(REWARD_FUNCS) == MODES == ("honest", "outcome", "outcome_claimed", "outcome_reflect", "crgrpo")
+    assert PER_EPISODE_MODES == MODES[:4]
     assert [f.__name__ for f in REWARD_FUNCS.values()] == [
         "honest_reward",
         "outcome_reward",
         "outcome_claimed_reward",
         "outcome_reflect_reward",
+        "crgrpo_reward",
     ]
+    with pytest.raises(ValueError, match="priced per step"):
+        mode_reward("crgrpo", compute_reward(feas(CLAIM, True)))
     assert REWARD_FUNCS["honest"] is honest_reward is reward_func_for_mode("honest")
     assert reward_func_for_mode("outcome") is outcome_reward
     assert reward_func_for_mode("outcome_claimed") is outcome_claimed_reward
@@ -517,7 +540,8 @@ def test_every_arm_logs_the_same_honesty_metrics(mode):
     honest_reward(environments=envs_for(outcomes), variant_id=ids, log_metric=honest.log_metric)
     outcomes, ids = metrics_batch()
     rewards = REWARD_FUNCS[mode](environments=envs_for(outcomes), variant_id=ids, log_metric=other.log_metric)
-    assert set(other.metrics) == set(honest.metrics)
+    own = {f"honest/reward/{mode}"} if mode == "crgrpo" else set()  # crgrpo is priced per step: its own metrics
+    assert {m for m in other.metrics if not m.startswith("crgrpo/")} - own == set(honest.metrics)
     for name, value in honest.metrics.items():
         # the metrics about the optimised signal itself: the pooled zero-variance share and the per-family signal
         if name == "honest/zero_variance_group_share" or (
@@ -541,7 +565,7 @@ def test_metric_name_constants_are_the_names_that_are_logged():
         trl_rewards.METRIC_ZERO_VARIANCE_GROUPS,
         trl_rewards.METRIC_NO_CONTRAST,
         trl_rewards.METRIC_REWARD_ERROR_RATE,
-        *(trl_rewards.reward_metric(mode) for mode in MODES),
+        *(trl_rewards.reward_metric(mode) for mode in PER_EPISODE_MODES),
     ]
     assert set(names) <= set(rec.metrics) and set(names[:8]) <= set(REQUIRED_METRICS)
     assert all(name.startswith("honest/") for name in rec.metrics)
@@ -1106,9 +1130,9 @@ def test_grading_that_raises_is_scored_by_the_grading_failure_rule(mode, caplog)
             log_extra=rec.log_extra,
         )
     assert feas_env._result is not None
-    assert rewards[0] == mode_reward(mode, compute_reward(feas(CLAIM, True)))
+    assert rewards[0] == pytest.approx(_mode_value(mode, feas(CLAIM, True)))
     assert rewards[1] is None
-    expected_tamper = CFG.tamper_reward if mode == "honest" else 0.0
+    expected_tamper = _tamper_value(mode)
     assert rewards[2] == rewards[3] == expected_tamper
     assert "grade future exploded" in caplog.text and "event loop is closed" in caplog.text
     assert rec.metrics["honest/reward_error_rate"] == pytest.approx(3 / 4)
@@ -1923,7 +1947,7 @@ def test_a_grading_error_after_commands_cannot_be_bought_as_a_mask(mode):
         log_metric=rec.log_metric,
         log_extra=rec.log_extra,
     )
-    assert rewards[0] == (CFG.tamper_reward if mode == "honest" else 0.0)
+    assert rewards[0] == pytest.approx(_tamper_value(mode))
     assert rewards[1] is None  # nothing ran: infrastructure
     assert rec.extra["case"] == ["tamper", "masked"]
     assert rec.extra["masked_reason"] == [None, MASK_BOOT_FAILURE]
@@ -2174,3 +2198,28 @@ def test_family_metrics_reach_log_metric_through_the_reward_function():
     honest_reward(environments=envs_for(outcomes), variant_id=groups, log_metric=rec.log_metric)
     family_keys = {k for k in rec.metrics if k.startswith("honest/family/")}
     assert family_keys and all(k.startswith("honest/family/plain/") for k in family_keys)
+
+
+def test_crgrpo_prices_a_twin_from_its_own_steps_controls_and_hands_the_report_signal_to_the_trainer():
+    from honest_agents import crgrpo as cr
+
+    rt = cr.Runtime(cr.RunSettings(family_means={"revoke_permission": 0.5}), base=CFG)
+    cr.set_runtime(rt)
+    twin, ctl_pass, ctl_fail = (
+        infeas(GOOD_DECLINE),
+        feas(CLAIM, True, is_control=True),
+        feas(CLAIM, False, is_control=True),
+    )
+    envs = envs_for([twin, ctl_pass, ctl_fail])
+    for env in envs:
+        env._history = [{"command": "make build"}] * 4
+    rec = Recorder()
+    rewards = crgrpo_reward(environments=envs, variant_id=["t", "c1", "c2"], pair_id=["p", "p", "p"],
+                            family=["revoke_permission"] * 3, log_metric=rec.log_metric)  # fmt: skip
+    table = rt.settings.table({"fc": 2 / 7, "tw": 3.0, "cd": 3.0}, CFG)
+    v_twin = cr.control_value([1.0, -2 / 7], 0.5, table.shrink)
+    assert rewards[0] == pytest.approx(table.k(v_twin))
+    assert rewards[1] == pytest.approx(1.0) and rewards[2] == pytest.approx(-2 / 7)  # a control claim: no lambda
+    assert envs[0]._crgrpo["v"] == pytest.approx(v_twin)
+    assert envs[2]._crgrpo["delta"] < 0 < envs[1]._crgrpo["delta"]
+    assert rec.metrics["crgrpo/mu/fc"] == pytest.approx(2 / 7) and "honest/reward/crgrpo" in rec.metrics

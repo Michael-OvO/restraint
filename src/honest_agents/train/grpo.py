@@ -32,6 +32,22 @@ def check_scale_rewards(grpo: dict[str, Any]) -> None:
     )
 
 
+def check_crgrpo(cfg: TrainRunConfig) -> Any:
+    """`reward.crgrpo` is valid for `mode: crgrpo` and set only there. Returns the parsed `crgrpo.RunSettings` (or None).
+
+    The runtime's state (multipliers, V_s family means) lives in this one training process: CR-GRPO needs
+    `launch.num_processes: 1`, the only supported layout anyway (`trainer.HonestGRPOTrainer._check_generation_layout`)."""
+    from honest_agents import crgrpo
+
+    if cfg.reward.mode != "crgrpo":
+        if cfg.reward.crgrpo:
+            raise ValueError("reward.crgrpo is only read by reward.mode: crgrpo")
+        return None
+    if cfg.launch.num_processes != 1:
+        raise ValueError("reward.mode crgrpo keeps its state in one process: launch.num_processes must be 1")
+    return crgrpo.RunSettings.from_dict(cfg.reward.crgrpo)
+
+
 def check_launch_layout(grpo: dict[str, Any], num_processes: int) -> None:
     """Refuse the layouts that mis-route completions inside TRL's tool loop."""
     if num_processes < 1:
@@ -212,6 +228,7 @@ def build_grpo_config(cfg: TrainRunConfig, family: ModelFamily, limits: Limits |
         raise ValueError(f"`grpo:` must not set derived field(s) {sorted(clash)}; use the top-level/section keys")
     if cfg.reward.mode not in REWARD_MODES:
         raise ValueError(f"reward.mode must be one of {REWARD_MODES}, got {cfg.reward.mode!r}")
+    check_crgrpo(cfg)
 
     agg = grpo.get("multi_objective_aggregation", "sum_then_normalize")
     if agg != "sum_then_normalize":

@@ -1,0 +1,24 @@
+# RL pool v4 for iteration 19 CR-GRPO (docs/iteration-19-design-crgrpo.md, K0.4): pool v3's step blocks (2 surface
+# pairs + 1 revoke_permission / remove_input pair + 2 plain rows per 8-prompt step) without any source reviewed as a
+# spec defect (DEF-66 / DEF-72, data/spec_audit/reviews.jsonl; training refuses them at load), and with the plain rows
+# drawn from variants G2 passes 1-3 of 4 times in its pool bank (it17a feasible rollouts) first, then unmeasured, then
+# always-passing ones (never-passing ones are dropped), so most plain rows carry both an action and a report contrast;
+# 15 steps x 8 = 120 rows; the run takes two passes (30 steps).
+#   python -m honest_agents.tasks.rl_pool_v3 --config configs/tasks/rl_pool_v4.yaml
+v2_pool: data/train_rl_v2.jsonl
+rl_pools: [data/train_rl.jsonl, data/train_rl_v2.jsonl]
+surfaces_dir: data/decision/surfaces/tasks
+node_root: /root/restraint
+out: data/train_rl_v4.jsonl
+report: data/train_rl_v4.report.json
+seed: 19
+steps: 15
+surfaces: [readme, file_header, config_comment, manifest]   # empty_backup and inbound_link are held out
+surface_pairs_per_step: 2
+minor_pairs_per_step: 1
+minor_families: [revoke_permission, remove_input]
+plain_per_step: 2
+exclude_pools: [data/select.jsonl, data/val.jsonl, data/test.jsonl, data/distill_pool.jsonl]
+exclude_spec_defects: true
+plain_bank: ~/Documents/honest-agents-archive/iterations/17-it17a-data-rollouts/eval/it17_rollouts_feasible/episodes.jsonl.gz
+plain_pass_band: [1, 3]

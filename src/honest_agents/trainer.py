@@ -73,6 +73,83 @@ from honest_agents.reward import (
 
 logger = logging.getLogger(__name__)
 
+# ── CR-GRPO's report term (docs/iteration-19-design-crgrpo.md, section 1 part 3) ─────────────────────────────────────
+
+STATUS_MARKER = "<parameter=status>\n"  # Qwen3.5's tool-call format: the status value follows this line
+REPORT_FUNCTION = "submit_report"
+METRIC_REP_N = "crgrpo/rep/n_rows"  # rows of the micro-batch whose status token was found and carry a signal
+METRIC_REP_PI = "crgrpo/rep/pi_claim"  # mean pi(claim) at the status token, from the training forward
+METRIC_REP_FROZEN = "crgrpo/rep/frozen_share"  # rows past z_max in the direction of their delta (no gradient)
+METRIC_REP_LOSS = "crgrpo/rep/loss"
+
+
+def status_position(
+    ids: list[int], tool_mask: list[int] | None, complete: int, incomplete: int, decode: Any, claimed: bool | None
+) -> int:
+    """Index in `ids` (the completion) of the status token of the episode's last `submit_report` call, or -1.
+
+    A candidate is a model token (tool_mask 1) equal to the first token of `complete` or `incomplete` whose preceding
+    text ends with `STATUS_MARKER` inside a `submit_report` call. The last one is the report the environment graded
+    (the episode ends at its report). With `claimed` known, the token must agree with the graded status, else -1: a
+    status the grader did not see must not be trained on its outcome."""
+    found = -1
+    for j, tok in enumerate(ids):
+        if tok not in (complete, incomplete) or j < 1 or (tool_mask is not None and not tool_mask[j]):
+            continue
+        before = decode(ids[max(0, j - 12) : j])
+        if before.endswith(STATUS_MARKER) and REPORT_FUNCTION in decode(ids[max(0, j - 64) : j]):
+            found = j
+    if found >= 0 and claimed is not None and (ids[found] == complete) != claimed:
+        return -1
+    return found
+
+
+def status_log_odds(logp: torch.Tensor, sampled_complete: torch.Tensor, grad_clip: float) -> torch.Tensor:
+    """z = log p(complete) - log p(incomplete) at the status token, from the sampled token's log-probability alone,
+    assuming the two options carry all the mass there (K0.1: the status always splits at one token). The value is
+    exact under that assumption; the gradient through logp is capped at `grad_clip` in magnitude (it is
+    +-1 / (1 - p), unbounded as p -> 1)."""
+    p = logp.detach().exp().clamp(max=1 - 1e-6)
+    other = torch.log1p(-p)
+    z = torch.where(sampled_complete, logp.detach() - other, other - logp.detach())
+    slope = (1.0 / (1.0 - p)).clamp(max=grad_clip)
+    slope = torch.where(sampled_complete, slope, -slope)
+    return z + slope * (logp - logp.detach())
+
+
+def report_term(
+    logps: torch.Tensor,
+    completion_ids: torch.Tensor,
+    pos: torch.Tensor,
+    delta: torch.Tensor,
+    complete: int,
+    *,
+    c_rep: float,
+    z_max: float,
+    grad_clip: float,
+    denominator: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """l_rep = -c_rep * sum_i delta_i * z_i / denominator over the rows with a status token (pos >= 0), z frozen once
+    past z_max in the direction of delta_i. `delta` is a constant (the graded outcome), so no gradient reaches the
+    actions through it."""
+    rows = (pos >= 0).nonzero(as_tuple=True)[0]
+    zero = logps.sum() * 0.0
+    if rows.numel() == 0:
+        return zero, {METRIC_REP_N: 0.0}
+    at = pos[rows]
+    lp = logps[rows, at]
+    z = status_log_odds(lp, completion_ids[rows, at] == complete, grad_clip)
+    d = delta[rows].to(z.dtype)
+    frozen = ((d > 0) & (z.detach() > z_max)) | ((d < 0) & (z.detach() < -z_max))
+    loss = -(c_rep * d * z * (~frozen)).sum() / denominator
+    stats = {
+        METRIC_REP_N: float(rows.numel()),
+        METRIC_REP_PI: torch.sigmoid(z.detach()).mean().item(),
+        METRIC_REP_FROZEN: frozen.float().mean().item(),
+        METRIC_REP_LOSS: loss.detach().item(),
+    }
+    return loss, stats
+
 
 class _UnknownTool(ValueError):
     """The model named a tool that does not exist; its own text is safe to show back (it only contains the name)."""
@@ -114,6 +191,10 @@ UPSTREAM_FINGERPRINTS: dict[str, str] = {
     "_calculate_rewards": "736ae29b083840b5da2638b55ad1258659c644589991fe6a494131354952efef",
     # Not ported, but the padding trimmer calls it with sliced inputs and relies on its argument semantics.
     "_get_per_token_logps_and_entropies": "dc17fee20840b7ebfc65648b3464f007f41dd846a472c7ae36a864c342e264c5",
+    # The CR-GRPO report term adds row tensors to this method's batch dict (TRL's shuffle and split carry any
+    # row-aligned tensor). Its reliance on `_compute_loss` (mask = completion_mask * tool_mask, one scoring forward) is
+    # tested on the real method instead (tests/test_crgrpo_report_term.py), which other tests spy on.
+    "_generate_and_score_completions": "2deae91942535170f062ec96efb9aabebc40db83ceb326be76d454379783e6aa",
 }
 
 # Why a rollout left the tool loop, as the trainer saw it. The values are `reward.STOP_REASONS`:
@@ -335,6 +416,10 @@ class HonestGRPOTrainer(GRPOTrainer):
     max_tool_workers: int | None = None
     clone_synced_params: bool = True  # docs/design.md section 8; set False before construction to reproduce stock TRL
     trim_padding: bool = True  # run every forward in length-trimmed chunks; False = TRL's padded layout
+    # `reward.mode: crgrpo` with the report term on: the run's `crgrpo.RunSettings` and the status tokens
+    # (`complete`, first token of `incomplete`). None: no report term, TRL's loss unchanged.
+    crgrpo: Any = None
+    status_tokens: tuple[int, int] | None = None
     sort_micro_batches: bool = True  # also regroup a generation round's micro-batches by length (token-sum losses only)
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -465,7 +550,15 @@ class HonestGRPOTrainer(GRPOTrainer):
 
     # ── padding-free scoring ──────────────────────────────────────
 
-    def _get_per_token_logps_and_entropies(
+    def _get_per_token_logps_and_entropies(self, model, *args, **kwargs):
+        """`_scored_logps`; inside `_compute_loss` with the report term on, the training forward's log-probs are kept
+        for `report_term` (the same tensor the main loss uses, with its graph)."""
+        out = self._scored_logps(model, *args, **kwargs)
+        if getattr(self, "_capture_logps", False) and torch.is_grad_enabled():
+            self._captured_logps = out[0]
+        return out
+
+    def _scored_logps(
         self, model, input_ids, attention_mask, logits_to_keep, *args, batch_size=None, compute_aux_loss=False, **kwargs
     ):
         """TRL's scoring on length-sorted chunks trimmed to their own window; same outputs, padded to TRL's shape.
@@ -540,9 +633,82 @@ class HonestGRPOTrainer(GRPOTrainer):
         self._buffered_inputs = sort_micro_batches(buffered)
         return self._buffered_inputs[self._step % per_round]
 
+    def _generate_and_score_completions(self, inputs):
+        output = super()._generate_and_score_completions(inputs)
+        if self.crgrpo is not None and self.crgrpo.report_term:
+            self._attach_report_signal(output)
+        return output
+
+    def _attach_report_signal(self, output: dict[str, Any]) -> None:
+        """Per row: the status token's position and the graded delta (`crgrpo_pos`, `crgrpo_delta`), consumed from the
+        environments (`trl_rewards.ENV_CRGRPO_ATTR`); the status token is taken out of the main loss (its tool_mask
+        set to 0), so it learns only from `report_term`. A row without a found status token keeps TRL's loss."""
+        from honest_agents.report import Status
+        from honest_agents.trl_rewards import ENV_CRGRPO_ATTR
+
+        if self.status_tokens is None:
+            raise RuntimeError("the CR-GRPO report term needs HonestGRPOTrainer.status_tokens")
+        complete, incomplete = self.status_tokens
+        ids, cmask = output["completion_ids"], output["completion_mask"]
+        tmask = output.get("tool_mask")
+        envs = list(self.environments or [])
+        n_rows = ids.size(0)
+        pos = torch.full((n_rows,), -1, dtype=torch.long, device=ids.device)
+        delta = torch.zeros(n_rows, dtype=torch.float32, device=ids.device)
+
+        def decode(x: list[int]) -> str:
+            return self.processing_class.decode(x, skip_special_tokens=False)
+
+        for i in range(n_rows):
+            env = envs[i] if i < len(envs) else None
+            signal = getattr(env, ENV_CRGRPO_ATTR, None)
+            if env is not None:
+                setattr(env, ENV_CRGRPO_ATTR, None)  # one use: a later failed reward call must not reuse it
+            if not signal:
+                continue
+            report = getattr(env, "_report", None)
+            claimed = None if report is None else report.status == Status.COMPLETE
+            n = int(cmask[i].sum())
+            row_mask = tmask[i, :n].tolist() if tmask is not None else None
+            j = status_position(ids[i, :n].tolist(), row_mask, complete, incomplete, decode, claimed)
+            if j >= 0:
+                pos[i], delta[i] = j, float(signal["delta"])
+        found = (pos >= 0).nonzero(as_tuple=True)[0]
+        if tmask is not None and found.numel():
+            tmask[found, pos[found]] = 0
+        output["crgrpo_pos"], output["crgrpo_delta"] = pos, delta
+        metrics = self._metrics["train" if self.model.training else "eval"]
+        metrics["crgrpo/rep/found_share"].append(found.numel() / n_rows if n_rows else 0.0)
+
     def _compute_loss(self, model, inputs):
         self._log_sampling_drift(inputs)
-        return super()._compute_loss(model, inputs)
+        pos = inputs.get("crgrpo_pos")
+        if pos is None or self.crgrpo is None or not self.model.training:
+            return super()._compute_loss(model, inputs)
+        self._capture_logps = True
+        try:
+            loss = super()._compute_loss(model, inputs)
+        finally:
+            self._capture_logps = False
+        logps = self.__dict__.pop("_captured_logps", None)
+        if logps is None:
+            raise RuntimeError("the CR-GRPO report term found no training log-probs to train the status token on")
+        s = self.crgrpo
+        rep, stats = report_term(
+            logps,
+            inputs["completion_ids"],
+            pos,
+            inputs["crgrpo_delta"],
+            self.status_tokens[0],
+            c_rep=s.c_rep,
+            z_max=s.z_max,
+            grad_clip=s.grad_clip,
+            # a mean over the optimizer step's rows, as the main loss is one sum over its tokens
+            denominator=float(pos.size(0) * self.current_gradient_accumulation_steps),
+        )
+        for name, value in stats.items():
+            self._metrics["train"][name].append(value)
+        return loss + rep
 
     def _log_sampling_drift(self, inputs: dict[str, Any]) -> None:
         """Token shares of the vLLM importance ratio TRL does not log: at the truncation cap, and far from 1."""

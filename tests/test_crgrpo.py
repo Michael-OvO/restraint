@@ -114,3 +114,87 @@ def test_substantive_commands_ignore_looking():
 def test_control_value_shrinks_to_the_family_mean():
     assert cr.control_value([], 0.4, 4) == pytest.approx(0.4)
     assert cr.control_value([1.0, 1.0, 1.0, 1.0], 0.0, 4) == pytest.approx(0.5)
+
+
+# ── the training runtime: online V_s, constraint rates, the multiplier update ──
+
+
+def _ep(o: EpisodeOutcome, *, n: int = 8, family: str = "high_risk", source: str = "s1") -> cr.Episode:
+    from honest_agents.reward import compute_reward
+
+    return cr.Episode(o, compute_reward(o, CFG.base), n, family, source)
+
+
+def test_v_s_is_the_leave_one_out_mean_of_the_steps_own_control_proceeds_shrunk_to_the_family_mean():
+    rt = cr.Runtime(cr.RunSettings(family_means={"high_risk": 0.5}))
+    pass_, fail = _ep(_feasible(_claim(), True, control=True)), _ep(_feasible(_claim(), False, control=True))
+    refused = _ep(_feasible(_incomplete(), False, control=True, n=1), n=1)
+    twin = _ep(_twin(_incomplete(RISK)))
+    out = rt.score([pass_, fail, refused, twin], step=0)
+    s = CFG.shrink
+    # the twin sees both proceeds (1 and -mu_fc); a refusal is not a proceed; a control never prices itself
+    assert out[3].v == pytest.approx((1 - CFG.mu_fc + s * 0.5) / (2 + s))
+    assert out[0].v == pytest.approx((-CFG.mu_fc + s * 0.5) / (1 + s))
+    assert out[2].payoff == pytest.approx(-CFG.mu_cd * out[2].v)
+    assert out[3].payoff == pytest.approx(CFG.k(out[3].v))  # the right decline earns k_s
+    # the family mean moves toward this step's proceeds
+    assert rt.family_mean["high_risk"] == pytest.approx(0.9 * 0.5 + 0.1 * (1 - CFG.mu_fc) / 2)
+
+
+def test_report_delta_and_payoff_use_the_current_multipliers_and_a_masked_episode_is_none():
+    from dataclasses import replace
+
+    rt = cr.Runtime(cr.RunSettings(mu_fc=1.0))
+    plain_fail = _ep(_feasible(_claim(), False), family="feasible")
+    masked = cr.Episode(plain_fail.outcome, replace(plain_fail.breakdown, masked=True), 8, "feasible", "s2")
+    out = rt.score([plain_fail, masked], step=0)
+    assert out[0].payoff == pytest.approx(-1.0) and out[1] is None
+    assert out[0].delta == pytest.approx(-1.0 - 0.1)  # claim (-mu_fc) minus an honest non-claim after work (alpha)
+
+
+def test_multipliers_take_one_damped_step_at_the_update_step_from_the_window():
+    rt = cr.Runtime(cr.RunSettings(targets={"fc": 0.1, "cd": 0.5}, update_steps=(3,), update_window=2))
+    fab, ok = _ep(_feasible(_claim(), False), family="feasible"), _ep(_feasible(_claim(), True), family="feasible")
+    for step in range(3):
+        rt.score([fab, ok, ok, ok], step=step)  # C1 rate 0.25 every step
+        assert rt.mu["fc"] == pytest.approx(2 / 7)
+    rt.score([fab, ok, ok, ok], step=3)
+    up = rt.updates[0]
+    assert up["update_step"] == 3 and up["rates"]["fc"] == [0.25, 8]  # steps 2 and 3 only
+    assert rt.mu["fc"] == pytest.approx(min(2 / 7 * __import__("math").exp(0.5 * 1.5), 2 * 2 / 7))
+    assert rt.mu["cd"] == 3.0 and rt.mu["tw"] == 3.0  # no controls seen; no target for tw
+    rt.score([fab], step=4)
+    assert len(rt.updates) == 1  # once per update step
+
+
+def test_the_pair_stays_caution_neutral_at_any_multipliers_the_update_reaches():
+    for mu_tw, mu_cd in ((3.0, 3.0), (6.0, 1.5), (1.5, 6.0)):
+        cfg = cr.CrgrpoConfig(mu_tw=mu_tw, mu_cd=mu_cd)
+        b = cr.blind_pair_values(V, cfg)
+        assert b["decline"] == pytest.approx(b["proceed"])
+
+
+def test_run_settings_reject_unknown_keys_and_bad_targets():
+    with pytest.raises(ValueError, match="unknown keys"):
+        cr.RunSettings.from_dict({"mu": 1})
+    with pytest.raises(ValueError, match="unknown constraints"):
+        cr.RunSettings(targets={"xx": 0.1})
+    with pytest.raises(ValueError, match="rates in"):
+        cr.RunSettings(targets={"fc": 1.5})
+    assert cr.RunSettings.from_dict({"update_steps": [15]}).update_steps == (15,)
+
+
+def test_the_runtime_state_survives_a_resume_at_the_checkpoint_step(tmp_path):
+    path = tmp_path / "crgrpo_state.jsonl"
+    settings = cr.RunSettings(targets={"fc": 0.1}, update_steps=(2,), update_window=2)
+    a = cr.Runtime(settings, state_file=path)
+    fab, ok = _ep(_feasible(_claim(), False), family="feasible"), _ep(_feasible(_claim(), True), family="feasible")
+    ctl = _ep(_feasible(_claim(), True, control=True))
+    for step in range(4):
+        a.score([fab, ok, ctl], step=step)
+    assert len(path.read_text().splitlines()) == 4 and a.updates
+    b = cr.Runtime(settings, state_file=path)
+    assert b.resume(path, before_step=3)  # checkpoint-3: steps 0..2 were scored
+    assert b.history[-1][0] == 2 and b.mu == a.updates[0]["after"] and b.updates == a.updates
+    assert b.family_mean["high_risk"] != a.family_mean["high_risk"]  # step 3's move is not in it
+    assert not cr.Runtime(settings).resume(path, before_step=0)
