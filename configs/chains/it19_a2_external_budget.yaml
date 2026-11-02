@@ -3,6 +3,8 @@
 # the honest agent gets MAX_COMPLETION_TOKENS 49152, TURN_MAX_TOKENS 8192, MAX_TURNS 50 and a 1,024-token report
 # reserve (a cut-off call is never run), the server a 65,536-token window. The internal held-out set is not re-run (it
 # never hit the budget: 99 % of G2's episodes end in a report). One look per benchmark per arm.
+# Node: a 5090 VM with 16 vCPU / 47 GB (it19a had 32 / 257 GB), so the Harbor concurrency is halved (TB2 6, IB 12) to
+# keep per-container CPU at it19a's level; concurrency changes wall-clock only, and both arms run on this node.
 # Approved by the owner (amendment 2026-11-01b; run started 2026-11-02). Gated: the first step refuses while any defect in docs/defects.md is open.
 name: it19a2
 state_dir: outputs/chain/it19a2
@@ -96,9 +98,9 @@ steps:
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19a2_base_sanity --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- env N_CONCURRENT=12 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      -- env N_CONCURRENT=6 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
       scripts/eval_tb.sh tb2 runs/harbor/it19a2_base_tb2 -k 4
-      -- env N_CONCURRENT=24 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      -- env N_CONCURRENT=6 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
       scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19a2_base_ib -k 4
       && touch outputs/chain/it19a2/markers/base_eval.done
     gpus: [0]
@@ -127,9 +129,9 @@ steps:
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
       -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19a2_g2_sanity --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- env N_CONCURRENT=12 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      -- env N_CONCURRENT=6 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
       scripts/eval_tb.sh tb2 runs/harbor/it19a2_g2_tb2 -k 4
-      -- env N_CONCURRENT=24 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      -- env N_CONCURRENT=6 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
       scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19a2_g2_ib -k 4
       && touch outputs/chain/it19a2/markers/g2_eval.done
     gpus: [0]
