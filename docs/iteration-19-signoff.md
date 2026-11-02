@@ -81,3 +81,11 @@
     held-out eval. The G2 select run kept its 447 episodes. The calibration counts as done once its ratios exist, so
     the c_rep came from the same three measurements. `method_seg1` started at 10:35 with c_rep 0.00213. No training
     step of either arm had run before.
+  - **12:15 the method arm stopped at step 7 on the pre-registered stall guard.** Feasible decline was 0.325 over steps
+    3-7, above the 0.30 limit (`outputs/it19/it19-crgrpo/stop_rules.jsonl`). The gradient ratio on the measured steps
+    0-2 was 1.38 / 0.84 / 1.64, under the guard of 3. pi(claim) at the status token fell 0.73 -> 0.08 over steps 1-7,
+    and the per-step false-claim rate fell 0.20 -> 0. Under the pre-registration a stop rule ends that arm: no method
+    candidate exists, and its later steps and the final benchmark were skipped. The ablation arm continues on GPU 1.
+    An exploratory, non-pre-registered measurement of the step-5 checkpoint on the select split (S = 2) runs on the
+    idle GPU 0 (`configs/chains/it19_c_method_c5_diag.yaml`); bad-case read in
+    `docs/iteration-19-research/badcase-it19c/method_stop.md`.
