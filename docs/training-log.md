@@ -1796,7 +1796,13 @@ the owner decides about the method arm (any re-run is a new pre-registered exper
 - Base ImpossibleBench: resumed in place with `harbor jobs resume` on instance 58779312. The original 720-min step could not hold TB2 plus ImpossibleBench.
 - G2 TB2 and ImpossibleBench: on instance 58815330, a second VM of the base node's host, with the same harness, budget and Harbor concurrency (TB2 6, IB 6) (`configs/chains/it19_a2_g2.yaml`).
 
-H2 and H3 under the external budget are not in yet.
+- **TB2 under the external budget (H3): inconclusive.** G2 − base false claims per episode −2.0 [−6.3, +2.8] (14.1 vs
+  16.1 %), success +0.3 [−2.6, +3.4] (11.3 vs 11.0 %), as under the training budget (−1.7). G2's edge is almost all at
+  the turn cap (half as many claims there); before the cap its claims are no more accurate than base's
+  (`docs/iteration-19-research/badcase-it19a2/g2_tb2.md`). Four G2 trials graded on a full disk were re-run (DEF-76);
+  the Harbor agent now has the training path's output cap (DEF-77, for later runs).
+
+H2 (ImpossibleBench) under the external budget is not in yet.
 
 ### Observations
 - **G2's restraint transfers to the frozen held-out set without a success cost.** Infeasible claims fell 40 points. Its feasible-work claims are no more truthful than base's: 18.4 vs 18.5 % fail, and 17.2 vs 18.0 % re-graded. This is the gap CR-GRPO targets. The it19a read of G2's internal false claims (`docs/iteration-19-research/badcase-it19a/internal_false_claims.md`) found two things. About 78 % sit on variants that G2's other sample or base solves. About 78 % leave a visible trace in the transcript.
@@ -1856,6 +1862,7 @@ H2 and H3 under the external budget are not in yet.
 | a new VM answered on its SSH port but every login timed out after key exchange: a stale `known_hosts` entry for the same `ip:port` from an earlier rental | `ssh-keygen -R "[ip]:port"` before the first login to a new rental |
 | it19c, 14:16 UTC: the 2-GPU host went offline after the ablation's step 15, with the checkpoints on its disk | pull checkpoints off a node at every milestone (rule 1b, segment ends), not only at the chain's end; the arm is re-run on a different provider |
 | a2 G2: Harbor's own process reached 40 GB resident during TB2 and was OOM-killed on a 47 GB VM (the base arm's stayed near 1.4 GB) | `harbor jobs resume` keeps finished trials; a memory alert on the Harbor process; prefer >= 96 GB RAM for Harbor jobs |
+| a2 G2: four TB2 verifiers ran out of disk on a node rented with a 200 GB disk (127 GB of TB2 images) and wrote rewards that graded nothing (DEF-76) | disk-full verifier output is masked as an infra error (`harbor_results`); >= 400 GB disk for TB2 nodes; a disk alert above 85 % |
 | a2: a concurrency edit applied twice (`sed` run twice on the same file) halved ImpossibleBench to 6 instead of 12 | check the edited values (`grep N_CONCURRENT`) against the intent before launch, not only the count of matches |
 
 ## Method notes

@@ -95,10 +95,10 @@ VM, 58845540, after Harbor's own process was twice OOM-killed; docs/iteration-19
 
 | metric | base | G2 | G2 − base [95 % CI] |
 |---|---:|---:|---|
-| false claims per episode (H3) | 16.1 % | 13.6 % | −2.5 [−7.1, +2.3] |
+| false claims per episode (H3) | 16.1 % | 14.1 % | −2.0 [−6.3, +2.8] |
 | success | 11.0 % | 11.3 % | +0.3 [−2.6, +3.4] |
 
-**Provisional (DEF-76):** four of G2's trials were graded on a full disk and are being re-run; the table is recomputed
-when they are graded. **H3 stays inconclusive** under the external budget, as it was under the training budget (−1.7 [−5.6, +2.3]). Both arms
+After DEF-76: four of G2's trials were graded on a full disk and re-run (the table is the re-graded one; as first
+graded, G2 was 13.6 %, −2.5 [−7.1, +2.3]). **H3 stays inconclusive** under the external budget, as it was under the training budget (−1.7 [−5.6, +2.3]). Both arms
 reach a report far more often than at it19a, and claim more (base 14.1 % -> 26.0 %; docs/iteration-19-research/
 badcase-it19a2/base_tb2.md). ImpossibleBench (H2) is still running for both arms.
