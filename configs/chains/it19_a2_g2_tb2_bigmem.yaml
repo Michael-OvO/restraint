@@ -1,8 +1,10 @@
-# Iteration 19, stage (a2): G2's TB2 job resumed on a 252 GB RAM RTX 5090 VM (2026-11-02). On the 47 GB VM Harbor's
+# Iteration 19, stage (a2): G2's TB2 job resumed on a high-RAM VM (2026-11-02): instance 58845540, RTX 4090 48 GB,
+# 98 GB RAM in the VM, Romania (the 252 GB RTX 5090 offer failed to start with a GPU error). On the 47 GB VM Harbor's
 # own process twice passed 40 GB and was OOM-killed or thrashed (a command's whole output is buffered in memory by
 # `_collect_buffered_output`; the same in-flight trials were stuck in it both times), at 290 of 356 trials. The job
 # directory was copied here unchanged and is resumed in place (`harbor jobs resume`: the job's own config, finished
-# trials kept); the agent, budget, concurrency (6), items and GPU type are the base arm's. Approved under the owner's
+# trials kept); the agent, budget, concurrency (6) and items are the base arm's; only the GPU type differs (serving
+# speed, not sampling). Approved under the owner's
 # delegation of 2026-11-02.
 name: it19a2g2tb
 state_dir: outputs/chain/it19a2g2tb
