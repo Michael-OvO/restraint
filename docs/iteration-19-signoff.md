@@ -89,3 +89,14 @@
     An exploratory, non-pre-registered measurement of the step-5 checkpoint on the select split (S = 2) runs on the
     idle GPU 0 (`configs/chains/it19_c_method_c5_diag.yaml`); bad-case read in
     `docs/iteration-19-research/badcase-it19c/method_stop.md`.
+  - **14:16 the it19c host went offline** (instance 58781495, host 3497; its reliability fell to 0.88) just after the
+    ablation arm's step 15, with steps 1-15 normal and no stop rule. It was still offline at 14:58. The pre-registration
+    counts this as an infrastructure failure to re-run (section 4): the ablation arm is repeated from G2 on instance
+    58836482 (1x RTX PRO 6000 WS 96 GB, 14 vCPU, Texas, $2.37/h; `configs/chains/it19_c_ablation_rerun.yaml`, started
+    14:59), with the same config, data order, seed and evaluation. W&B name `it19-crgrpo-ablation-r2`. The G2 select
+    reference measured on 58781495 is reused (pulled before the outage). 58781495 is stopped, not destroyed: its disk
+    holds the first ablation run's checkpoints and the select transcripts.
+- **Stage a2 run log (2026-11-02, UTC).** 14:52: Harbor's main process in G2's TB2 job grew to 40 GB resident on the
+  47 GB VM, and the OOM killer ended it at 290 of 356 trials (the base arm's Harbor process stays near 1.4 GB). G2's
+  TB2 job is resumed in place, then G2's ImpossibleBench runs (`configs/chains/it19_a2_g2_resume.yaml`), with a Mac-side
+  alert above 25 GB.

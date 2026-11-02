@@ -1854,6 +1854,8 @@ H2 and H3 under the external budget are not in yet.
 | it19c: timeouts sized to G3's speed killed the c_rep calibration (in an unneeded step-3 probe) and would have killed the G2 select run part-way; stage a2's `base_eval` (720 min) could not hold TB2 plus ImpossibleBench under the external budget | size timeouts to the measured step time on the node; every held-out eval runs with `--resume`; a long Harbor job is resumed in place with `harbor jobs resume` |
 | a watcher stops the node on `ALL_DONE` even when the chain ended early on a failure; the host then rented the GPUs out within minutes and the restart queued for 30 min | expect a queued restart after any stop; watch it (DEF-69) |
 | a new VM answered on its SSH port but every login timed out after key exchange: a stale `known_hosts` entry for the same `ip:port` from an earlier rental | `ssh-keygen -R "[ip]:port"` before the first login to a new rental |
+| it19c, 14:16 UTC: the 2-GPU host went offline after the ablation's step 15, with the checkpoints on its disk | pull checkpoints off a node at every milestone (rule 1b, segment ends), not only at the chain's end; the arm is re-run on a different provider |
+| a2 G2: Harbor's own process reached 40 GB resident during TB2 and was OOM-killed on a 47 GB VM (the base arm's stayed near 1.4 GB) | `harbor jobs resume` keeps finished trials; a memory alert on the Harbor process; prefer >= 96 GB RAM for Harbor jobs |
 | a2: a concurrency edit applied twice (`sed` run twice on the same file) halved ImpossibleBench to 6 instead of 12 | check the edited values (`grep N_CONCURRENT`) against the intent before launch, not only the count of matches |
 
 ## Method notes
