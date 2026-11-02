@@ -45,6 +45,27 @@ steps:
     timeout_min: 20
     on_failure: stop
 
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    after: [freeze_checks]
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    after: [merge_sft_v2]
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  # ── 1. the reference ──
   - name: inputs_frozen
     command: >-
       printf '%s\n'
@@ -58,29 +79,11 @@ steps:
       model.name=outputs/it15/g2_merged --dry-run > outputs/chain/it19c/plan_ablation.json
       && touch outputs/chain/it19c/markers/inputs_frozen.done
     gpus: []
+    after: [merge_g2]  # the plans are built against the merged G2 the arms start from
     done: outputs/chain/it19c/markers/inputs_frozen.done
     timeout_min: 10
     on_failure: stop
 
-  - name: merge_sft_v2
-    command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
-      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
-    gpus: []
-    done: outputs/it14/sft_v2_e3_merged/config.json
-    timeout_min: 30
-    on_failure: stop
-
-  - name: merge_g2
-    command: >-
-      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
-      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
-    gpus: []
-    done: outputs/it15/g2_merged/config.json
-    timeout_min: 30
-    on_failure: stop
-
-  # ── 1. the reference ──
   - name: g2_select
     command: >-
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
@@ -90,7 +93,7 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
     gpus: [1]
-    after: [merge_g2]
+    after: [inputs_frozen]
     done: runs/eval/it19c_g2_select/metrics.json
     timeout_min: 180
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
@@ -107,7 +110,7 @@ steps:
       grpo.max_steps=3 grpo.save_steps=3 probe.fixed_checkpoint_step=3 probe.steps=[3] probe.on_start=false
       reward.crgrpo.c_rep=1.0 reward.crgrpo.grad_ratio_max=null
     gpus: [0]
-    after: [merge_g2]
+    after: [inputs_frozen]
     done: outputs/it19_cal/it19-crgrpo-cal/checkpoint-3/adapter_config.json
     timeout_min: 150
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
