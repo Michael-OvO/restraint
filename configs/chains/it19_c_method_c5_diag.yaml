@@ -1,0 +1,34 @@
+# Iteration 19 stage (b), EXPLORATORY (not pre-registered; 2026-11-02). The method arm stopped at step 7 on the
+# pre-registered stall guard (`stop.max_decline_rate_feasible` 0.30 over 5 steps: 0.325; pi(claim) at the status token
+# 0.73 at step 1, 0.08 at step 7). Its last checkpoint (step 5) is measured on the select split against the G2 reference
+# (runs/eval/it19c_g2_select) to describe what the report term did; nothing here is a candidate or a test of the
+# hypothesis. It uses GPU 0, idle after the stop, while the ablation arm trains on GPU 1 (chain it19c). No watcher of
+# its own: the it19c watcher covers the node.
+name: it19c_diag
+state_dir: outputs/chain/it19c_diag
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: method_c5_select
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo/checkpoint-5 --out outputs/it19/crgrpo_c5_merged
+      && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_c5_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_method_c5_sanity --resume --limit 12 --n-samples 1
+      --concurrency 12 --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_method_c5_select --resume --n-samples 2
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    done: runs/eval/it19c_method_c5_select/metrics.json
+    after: []
+    timeout_min: 240
+    on_failure: stop
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
+  env: {UV_NO_SYNC: "1"}
+
