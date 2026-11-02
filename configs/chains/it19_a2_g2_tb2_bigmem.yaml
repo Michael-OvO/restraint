@@ -1,0 +1,59 @@
+# Iteration 19, stage (a2): G2's TB2 job resumed on a 252 GB RAM RTX 5090 VM (2026-11-02). On the 47 GB VM Harbor's
+# own process twice passed 40 GB and was OOM-killed or thrashed (a command's whole output is buffered in memory by
+# `_collect_buffered_output`; the same in-flight trials were stuck in it both times), at 290 of 356 trials. The job
+# directory was copied here unchanged and is resumed in place (`harbor jobs resume`: the job's own config, finished
+# trials kept); the agent, budget, concurrency (6), items and GPU type are the base arm's. Approved under the owner's
+# delegation of 2026-11-02.
+name: it19a2g2tb
+state_dir: outputs/chain/it19a2g2tb
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    after: []
+    timeout_min: 30
+    on_failure: stop
+    env: {UV_NO_SYNC: "1"}
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+    env: {UV_NO_SYNC: "1"}
+
+  - name: g2_tb2_resume
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19a2_g2_sanity_bigmem --resume --limit 12 --n-samples 1
+      --concurrency 12 --train-config configs/grpo_it13_2gpu.yaml
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval harbor jobs resume
+      -p runs/harbor/it19a2_g2_tb2/tb2__policy__honest__20261102_120809
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.harbor_results
+      runs/harbor/it19a2_g2_tb2/tb2__policy__honest__20261102_120809
+      && mkdir -p runs/final/it19a2
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --single --bench terminal_bench_2 runs/harbor/it19a2_g2_tb2/tb2__* --out runs/final/it19a2/g2_tb2_units.json
+      && mkdir -p outputs/chain/it19a2g2tb/markers && touch outputs/chain/it19a2g2tb/markers/g2_tb2_resume.done
+    gpus: [0]
+    done: outputs/chain/it19a2g2tb/markers/g2_tb2_resume.done
+    timeout_min: 480
+    on_failure: stop
+    stall_min: 120
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it19a2_g2_tb2, runs/final/it19a2, runs/eval/it19a2_g2_sanity_bigmem, outputs/logs]
