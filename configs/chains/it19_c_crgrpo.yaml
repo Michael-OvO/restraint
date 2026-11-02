@@ -1,18 +1,21 @@
-# Iteration 19, stage (b): the CR-GRPO run (docs/iteration-19-prereg-crgrpo.md). One 96 GB-class GPU, everything in
-# sequence (training and evaluation never share the GPU):
-#  1. G2 re-run on the select split (S = 4): the reference for P1, the guards and stop rule 1b.
-#  2. Each arm (method, then ablation; the method arm first calibrates c_rep in a 3-step run): steps 1-15; checkpoint 15
-#     merged and run on the 120 select twins; stop rule 1b
-#     (`analysis.calibration twin-stop`, exit 3 when it fires: that arm's steps 16-30 are then skipped, the other arm
-#     still runs); steps 16-30 resumed from checkpoint 15 (the CR-GRPO runtime state resumes with it); the final
-#     checkpoint merged and run on the select split (S = 4).
-#  3. The method arm on the frozen final benchmark: internal held-out (S = 2), TB2 and ImpossibleBench (S = 4) at stage
-#     a2's external budget.
+# Iteration 19, stage (b): the CR-GRPO run (docs/iteration-19-prereg-crgrpo.md). One node with two 96 GB GPUs; the two
+# arms run in parallel, one GPU each (training and evaluation never share a GPU; each GPU runs one step at a time):
+#  GPU 0, the method arm: c_rep calibration (3 steps), steps 1-15, checkpoint 15 merged and run on the 120 select
+#     twins, stop rule 1b, steps 16-30 resumed from checkpoint 15, the final checkpoint on the select split (S = 4),
+#     then the frozen final benchmark: internal held-out (S = 2), TB2 and ImpossibleBench (S = 4) at stage a2's budget.
+#  GPU 1: the G2 reference on the select split (S = 4: the reference for P1, the guards and stop rule 1b), then the
+#     ablation arm (no report term), the same steps without the calibration and the final benchmark.
+# Stop rule 1b (`analysis.calibration twin-stop`, exit 3 when it fires) ends that arm only: its steps 16-30 are skipped,
+# the other arm still runs. Only the shared gates before the arms split stop the whole chain; every later step continues
+# on failure, so a failure skips its own dependents only (pre-launch review, 2026-11-02). A leaked sandbox of a failed
+# step is removed only when neither GPU runs a step. Each GPU-1 step names its GPU, vLLM port (8001) and MASTER_PORT, so the two arms never share
+# a server, a port or a rendezvous; the runner removes leaked sandboxes only when no other step is running.
 # The Mac reads P1, the guards and the attribution from the pulled runs (`analysis.power estimate`,
 # `analysis.calibration read-guard` / `twin-stop`, `final_benchmark compute`).
-# Timing (estimates, G3: 4.3 h for 15 steps and 4 probes): each arm about 9 h, the select runs about 1.5 h each, the
-# final benchmark about 6 h; about 30 h in all.
-# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+# Timing (estimates, G3: 4.3 h for 15 steps and 4 probes on >= 23 vCPU): GPU 0 about 17 h (calibration 1 h, the arm
+# 9 h, select 1.5 h, final benchmark 6 h), GPU 1 about 12 h; about 31 GPU-hours, about 17 h of wall time.
+# Approved under the owner's delegation of 2026-11-02 (docs/iteration-19-signoff.md, it19c). Gated: the first step
+# refuses while any defect in docs/defects.md is open.
 name: it19c
 state_dir: outputs/chain/it19c
 sequential: true
@@ -86,11 +89,12 @@ steps:
       -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_g2_select --n-samples 4 --concurrency 24
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
-    gpus: [0]
+    gpus: [1]
+    after: [merge_g2]
     done: runs/eval/it19c_g2_select/metrics.json
     timeout_min: 180
-    on_failure: stop
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   # ── 2a. the method arm ──
   # c_rep calibration (pre-registration section 3): 3 steps of the method arm at c_rep 1 measure |grad l_rep| /
@@ -103,11 +107,12 @@ steps:
       grpo.max_steps=3 grpo.save_steps=3 probe.fixed_checkpoint_step=3 probe.steps=[3] probe.on_start=false
       reward.crgrpo.c_rep=1.0 reward.crgrpo.grad_ratio_max=null
     gpus: [0]
+    after: [merge_g2]
     done: outputs/it19_cal/it19-crgrpo-cal/checkpoint-3/adapter_config.json
     timeout_min: 150
-    on_failure: stop
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 60
-    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: calibrate_c_rep
     command: >-
@@ -115,9 +120,10 @@ steps:
       --ratios outputs/it19_cal/it19-crgrpo-cal/crgrpo_grad_ratio.jsonl --target 0.75
       --out outputs/chain/it19c/c_rep.txt
     gpus: []
+    after: [calibrate_train]
     done: outputs/chain/it19c/c_rep.txt
     timeout_min: 5
-    on_failure: stop
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
 
   - name: method_seg1
     command: >-
@@ -125,11 +131,12 @@ steps:
       grpo.max_steps=15 probe.fixed_checkpoint_step=15 probe.steps=[15]
       reward.crgrpo.c_rep=$(cat outputs/chain/it19c/c_rep.txt)
     gpus: [0]
+    after: [calibrate_c_rep]
     done: outputs/it19/it19-crgrpo/checkpoint-15/adapter_config.json
     timeout_min: 420
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
-    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: method_twins15
     command: >-
@@ -141,6 +148,7 @@ steps:
       -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_method_c15_twins --n-samples 2
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
     gpus: [0]
+    after: [method_seg1]
     done: runs/eval/it19c_method_c15_twins/metrics.json
     timeout_min: 90
     on_failure: continue
@@ -153,6 +161,7 @@ steps:
       --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/method_rule1b.json
       && touch outputs/chain/it19c/markers/method_rule1b.done
     gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
+    after: [method_twins15, g2_select]
     done: outputs/chain/it19c/markers/method_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -167,7 +176,7 @@ steps:
     timeout_min: 420
     on_failure: continue
     stall_min: 60
-    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: method_select
     command: >-
@@ -203,13 +212,13 @@ steps:
     command: >-
       RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged
       grpo.max_steps=15 probe.fixed_checkpoint_step=15 probe.steps=[15]
-    gpus: [0]
+    gpus: [1]
     after: [g2_select]
     done: outputs/it19/it19-crgrpo-ablation/checkpoint-15/adapter_config.json
     timeout_min: 420
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
-    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: ablation_twins15
     command: >-
@@ -221,11 +230,12 @@ steps:
       --train-config configs/grpo_it13_2gpu.yaml
       -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_ablation_c15_twins --n-samples 2
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
-    gpus: [0]
+    gpus: [1]
+    after: [ablation_seg1]
     done: runs/eval/it19c_ablation_c15_twins/metrics.json
     timeout_min: 90
     on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   - name: ablation_rule1b
     command: >-
@@ -233,7 +243,8 @@ steps:
       --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_c15_twins
       --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/ablation_rule1b.json
       && touch outputs/chain/it19c/markers/ablation_rule1b.done
-    gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
+    gpus: [1]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
+    after: [ablation_twins15]
     done: outputs/chain/it19c/markers/ablation_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -241,13 +252,13 @@ steps:
   - name: ablation_seg2
     command: >-
       RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged
-    gpus: [0]
+    gpus: [1]
     after: [ablation_rule1b]
     done: outputs/it19/it19-crgrpo-ablation/checkpoint-30/adapter_config.json
     timeout_min: 420
     on_failure: continue
     stall_min: 60
-    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: ablation_select
     command: >-
@@ -260,12 +271,12 @@ steps:
       -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_ablation_select --n-samples 4 --concurrency 24
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
-    gpus: [0]
+    gpus: [1]
     after: [ablation_seg2]
     done: runs/eval/it19c_ablation_select/metrics.json
     timeout_min: 180
     on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   - name: ablation_g6
     command: >-
@@ -273,7 +284,7 @@ steps:
       --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_select
       --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/ablation_g6.json;
       rc=$?; echo $rc > outputs/chain/it19c/ablation_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
-    gpus: [0]
+    gpus: [1]
     after: [ablation_select]
     done: outputs/chain/it19c/ablation_g6.json
     timeout_min: 10
@@ -291,7 +302,7 @@ steps:
     after: [freeze_checks]
     done: outputs/chain/it19c/markers/ib_tasks.done
     timeout_min: 20
-    on_failure: stop
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
 
   - name: method_final
     command: >-
@@ -304,10 +315,10 @@ steps:
       scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19c_method_ib -k 4
       && touch outputs/chain/it19c/markers/method_final.done
     gpus: [0]
-    after: [method_select, ib_tasks]  # file order (sequential) still puts it after the ablation
+    after: [method_select, ib_tasks]  # G6 is a reading, not a gate (file order still starts it first on GPU 0)
     done: outputs/chain/it19c/markers/method_final.done
     timeout_min: 900
-    on_failure: stop
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 45
     progress: {pattern: 'serve_and_run: command (\d+):', total: 3}
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
@@ -321,9 +332,10 @@ steps:
       runs/harbor/it19c_method_ib/ib_lcb_tuned__* --out runs/final/it19c/method_ib_summary.json
       && touch outputs/chain/it19c/markers/method_units.done
     gpus: []
+    after: [method_final]
     done: outputs/chain/it19c/markers/method_units.done
     timeout_min: 30
-    on_failure: stop
+    on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
 
 final:
   command: "true"

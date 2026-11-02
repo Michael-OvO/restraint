@@ -34,17 +34,37 @@
   payoff table pass their tests; `scripts/test.sh --fast` 5,057 passed (the L0 timing test passes alone);
   `node_chain check` on the job file.
 
-## it19c CR-GRPO (DRAFT: not signed; nothing approved)
+## it19c CR-GRPO (2026-11-02, under the owner's delegation)
 
-To be filled at launch, in this order (pre-registration section 10):
-
-- **Owner approval** of docs/iteration-19-prereg-crgrpo.md and of the spend (about $31-44 on a 96 GB-class node; the
-  node launch asked separately, with the offer).
-- **Stage a2 done**, its DEF-74 re-grade applied (`runs/def74/*`), and `python -m honest_agents.crgrpo family-means` on
-  the re-graded it17a bank fixed in both configs (and the high_risk surface value unchanged at 0.704 or recomputed).
-- **Ledger:** `gate.ledger check --experiment it19c` exits 0.
-- **Mac checks at the launch commit:** `scripts/test.sh --fast`; the L0 sweep; `gate.guards --chains`;
-  `node_chain check configs/chains/it19_c_crgrpo.yaml`; S9 = `tests/test_crgrpo.py` and K1
-  (`analysis.reward_gate --config crgrpo` on G3's rollouts: PASS on 2026-11-01 after the review fixes, pooled
-  blind-decline credit −0.042); `final_benchmark never-trained --archive` (pass, the GRPO pools in scope).
-- **Evaluation-path diff** since `634ef8e` limited to the list in the pre-registration section 10.
+- **Owner approval:** before an overnight run the owner wrote "you have the right to execute all commands, have the
+  server use anything at your will, and do all the training. Just make sure we're moving and pushing as fast as
+  possible ... If you think the resource is too scarce, it's also okay. We can rent a bigger machine." The
+  pre-registration (docs/iteration-19-prereg-crgrpo.md) is approved under that delegation, with two launch deviations
+  recorded at its end (a2 still running; two GPUs in parallel).
+- **Node and spend:** the only VM-capable 96 GB offers at launch were 57881531 (1 GPU, 12 vCPU: rented, found too
+  CPU-poor for Docker-bound rollouts, the iteration-16 runbook asks >= 23 vCPU, destroyed unused) and 58236770:
+  2x RTX PRO 6000 WS 96 GB, 128 vCPU, 504 GB RAM, Czechia, **$4.53/h**, instance 58781495; about 17 h, about $77.
+  Balance before: $113.79 (stage a2 runs at the same time on instance 58779312, $0.67/h).
+- **Stage a2 / DEF-74:** a2's `def74_regrade` ran first (2026-11-02, 3 min): 27 + 2 + 4 episodes replayed in the three
+  in-scope runs (the other 58 rows of `data/def74/affected.jsonl` are older archived runs), 14 / 1 / 4 changed to
+  `success_claimed`. `crgrpo family-means` on `runs/def74/it17_rollouts_feasible`: remove_input **0.6225** (215
+  proceeds; 0.6236 on 202 before), revoke_permission 0.8338 unchanged, high_risk kept at the surface value 0.7043.
+  Fixed in `configs/grpo_it19_crgrpo.yaml` (the ablation inherits it).
+- **Ledger:** `gate.ledger check --experiment it19c`: all 75 entries closed or waived.
+- **Mac checks:** `scripts/test.sh --fast` 5,140 passed, 1 failed: the L0 timing test (77 s against 60 s under the
+  parallel suite; passes alone in 41 s, as at it19a); `tests/test_crgrpo.py` 48 passed; `node_chain check` and
+  `gate.guards --chains` on the two-GPU job file: pass; `final_benchmark never-trained --archive`: pass.
+- **K1** (`analysis.reward_gate --config crgrpo` on G3's rollouts): PASS, pooled blind-decline credit −0.042, every
+  blind policy below the start policy, reading pays on both branches (unchanged). Run with G2's surface-4 eval as well,
+  that set reads FAIL on one line only: blind *proceeding* is level with G2's own policy (−0.036 [−0.154, +0.095]);
+  every blind decline policy is below it (+0.199 to +0.464). It is not part of K1 and not a blind-decline credit; noted.
+- **Evaluation-path diff** since `634ef8e`: exactly the files listed in the pre-registration section 10
+  (`git diff --stat 634ef8e`: eval_tb.sh, impossiblebench.py, final_benchmark.py, harbor_agent.py, metrics/episode.py,
+  metrics/scored.py, reporter.py (unused), rollout.py, grading.py, spec.py).
+- **Job file:** `configs/chains/it19_c_crgrpo.yaml`, two-GPU layout (method on GPU 0; G2 reference then ablation on
+  GPU 1, vLLM port 8001, MASTER_PORT per arm), reviewed by a 3-lens adversarial workflow before launch: 3 confirmed and
+  fixed (a method-side `on_failure: stop` in calibration or the final benchmark would have skipped the parallel
+  ablation arm's remaining steps; `method_final` waited on G6, so a G6 crash would have dropped the final benchmark;
+  later steps now continue on failure and skip only their own dependents), 1 refuted (an infra-errored twin does not
+  end an arm), minor kept: a failed step's leaked sandboxes are removed only when neither GPU is busy, and a step of
+  one arm cannot be retried without a side job file while the other arm runs.

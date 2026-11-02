@@ -1,12 +1,14 @@
-# Iteration 19, stage (b): CR-GRPO pre-registration (DRAFT, for the owner)
+# Iteration 19, stage (b): CR-GRPO pre-registration (APPROVED 2026-11-02, under the owner's delegation)
 
 Design: [iteration-19-design-crgrpo.md](iteration-19-design-crgrpo.md) (revision 2, with the owner decisions after K2).
 Configs: `configs/grpo_it19_crgrpo.yaml` (method arm), `configs/grpo_it19_crgrpo_ablation.yaml` (ablation arm).
 Pool: `configs/tasks/rl_pool_v4.yaml`. Job file: `configs/chains/it19_c_crgrpo.yaml`. Pre-launch review: a 102-agent
 review of the build with adversarial verification
 ([iteration-19-research/grill_crgrpo_build.md](iteration-19-research/grill_crgrpo_build.md)); every finding that
-survived is fixed in the code or decided below. Nothing here has run. From the owner's approval on, nothing here
-changes except by a dated owner amendment.
+survived is fixed in the code or decided below. **Approved 2026-11-02 under the owner's delegation** (the owner, before
+an overnight run: "you have the right to execute all commands, have the server use anything at your will, and do all
+the training"), before any CR-GRPO step ran; the sign-off is docs/iteration-19-signoff.md (it19c). From then on,
+nothing here changes except by a dated amendment.
 
 ## 1. Hypothesis
 
@@ -51,8 +53,8 @@ ablation's comparisons with G2 are descriptive, and its role is the attribution 
 - **V_s** per source: the leave-one-out mean of the step's own control proceeds of that source, shrunk (weight 4) to
   the family mean, never below 0.1 (review R6). Starting family means (`python -m honest_agents.crgrpo family-means`):
   high_risk 0.704 (G2 on the 4 trained evidence surfaces: every high_risk pair of pool v4 is a surface pair),
-  remove_input 0.624, revoke_permission 0.834 (the it17a pool bank, DEF-66 sources out); **recomputed on the
-  DEF-74-re-graded bank before launch** (stage a2's first step) and fixed in the config then. They move by an
+  remove_input 0.622, revoke_permission 0.834 (the it17a pool bank, DEF-66 sources out, after the DEF-74 re-grade of
+  stage a2's `def74_regrade` step on 2026-11-02: 27 episodes replayed, 14 changed; remove_input was 0.624 before). They move by an
   exponential average (0.9) of each step's proceeds. Validation-probe episodes never move any of this state (R7).
 - **Constraints** (owner: "Cap fc, drop tw, cd at G2"): C1 false claims per feasible episode, target **0.09** (G2 on
   its bank 0.124); C3 control refusals (refusal or abstain or false blame, or a non-claim or silence after fewer than
@@ -183,8 +185,22 @@ One look per benchmark.
 - The it19c sign-off (`docs/iteration-19-signoff.md`, a new section): the launch commit; `scripts/test.sh --fast`; the
   L0 sweep; `gate.guards --chains`; `node_chain check` on the job file; S9 = `tests/test_crgrpo.py` and the K1 re-run
   of `analysis.reward_gate --config crgrpo` on the changed table; the never-trained check.
-- **Hardware:** a 96 GB-class GPU (G3 peaked at 53-74 GB on 96 GB; the KL reference adds a no-grad forward and the
-  measured steps two extra backward passes).
+- **Hardware:** a 96 GB-class GPU per arm (G3 peaked at 53-74 GB on 96 GB; the KL reference adds a no-grad forward and
+  the measured steps two extra backward passes). Run on one node with two RTX PRO 6000 WS 96 GB, 128 vCPU: the method
+  arm on GPU 0, the G2 reference and the ablation arm on GPU 1, in parallel (the job file's layout; no step, seed,
+  config value or evaluation changes, only which GPU runs it and when).
 - **Cost:** about 31 GPU-hours (the c_rep calibration about 1 h; each arm about 9 h with its probes and twin checks;
   the select runs about 4.5 h; the final benchmark about 6 h): about $31-44 at $1.0-1.4/h, inside the owner's $100+.
+  At launch the only VM offers with 96 GB and enough CPU cost $2.15-2.35/h per GPU, so about $70-80 (two GPUs at
+  $4.53/h for about 17 h).
 - The owner's approval of this pre-registration and of the spend.
+
+## Deviations at launch (2026-11-02)
+
+- **Stage a2 had not finished when it19c started.** Section 10 asks for stage a2 done; what it19c depends on is a2's
+  DEF-74 re-grade (the family means), which ran first in a2 (2026-11-02, `runs/def74/*`) and is fixed in the configs.
+  a2's TB2 and ImpossibleBench evaluations of base and G2 continue on their own node; it19c's final benchmark runs the
+  same harness at the same budget and is read against them once both exist. Nothing in it19c reads an a2 result.
+- **Two GPUs in parallel instead of one GPU in sequence** (section 10, hardware), to halve the wall time; the GPU-hours
+  and the cost are unchanged.
+

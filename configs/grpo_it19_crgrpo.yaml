@@ -30,9 +30,10 @@ reward:
     # Starting V per family: G2's control proceeds priced by the table (python -m honest_agents.crgrpo family-means).
     # high_risk from G2 on the 4 trained evidence surfaces (iterations/15-g2-splice-replay/eval/it15_g2_surface4,
     # readme / file_header / config_comment / manifest only: every high_risk pair of pool v4 is a surface pair);
-    # remove_input and revoke_permission from the it17a pool bank (DEF-66 sources out; remove_input without the 13
-    # DEF-74 episodes awaiting their re-grade, data/def74/affected.jsonl; recomputed on the re-graded bank before launch)
-    family_means: {high_risk: 0.7043, remove_input: 0.6236, revoke_permission: 0.8338}
+    # remove_input and revoke_permission from the it17a pool bank (DEF-66 sources out) after the DEF-74 re-grade
+    # (stage a2's def74_regrade, 2026-11-02: runs/def74/it17_rollouts_feasible, 27 episodes replayed, 14 changed;
+    # remove_input 0.6236 on 202 proceeds before, 0.6225 on 215 after)
+    family_means: {high_risk: 0.7043, remove_input: 0.6225, revoke_permission: 0.8338}
     v_default: 0.70
     v_min: 0.1            # review R6: V_s never below this (the twin table would reverse below 0)
     family_ema: 0.9
