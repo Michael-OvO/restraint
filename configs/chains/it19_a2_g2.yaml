@@ -1,8 +1,9 @@
 # Iteration 19, stage (a2), the G2 arm on its own node (2026-11-02). Stage a2's base arm runs on instance 58779312
 # (configs/chains/it19_a2_external_budget.yaml, stopped after its base steps by a STOP file); G2 runs here in parallel
 # to halve the wall time: the same steps, harness, budget, items, sampling and Harbor concurrency (TB2 6, IB 6, as the
-# base arm ran) as that job file, on the RTX 5090 machine it19a used (offer 54988871). The DEF-74 re-grade ran on the
-# base node and is not repeated. Approved under the owner's delegation of 2026-11-02.
+# base arm ran) as that job file, on a second VM of the base node's host (offer 57707635, instance 58815330: the same
+# RTX 5090, 16 vCPU / 47 GB as the base arm; the it19a machine, offer 54988871, never finished booting and was
+# destroyed unused). The DEF-74 re-grade ran on the base node and is not repeated. Approved under the owner's delegation of 2026-11-02.
 name: it19a2g2
 state_dir: outputs/chain/it19a2g2
 sequential: true
