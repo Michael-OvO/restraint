@@ -8,7 +8,9 @@
 # Stop rule 1b (`analysis.calibration twin-stop`, exit 3 when it fires) ends that arm only: its steps 16-30 are skipped,
 # the other arm still runs. Only the shared gates before the arms split stop the whole chain; every later step continues
 # on failure, so a failure skips its own dependents only (pre-launch review, 2026-11-02). A leaked sandbox of a failed
-# step is removed only when neither GPU runs a step. Each GPU-1 step names its GPU, vLLM port (8001) and MASTER_PORT, so the two arms never share
+# step is removed only when neither GPU runs a step. Every step runs with UV_NO_SYNC=1 on the venv `setup_node.sh` synced
+# with both extras: each `uv run` with another extra set re-syncs the shared venv (it uninstalls and reinstalls
+# packages), which broke a parallel step on 2026-11-02 (numpy missing mid-import) and would hit a running trainer. Each GPU-1 step names its GPU, vLLM port (8001) and MASTER_PORT, so the two arms never share
 # a server, a port or a rendezvous; the runner removes leaked sandboxes only when no other step is running.
 # The Mac reads P1, the guards and the attribution from the pulled runs (`analysis.power estimate`,
 # `analysis.calibration read-guard` / `twin-stop`, `final_benchmark compute`).
@@ -29,6 +31,7 @@ steps:
       --json outputs/chain/it19c/gate_ledger.json
       && mkdir -p outputs/chain/it19c/markers && touch outputs/chain/it19c/markers/gate_ledger.done
     gpus: []
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/gate_ledger.done
     after: []
     timeout_min: 5
@@ -41,6 +44,7 @@ steps:
       --out outputs/chain/it19c/never_trained.json
       && touch outputs/chain/it19c/markers/freeze_checks.done
     gpus: []
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/freeze_checks.done
     timeout_min: 20
     on_failure: stop
@@ -51,6 +55,7 @@ steps:
       --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
     gpus: []
     after: [freeze_checks]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/it14/sft_v2_e3_merged/config.json
     timeout_min: 30
     on_failure: stop
@@ -61,6 +66,7 @@ steps:
       --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
     gpus: []
     after: [merge_sft_v2]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/it15/g2_merged/config.json
     timeout_min: 30
     on_failure: stop
@@ -80,6 +86,7 @@ steps:
       && touch outputs/chain/it19c/markers/inputs_frozen.done
     gpus: []
     after: [merge_g2]  # the plans are built against the merged G2 the arms start from
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/inputs_frozen.done
     timeout_min: 10
     on_failure: stop
@@ -97,7 +104,7 @@ steps:
     done: runs/eval/it19c_g2_select/metrics.json
     timeout_min: 180
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
-    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   # ── 2a. the method arm ──
   # c_rep calibration (pre-registration section 3): 3 steps of the method arm at c_rep 1 measure |grad l_rep| /
@@ -115,7 +122,7 @@ steps:
     timeout_min: 150
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 60
-    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: calibrate_c_rep
     command: >-
@@ -124,6 +131,7 @@ steps:
       --out outputs/chain/it19c/c_rep.txt
     gpus: []
     after: [calibrate_train]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/c_rep.txt
     timeout_min: 5
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
@@ -139,7 +147,7 @@ steps:
     timeout_min: 420
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
-    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: method_twins15
     command: >-
@@ -155,7 +163,7 @@ steps:
     done: runs/eval/it19c_method_c15_twins/metrics.json
     timeout_min: 90
     on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
   - name: method_rule1b
     command: >-
@@ -165,6 +173,7 @@ steps:
       && touch outputs/chain/it19c/markers/method_rule1b.done
     gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
     after: [method_twins15, g2_select]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/method_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -179,7 +188,7 @@ steps:
     timeout_min: 420
     on_failure: continue
     stall_min: 60
-    env: {TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: method_select
     command: >-
@@ -196,7 +205,7 @@ steps:
     done: runs/eval/it19c_method_select/metrics.json
     timeout_min: 180
     on_failure: continue
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
   - name: method_g6
     command: >-
@@ -206,6 +215,7 @@ steps:
       rc=$?; echo $rc > outputs/chain/it19c/method_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
     gpus: [0]
     after: [method_select]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/method_g6.json
     timeout_min: 10
     on_failure: continue
@@ -221,7 +231,7 @@ steps:
     timeout_min: 420
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
-    env: {TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: ablation_twins15
     command: >-
@@ -238,7 +248,7 @@ steps:
     done: runs/eval/it19c_ablation_c15_twins/metrics.json
     timeout_min: 90
     on_failure: continue
-    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   - name: ablation_rule1b
     command: >-
@@ -248,6 +258,7 @@ steps:
       && touch outputs/chain/it19c/markers/ablation_rule1b.done
     gpus: [1]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
     after: [ablation_twins15]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/ablation_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -261,7 +272,7 @@ steps:
     timeout_min: 420
     on_failure: continue
     stall_min: 60
-    env: {TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
 
   - name: ablation_select
     command: >-
@@ -279,7 +290,7 @@ steps:
     done: runs/eval/it19c_ablation_select/metrics.json
     timeout_min: 180
     on_failure: continue
-    env: {VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
   - name: ablation_g6
     command: >-
@@ -289,6 +300,7 @@ steps:
       rc=$?; echo $rc > outputs/chain/it19c/ablation_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
     gpus: [1]
     after: [ablation_select]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/ablation_g6.json
     timeout_min: 10
     on_failure: continue
@@ -303,6 +315,7 @@ steps:
       && touch outputs/chain/it19c/markers/ib_tasks.done
     gpus: []
     after: [freeze_checks]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/ib_tasks.done
     timeout_min: 20
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
@@ -324,7 +337,7 @@ steps:
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 45
     progress: {pattern: 'serve_and_run: command (\d+):', total: 3}
-    env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
   - name: method_units
     command: >-
@@ -336,6 +349,7 @@ steps:
       && touch outputs/chain/it19c/markers/method_units.done
     gpus: []
     after: [method_final]
+    env: {UV_NO_SYNC: "1"}
     done: outputs/chain/it19c/markers/method_units.done
     timeout_min: 30
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
@@ -343,6 +357,7 @@ steps:
 final:
   command: "true"
   timeout_min: 5
+  env: {UV_NO_SYNC: "1"}
 
 watch:
   pull_paths: [runs/eval/it19c_g2_select, runs/eval/it19c_method_c15_twins, runs/eval/it19c_method_select,
