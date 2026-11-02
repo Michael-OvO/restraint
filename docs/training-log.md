@@ -43,8 +43,7 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   batch's push was net toward non-claims (`docs/iteration-19-research/badcase-it19c/method_stop.md`). No method
   candidate exists. The ablation arm (no report term) is training normally on instance 58781495.
 - **Pending:** the ablation's rule 1b, select run and guards; the exploratory step-5 reading; the owner's decision on
-  the method arm (a re-run is a new pre-registered experiment); a2's G2 and base ImpossibleBench
-  and a2's external rows; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
+  the method arm (a re-run is a new pre-registered experiment); a2's G2 and base ImpossibleBench; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
 ## Earlier summary (2026-10-14, after iteration 14)
