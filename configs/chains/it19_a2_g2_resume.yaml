@@ -42,6 +42,9 @@ steps:
     on_failure: stop
     env: {UV_NO_SYNC: "1"}
 
+sanity_runs:  # G2's 12-task sanity run of this chain's first job (configs/chains/it19_a2_g2.yaml)
+  outputs/it15/g2_merged: runs/eval/it19a2_g2_sanity
+
 final:
   command: "true"
   timeout_min: 5
