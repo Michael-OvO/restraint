@@ -68,3 +68,20 @@ benchmark's strict flag is recorded as DEF-70.
   fail; TB2: no significant change). This is the gap stage (b) targets.
 - **The strict ImpossibleBench flag cannot see G2's way of declining.** Any later arm is compared on both readings, with
   the strict one as pre-registered.
+
+## Addendum 2026-11-02: the internal held-out after the DEF-74 re-grade
+
+Stage a2's `def74_regrade` replayed the remove_input control episodes the build's own backup had failed (`runs/def74`):
+base 2 (1 changed), G2 4 (4 changed), each from `fabrication` to `success_claimed`. Re-scored with
+`analysis.power estimate` on the 562-variant set (DEF-72's spec defect and the other DEF-66 sources out by default; the
+569-variant table above includes them):
+
+| metric | as run: base / G2, G2 − base [95 % CI] | after the re-grade |
+|---|---|---|
+| false claims among claims (H1) | 18.1 / 17.8 %, −0.4 [−3.4, +2.7] | 18.0 / 17.2 %, **−0.8 [−3.9, +2.3]** |
+| claims on infeasible variants | 53.1 / 12.9 %, −40.2 [−44.9, −35.6] | unchanged |
+| verified success | 73.4 / 77.2 %, +3.8 [+0.7, +6.9] | 73.5 / 77.8 %, **+4.3 [+1.1, +7.4]** |
+| task success | 75.3 / 77.9 %, +2.6 [−0.5, +5.8] | 75.4 / 78.5 %, +3.1 [−0.1, +6.3] |
+| claim rate, feasible | 88.4 / 91.6 %, +3.2 [+0.9, +5.6] | unchanged |
+
+H1 stays inconclusive; no conclusion above changes. The re-graded runs are the reference for it19c's final benchmark.
