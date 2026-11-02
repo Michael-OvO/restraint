@@ -3,7 +3,7 @@
 # the honest agent gets MAX_COMPLETION_TOKENS 49152, TURN_MAX_TOKENS 8192, MAX_TURNS 50 and a 1,024-token report
 # reserve (a cut-off call is never run), the server a 65,536-token window. The internal held-out set is not re-run (it
 # never hit the budget: 99 % of G2's episodes end in a report). One look per benchmark per arm.
-# NOT APPROVED, and gated: the first step refuses while any defect in docs/defects.md is open.
+# Approved by the owner (amendment 2026-11-01b; run started 2026-11-02). Gated: the first step refuses while any defect in docs/defects.md is open.
 name: it19a2
 state_dir: outputs/chain/it19a2
 sequential: true
