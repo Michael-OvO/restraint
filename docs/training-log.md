@@ -1782,10 +1782,13 @@ No training step of either arm had run before attempt 3.
   (`docs/iteration-19-research/badcase-it19c/method_stop.md`). Under the pre-registration the arm ends: no method
   candidate, no final benchmark, and P1 cannot be computed as registered.
 - Ablation arm (no report term): steps 1-5 normal (10 min per step, feasible decline 0.075-0.20, false-claim rate per
-  step 0.225 -> 0.05-0.075); still running. An exploratory measurement of the method's step-5 checkpoint on the select
-  split (S = 2, not pre-registered) runs on the idle GPU 0.
+  step 0.225 -> 0.05-0.075); still running.
+- Exploratory (not pre-registered): the method's step-5 checkpoint on the select split (S = 2) against the G2 reference:
+  false claims per feasible episode −2.3 [−5.6, +0.9], verified success −8.3 [−12.1, −4.4], feasible claim rate −10.6
+  [−14.5, −6.7], claims on infeasible variants +0.8 [−5.0, +6.5]. The drift was under way by step 5 and did not
+  discriminate between solved and failed tasks.
 
-Pending: the ablation's rule 1b at step 15, its steps 16-30, select run and guards; the exploratory step-5 reading; what
+Pending: the ablation's rule 1b at step 15, its steps 16-30, select run and guards; what
 the owner decides about the method arm (any re-run is a new pre-registered experiment).
 
 **a2 G2: running.**

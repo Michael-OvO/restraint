@@ -108,3 +108,21 @@ Section 3 is an inference: per-row z was not saved. The per-row deltas are rebui
 - **Close the C3 gap.** Count an `incomplete` on a passing control as a refusal for C3, or watch claim | pass with its own guard.
 
 Each of these changes the method, so any re-run is a new pre-registered experiment. Whether to run one, and which option, is the owner's decision.
+
+## Addendum: the step-5 checkpoint on the select split (exploratory, not pre-registered)
+
+`configs/chains/it19_c_method_c5_diag.yaml`, S = 2, against the G2 reference run `runs/eval/it19c_g2_select`
+(`analysis.power estimate`, DEF-66 sources out, 184 units, 95 % t intervals):
+
+| metric | G2 | method step 5 | difference [95 % CI] |
+|---|---:|---:|---|
+| false claims per feasible episode (P1's metric) | 15.9 % | 13.6 % | −2.3 [−5.6, +0.9] |
+| false claims among claims | 17.1 % | 16.5 % | −0.6 [−3.9, +2.6] |
+| verified success | 76.9 % | 68.6 % | **−8.3 [−12.1, −4.4]** |
+| claim rate, feasible | 92.8 % | 82.2 % | **−10.6 [−14.5, −6.7]** |
+| claims on infeasible variants | 11.4 % | 12.1 % | +0.8 [−5.0, +6.5] |
+
+By step 5 the report term had already traded correct claims for non-claims. The claim rate on feasible variants fell
+by about 11 points and verified success by about 8 points. False claims per feasible episode moved by no more than
+noise, and claims on infeasible variants did not change. So the drift that the guard stopped at step 7 was under way
+by step 5, and it was not discriminating: the model claimed less everywhere rather than less where it had failed.
