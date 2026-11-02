@@ -68,3 +68,16 @@
   later steps now continue on failure and skip only their own dependents), 1 refuted (an infra-errored twin does not
   end an arm), minor kept: a failed step's leaked sandboxes are removed only when neither GPU is busy, and a step of
   one arm cannot be retried without a side job file while the other arm runs.
+- **Run log (2026-11-02, times UTC).**
+  - **07:17 attempt 1:** `inputs_frozen` failed. The parallel `uv run` calls with different extras re-synced the shared
+    venv, so numpy was missing mid-import. The fix is `UV_NO_SYNC=1` on every step. The watcher stopped the node, and
+    its restart queued until 07:50 while the host was busy.
+  - **08:00 attempt 2:** the calibration's three measured steps gave ratios 352 / 251 / 598. c_rep = 0.00213 after the
+    clip amendment (pre-registration end). The first steps ran about 35 min each against G3's 17, because Harbor booted
+    16 sandboxes at a time on a cold image cache. All 510 task images were prebuilt on the node (09:20-10:30), with 0
+    failures. The calibration then hit its 150-min timeout in an unneeded step-3 probe after its three ratios were
+    written. The G2 select run was also heading for its 180-min timeout (447 of 816 episodes).
+  - **10:35 attempt 3:** the runner was stopped and relaunched with timeouts sized to the node and `--resume` on every
+    held-out eval. The G2 select run kept its 447 episodes. The calibration counts as done once its ratios exist, so
+    the c_rep came from the same three measurements. `method_seg1` started at 10:35 with c_rep 0.00213. No training
+    step of either arm had run before.
