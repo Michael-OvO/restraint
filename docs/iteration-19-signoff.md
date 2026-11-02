@@ -43,7 +43,7 @@
   recorded at its end (a2 still running; two GPUs in parallel).
 - **Node and spend:** the only VM-capable 96 GB offers at launch were 57881531 (1 GPU, 12 vCPU: rented, found too
   CPU-poor for Docker-bound rollouts, the iteration-16 runbook asks >= 23 vCPU, destroyed unused) and 58236770:
-  2x RTX PRO 6000 WS 96 GB, 128 vCPU, 504 GB RAM, Czechia, **$4.53/h**, instance 58781495; about 17 h, about $77.
+  2x RTX PRO 6000 WS 96 GB, 128 vCPU (122 and 396 GB RAM inside the VM), Czechia, **$4.53/h** ($4.73 with storage), instance 58781495; about 17 h, about $77.
   Balance before: $113.79 (stage a2 runs at the same time on instance 58779312, $0.67/h).
 - **Stage a2 / DEF-74:** a2's `def74_regrade` ran first (2026-11-02, 3 min): 27 + 2 + 4 episodes replayed in the three
   in-scope runs (the other 58 rows of `data/def74/affected.jsonl` are older archived runs), 14 / 1 / 4 changed to
