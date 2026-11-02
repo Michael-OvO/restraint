@@ -14,6 +14,8 @@
 # a server, a port or a rendezvous; the runner removes leaked sandboxes only when no other step is running.
 # The Mac reads P1, the guards and the attribution from the pulled runs (`analysis.power estimate`,
 # `analysis.calibration read-guard` / `twin-stop`, `final_benchmark compute`).
+# Timeouts were scaled up 2026-11-02 after the first steps on this node ran about 35 min each against G3's 17 (a cold
+# image cache; prebuilt since), and every held-out eval runs with --resume so a restarted step keeps its episodes.
 # Timing (estimates, G3: 4.3 h for 15 steps and 4 probes on >= 23 vCPU): GPU 0 about 17 h (calibration 1 h, the arm
 # 9 h, select 1.5 h, final benchmark 6 h), GPU 1 about 12 h; about 31 GPU-hours, about 17 h of wall time.
 # Approved under the owner's delegation of 2026-11-02 (docs/iteration-19-signoff.md, it19c). Gated: the first step
@@ -94,15 +96,15 @@ steps:
   - name: g2_select
     command: >-
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
-      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_g2_sanity --limit 12 --n-samples 1 --concurrency 12
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_g2_sanity --resume --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_g2_select --n-samples 4 --concurrency 24
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_g2_select --resume --n-samples 4 --concurrency 24
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
     gpus: [1]
     after: [inputs_frozen]
     done: runs/eval/it19c_g2_select/metrics.json
-    timeout_min: 180
+    timeout_min: 480
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
@@ -114,12 +116,12 @@ steps:
     command: >-
       scripts/train.sh configs/grpo_it19_crgrpo.yaml model.name=outputs/it15/g2_merged
       output_root=outputs/it19_cal run_name=it19-crgrpo-cal wandb.name=it19-crgrpo-cal
-      grpo.max_steps=3 grpo.save_steps=3 probe.fixed_checkpoint_step=3 probe.steps=[3] probe.on_start=false
+      grpo.max_steps=3 grpo.save_steps=3 probe.fixed_checkpoint_step=3 probe.steps=[] probe.on_start=false
       reward.crgrpo.c_rep=1.0 reward.crgrpo.grad_ratio_max=null
     gpus: [0]
     after: [inputs_frozen]
-    done: outputs/it19_cal/it19-crgrpo-cal/checkpoint-3/adapter_config.json
-    timeout_min: 150
+    done: outputs/it19_cal/it19-crgrpo-cal/crgrpo_grad_ratio.jsonl  # its only output used (calibrate_c_rep refuses < 3 steps); the run is never a candidate
+    timeout_min: 300
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 60
     env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -144,7 +146,7 @@ steps:
     gpus: [0]
     after: [calibrate_c_rep]
     done: outputs/it19/it19-crgrpo/checkpoint-15/adapter_config.json
-    timeout_min: 420
+    timeout_min: 960
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
     env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -154,14 +156,14 @@ steps:
       env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
       --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo/checkpoint-15 --out outputs/it19/crgrpo_c15_merged
       && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_c15_merged
-      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_method_c15_sanity --limit 12 --n-samples 1 --concurrency 12
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_method_c15_sanity --resume --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_method_c15_twins --n-samples 2
+      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_method_c15_twins --resume --n-samples 2
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
     gpus: [0]
     after: [method_seg1]
     done: runs/eval/it19c_method_c15_twins/metrics.json
-    timeout_min: 90
+    timeout_min: 240
     on_failure: continue
     env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
@@ -185,7 +187,7 @@ steps:
     gpus: [0]
     after: [method_rule1b]
     done: outputs/it19/it19-crgrpo/checkpoint-30/adapter_config.json
-    timeout_min: 420
+    timeout_min: 960
     on_failure: continue
     stall_min: 60
     env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -195,15 +197,15 @@ steps:
       env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
       --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo/checkpoint-30 --out outputs/it19/crgrpo_merged
       && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_merged
-      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_method_sanity --limit 12 --n-samples 1 --concurrency 12
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_method_sanity --resume --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_method_select --n-samples 4 --concurrency 24
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_method_select --resume --n-samples 4 --concurrency 24
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
     gpus: [0]
     after: [method_seg2]
     done: runs/eval/it19c_method_select/metrics.json
-    timeout_min: 180
+    timeout_min: 480
     on_failure: continue
     env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
@@ -228,7 +230,7 @@ steps:
     gpus: [1]
     after: [g2_select]
     done: outputs/it19/it19-crgrpo-ablation/checkpoint-15/adapter_config.json
-    timeout_min: 420
+    timeout_min: 960
     on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
     stall_min: 60
     env: {UV_NO_SYNC: "1", TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -239,14 +241,14 @@ steps:
       --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo-ablation/checkpoint-15
       --out outputs/it19/crgrpo_ablation_c15_merged
       && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_ablation_c15_merged
-      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_c15_sanity --limit 12 --n-samples 1 --concurrency 12
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_c15_sanity --resume --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_ablation_c15_twins --n-samples 2
+      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_ablation_c15_twins --resume --n-samples 2
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
     gpus: [1]
     after: [ablation_seg1]
     done: runs/eval/it19c_ablation_c15_twins/metrics.json
-    timeout_min: 90
+    timeout_min: 240
     on_failure: continue
     env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
@@ -269,7 +271,7 @@ steps:
     gpus: [1]
     after: [ablation_rule1b]
     done: outputs/it19/it19-crgrpo-ablation/checkpoint-30/adapter_config.json
-    timeout_min: 420
+    timeout_min: 960
     on_failure: continue
     stall_min: 60
     env: {UV_NO_SYNC: "1", TRAIN_GPUS: "1", MASTER_PORT: "29510", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
@@ -280,15 +282,15 @@ steps:
       --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo-ablation/checkpoint-30
       --out outputs/it19/crgrpo_ablation_merged
       && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_ablation_merged
-      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_sanity --limit 12 --n-samples 1 --concurrency 12
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_sanity --resume --limit 12 --n-samples 1 --concurrency 12
       --train-config configs/grpo_it13_2gpu.yaml
-      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_ablation_select --n-samples 4 --concurrency 24
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_ablation_select --resume --n-samples 4 --concurrency 24
       --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
       --protocol configs/protocols/it16_select.json
     gpus: [1]
     after: [ablation_seg2]
     done: runs/eval/it19c_ablation_select/metrics.json
-    timeout_min: 180
+    timeout_min: 480
     on_failure: continue
     env: {UV_NO_SYNC: "1", VLLM_GPUS: "1", VLLM_PORT: "8001", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8001/v1", MODEL: policy}
 
@@ -323,7 +325,7 @@ steps:
   - name: method_final
     command: >-
       scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_merged
-      -- scripts/eval_heldout.sh data/benchmarks/internal_heldout.jsonl runs/eval/it19c_method_heldout --n-samples 2
+      -- scripts/eval_heldout.sh data/benchmarks/internal_heldout.jsonl runs/eval/it19c_method_heldout --resume --n-samples 2
       --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml
       -- env N_CONCURRENT=12 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
       scripts/eval_tb.sh tb2 runs/harbor/it19c_method_tb2 -k 4
@@ -333,7 +335,7 @@ steps:
     gpus: [0]
     after: [method_select, ib_tasks]  # G6 is a reading, not a gate (file order still starts it first on GPU 0)
     done: outputs/chain/it19c/markers/method_final.done
-    timeout_min: 900
+    timeout_min: 1440
     on_failure: continue  # the stop is scoped by `after`: only this step's dependents are skipped, the other arm runs on
     stall_min: 45
     progress: {pattern: 'serve_and_run: command (\d+):', total: 3}
