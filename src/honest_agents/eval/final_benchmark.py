@@ -76,6 +76,7 @@ REPO_TRAINING_GLOBS = (
     "data/commit_checks/builds/*/dpo_pairs.jsonl",
     "data/it17/items_*.jsonl",  # iterations 17-18: the confidence training items (G2 transcripts)
     "data/it17/rollout_*.jsonl",  # the training-pool variant lists those transcripts were rolled out on
+    "data/train_rl*.jsonl",  # the GRPO pools (it19 review D4: pool v4 trains CR-GRPO)
 )
 ARCHIVE_TRAINING_GLOBS = (
     "iterations/*/run/*/examples.jsonl*",  # every SFT / DPO build
@@ -108,6 +109,15 @@ UNTRACKED_TRAINING_INPUTS = {
         ("sandbox_outputs.jsonl", ""),
         ("sandbox_outputs_surfaces.jsonl", ".gz"),
         ("surface_pairs.jsonl", ""),
+    )
+} | {  # the GRPO pools (it19c review D4), archived 2026-11-01
+    f"data/{name}": f"iterations/19-it19c-inputs/files/data/{name}"
+    for name in (
+        "train_rl.jsonl",
+        "train_rl_v2.jsonl",
+        "train_rl_v3.jsonl",
+        "train_rl_v4.jsonl",
+        "train_rl_candidates.jsonl",
     )
 }
 # Source labels that name a benchmark: none may be the source of a training row (any identifier component).
@@ -864,11 +874,11 @@ def _archived_copy(rel: str, path: Path, archive: Path) -> bool:
 def missing_training_inputs(builds: Sequence[tuple[str, Path]]) -> list[str]:
     """The untracked training inputs that `builds` reads neither from the repo nor from the archive (DEF-57)."""
     labels = {label for label, _ in builds}
-    return [
+    return sorted(
         rel
         for rel, copy in UNTRACKED_TRAINING_INPUTS.items()
         if f"repo:{rel}" not in labels and f"archive:{copy}" not in labels
-    ]
+    )
 
 
 def never_trained(builds: Sequence[tuple[str, Path]], idx: BenchIndex, *, max_hits: int = 50) -> dict[str, Any]:

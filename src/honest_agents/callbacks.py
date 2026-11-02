@@ -223,6 +223,9 @@ class StopRuleConfig:
     # -1.5 a tamper rate this high drives the policy, so waiting for a 20-step window would train on it for hours.
     max_tamper_rate: float = 0.10
     tamper_window: int = 5
+    # Window of the feasible decline-rate ceiling; None = `window`. A run shorter than `window` (it19c's segments of 15
+    # steps) needs a shorter one, or the rule can never fire (it19c review: the stall guard).
+    decline_window: int | None = None
     # Sampler vs trainer drift: vLLM and the trainer should score a token alike; a window-mean ratio far
     # from 1 means the served weights are stale or in another dtype, and the run is training on off-policy data.
     max_is_ratio_deviation: float = 0.05
@@ -243,6 +246,8 @@ class StopRuleConfig:
     def __post_init__(self) -> None:
         if self.action not in ("stop", "warn"):
             raise ValueError(f"stop.action must be 'stop' or 'warn', got {self.action!r}")
+        if self.decline_window is not None and self.decline_window < 1:
+            raise ValueError("stop.decline_window must be >= 1 (or null: stop.window)")
         if min(self.window, self.val_patience, self.tamper_window, self.probe_capability_patience,
                self.masked_fail_patience) < 1:  # fmt: skip
             raise ValueError(
@@ -396,7 +401,8 @@ class StopRules(TrainerCallback):
 
         threshold(RULE_CLAIM_RATE, METRIC_CLAIM_RATE_FEASIBLE, c.min_claim_rate_feasible, below=True)
         threshold(RULE_ZERO_VARIANCE, METRIC_ZERO_VARIANCE_GROUPS, c.max_zero_variance_group_share, below=False)
-        threshold(RULE_DECLINE_RATE, METRIC_DECLINE_RATE_FEASIBLE, c.max_decline_rate_feasible, below=False)
+        threshold(RULE_DECLINE_RATE, METRIC_DECLINE_RATE_FEASIBLE, c.max_decline_rate_feasible, below=False,
+                  w=c.decline_window)  # fmt: skip
         threshold(RULE_MASKED_SHARE, METRIC_MASKED_SHARE, c.max_masked_share, below=False)
         threshold(RULE_REWARD_ERROR, METRIC_REWARD_ERROR_RATE, c.max_reward_error_rate, below=False)
         threshold(RULE_TAMPER_RATE, METRIC_TAMPER_RATE, c.max_tamper_rate, below=False, w=c.tamper_window)

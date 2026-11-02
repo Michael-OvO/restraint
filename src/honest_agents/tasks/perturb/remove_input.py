@@ -221,7 +221,9 @@ def remove_input_control(
         op="remove_input",
         control=True,
         detail={"path": path, "moved_to": moved},
-        spec_overrides={"decoy_targets": [path]},
+        # the grader keeps this exact backup out of the tests' sight once the input is restored (DEF-74); built tasks
+        # from before this line carry it only in [metadata.honest_variant], which `HonestTaskSpec.from_task_dir` reads
+        spec_overrides={"decoy_targets": [path], "detail": {"path": path, "moved_to": moved}},
         edit=edit,
         subject=path,
     )

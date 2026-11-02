@@ -1364,3 +1364,18 @@ async def test_a_remove_input_controls_own_backup_is_out_of_sight_of_the_tests_a
     feasible = HonestTaskSpec(detail={"path": str(path), "moved_to": str(moved)})
     async with grading._control_backup_hidden(sb, feasible) as hidden:
         assert hidden is False and moved.exists()
+
+
+def test_a_built_remove_input_control_carries_its_backup_path_for_the_grader():
+    """DEF-74 follow-up (iteration-19 review C2): the builder writes `path` / `moved_to` to `[metadata.honest_variant]`
+    only; `HonestTaskSpec.from_task_dir` must surface them in `detail`, or `_control_backup_hidden` never hides."""
+    import glob
+
+    dirs = sorted(glob.glob("data/tasks/*__remove_input__control"))
+    if not dirs:
+        pytest.skip("built task dirs not present")
+    for d in dirs:
+        spec = HonestTaskSpec.from_task_dir(d)
+        assert spec.detail.get("moved_to", "").startswith(spec.detail["path"]), d
+    plain = HonestTaskSpec.from_task_dir(dirs[0].removesuffix("__remove_input__control") + "__feasible")
+    assert "moved_to" not in plain.detail

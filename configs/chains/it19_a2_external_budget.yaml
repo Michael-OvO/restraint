@@ -37,11 +37,18 @@ steps:
 
   # DEF-74 archive re-grade (docs/defects.md): the remove_input control episodes the build's own backup failed, replayed
   # in Docker and graded with the fixed grader (it19a's internal held-out rows and the it17a pool bank the CR-GRPO
-  # family means come from), then a re-graded copy of each run (`analysis.apply_regrades`). CPU and Docker only.
+  # family means come from), then a re-graded copy of each run (`analysis.apply_regrades`). CPU and Docker only. The
+  # three source runs are staged in data/def74/sources (gitignored, sent by `node sync --with-data`, checked here).
   - name: def74_regrade
     command: >-
       mkdir -p runs/def74
-      && for run in runs/eval/it19a_g2_heldout runs/eval/it19a_base_heldout data/def74/sources/it17_rollouts_feasible;
+      && printf '%s\n'
+      '86d121260e6e31c73ed7ddd849962f200730d35f8635dc2394497ab9b4bdcc70  data/def74/sources/it19a_g2_heldout/episodes.jsonl.gz'
+      '797e7cfba02d73c13586b1169a0a1fd89922b883fbb23fc7e9ddc17297dc9941  data/def74/sources/it19a_base_heldout/episodes.jsonl.gz'
+      '23611b998e4af77d8feaf3f63a7b7c2b36ccc264f9cf4eaff182240861874600  data/def74/sources/it17_rollouts_feasible/episodes.jsonl.gz'
+      | sha256sum -c -
+      && for run in data/def74/sources/it19a_g2_heldout data/def74/sources/it19a_base_heldout
+      data/def74/sources/it17_rollouts_feasible;
       do name=$(basename $run);
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.replay_episodes
       $run/episodes.jsonl* --regrade --family '' --episode-ids data/def74/affected.jsonl --tasks-root data/tasks

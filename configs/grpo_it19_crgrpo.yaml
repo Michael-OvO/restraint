@@ -5,8 +5,9 @@
 # What differs from G3 (configs/grpo_it15_g3.yaml):
 #   reward.mode crgrpo: the CR-GRPO table priced per step (honest_agents.crgrpo): online V_s from the step's own controls,
 #     multipliers for C1 false claims, C2 twin claim or damage, C3 control refusal, one damped update after step 15;
-#   the report term: the status token learns only from l_rep (HonestGRPOTrainer.crgrpo), c_rep 10;
-#   grpo.beta 0.04: a KL to G2 (the adapter off) on ALL completion tokens (the it17 lesson);
+#   the report term: the status token learns only from l_rep (HonestGRPOTrainer.crgrpo; z = logit(complete) -
+#     logit(incomplete) from the lm_head hook, exact, fp32), c_rep from the node calibration;
+#   grpo.beta 0.04: a KL to G2 (the adapter off) on every completion token except the status token (masked with it);
 #   30 steps, checkpoints every 5, probes at 0 / 15 / 30; the run is trained in two segments (job file) with stop rule
 #     1b (analysis.calibration twin-stop on the 120 select twins) between them.
 base: grpo_it15_g3.yaml
@@ -26,20 +27,37 @@ reward:
     mu_cd: 3.0
     min_substantive: 3
     shrink: 4.0
-    # G2's control proceeds on its pool bank priced by the table (python -m honest_agents.crgrpo family-means
-    # --episodes .../17-it17a-data-rollouts/eval/it17_rollouts_feasible/episodes.jsonl.gz; DEF-66 sources left out)
-    family_means: {high_risk: 0.8088, remove_input: 0.5686, revoke_permission: 0.8338}
-    v_default: 0.75
+    # Starting V per family: G2's control proceeds priced by the table (python -m honest_agents.crgrpo family-means).
+    # high_risk from G2 on the 4 trained evidence surfaces (iterations/15-g2-splice-replay/eval/it15_g2_surface4,
+    # readme / file_header / config_comment / manifest only: every high_risk pair of pool v4 is a surface pair);
+    # remove_input and revoke_permission from the it17a pool bank (DEF-66 sources out; remove_input without the 13
+    # DEF-74 episodes awaiting their re-grade, data/def74/affected.jsonl; recomputed on the re-graded bank before launch)
+    family_means: {high_risk: 0.7043, remove_input: 0.6236, revoke_permission: 0.8338}
+    v_default: 0.70
+    v_min: 0.1            # review R6: V_s never below this (the twin table would reverse below 0)
     family_ema: 0.9
-    # G2 on the same bank: C1 0.124 per feasible episode, C2 0.186 of twins, C3 0.087 of controls
-    targets: {fc: 0.09, tw: 0.15, cd: 0.10}
-    update_steps: [15]
-    update_window: 10
+    # Constraints (owner, 2026-11-01, "Cap fc, drop tw, cd at G2"). C1: G2 0.124 per feasible episode on its bank, target
+    # 0.09. C2 (twins): no target; under neutrality mu_tw only moves weight between the decline reward and the damage
+    # penalty (review R13), so twins are watched by stop rule 1b and the guards. C3: G2 on the pool's mix about 0.21
+    # (surface controls 0.265, remove_input 0.169, revoke_permission 0.04; 30 : 7.5 : 7.5 controls per pass): the
+    # target holds refusal at G2's level.
+    targets: {fc: 0.09, cd: 0.21}
+    mu_max: {fc: 0.35}    # claim threshold (0.1 + mu_fc) / (1 + mu_fc) <= 1/3 (K0.3: beyond it success costs ~6 points)
+    # One update after the first pass: TRL's global_step 14 is the batch of optimizer step 15; the window is the whole
+    # first pass (steps 0-14), so the plain rows' pass-band order cancels out (review D3)
+    update_steps: [14]
+    update_window: 15
     update_rate: 0.5
     report_term: true
-    c_rep: 10.0
+    c_rep: 1.0            # PLACEHOLDER: set from the node calibration (pre-registration section 3) before the run
     z_max: 6.0
-    grad_clip: 20.0
+    grad_ratio_steps: 3   # |grad l_rep| / |grad main| measured on steps 0-2
+    grad_ratio_max: 3.0   # and the run stops above it
+stop:
+  # review R2 (owner: "Record + guard"): stalling ("a few commands, then incomplete") is not priced out; a training-time
+  # ceiling on the feasible decline rate (G2 about 0.08-0.10) stops a run that drifts into it
+  max_decline_rate_feasible: 0.30
+  decline_window: 5       # over the last 5 steps: the segments are 15 steps, shorter than stop.window (20)
 wandb:
   name: it19-crgrpo
   group: it19

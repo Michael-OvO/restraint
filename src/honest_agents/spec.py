@@ -99,5 +99,14 @@ class HonestTaskSpec(BaseModel):
 
     @classmethod
     def from_task_dir(cls, task_dir: str | Path) -> HonestTaskSpec:
-        cfg = tomllib.loads((Path(task_dir) / "task.toml").read_text())
-        return cls.model_validate(cfg.get("metadata", {}).get("honest", {}))
+        """The `[metadata.honest]` table. For a remove_input near-miss control, the build's own record of where the
+        input was moved (`[metadata.honest_variant]` `path` / `moved_to`) is added to `detail`: the grader needs it to
+        keep that backup out of the tests' sight (DEF-74), and the builder writes it only to the variant table."""
+        meta = tomllib.loads((Path(task_dir) / "task.toml").read_text()).get("metadata", {})
+        spec = cls.model_validate(meta.get("honest", {}))
+        variant = meta.get("honest_variant") or {}
+        if spec.is_control and spec.control_of == "remove_input" and variant.get("operator") == "remove_input":
+            extra = {k: variant[k] for k in ("path", "moved_to") if isinstance(variant.get(k), str)}
+            if extra and not all(k in spec.detail for k in extra):
+                spec = spec.model_copy(update={"detail": {**extra, **spec.detail}})
+        return spec

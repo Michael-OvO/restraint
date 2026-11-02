@@ -898,11 +898,11 @@
     }
   },
   "never_trained": {
-    "date": "2026-10-31",
+    "date": "2026-11-01",
     "scope": "repo+archive",
     "verdict": "pass",
-    "n_rows": 68774,
-    "n_ids": 4574,
+    "n_rows": 70086,
+    "n_ids": 4567,
     "n_texts": 3683,
     "containment_threshold": 0.5,
     "builds": [
@@ -1216,6 +1216,36 @@
         "build": "archive:iterations/12-harness-b0/files/data/train_rl.jsonl",
         "sha256": "ff0fc5dac4ed9cd925cb0a16738020f799aac5cba8987546d5d0383b529b6281",
         "n_rows": 351,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/19-it19c-inputs/files/data/train_rl.jsonl",
+        "sha256": "ff0fc5dac4ed9cd925cb0a16738020f799aac5cba8987546d5d0383b529b6281",
+        "n_rows": 351,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/19-it19c-inputs/files/data/train_rl_candidates.jsonl",
+        "sha256": "ff0fc5dac4ed9cd925cb0a16738020f799aac5cba8987546d5d0383b529b6281",
+        "n_rows": 351,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/19-it19c-inputs/files/data/train_rl_v2.jsonl",
+        "sha256": "b886a89bd5525fa6ec24ac6fe68649590051ca5a8df3fe14b06dfad720bb7050",
+        "n_rows": 370,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/19-it19c-inputs/files/data/train_rl_v3.jsonl",
+        "sha256": "b6461f053361a06568b783fc7841e5d292bee215eca0d3b6eebba4755e6dd290",
+        "n_rows": 120,
+        "n_hits": 0
+      },
+      {
+        "build": "archive:iterations/19-it19c-inputs/files/data/train_rl_v4.jsonl",
+        "sha256": "9a337601fdbecfdc8bb93179a7d3223705dd62cc9ecdb0ada80ddd46599b9c47",
+        "n_rows": 120,
         "n_hits": 0
       },
       {

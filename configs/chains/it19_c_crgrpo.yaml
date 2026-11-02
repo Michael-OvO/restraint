@@ -1,7 +1,8 @@
 # Iteration 19, stage (b): the CR-GRPO run (docs/iteration-19-prereg-crgrpo.md). One 96 GB-class GPU, everything in
 # sequence (training and evaluation never share the GPU):
 #  1. G2 re-run on the select split (S = 4): the reference for P1, the guards and stop rule 1b.
-#  2. Each arm (method, then ablation): steps 1-15; checkpoint 15 merged and run on the 120 select twins; stop rule 1b
+#  2. Each arm (method, then ablation; the method arm first calibrates c_rep in a 3-step run): steps 1-15; checkpoint 15
+#     merged and run on the 120 select twins; stop rule 1b
 #     (`analysis.calibration twin-stop`, exit 3 when it fires: that arm's steps 16-30 are then skipped, the other arm
 #     still runs); steps 16-30 resumed from checkpoint 15 (the CR-GRPO runtime state resumes with it); the final
 #     checkpoint merged and run on the select split (S = 4).
@@ -92,10 +93,37 @@ steps:
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
   # ── 2a. the method arm ──
-  - name: method_seg1
+  # c_rep calibration (pre-registration section 3): 3 steps of the method arm at c_rep 1 measure |grad l_rep| /
+  # |grad main|; c_rep = 1 * 0.75 / median ratio (clipped to [0.1, 100]) is written for both segments. Its own output
+  # dir; nothing of it is kept as a candidate. It also builds the method-arm trainer once (the C1 crash would stop here).
+  - name: calibrate_train
     command: >-
       scripts/train.sh configs/grpo_it19_crgrpo.yaml model.name=outputs/it15/g2_merged
+      output_root=outputs/it19_cal run_name=it19-crgrpo-cal wandb.name=it19-crgrpo-cal
+      grpo.max_steps=3 grpo.save_steps=3 probe.fixed_checkpoint_step=3 probe.steps=[3] probe.on_start=false
+      reward.crgrpo.c_rep=1.0 reward.crgrpo.grad_ratio_max=null
+    gpus: [0]
+    done: outputs/it19_cal/it19-crgrpo-cal/checkpoint-3/adapter_config.json
+    timeout_min: 150
+    on_failure: stop
+    stall_min: 60
+    env: {WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: calibrate_c_rep
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.crgrpo calibrate
+      --ratios outputs/it19_cal/it19-crgrpo-cal/crgrpo_grad_ratio.jsonl --target 0.75
+      --out outputs/chain/it19c/c_rep.txt
+    gpus: []
+    done: outputs/chain/it19c/c_rep.txt
+    timeout_min: 5
+    on_failure: stop
+
+  - name: method_seg1
+    command: >-
+      RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo.yaml model.name=outputs/it15/g2_merged
       grpo.max_steps=15 probe.fixed_checkpoint_step=15 probe.steps=[15]
+      reward.crgrpo.c_rep=$(cat outputs/chain/it19c/c_rep.txt)
     gpus: [0]
     done: outputs/it19/it19-crgrpo/checkpoint-15/adapter_config.json
     timeout_min: 420
@@ -122,9 +150,9 @@ steps:
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
       --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_method_c15_twins
-      --json outputs/chain/it19c/method_rule1b.json
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/method_rule1b.json
       && touch outputs/chain/it19c/markers/method_rule1b.done
-    gpus: []
+    gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
     done: outputs/chain/it19c/markers/method_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -132,6 +160,7 @@ steps:
   - name: method_seg2
     command: >-
       RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo.yaml model.name=outputs/it15/g2_merged
+      reward.crgrpo.c_rep=$(cat outputs/chain/it19c/c_rep.txt)
     gpus: [0]
     after: [method_rule1b]
     done: outputs/it19/it19-crgrpo/checkpoint-30/adapter_config.json
@@ -157,10 +186,22 @@ steps:
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
 
+  - name: method_g6
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
+      --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_method_select
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/method_g6.json;
+      rc=$?; echo $rc > outputs/chain/it19c/method_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
+    gpus: [0]
+    after: [method_select]
+    done: outputs/chain/it19c/method_g6.json
+    timeout_min: 10
+    on_failure: continue
+
   # ── 2b. the ablation arm (no report term) ──
   - name: ablation_seg1
     command: >-
-      scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged
+      RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged
       grpo.max_steps=15 probe.fixed_checkpoint_step=15 probe.steps=[15]
     gpus: [0]
     after: [g2_select]
@@ -190,9 +231,9 @@ steps:
     command: >-
       env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
       --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_c15_twins
-      --json outputs/chain/it19c/ablation_rule1b.json
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/ablation_rule1b.json
       && touch outputs/chain/it19c/markers/ablation_rule1b.done
-    gpus: []
+    gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
     done: outputs/chain/it19c/markers/ablation_rule1b.done
     timeout_min: 10
     on_failure: continue
@@ -225,6 +266,18 @@ steps:
     timeout_min: 180
     on_failure: continue
     env: {VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: ablation_g6
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
+      --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_select
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c/ablation_g6.json;
+      rc=$?; echo $rc > outputs/chain/it19c/ablation_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
+    gpus: [0]
+    after: [ablation_select]
+    done: outputs/chain/it19c/ablation_g6.json
+    timeout_min: 10
+    on_failure: continue
 
   # ── 3. the method arm on the final benchmark ──
   - name: ib_tasks
@@ -282,6 +335,8 @@ watch:
                runs/harbor/it19c_method_tb2, runs/harbor/it19c_method_ib, runs/final/it19c,
                outputs/chain/it19c/method_rule1b.json, outputs/chain/it19c/ablation_rule1b.json,
                outputs/it19/it19-crgrpo/crgrpo_state.jsonl, outputs/it19/it19-crgrpo-ablation/crgrpo_state.jsonl,
+               outputs/it19_cal/it19-crgrpo-cal/crgrpo_grad_ratio.jsonl, outputs/chain/it19c/c_rep.txt,
+               outputs/chain/it19c/method_g6.json, outputs/chain/it19c/ablation_g6.json,
                outputs/logs]
   archives:
     - {iteration: 19, name: it19c-crgrpo, run: [outputs/it19/it19-crgrpo, outputs/it19/it19-crgrpo-ablation],
@@ -291,5 +346,12 @@ watch:
               runs/eval/it19c_ablation_sanity, runs/eval/it19c_ablation_select, runs/eval/it19c_method_heldout],
        file: [runs/final/it19c/method_tb2_units.json, runs/final/it19c/method_ib_summary.json,
               outputs/chain/it19c/method_rule1b.json, outputs/chain/it19c/ablation_rule1b.json,
+              outputs/chain/it19c/method_g6.json, outputs/chain/it19c/ablation_g6.json,
+              outputs/chain/it19c/c_rep.txt, outputs/it19_cal/it19-crgrpo-cal/crgrpo_grad_ratio.jsonl,
+              outputs/it19/it19-crgrpo/crgrpo_grad_ratio.jsonl,
+              outputs/it19/it19-crgrpo/checkpoint-15/adapter_config.json,
+              outputs/it19/it19-crgrpo/checkpoint-15/adapter_model.safetensors,
+              outputs/it19/it19-crgrpo-ablation/checkpoint-15/adapter_config.json,
+              outputs/it19/it19-crgrpo-ablation/checkpoint-15/adapter_model.safetensors,
               outputs/chain/it19c/never_trained.json],
        note: "iteration 19 stage (b): CR-GRPO from G2 (method and ablation arms), select-split endpoints, final benchmark"}

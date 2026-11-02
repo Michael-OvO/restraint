@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import logging
@@ -175,7 +176,11 @@ def probe_safe_trainer_class() -> type:
             return super()._get_per_token_logps_and_entropies(model, *args, batch_size=batch_size, **kwargs)
 
         def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-            self._prepare_inputs(inputs)  # roll out, grade and log `eval_*` metrics; nothing is learned from them
+            runtime = getattr(self, "_crgrpo_runtime", None)
+            # roll out, grade and log `eval_*` metrics; nothing is learned from them, and a CR-GRPO run's state (family
+            # means, constraint rates, the multiplier update) never moves on probe episodes (review R7)
+            with runtime.frozen() if runtime is not None else contextlib.nullcontext():
+                self._prepare_inputs(inputs)
             return torch.zeros((), device=self.accelerator.device), None, None
 
     return ProbeSafeGRPOTrainer
@@ -196,10 +201,14 @@ def trainer_model(cfg: Any) -> str:
 CRGRPO_STATE_FILE = "crgrpo_state.jsonl"
 
 
-def install_crgrpo(trainer: Any, cfg: Any, *, output_dir: Path | None = None) -> crgrpo_module.Runtime | None:
+def install_crgrpo(
+    trainer: Any, cfg: Any, *, output_dir: Path | None = None, reward_config: Any = None
+) -> crgrpo_module.Runtime | None:
     """`reward.mode: crgrpo`: the runtime the reward function prices each step with (on the run's own reward config,
     its state appended to `<output_dir>/crgrpo_state.jsonl` every step), and, with the report term on, the trainer's
-    settings and status tokens. Other modes: cleared. `resume_crgrpo` continues the state on a resume."""
+    settings and status tokens. Other modes: cleared. `resume_crgrpo` continues the state on a resume.
+    `reward_config` is the environments' own (`Plan.reward_config`, efficiency reference = the bash budget), so the
+    table prices with exactly the config the episodes were graded under (review R12)."""
     from honest_agents.train.derive import build_reward_config
     from honest_agents.train.grpo import check_crgrpo
 
@@ -209,13 +218,15 @@ def install_crgrpo(trainer: Any, cfg: Any, *, output_dir: Path | None = None) ->
         trainer.crgrpo = None
         return None
     state_file = Path(output_dir) / CRGRPO_STATE_FILE if output_dir is not None else None
-    runtime = crgrpo_module.Runtime(settings, build_reward_config(cfg), state_file=state_file)
+    base = reward_config if reward_config is not None else build_reward_config(cfg)
+    runtime = crgrpo_module.Runtime(settings, base, state_file=state_file)
     crgrpo_module.set_runtime(runtime)
     trainer.crgrpo = settings
     if settings.report_term:
         from honest_agents.train.confidence_exact import StatusTokens
+        from honest_agents.trainer import text_tokenizer
 
-        t = StatusTokens.of(trainer.processing_class)
+        t = StatusTokens.of(text_tokenizer(trainer))
         trainer.status_tokens = (t.complete, t.incomplete)
     return runtime
 
@@ -260,7 +271,9 @@ def make_trainer(plan: Plan, *, check_server: bool = True) -> Any:
     trainer.trim_padding = plan.cfg.trainer.trim_padding
     trainer.sort_micro_batches = plan.cfg.trainer.sort_micro_batches
     trainer.execute_pending_report = plan.cfg.trainer.execute_pending_report
-    trainer._crgrpo_runtime = install_crgrpo(trainer, plan.cfg, output_dir=Path(plan.grpo_config.output_dir))
+    trainer._crgrpo_runtime = install_crgrpo(
+        trainer, plan.cfg, output_dir=Path(plan.grpo_config.output_dir), reward_config=plan.reward_config
+    )
     check_training_template(trainer, plan.family, strict=plan.cfg.model.strict_template)
     check_tool_flow_template(trainer, strict=plan.cfg.model.strict_template)
     check_end_of_turn_token(trainer, strict=plan.cfg.model.strict_template)
@@ -309,10 +322,16 @@ def train(plan: Plan, resume: bool = False) -> bool:
         runtime = getattr(trainer, "_crgrpo_runtime", None)
         if ckpt is not None:
             resume_crgrpo(runtime, int(Path(ckpt).name.rsplit("-", 1)[1]))
-        elif runtime is not None and runtime.state_file is not None and runtime.state_file.is_file():
-            stale = runtime.state_file.with_suffix(f".stale-{int(time.time())}.jsonl")
-            runtime.state_file.rename(stale)  # a fresh run must not inherit an earlier life's multipliers
-            logger.warning("fresh crgrpo run: moved the earlier state to %s", stale)
+        elif runtime is not None and runtime.state_file is not None:
+            from honest_agents.trainer import GRAD_RATIO_FILE
+
+            # a fresh run must not inherit an earlier life's multipliers, nor append to its gradient ratios (the c_rep
+            # calibration would mix two attempts)
+            for path in (runtime.state_file, runtime.state_file.parent / GRAD_RATIO_FILE):
+                if path.is_file():
+                    stale = path.with_suffix(f".stale-{int(time.time())}.jsonl")
+                    path.rename(stale)
+                    logger.warning("fresh crgrpo run: moved %s to %s", path.name, stale)
         report = getattr(trainer.model, "print_trainable_parameters", None)
         if trainer.accelerator.is_main_process and report is not None:
             report()

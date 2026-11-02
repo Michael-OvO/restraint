@@ -33,3 +33,18 @@
 - **Mac checks:** K0 / K1 / K1(b) pass (docs/iteration-19-design-crgrpo.md); the K2a trainer, the scorer and the
   payoff table pass their tests; `scripts/test.sh --fast` 5,057 passed (the L0 timing test passes alone);
   `node_chain check` on the job file.
+
+## it19c CR-GRPO (DRAFT: not signed; nothing approved)
+
+To be filled at launch, in this order (pre-registration section 10):
+
+- **Owner approval** of docs/iteration-19-prereg-crgrpo.md and of the spend (about $31-44 on a 96 GB-class node; the
+  node launch asked separately, with the offer).
+- **Stage a2 done**, its DEF-74 re-grade applied (`runs/def74/*`), and `python -m honest_agents.crgrpo family-means` on
+  the re-graded it17a bank fixed in both configs (and the high_risk surface value unchanged at 0.704 or recomputed).
+- **Ledger:** `gate.ledger check --experiment it19c` exits 0.
+- **Mac checks at the launch commit:** `scripts/test.sh --fast`; the L0 sweep; `gate.guards --chains`;
+  `node_chain check configs/chains/it19_c_crgrpo.yaml`; S9 = `tests/test_crgrpo.py` and K1
+  (`analysis.reward_gate --config crgrpo` on G3's rollouts: PASS on 2026-11-01 after the review fixes, pooled
+  blind-decline credit −0.042); `final_benchmark never-trained --archive` (pass, the GRPO pools in scope).
+- **Evaluation-path diff** since `634ef8e` limited to the list in the pre-registration section 10.

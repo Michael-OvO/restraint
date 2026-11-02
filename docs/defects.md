@@ -3573,11 +3573,19 @@ section 7 critique) and from re-checks against the code and the archive on that 
   fail. It applies to cda4eda5 as well (the backup is the perturbation's footprint, not the agent's output; the control
   then grades like its feasible twin, where the file does not exist). `debug.control_backup_hidden` records it. Test:
   `tests/test_grading.py::test_a_remove_input_controls_own_backup_is_out_of_sight_of_the_tests_after_a_restore`.
+- **Reopened and re-closed 2026-11-01 (the it19c pre-launch review, finding C2):** the fix above was inert.
+  `HonestTaskSpec.from_task_dir` read only `[metadata.honest]`, and the remove_input builder writes `path` /
+  `moved_to` to `[metadata.honest_variant]`, so every control loaded with `detail = {}` and `_control_backup_hidden`
+  hid nothing (in training, in evaluation and in the planned re-grade). No experiment and no re-grade had run on it.
+  Fix: `from_task_dir` adds the variant table's `path` / `moved_to` to `detail` for a remove_input control (all 191
+  built controls now carry them; no task.toml changed, so no frozen hash moves). Test:
+  `tests/test_grading.py::test_a_built_remove_input_control_carries_its_backup_path_for_the_grader`.
 - **Archive re-score:** `data/def74/affected.jsonl` lists each affected episode with `decided`: `still_failed` (another,
   unrelated test failed too, so the fix cannot change the grade: 34) or `regrade` (57, of which it19a G2 4, it19a base 1,
   it17a rollouts 18). The `regrade` rows are replayed with `analysis.replay_episodes --regrade` on the node (Docker),
   as the first step of the next node session and before any it19a / it17a analysis or item build reads them; until
-  then they are excluded from those analyses. Older iterations (passk, iteration 2, it11) are not re-reported.
+  then they are excluded from those analyses. The three source runs are staged in `data/def74/sources/` (sha256s in
+  the a2 job file's `def74_regrade` step). Older iterations (passk, iteration 2, it11) are not re-reported.
 
 ### DEF-75: an explanation in the `incomplete` list does not count as explained
 - **Area:** metric (`report.Report.explains_non_completion`, ImpossibleBench `flag_lenient`). **Status:** closed

@@ -678,3 +678,14 @@ def test_masked_collapse_fires_on_two_consecutive_steps_not_one():
     assert StopRuleConfig().masked_fail_share == 0.5 and StopRuleConfig().masked_fail_patience == 2
     assert feed(StopRules(StopRuleConfig(window=20, masked_fail_patience=3)), [bad, bad]) == {}
     assert feed(StopRules(StopRuleConfig(window=20)), [healthy(**{MASKED: 0.49})] * 4) == {}
+
+
+def test_the_decline_rate_ceiling_can_use_its_own_shorter_window():
+    """it19c review: with stop.window 20 and 15-step segments the ceiling could never fire; decline_window fixes it."""
+    long = StopRules(StopRuleConfig(window=20, max_decline_rate_feasible=0.3), reward_mode="honest")
+    assert feed(long, [healthy(**{DECLINE: 0.8})] * 15) == {}
+    short = StopRules(StopRuleConfig(window=20, max_decline_rate_feasible=0.3, decline_window=5), reward_mode="honest")
+    fired = feed(short, [healthy(**{DECLINE: 0.8})] * 15)
+    assert min(fired) == 5 and fired[5] == [callbacks.RULE_DECLINE_RATE]
+    with pytest.raises(ValueError, match="decline_window"):
+        StopRuleConfig(decline_window=0)

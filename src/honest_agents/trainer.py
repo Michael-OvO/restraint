@@ -49,11 +49,13 @@ import asyncio
 import concurrent.futures
 import hashlib
 import inspect
+import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
 import torch
 from trl import GRPOTrainer
@@ -81,72 +83,164 @@ METRIC_REP_N = "crgrpo/rep/n_rows"  # rows of the micro-batch whose status token
 METRIC_REP_PI = "crgrpo/rep/pi_claim"  # mean pi(claim) at the status token, from the training forward
 METRIC_REP_FROZEN = "crgrpo/rep/frozen_share"  # rows past z_max in the direction of their delta (no gradient)
 METRIC_REP_LOSS = "crgrpo/rep/loss"
+METRIC_REP_Z_ABS = "crgrpo/rep/z_abs"  # mean |z| on the found rows
+GRAD_RATIO_FILE = "crgrpo_grad_ratio.jsonl"  # one line per measured optimizer step, in the run's output_dir
+METRIC_REP_GRAD_RATIO = "crgrpo/rep/grad_ratio"  # |grad l_rep| / |grad main| over the LoRA parameters, measured steps
 
 
 def status_position(
-    ids: list[int], tool_mask: list[int] | None, complete: int, incomplete: int, decode: Any, claimed: bool | None
+    ids: list[int],
+    tool_mask: list[int] | None,
+    complete: int,
+    incomplete: int,
+    decode: Any,
+    claimed: bool | None,
+    call_open: int | None = None,
+    call_close: int | None = None,
 ) -> int:
     """Index in `ids` (the completion) of the status token of the episode's last `submit_report` call, or -1.
 
     A candidate is a model token (tool_mask 1) equal to the first token of `complete` or `incomplete` whose preceding
-    text ends with `STATUS_MARKER` inside a `submit_report` call. The last one is the report the environment graded
-    (the episode ends at its report). With `claimed` known, the token must agree with the graded status, else -1: a
-    status the grader did not see must not be trained on its outcome."""
-    found = -1
+    text ends with `STATUS_MARKER` inside an open `submit_report` call: with the tool-call tokens known
+    (`call_open` / `call_close`, Qwen3.5's `<tool_call>` / `</tool_call>`), the call is the one opened last and not
+    closed, however long the fields before `status` are; without them, the 64 tokens before. The last one is the report
+    the environment graded (the episode ends at its report). With `claimed` known, the token must agree with the graded
+    status, else -1: a status the grader did not see must not be trained on its outcome."""
+    found, opened = -1, None
     for j, tok in enumerate(ids):
+        if call_open is not None and tok == call_open:
+            opened = j
+            continue
+        if call_close is not None and tok == call_close:
+            opened = None
+            continue
         if tok not in (complete, incomplete) or j < 1 or (tool_mask is not None and not tool_mask[j]):
             continue
-        before = decode(ids[max(0, j - 12) : j])
-        if before.endswith(STATUS_MARKER) and REPORT_FUNCTION in decode(ids[max(0, j - 64) : j]):
-            found = j
+        if not decode(ids[max(0, j - 12) : j]).endswith(STATUS_MARKER):
+            continue
+        if call_open is not None:
+            if opened is None:
+                continue
+            call = decode(ids[opened + 1 : j])
+            if f"<function={REPORT_FUNCTION}>" not in call or "</function>" in call:
+                continue
+        elif REPORT_FUNCTION not in decode(ids[max(0, j - 64) : j]):
+            continue
+        found = j
     if found >= 0 and claimed is not None and (ids[found] == complete) != claimed:
         return -1
     return found
 
 
-def status_log_odds(logp: torch.Tensor, sampled_complete: torch.Tensor, grad_clip: float) -> torch.Tensor:
-    """z = log p(complete) - log p(incomplete) at the status token, from the sampled token's log-probability alone,
-    assuming the two options carry all the mass there (K0.1: the status always splits at one token). The value is
-    exact under that assumption; the gradient through logp is capped at `grad_clip` in magnitude (it is
-    +-1 / (1 - p), unbounded as p -> 1)."""
-    p = logp.detach().exp().clamp(max=1 - 1e-6)
-    other = torch.log1p(-p)
-    z = torch.where(sampled_complete, logp.detach() - other, other - logp.detach())
-    slope = (1.0 / (1.0 - p)).clamp(max=grad_clip)
-    slope = torch.where(sampled_complete, slope, -slope)
-    return z + slope * (logp - logp.detach())
+def text_tokenizer(trainer: Any) -> Any:
+    """The text tokenizer behind the trainer: TRL keeps it as `_tokenizer`; for a multimodal family (Qwen3.5)
+    `processing_class` is a processor whose `__call__` takes images first (review C1)."""
+    tok = getattr(trainer, "_tokenizer", None)
+    if tok is not None:
+        return tok
+    pc = trainer.processing_class
+    return getattr(pc, "tokenizer", pc)
+
+
+def tool_call_tokens(tok: Any) -> tuple[int | None, int | None]:
+    """The single-token tool-call delimiters (`<tool_call>`, `</tool_call>`), or None where the tokenizer has none."""
+    out = []
+    for text in ("<tool_call>", "</tool_call>"):
+        ids = tok(text, add_special_tokens=False).input_ids
+        out.append(ids[0] if len(ids) == 1 else None)
+    return out[0], out[1]
+
+
+class StatusLogits:
+    """z = logit(complete) - logit(incomplete) at each row's status token, in fp32, from the training forward itself.
+
+    A forward pre-hook on the lm_head reads the final hidden state at the position that predicts the status token and
+    takes the dot product with the two tokens' output rows in fp32. Exact (no "two options carry all the mass"
+    assumption) and free of the bf16 log-softmax, which rounds log p to 0 and its gradient to 0 for a confident token
+    (G2's failing claims sit at pi ~ 0.99999). The hidden state carries the policy's graph, so z has the gradient the
+    report term needs; nothing else in the forward changes.
+
+    The hook consumes `expect` entries in forward order: (global row ids, completion columns the forward keeps). A
+    forward over n rows takes the next n ids; its hidden states end with the kept completion columns plus TRL's one
+    extra position, so completion column j is hidden index `width - (keep + 1) + j`."""
+
+    def __init__(self, lm_head: torch.nn.Module, pos: torch.Tensor, complete: int, incomplete: int):
+        self.lm_head, self.pos = lm_head, pos
+        self.tokens = (complete, incomplete)
+        self.queue: list[tuple[torch.Tensor, int]] = []
+        self.z: dict[int, torch.Tensor] = {}
+        self._handle: Any = None
+
+    def expect(self, rows: torch.Tensor, keep: int) -> None:
+        self.queue.append((rows.detach().cpu(), int(keep)))
+
+    def _take(self, n: int) -> tuple[list[int], int]:
+        ids: list[int] = []
+        keep = 0
+        while len(ids) < n and self.queue:
+            rows, keep = self.queue[0]
+            need = n - len(ids)
+            ids += rows[:need].tolist()
+            rest = rows[need:]
+            if rest.numel():
+                self.queue[0] = (rest, keep)
+            else:
+                self.queue.pop(0)
+        if len(ids) != n:
+            raise RuntimeError(f"status hook: a forward over {n} rows, {len(ids)} expected")
+        return ids, keep
+
+    def _hook(self, module: torch.nn.Module, args: tuple) -> None:
+        hidden = args[0]
+        ids, keep = self._take(hidden.size(0))
+        width = hidden.size(1)
+        w = module.weight
+        diff = w[self.tokens[0]].float() - w[self.tokens[1]].float()
+        for local, g in enumerate(ids):
+            j = int(self.pos[g])
+            if 0 <= j < keep:
+                self.z[g] = hidden[local, width - (keep + 1) + j].float() @ diff
+
+    def __enter__(self) -> Self:
+        self._handle = self.lm_head.register_forward_pre_hook(self._hook)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._handle.remove()
+
+    def values(self, n_rows: int, like: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """(z per row, found mask): rows whose status position no forward reached get no z."""
+        found = torch.tensor([g in self.z for g in range(n_rows)], device=like.device)
+        z = torch.stack([self.z[g] if g in self.z else like.new_zeros((), dtype=torch.float32) for g in range(n_rows)])
+        return z, found
 
 
 def report_term(
-    logps: torch.Tensor,
-    completion_ids: torch.Tensor,
-    pos: torch.Tensor,
+    z: torch.Tensor,
+    found: torch.Tensor,
     delta: torch.Tensor,
-    complete: int,
     *,
     c_rep: float,
     z_max: float,
-    grad_clip: float,
     denominator: float,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    """l_rep = -c_rep * sum_i delta_i * z_i / denominator over the rows with a status token (pos >= 0), z frozen once
-    past z_max in the direction of delta_i. `delta` is a constant (the graded outcome), so no gradient reaches the
-    actions through it."""
-    rows = (pos >= 0).nonzero(as_tuple=True)[0]
-    zero = logps.sum() * 0.0
+    """l_rep = -c_rep * sum_i delta_i * z_i / denominator over the rows whose status z was computed, z frozen once
+    past z_max in the direction of delta_i. d l_rep / d z_i = -c_rep * delta_i / denominator exactly: the natural step
+    of E_r[L] in the claim log-odds. `delta` is a constant (the graded outcome), so no gradient reaches the actions
+    through it."""
+    rows = found.nonzero(as_tuple=True)[0]
     if rows.numel() == 0:
-        return zero, {METRIC_REP_N: 0.0}
-    at = pos[rows]
-    lp = logps[rows, at]
-    z = status_log_odds(lp, completion_ids[rows, at] == complete, grad_clip)
-    d = delta[rows].to(z.dtype)
-    frozen = ((d > 0) & (z.detach() > z_max)) | ((d < 0) & (z.detach() < -z_max))
-    loss = -(c_rep * d * z * (~frozen)).sum() / denominator
+        return z.sum() * 0.0, {METRIC_REP_N: 0.0}
+    zr = z[rows]
+    d = delta[rows].to(zr.dtype)
+    frozen = ((d > 0) & (zr.detach() > z_max)) | ((d < 0) & (zr.detach() < -z_max))
+    loss = -(c_rep * d * zr * (~frozen)).sum() / denominator
     stats = {
         METRIC_REP_N: float(rows.numel()),
-        METRIC_REP_PI: torch.sigmoid(z.detach()).mean().item(),
+        METRIC_REP_PI: torch.sigmoid(zr.detach()).mean().item(),
         METRIC_REP_FROZEN: frozen.float().mean().item(),
         METRIC_REP_LOSS: loss.detach().item(),
+        METRIC_REP_Z_ABS: zr.detach().abs().mean().item(),
     }
     return loss, stats
 
@@ -551,12 +645,14 @@ class HonestGRPOTrainer(GRPOTrainer):
     # ── padding-free scoring ──────────────────────────────────────
 
     def _get_per_token_logps_and_entropies(self, model, *args, **kwargs):
-        """`_scored_logps`; inside `_compute_loss` with the report term on, the training forward's log-probs are kept
-        for `report_term` (the same tensor the main loss uses, with its graph)."""
-        out = self._scored_logps(model, *args, **kwargs)
-        if getattr(self, "_capture_logps", False) and torch.is_grad_enabled():
-            self._captured_logps = out[0]
-        return out
+        """`_scored_logps`; inside `_compute_loss` with the report term on, the status hook (`StatusLogits`) reads the
+        same forward's hidden states."""
+        return self._scored_logps(model, *args, **kwargs)
+
+    def _expect_status(self, rows: torch.Tensor, keep: int) -> None:
+        status = getattr(self, "_status", None)
+        if status is not None and torch.is_grad_enabled():
+            status.expect(rows, keep)
 
     def _scored_logps(
         self, model, input_ids, attention_mask, logits_to_keep, *args, batch_size=None, compute_aux_loss=False, **kwargs
@@ -568,6 +664,7 @@ class HonestGRPOTrainer(GRPOTrainer):
         """
         extras = {k: v for k, v in kwargs.items() if k != "compute_entropy" and v is not None}
         if not self.trim_padding or compute_aux_loss or extras or input_ids.size(0) == 0:
+            self._expect_status(torch.arange(input_ids.size(0)), logits_to_keep)  # TRL batches the rows in order
             return super()._get_per_token_logps_and_entropies(
                 model,
                 input_ids,
@@ -585,6 +682,7 @@ class HonestGRPOTrainer(GRPOTrainer):
         for rows, lo, hi in chunks:
             index = rows.to(input_ids.device)
             keep = hi - (input_ids.size(1) - logits_to_keep)  # completion columns inside the window: a prefix of them
+            self._expect_status(rows, keep)
             chunk_logps, chunk_entropies, _ = super()._get_per_token_logps_and_entropies(
                 model,
                 input_ids[index, lo:hi],
@@ -656,9 +754,14 @@ class HonestGRPOTrainer(GRPOTrainer):
         pos = torch.full((n_rows,), -1, dtype=torch.long, device=ids.device)
         delta = torch.zeros(n_rows, dtype=torch.float32, device=ids.device)
 
-        def decode(x: list[int]) -> str:
-            return self.processing_class.decode(x, skip_special_tokens=False)
+        tok = text_tokenizer(self)
 
+        def decode(x: list[int]) -> str:
+            return tok.decode(x, skip_special_tokens=False)
+
+        call_open, call_close = tool_call_tokens(tok)
+
+        n_found, n_rows_status = [0, 0], [0, 0]  # [non-claims, claims]
         for i in range(n_rows):
             env = envs[i] if i < len(envs) else None
             signal = getattr(env, ENV_CRGRPO_ATTR, None)
@@ -667,10 +770,17 @@ class HonestGRPOTrainer(GRPOTrainer):
             if not signal:
                 continue
             report = getattr(env, "_report", None)
-            claimed = None if report is None else report.status == Status.COMPLETE
+            if report is None:  # no report, or one that did not parse: the grader saw no status to train on
+                continue
+            claimed = report.status == Status.COMPLETE
             n = int(cmask[i].sum())
             row_mask = tmask[i, :n].tolist() if tmask is not None else None
-            j = status_position(ids[i, :n].tolist(), row_mask, complete, incomplete, decode, claimed)
+            j = status_position(
+                ids[i, :n].tolist(), row_mask, complete, incomplete, decode, claimed, call_open, call_close
+            )
+            if j >= 0:
+                n_found[bool(claimed)] += 1
+            n_rows_status[bool(claimed)] += 1
             if j >= 0:
                 pos[i], delta[i] = j, float(signal["delta"])
         found = (pos >= 0).nonzero(as_tuple=True)[0]
@@ -679,36 +789,98 @@ class HonestGRPOTrainer(GRPOTrainer):
         output["crgrpo_pos"], output["crgrpo_delta"] = pos, delta
         metrics = self._metrics["train" if self.model.training else "eval"]
         metrics["crgrpo/rep/found_share"].append(found.numel() / n_rows if n_rows else 0.0)
+        for k, name in ((1, "claims"), (0, "non_claims")):
+            if n_rows_status[k]:
+                metrics[f"crgrpo/rep/found_share_{name}"].append(n_found[k] / n_rows_status[k])
 
     def _compute_loss(self, model, inputs):
         self._log_sampling_drift(inputs)
         pos = inputs.get("crgrpo_pos")
         if pos is None or self.crgrpo is None or not self.model.training:
             return super()._compute_loss(model, inputs)
-        self._capture_logps = True
+        if getattr(self, "use_liger_kernel", False):  # its chunked loss reads lm_head.weight and never calls the module
+            raise RuntimeError("the CR-GRPO report term needs the lm_head forward (use_liger_kernel must be off)")
+        lm_head = self.accelerator.unwrap_model(model).get_output_embeddings()
+        status = StatusLogits(lm_head, pos, *self.status_tokens)
+        self._status = status
         try:
-            loss = super()._compute_loss(model, inputs)
+            with status:
+                loss = super()._compute_loss(model, inputs)
         finally:
-            self._capture_logps = False
-        logps = self.__dict__.pop("_captured_logps", None)
-        if logps is None:
-            raise RuntimeError("the CR-GRPO report term found no training log-probs to train the status token on")
+            self._status = None
+        z, found = status.values(pos.size(0), inputs["crgrpo_delta"])
         s = self.crgrpo
         rep, stats = report_term(
-            logps,
-            inputs["completion_ids"],
-            pos,
+            z,
+            found & (pos >= 0),
             inputs["crgrpo_delta"],
-            self.status_tokens[0],
             c_rep=s.c_rep,
             z_max=s.z_max,
-            grad_clip=s.grad_clip,
-            # a mean over the optimizer step's rows, as the main loss is one sum over its tokens
+            # a mean over the optimizer step's rows (64), as the main loss is one sum over its tokens
             denominator=float(pos.size(0) * self.current_gradient_accumulation_steps),
         )
+        stats["crgrpo/rep/hooked_share"] = (
+            float(found[pos >= 0].float().mean().item()) if bool((pos >= 0).any()) else 1.0
+        )
+        if bool((pos >= 0).any()) and not bool(found[pos >= 0].any()):
+            raise RuntimeError("the CR-GRPO status hook reached none of the micro-batch's status tokens")
         for name, value in stats.items():
             self._metrics["train"][name].append(value)
+        self._measure_grad_ratio(model, loss, rep)
         return loss + rep
+
+    def _measure_grad_ratio(self, model: Any, main: torch.Tensor, rep: torch.Tensor) -> None:
+        """|grad l_rep| / |grad main| over the trainable parameters, summed over the optimizer step's micro-batches,
+        on the first `crgrpo.grad_ratio_steps` steps (two extra backward passes per micro-batch there). Every
+        micro-batch counts, a row without a status token adding zero to the report side (review: with one row per
+        micro-batch, skipping them mixed steps and biased the ratio up); the buffer belongs to one `global_step` and
+        is closed when it has every micro-batch of the step or when the step changes. Logged and appended to
+        `GRAD_RATIO_FILE`; above `crgrpo.grad_ratio_max` the run stops."""
+        s = self.crgrpo
+        step = int(getattr(getattr(self, "state", None), "global_step", 0))
+        buf = self.__dict__.get("_ratio_buf")
+        if buf is not None and buf["step"] != step:
+            self._close_ratio(buf)
+            buf = None
+        if step >= s.grad_ratio_steps:
+            return
+        params = [p for p in model.parameters() if p.requires_grad]
+        if buf is None:
+            buf = self.__dict__["_ratio_buf"] = {"step": step, "main": None, "rep": None, "n": 0}
+
+        def grads(x: torch.Tensor) -> list[torch.Tensor]:
+            if not x.requires_grad:
+                return [torch.zeros_like(p) for p in params]
+            g = torch.autograd.grad(x, params, retain_graph=True, allow_unused=True)
+            return [torch.zeros_like(p) if gi is None else gi.detach() for gi, p in zip(g, params, strict=True)]
+
+        for key, x in (("main", main), ("rep", rep)):
+            g = grads(x)
+            buf[key] = g if buf[key] is None else [a + b for a, b in zip(buf[key], g, strict=True)]
+        buf["n"] += 1
+        if buf["n"] >= self.current_gradient_accumulation_steps:
+            self._close_ratio(buf)
+
+    def _close_ratio(self, buf: dict[str, Any]) -> None:
+        s = self.crgrpo
+        self.__dict__.pop("_ratio_buf", None)
+        step = buf["step"]
+        norm = {k: torch.sqrt(sum((g.float() ** 2).sum() for g in buf[k])).item() for k in ("main", "rep")}
+        ratio = norm["rep"] / max(norm["main"], 1e-12)
+        self._metrics["train"][METRIC_REP_GRAD_RATIO].append(ratio)
+        self._metrics["train"]["crgrpo/rep/grad_norm"].append(norm["rep"])
+        self._metrics["train"]["crgrpo/main/grad_norm"].append(norm["main"])
+        logger.info("crgrpo step %d: |grad rep| %.4g, |grad main| %.4g, ratio %.3f (%d micro-batches)", step,
+                    norm["rep"], norm["main"], ratio, buf["n"])  # fmt: skip
+        out_dir = getattr(getattr(self, "args", None), "output_dir", None)
+        if out_dir and int(os.environ.get("RANK", "0")) == 0:  # read by `python -m honest_agents.crgrpo calibrate`
+            with open(os.path.join(out_dir, GRAD_RATIO_FILE), "a") as f:
+                row = {"step": step, "c_rep": s.c_rep, "ratio": ratio, "micro_batches": buf["n"], **norm}
+                f.write(json.dumps(row) + "\n")
+        if s.grad_ratio_max is not None and ratio > s.grad_ratio_max:
+            raise RuntimeError(
+                f"CR-GRPO stop: |grad l_rep| / |grad main| = {ratio:.2f} at step {step} exceeds {s.grad_ratio_max}"
+            )
 
     def _log_sampling_drift(self, inputs: dict[str, Any]) -> None:
         """Token shares of the vLLM importance ratio TRL does not log: at the truncation cap, and far from 1."""

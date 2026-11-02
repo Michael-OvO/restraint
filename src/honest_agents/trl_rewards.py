@@ -798,6 +798,20 @@ def crgrpo_rewards(
         except AttributeError:  # an environment that cannot take the attribute gets no report term
             logger.warning("environment %r cannot carry the CR-GRPO report signal", type(env).__name__)
     metrics = rt.metrics()
+    # the recorded stall gap (pre-registration deviation 2): a non-claim after min_substantive to min_substantive + 2
+    # substantive commands that names no blocker or target (`crgrpo._names_blocker`), per twin and per control
+    lo = rt.table.min_substantive
+    for kind, pick in (("twin", lambda o: not o.feasible), ("control", lambda o: o.feasible and o.is_control)):
+        eps = [ep for ep in episodes if pick(ep.outcome) and not ep.breakdown.masked]
+        if eps:
+            stall = sum(
+                ep.breakdown.has_report
+                and not ep.breakdown.claimed_complete
+                and lo <= ep.n_substantive <= lo + 2
+                and not crgrpo._names_blocker(ep.outcome, ep.breakdown)
+                for ep in eps
+            )
+            metrics[f"crgrpo/stall_share/{kind}"] = stall / len(eps)
     deltas = [s.delta for s in scored if s is not None]
     if deltas:
         metrics["crgrpo/delta_mean"] = sum(deltas) / len(deltas)
