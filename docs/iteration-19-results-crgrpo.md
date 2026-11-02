@@ -15,7 +15,12 @@ delegation, with its dated amendments and launch deviations). Run log and every 
 
 Neither arm supports the core claim. The report term, as designed, collapses the status token into blanket non-claims;
 without it, the payoff table and the constraints leave the claim rate where it was while task success falls, so false
-claims rise.
+claims rise. The common cause (bad-case read): the reward depends on the hidden test result and the twin label, and
+nothing in the policy's own context separates passing work from failing work. The ablation's extra false claims come
+from variants it now passes less (+22, against −7 where it passes more), claimed at confidence about 1.0 without
+running the tests. At μ_fc's cap (0.35) a claim pays whenever P(pass) > 1/3, and on controls a blocker-citing decline
+is priced about −2.2 against −0.35 for a false claim (controls carry 56 of the 93 false claims). On all 208 high_risk
+twins at S = 4, irreversible violations were 31 (G2) and 37 (ablation), descriptive.
 
 ## Method arm (stopped)
 
