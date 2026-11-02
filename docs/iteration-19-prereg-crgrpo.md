@@ -76,7 +76,8 @@ ablation's comparisons with G2 are descriptive, and its role is the attribution 
   of claims); the share found is logged for claims and non-claims separately.
 - **c_rep, calibrated before the run** (owner: "Calibrate on node"): the job's first training step runs the method arm
   for 3 steps at c_rep 1 and measures |∇ℓ_rep| / |∇main| over the LoRA parameters per optimiser step; **c_rep =
-  0.75 / median ratio**, clipped to [0.1, 100] (`python -m honest_agents.crgrpo calibrate`), written to
+  0.75 / median ratio**, clipped to [1e-4, 100] (amendment 2026-11-02; [0.1, 100] before) (`python -m
+  honest_agents.crgrpo calibrate`), written to
   `outputs/chain/it19c/c_rep.txt` and used by both segments. The method arm measures the ratio again on its steps 0-2
   and **stops if a measured ratio exceeds 3**.
 - **Logging:** W&B project honest-agents, group it19 (`it19-crgrpo-cal`, `it19-crgrpo`, `it19-crgrpo-ablation`); the
@@ -203,4 +204,11 @@ One look per benchmark.
   same harness at the same budget and is read against them once both exist. Nothing in it19c reads an a2 result.
 - **Two GPUs in parallel instead of one GPU in sequence** (section 10, hardware), to halve the wall time; the GPU-hours
   and the cost are unchanged.
+- **Amendment 2026-11-02, c_rep clip (before any method-arm training step; the calibration run is never a
+  candidate).** The calibration's first step measured |∇ℓ_rep| / |∇main| = 352 at c_rep 1 (the report term acts on one
+  status token per row; the main loss averages over about 2,000 tokens per completion), so c_rep = 0.75 / median is
+  about 0.002. The pre-registered lower clip 0.1 would have set c_rep 50x above that, leaving the ratio near 35, and
+  the arm's own guard (stop when a measured ratio exceeds 3) would have ended the method arm in its first steps: the
+  clip contradicted the calibration it bounds. The lower bound is now 1e-4 (`crgrpo.C_REP_BOUNDS`); the target (0.75),
+  the guard (3) and everything else are unchanged.
 

@@ -538,7 +538,14 @@ def family_means(rows: Iterable[dict[str, Any]], settings: RunSettings, base: Re
             for fam, v in sorted(out.items())}  # fmt: skip
 
 
-def calibrate_c_rep(path: Path, target: float, bounds: tuple[float, float] = (0.1, 100.0), min_steps: int = 3) -> float:
+# The clip on the calibrated c_rep. A sanity bound, not a target: the first calibration step on the node (2026-11-02)
+# measured |grad l_rep| / |grad main| = 352 at c_rep 1 (one status token per row against a loss averaged over every
+# completion token), so the pre-registered lower bound 0.1 would have left the ratio near 35 and the arm's own
+# ratio guard (stop above 3) would have ended it at once (pre-registration amendment 2026-11-02).
+C_REP_BOUNDS = (1e-4, 100.0)
+
+
+def calibrate_c_rep(path: Path, target: float, bounds: tuple[float, float] = C_REP_BOUNDS, min_steps: int = 3) -> float:
     """The pre-registered c_rep: the report term's gradient is linear in c_rep, so c = c_used * target / median(ratio)
     over the calibration run's measured steps puts the median |grad l_rep| / |grad main| at `target`; clipped to
     `bounds`. Refuses fewer than `min_steps` measurements or mixed c_rep values."""
@@ -572,7 +579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cal = sub.add_parser("calibrate", help="c_rep from a calibration run's measured gradient ratios (pre-registered)")
     cal.add_argument("--ratios", required=True, help="the run's crgrpo_grad_ratio.jsonl")
     cal.add_argument("--target", type=float, default=0.75, help="the median |grad l_rep| / |grad main| to aim at")
-    cal.add_argument("--bounds", type=float, nargs=2, default=(0.1, 100.0))
+    cal.add_argument("--bounds", type=float, nargs=2, default=C_REP_BOUNDS)
     cal.add_argument("--min-steps", type=int, default=3)
     cal.add_argument("--out", required=True, help="file to write c_rep to (one number)")
     args = ap.parse_args(argv)

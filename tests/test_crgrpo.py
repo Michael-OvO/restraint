@@ -329,6 +329,17 @@ def test_c_rep_calibration_puts_the_median_ratio_at_the_target(tmp_path):
         cr.calibrate_c_rep(path, 0.75, min_steps=4)
 
 
+def test_c_rep_calibration_reaches_the_target_at_the_measured_scale(tmp_path):
+    """The node measured a ratio of 352 at c_rep 1: the default bounds must not clip c_rep away from the target."""
+    import json
+
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        "".join(json.dumps({"step": s, "c_rep": 1.0, "ratio": r}) + "\n" for s, r in enumerate((352, 300, 410)))
+    )
+    assert cr.calibrate_c_rep(path, 0.75) == pytest.approx(0.75 / 352)
+
+
 @pytest.mark.parametrize(
     ("command", "substantive"),
     [('echo "<b>x</b>"', False), ('echo "a -> b"', False), ("cat <<< word\nls", False), ("ls 2>&1 >&2", False)],
