@@ -38,11 +38,12 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   5,141 tests pass. The prereg was approved 2026-11-02 under the owner's delegation; the c_rep lower clip was amended to
   1e-4 before any method-arm step, after the node measured a gradient ratio of 352 (c_rep 0.00213)
   (`docs/iteration-19-prereg-crgrpo.md`).
-- **it19c is running** on instance 58781495 (2x RTX PRO 6000 WS 96 GB, $4.53/h, about 17 h, about $77; balance before
-  $113.79). Attempt 3 started `method_seg1` at 10:35 UTC; no training step had run before it
-  (`docs/iteration-19-signoff.md`).
-- **Pending:** rule 1b at step 15 for each arm; the select-split P1 (false claims per feasible episode) and guards
-  G1-G6; the ablation's attribution contrast; the method arm's final benchmark against it19a's re-graded internal rows
+- **it19c: the method arm stopped at step 7 on the pre-registered stall guard**: it learned to report `incomplete` on
+  tasks it had solved (pi(claim) 0.73 -> 0.08), because the status token is trained by the report term alone and the
+  batch's push was net toward non-claims (`docs/iteration-19-research/badcase-it19c/method_stop.md`). No method
+  candidate exists. The ablation arm (no report term) is training normally on instance 58781495.
+- **Pending:** the ablation's rule 1b, select run and guards; the exploratory step-5 reading; the owner's decision on
+  the method arm (a re-run is a new pre-registered experiment); a2's G2 and base ImpossibleBench
   and a2's external rows; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
@@ -1770,12 +1771,23 @@ The re-graded rows are it19c's internal reference.
   - The calibration hit its timeout in an unneeded step-3 probe.
 - Attempt 3, 10:35: timeouts resized and `--resume` added on every eval. The G2 select run kept 447 of 816 episodes. `method_seg1` started with c_rep 0.00213.
 
-No training step of either arm had run before attempt 3. Pending:
-- method arm: steps 1-15, rule 1b at step 15, steps 16-30, G6;
-- the G2 reference select run, then the ablation arm on GPU 1;
-- the select-split P1 and guards for both arms;
-- the attribution contrast;
-- the method arm's final benchmark.
+No training step of either arm had run before attempt 3.
+- G2 reference on the select split (S = 4, 816 episodes, 0 infra errors): false claims per feasible episode 97/512 =
+  18.9 % (two earlier G2 select runs 15.7-17.8 %), verified success 73.6 %, claims on infeasible variants 12.2 %.
+- **The method arm stopped at step 7 on the pre-registered stall guard** (feasible decline 0.325 over steps 3-7 against
+  0.30). The status token's pi(claim) fell 0.73 -> 0.08 over steps 1-7. At step 7, 20 of 31 passing feasible episodes
+  reported `incomplete`, against 1 of 140 over steps 1-5; the model kept working (about 17 actions) and only the status
+  token turned. The pre-registered design trains the status token by l_rep alone (masked from the main loss); the batch's
+  delta was net negative from step 1 (the twins at about -3V each), and the one-sided z_max freeze silenced the
+  correct-claim rows, so the push to lower the claim logit spread to every context
+  (`docs/iteration-19-research/badcase-it19c/method_stop.md`). Under the pre-registration the arm ends: no method
+  candidate, no final benchmark, and P1 cannot be computed as registered.
+- Ablation arm (no report term): steps 1-5 normal (10 min per step, feasible decline 0.075-0.20, false-claim rate per
+  step 0.225 -> 0.05-0.075); still running. An exploratory measurement of the method's step-5 checkpoint on the select
+  split (S = 2, not pre-registered) runs on the idle GPU 0.
+
+Pending: the ablation's rule 1b at step 15, its steps 16-30, select run and guards; the exploratory step-5 reading; what
+the owner decides about the method arm (any re-run is a new pre-registered experiment).
 
 **a2 G2: running.**
 - Base TB2: done (above).
