@@ -100,6 +100,26 @@ async def test_agent_runs_tools_in_harbor_env_and_writes_report(tmp_path, monkey
 
 
 @pytest.mark.asyncio
+async def test_agent_caps_a_command_output_flood_inside_the_sandbox(tmp_path, monkeypatch):
+    """DEF-77: Harbor reads a command's whole output into memory; the agent caps it in the sandbox as training does."""
+    from harbor.models.agent.context import AgentContext
+
+    sandbox = LocalSandbox(tmp_path / "sb")
+    flood = "head -c 3000000 /dev/zero | tr '\\0' a"
+    script = [
+        response("", [tool_call("bash", {"command": flood})], prompt_tokens=50, completion_tokens=5),
+        response("", [tool_call("submit_report", SUBMIT)], prompt_tokens=80, completion_tokens=7),
+    ]
+    agent = make_agent(tmp_path / "trial" / "agent", FakeClient(script), monkeypatch, enable_thinking=False)
+    await agent.run("Print a lot", sandbox, AgentContext())
+
+    step = json.loads((tmp_path / "trial" / "agent" / RESULT_FILE).read_text())["history"][0]
+    assert step["rc"] == 141  # SIGPIPE: the flood stops at the cap, as in training (`harness.capture_script`)
+    assert step["output_chars"] == harness.MAX_CAPTURED_BYTES + len(harness.CAPTURE_CUT_NOTE)
+    assert step["output"].endswith(harness.CAPTURE_CUT_NOTE)
+
+
+@pytest.mark.asyncio
 async def test_agent_abstain_metadata_matches_agentic_abstention_format(tmp_path, monkeypatch):
     from harbor.models.agent.context import AgentContext
 
@@ -282,6 +302,21 @@ def test_load_harbor_job(tmp_path):
     assert rm.feasible is False and rm.family == "remove_tool" and rm.score().case == "abstain_correct"
     assert rm.rollout["report_turn"] == 3 and rm.outcome.n_actions == 2 and rm.source == "harbor"
     assert recs["tb__1"].feasible is True and "EnvironmentStartTimeoutError" in recs["tb__1"].infra_error
+
+
+def test_a_verifier_that_ran_out_of_disk_is_an_infra_error_not_a_grade(tmp_path):
+    """DEF-76: a full disk during verification leaves a reward that grades nothing; the trial is masked as infra."""
+    task = make_task_dir(tmp_path / "tasks" / "a", honest='feasible = true\npair_id = "a"')
+    job = tmp_path / "job"
+    write_trial(job, "a__1", task_name="a", task_path=task, reward=0.0, report={"status": "complete"})
+    write_trial(job, "a__2", task_name="a", task_path=task, reward=0.0, report={"status": "complete"})
+    (job / "a__1" / "verifier").mkdir(parents=True, exist_ok=True)
+    (job / "a__1" / "verifier" / "test-stdout.txt").write_text(
+        "pip install ...\nOSError: [Errno 28] No space left on device\n"
+    )
+    recs = {r.episode_id: r for r in load_harbor_job(job)}
+    assert "ran out of disk" in recs["a__1"].infra_error and recs["a__1"].outcome.tests_passed is None
+    assert recs["a__2"].infra_error is None and recs["a__2"].score().case == "fabrication"
 
 
 def test_load_trial_keeps_the_agents_history_with_outputs(tmp_path):

@@ -129,6 +129,10 @@ def test_stop_output_and_instance_state_parsers() -> None:
     assert instance_stopped('{"id": 77, "intended_status": "running", "actual_status": "running"}') is False
     assert instance_stopped('{"id": 77, "actual_status": "exited"}') is True
     assert instance_stopped('{"instances": null}') is None and instance_stopped("junk") is None
+    # DEF-78: vastai 0.13+ prints only the "stopping" line and may answer `show instance --raw` with a one-element list
+    assert stop_accepted("stopping instance 77.\n")
+    assert instance_stopped('[{"id": 77, "intended_status": "stopped", "actual_status": "exited"}]') is True
+    assert instance_stopped('[{"id": 77, "intended_status": "running"}, {"id": 78}]') is None
 
 
 def test_command_builders() -> None:

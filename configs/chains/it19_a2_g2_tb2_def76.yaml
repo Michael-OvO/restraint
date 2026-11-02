@@ -1,0 +1,38 @@
+# Iteration 19, stage (a2): DEF-76 re-run of four G2 TB2 trials whose verifier ran out of disk on instance 58815330
+# (a 200 GB disk with 127 GB of TB2 images): custom-memory-heap-crash__yzo54hR, torch-pipeline-parallelism__Jb4HtBN,
+# torch-tensor-parallelism__A3aqPVw and __gCnPo3U, moved to runs/harbor/it19a2_g2_tb2_def76_invalid. Resumed in place on
+# instance 58845540 (131 GB free) with the job's own config and the node's pinned code (no DEF-77 output cap, as every
+# other a2 trial ran). Approved under the owner's delegation of 2026-11-02.
+name: it19a2g2def76
+state_dir: outputs/chain/it19a2g2def76
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: g2_tb2_rerun
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval harbor jobs resume
+      -p runs/harbor/it19a2_g2_tb2/tb2__policy__honest__20261102_120809
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.harbor_results
+      runs/harbor/it19a2_g2_tb2/tb2__policy__honest__20261102_120809
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark units
+      --single --bench terminal_bench_2 runs/harbor/it19a2_g2_tb2/tb2__* --out runs/final/it19a2/g2_tb2_units.json
+      && mkdir -p outputs/chain/it19a2g2def76/markers && touch outputs/chain/it19a2g2def76/markers/g2_tb2_rerun.done
+    gpus: [0]
+    done: outputs/chain/it19a2g2def76/markers/g2_tb2_rerun.done
+    after: []
+    timeout_min: 240
+    on_failure: stop
+    stall_min: 120
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+sanity_runs:  # G2's sanity run on this node (configs/chains/it19_a2_g2_tb2_bigmem.yaml)
+  outputs/it15/g2_merged: runs/eval/it19a2_g2_sanity_bigmem
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it19a2_g2_tb2, runs/harbor/it19a2_g2_tb2_def76_invalid, runs/final/it19a2, outputs/logs]

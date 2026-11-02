@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import math
+import shlex
 import threading
 import uuid
 from dataclasses import dataclass
@@ -577,3 +578,42 @@ async def start_sandbox(env: Any, task: Any, environment_type: str) -> None:
         _WARM.add(name)
     finally:
         lock.release()
+
+
+# Bytes of one command's output that reach the host process (the training env and the Harbor agent, DEF-77). Harbor keeps the whole stdout/stderr in memory and the
+# model is shown at most MAX_OUTPUT_CHARS (2,000) of it, so an output flood (`yes`, `cat` of a big file, a print loop)
+# only costs RAM: a run was OOM-killed with the trainer at 69 GB. Capped inside the container with `head -c`.
+MAX_CAPTURED_BYTES = 1_000_000
+# After the command itself exits, how long the capture may still drain before it is stopped (DEF-65): a process the
+# command backgrounded keeps the capture's write end open, so waiting for end-of-file would wait for that process.
+CAPTURE_DRAIN_SEC = 2
+CAPTURE_CUT_NOTE = "\n[output cut at 1 MB: the command printed more]"
+
+
+def capture_script(command: str, timeout: int, kill_after: int = 5) -> str:
+    """The shell script one agent command runs as: under `timeout -k`, output capped at `MAX_CAPTURED_BYTES` + 1 (one
+    byte over marks a cut), exit code the command's own (124 / 137 on a timeout).
+
+    The command writes into a FIFO. Its reader is `tee` (unbuffered on GNU and BSD), which writes every chunk straight
+    into an unlinked capture file and passes it on to `head -c`, there only to enforce the cap: when `head` exits,
+    `tee` and then the command get SIGPIPE, so a flood stops at the cap as it did with the old `cmd 2>&1 | head -c`.
+    The script waits for the command, not for end-of-file (DEF-65): a process the command backgrounds
+    (`./server.sh &`) inherits the FIFO's write end, so waiting for end-of-file waited as long as that process lived,
+    and every later exec of the episode hung on the host's backstop. Once the command exits, the readers get
+    `CAPTURE_DRAIN_SEC` to finish; then the capture file is read and the script exits. Nothing is killed: readers
+    still held by a backgrounded process keep draining its output into the unlinked file (up to the cap), as a
+    terminal would, and hold none of the exec's own streams. The FIFO and the capture file are unlinked before the
+    command starts, so it never sees them. Without `mktemp` / `mkfifo` the script falls back to the plain pipe."""
+    cap = MAX_CAPTURED_BYTES + 1
+    inner = f"timeout -k {kill_after} {timeout} bash -c {shlex.quote(command)}"
+    polls = CAPTURE_DRAIN_SEC * 100  # 10 ms steps: the readers usually finish within the first one
+    return (
+        'if o=$(mktemp 2>/dev/null) && d=$(mktemp -d 2>/dev/null) && mkfifo "$d/p" 2>/dev/null; then '
+        'exec 3>"$o" 4<"$o"; rm -f "$o"; '
+        f'{{ tee /dev/fd/3 <"$d/p" | head -c {cap}; }} >/dev/null 2>&1 4<&- </dev/null & h=$!; '
+        'exec 7>"$d/p"; rm -rf "$d"; '
+        f"{inner} >&7 2>&1 3>&- 4<&- 7>&-; rc=$?; exec 7>&- 3>&-; "
+        f'i=0; while kill -0 "$h" 2>/dev/null && [ "$i" -lt {polls} ]; do sleep 0.01; i=$((i+1)); done; '
+        f'head -c {cap} <&4; exit "$rc"; '
+        f"else set -o pipefail; {inner} 2>&1 | head -c {cap}; fi"
+    )

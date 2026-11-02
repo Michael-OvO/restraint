@@ -219,7 +219,8 @@ async def test_agent_bash_runs_under_timeout_k_like_the_training_env(tmp_path, m
     )
     monkeypatch.setattr(agent, "_client", lambda: client)
     await agent.run("x", sandbox, AgentContext())
-    assert sandbox.calls[0].command.startswith("timeout -k 5 1 bash -c ")
+    # the training env's wrapper (`harness.capture_script`, DEF-77): `timeout -k` inside, output capped in the sandbox
+    assert sandbox.calls[0].command.startswith("bash -c ") and "timeout -k 5 1 bash -c " in sandbox.calls[0].command
     assert sandbox.calls[0].timeout_sec == 1 + 5 + 15
     tool_output = client.requests[1]["messages"][-1]["content"]
     assert "[exit code: 124]" in tool_output and "timed out after 1s" in tool_output

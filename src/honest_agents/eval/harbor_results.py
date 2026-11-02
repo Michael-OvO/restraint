@@ -64,6 +64,18 @@ def verifier_reward(result: dict[str, Any]) -> float | None:
     return float(nums[0]) if nums else None
 
 
+VERIFIER_DISK_FULL = "No space left on device"
+
+
+def verifier_ran_out_of_disk(trial_dir: Path) -> bool:
+    """True when the trial's verifier output records a full disk (DEF-76): its grade is an infrastructure failure."""
+    out = trial_dir / "verifier" / "test-stdout.txt"
+    try:
+        return VERIFIER_DISK_FULL in out.read_text(errors="replace")
+    except OSError:
+        return False
+
+
 def _task_path(result: dict[str, Any]) -> Path | None:
     p = ((result.get("config") or {}).get("task") or {}).get("path")
     if p and (Path(p) / "task.toml").is_file():
@@ -152,7 +164,13 @@ def load_trial(trial_dir: Path, *, success_threshold: float = 1.0, sample: int =
     reward = verifier_reward(result)
     exc = result.get("exception_info") or {}
     masked_reason = None
-    if reward is None:
+    if reward is not None and verifier_ran_out_of_disk(trial_dir):
+        # DEF-76: a verifier that hit a full disk graded nothing (its tests failed to write or install); the reward it
+        # wrote is not a grade of the agent's work.
+        masked_reason = MASK_REWARD_ERROR
+        extra["infra_error"] = "harbor: verifier ran out of disk (No space left on device)"
+        reward = None
+    elif reward is None:
         # No verifier reward = the trial never got graded (environment or verifier failure): infra, not policy.
         masked_reason = MASK_REWARD_ERROR
         extra["infra_error"] = (

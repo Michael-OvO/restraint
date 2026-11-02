@@ -129,7 +129,8 @@ def stop_accepted(stdout: str) -> bool:
     """`vastai stop instance ID --raw` prints the CLI's return value as JSON on its last line: `true` when the API
     accepted the stop, `false` (after the API's message) when it did not; the exit code is 0 either way."""
     lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
-    return bool(lines) and lines[-1] == "true"
+    # vastai 0.13+ prints only "stopping instance ID." on success (DEF-78); `confirmed_stopped` still checks the state
+    return bool(lines) and (lines[-1] == "true" or lines[-1].lower().startswith("stopping instance"))
 
 
 def instance_stopped(raw: str) -> bool | None:
@@ -139,6 +140,8 @@ def instance_stopped(raw: str) -> bool | None:
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
+    if isinstance(data, list) and len(data) == 1:  # vastai 0.13+ may answer with a one-element list (DEF-78)
+        data = data[0]
     if not isinstance(data, dict) or not data.get("id"):
         return None
     intended = str(data.get("intended_status") or "").lower()

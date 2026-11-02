@@ -264,11 +264,15 @@ class HonestPolicyAgent(BaseAgent):
             if refused is not None:
                 return refused
             # The same wrapper as `HonestHarborEnv.bash`: `timeout -k` kills the whole command inside the sandbox, so a
-            # command that outlives the host-side timeout cannot keep running into the next call or into grading.
-            wrapped = f"timeout -k {_KILL_AFTER_SEC} {timeout} bash -c {shlex.quote(command)}"
+            # command that outlives the host-side timeout cannot keep running into the next call or into grading, and
+            # the output is capped inside the sandbox (DEF-77: Harbor reads a command's whole output into memory, and
+            # an output flood twice OOM-killed the Harbor process of a TB2 job on a 47 GB VM).
+            wrapped = f"bash -c {shlex.quote(harness.capture_script(command, timeout, _KILL_AFTER_SEC))}"
             try:
                 res = await environment.exec(wrapped, timeout_sec=timeout + _KILL_AFTER_SEC + _EXEC_SLACK_SEC)
                 rc, out = res.return_code, (res.stdout or "") + (res.stderr or "")
+                if len(out) > harness.MAX_CAPTURED_BYTES:
+                    out = out[: harness.MAX_CAPTURED_BYTES] + harness.CAPTURE_CUT_NOTE
                 if rc in _TIMEOUT_CODES:
                     out += f"\n[command timed out after {timeout}s and was killed]"
             except Exception:

@@ -83,6 +83,9 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-73 | task data | closed 2026-11-01 | source f533b02d: the instruction asks for lines "in the form shown below: `LINE-1:  FILE_CREATED: ...`", then shows an example without the prefix; the test follows the example (DEF-66 review refuted it; both models 0 / 8) |
 | DEF-74 | task data | closed 2026-11-01 | remove_input controls with a "no extra files" test (2ce110bb, 8ac1e9e9, cda4eda5): restoring the input with `cp` leaves the perturbation's own backup, which fails the test; the oracle uses `mv` |
 | DEF-75 | metric | closed 2026-11-01 | `explains_non_completion` reads only `blocker` and `reason`: a decline whose explanation is in the `incomplete` list counts as unexplained (ImpossibleBench `flag_lenient`; G2 4, base 18 of the non-truncated impossible trials) |
+| DEF-76 | infrastructure / grading | fixing (re-run of the 4 trials running, 2026-11-02) | four G2 TB2 verifiers of stage a2 ran out of disk ("No space left on device") on a 200 GB node holding 127 GB of TB2 images; their rewards graded nothing, and one was scored as a false claim |
+| DEF-77 | harness / external eval | closed 2026-11-02 | the Harbor agent ran commands without the training path's in-sandbox output cap (DEF-65's `capture_script`); Harbor reads a command's whole output into memory, and output floods twice OOM-killed the Harbor process of G2's TB2 job on a 47 GB VM |
+| DEF-78 | infrastructure | closed 2026-11-02 | the watcher reported "STOP FAILED" after every successful stop: vastai 0.13 prints only "stopping instance N." and may answer `show instance --raw` with a one-element list |
 
 ---
 
@@ -3607,4 +3610,45 @@ section 7 critique) and from re-checks against the code and the archive on that 
   `refrozen`). On it19a (all 824 impossible-split trials per arm): base 2.3 %, G2 0.4 %, beside `flag_lenient` 23.4 % /
   27.7 % (reproduced). Test:
   `tests/eval/test_external_impossiblebench.py::test_a_decline_explained_only_in_incomplete_is_reported_beside_the_lenient_flag`.
+
+### DEF-76: TB2 verifiers that ran out of disk were scored as grades
+- **Area:** infrastructure / grading (`eval.harbor_results.load_trial`). **Status:** fixing (re-run of the 4 trials
+  running, 2026-11-02).
+  **Found:** 2026-11-02, the bad-case read of stage a2's G2 TB2 job (`docs/iteration-19-research/badcase-it19a2/g2_tb2.md`).
+- **Evidence:** instance 58815330 had a 200 GB disk (rented with `--disk 200`; the base arm's node had 400) and held
+  127 GB of TB2 images; at 94 % full, the verifiers of `custom-memory-heap-crash__yzo54hR`,
+  `torch-pipeline-parallelism__Jb4HtBN`, `torch-tensor-parallelism__A3aqPVw` and `torch-tensor-parallelism__gCnPo3U`
+  printed "No space left on device" and still wrote a reward (0); one of them is a scored false claim. No base TB2 trial
+  and no ImpossibleBench trial so far shows it (searched 2026-11-02).
+- **Impact:** G2's TB2 false-claim rate under the external budget (13.6 %) includes ungraded trials; H3's direction is
+  unchanged by four trials but the units are not valid until they are re-graded.
+- **Fix:** `harbor_results.verifier_ran_out_of_disk` masks such a trial as an infra error (no grade), so it can never be
+  scored silently again (`tests/eval/test_harbor.py::test_a_verifier_that_ran_out_of_disk_is_an_infra_error_not_a_grade`);
+  the four trials were moved to `runs/harbor/it19a2_g2_tb2_def76_invalid` and re-run in place on instance 58845540
+  (131 GB free) with the job's own config and the pinned code (`configs/chains/it19_a2_g2_tb2_def76.yaml`); the G2 units
+  are rewritten from the full job. The G2 ImpossibleBench node was cleared of the TB2 images (123 GB free) while it
+  ran. Rule for later nodes: >= 400 GB disk for TB2. Closed when the re-run is graded and H3 recomputed.
+
+### DEF-77: the Harbor agent had no in-sandbox output cap
+- **Area:** harness / external eval (`eval.harbor_agent.HonestPolicyAgent.run`, `bash`). **Status:** closed 2026-11-02.
+  **Found:** 2026-11-02, stage a2: Harbor's own process in G2's TB2 job grew past 40 GB twice and was OOM-killed or
+  thrashed on a 47 GB VM; the bad-case read found a 950 MB `cat /app/alpine.iso` and an endless `perl` print loop among
+  G2's commands.
+- **Evidence:** the training env wraps every command in `capture_script` (output capped at 1 MB inside the sandbox,
+  DEF-65); the Harbor agent ran `timeout -k ... bash -c CMD`, so Harbor's `_collect_buffered_output` read the whole
+  flood into memory; a flood that outlived the 80 s host timeout came back as `[sandbox unavailable]`.
+- **Impact:** an infrastructure failure (lost trials, resumed in place), and in the rare flood the model saw "sandbox
+  unavailable" instead of a capped output. Both stage a2 arms ran without the cap, so base and G2 are comparable; the
+  cap is new from here on and is a change of the evaluation path for any later run.
+- **Fix:** `capture_script` and its constants moved to `harness` (the Harbor agent cannot import `env`, which needs
+  TRL) and the agent uses it, with the host-side cut and `CAPTURE_CUT_NOTE` as in training
+  (`tests/eval/test_harbor.py::test_agent_caps_a_command_output_flood_inside_the_sandbox`).
+
+### DEF-78: the watcher reported a failed stop after every successful stop
+- **Area:** infrastructure (`node_watch.stop_accepted`, `instance_stopped`). **Status:** closed 2026-11-02.
+  **Found:** 2026-11-02: "INSTANCE ... STOP FAILED" on four chains whose instances were in fact stopped.
+- **Evidence:** vastai 0.13 prints "stopping instance N." with no final `true`, and `show instance N --raw` returned a
+  one-element list; `stop_accepted` required `true` and `instance_stopped` a dict.
+- **Impact:** a false alarm only (each instance was stopped); a real failure would have read the same.
+- **Fix:** both parsers accept the new forms and stay fail-closed otherwise (`tests/test_node_watch.py`).
 
