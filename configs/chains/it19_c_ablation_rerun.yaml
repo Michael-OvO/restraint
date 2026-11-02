@@ -1,0 +1,176 @@
+# Iteration 19 stage (b): the ablation arm (CR-GRPO without the report term) re-run on a new node (2026-11-02). Its
+# first run, on instance 58781495 (chain it19c), reached step 15 with no stop rule; the host then went offline
+# (14:16 UTC) with the checkpoints on it. The pre-registration counts an infrastructure failure as a re-run
+# (section 4): this job repeats the arm from G2 with the same config, data order, seed and evaluation, on one GPU
+# (instance 58836482, RTX PRO 6000 WS 96 GB, 14 vCPU, Texas; task images prebuilt first). The G2 select reference is
+# the one measured on 58781495 (`runs/eval/it19c_g2_select`, copied here). The method arm is not repeated: it ended on
+# its stop rule (docs/iteration-19-signoff.md). Approved under the owner's delegation of 2026-11-02.
+name: it19c_abl
+state_dir: outputs/chain/it19c_abl
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: gate_ledger
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.gate.ledger check --experiment it19c
+      --ledger docs/defects.md
+      --json outputs/chain/it19c_abl/gate_ledger.json
+      && mkdir -p outputs/chain/it19c_abl/markers && touch outputs/chain/it19c_abl/markers/gate_ledger.done
+    gpus: []
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/chain/it19c_abl/markers/gate_ledger.done
+    after: []
+    timeout_min: 5
+    on_failure: stop
+
+  - name: freeze_checks
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark check
+      && env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.eval.final_benchmark never-trained
+      --out outputs/chain/it19c_abl/never_trained.json
+      && touch outputs/chain/it19c_abl/markers/freeze_checks.done
+    gpus: []
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/chain/it19c_abl/markers/freeze_checks.done
+    timeout_min: 20
+    on_failure: stop
+
+  - name: merge_sft_v2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge --base Qwen/Qwen3.5-4B
+      --adapter data/weights/it14/sft-v2-e3-final --out outputs/it14/sft_v2_e3_merged
+    gpus: []
+    after: [freeze_checks]
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/it14/sft_v2_e3_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  - name: merge_g2
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it14/sft_v2_e3_merged --adapter data/weights/it15/g2-s1-final --out outputs/it15/g2_merged
+    gpus: []
+    after: [merge_sft_v2]
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/it15/g2_merged/config.json
+    timeout_min: 30
+    on_failure: stop
+
+  # ── 1. the reference ──
+  - name: inputs_frozen
+    command: >-
+      printf '%s\n'
+      '9a337601fdbecfdc8bb93179a7d3223705dd62cc9ecdb0ada80ddd46599b9c47  data/train_rl_v4.jsonl'
+      '61d523d9d1b4b02e4d271f1906f6cf5b3020426a2e0a6c3d1999a01a621b56c1  data/it19/select_high_risk_twins.jsonl'
+      '7c29914ce2b611da6d75ae069ab63300a575b1c699d44e1ffaf179515d88ddcf  data/select.jsonl'
+      | sha256sum -c -
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.train --config configs/grpo_it19_crgrpo.yaml
+      model.name=outputs/it15/g2_merged --dry-run > outputs/chain/it19c_abl/plan_method.json
+      && env -u VIRTUAL_ENV uv run --frozen python -m honest_agents.train --config configs/grpo_it19_crgrpo_ablation.yaml
+      model.name=outputs/it15/g2_merged --dry-run > outputs/chain/it19c_abl/plan_ablation.json
+      && touch outputs/chain/it19c_abl/markers/inputs_frozen.done
+    gpus: []
+    after: [merge_g2]  # the plans are built against the merged G2 the arms start from
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/chain/it19c_abl/markers/inputs_frozen.done
+    timeout_min: 10
+    on_failure: stop
+
+  - name: ablation_seg1
+    command: >-
+      RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged wandb.name=it19-crgrpo-ablation-r2
+      grpo.max_steps=15 probe.fixed_checkpoint_step=15 probe.steps=[15]
+    gpus: [0]
+    after: [inputs_frozen]
+    done: outputs/it19/it19-crgrpo-ablation/checkpoint-15/adapter_config.json
+    timeout_min: 960
+    on_failure: continue  # a stop rule (exit 3) ends this arm only; its later steps are skipped
+    stall_min: 60
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: ablation_twins15
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo-ablation/checkpoint-15
+      --out outputs/it19/crgrpo_ablation_c15_merged
+      && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_ablation_c15_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_c15_sanity --resume --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/it19/select_high_risk_twins.jsonl runs/eval/it19c_ablation_c15_twins --resume --n-samples 2
+      --concurrency 24 --train-config configs/grpo_it13_2gpu.yaml --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    after: [ablation_seg1]
+    done: runs/eval/it19c_ablation_c15_twins/metrics.json
+    timeout_min: 240
+    on_failure: continue
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: ablation_rule1b
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
+      --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_c15_twins
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c_abl/ablation_rule1b.json
+      && touch outputs/chain/it19c_abl/markers/ablation_rule1b.done
+    gpus: [0]  # holds the GPU slot so nothing later starts before this arm's steps 16-30 (review O1)
+    after: [ablation_twins15]
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/chain/it19c_abl/markers/ablation_rule1b.done
+    timeout_min: 10
+    on_failure: continue
+
+  - name: ablation_seg2
+    command: >-
+      RESUME=1 scripts/train.sh configs/grpo_it19_crgrpo_ablation.yaml model.name=outputs/it15/g2_merged wandb.name=it19-crgrpo-ablation-r2
+    gpus: [0]
+    after: [ablation_rule1b]
+    done: outputs/it19/it19-crgrpo-ablation/checkpoint-30/adapter_config.json
+    timeout_min: 960
+    on_failure: continue
+    stall_min: 60
+    env: {UV_NO_SYNC: "1", TRAIN_GPUS: "0", MASTER_PORT: "29500", WANDB_PROJECT: honest-agents, WANDB_ENTITY: michael_ovo, WANDB_RUN_GROUP: it19, PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"}
+
+  - name: ablation_select
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.sft.merge
+      --base outputs/it15/g2_merged --adapter outputs/it19/it19-crgrpo-ablation/checkpoint-30
+      --out outputs/it19/crgrpo_ablation_merged
+      && scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it19/crgrpo_ablation_merged
+      -- scripts/eval_heldout.sh data/val.jsonl runs/eval/it19c_ablation_sanity --resume --limit 12 --n-samples 1 --concurrency 12
+      --train-config configs/grpo_it13_2gpu.yaml
+      -- scripts/eval_heldout.sh data/select.jsonl runs/eval/it19c_ablation_select --resume --n-samples 4 --concurrency 24
+      --train-config configs/grpo_it13_2gpu.yaml --exclude-quarantined data/select_quarantine.txt
+      --protocol configs/protocols/it16_select.json
+    gpus: [0]
+    after: [ablation_seg2]
+    done: runs/eval/it19c_ablation_select/metrics.json
+    timeout_min: 480
+    on_failure: continue
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: ablation_g6
+    command: >-
+      env -u VIRTUAL_ENV uv run --frozen --extra eval python -m honest_agents.analysis.calibration twin-stop
+      --reference runs/eval/it19c_g2_select --candidate runs/eval/it19c_ablation_select
+      --samples 0 1 --expect-matched 120 --json outputs/chain/it19c_abl/ablation_g6.json;
+      rc=$?; echo $rc > outputs/chain/it19c_abl/ablation_g6.rc; [ $rc -eq 0 ] || [ $rc -eq 3 ]
+    gpus: [0]
+    after: [ablation_select]
+    env: {UV_NO_SYNC: "1"}
+    done: outputs/chain/it19c_abl/ablation_g6.json
+    timeout_min: 10
+    on_failure: continue
+
+  # ── 3. the method arm on the final benchmark ──
+
+final:
+  command: "true"
+  timeout_min: 5
+  env: {UV_NO_SYNC: "1"}
+
+watch:
+  pull_paths: [runs/eval/it19c_ablation_c15_sanity, runs/eval/it19c_ablation_c15_twins, runs/eval/it19c_ablation_sanity,
+               runs/eval/it19c_ablation_select, outputs/chain/it19c_abl, outputs/it19/it19-crgrpo-ablation/crgrpo_state.jsonl,
+               outputs/it19/it19-crgrpo-ablation/train_log.jsonl, outputs/it19/it19-crgrpo-ablation/stop_rules.jsonl,
+               outputs/it19/it19-crgrpo-ablation/checkpoint-15, outputs/it19/it19-crgrpo-ablation/checkpoint-30, outputs/logs]
