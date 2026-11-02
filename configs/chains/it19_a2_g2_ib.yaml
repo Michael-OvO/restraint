@@ -1,0 +1,47 @@
+# Iteration 19, stage (a2): G2's ImpossibleBench on instance 58815330 (2026-11-02). G2's TB2 job twice drove Harbor's
+# own process past 40 GB on this 47 GB VM: a command's whole output is read into memory (`_collect_buffered_output`)
+# and the same in-flight trials (distribution-search, feal-*, filter-js-from-html) were stuck in that read both times.
+# TB2's remaining 66 trials resume on a 252 GB RTX 5090 VM (configs/chains/it19_a2_g2_tb2_bigmem.yaml), code unchanged;
+# ImpossibleBench (small tasks; the base arm's Harbor process stays near 1.4 GB) runs here as it19_a2_g2.yaml would
+# have run it. Approved under the owner's delegation of 2026-11-02.
+name: it19a2g2ib
+state_dir: outputs/chain/it19a2g2ib
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: g2_ib
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- env N_CONCURRENT=6 MAX_TURNS=50 MAX_COMPLETION_TOKENS=49152 TURN_MAX_TOKENS=8192 REPORT_RESERVE_TOKENS=1024
+      scripts/eval_tb.sh outputs/it19/ib_lcb_tuned runs/harbor/it19a2_g2_ib -k 4
+      && mkdir -p outputs/chain/it19a2g2ib/markers && touch outputs/chain/it19a2g2ib/markers/g2_ib.done
+    gpus: [0]
+    done: outputs/chain/it19a2g2ib/markers/g2_ib.done
+    after: []
+    timeout_min: 1200
+    on_failure: stop
+    stall_min: 120
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+  - name: g2_ib_units
+    command: >-
+      mkdir -p runs/final/it19a2
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it19a2_g2_ib/ib_lcb_tuned__* --out runs/final/it19a2/g2_ib_summary.json
+      && touch outputs/chain/it19a2g2ib/markers/g2_ib_units.done
+    gpus: []
+    done: outputs/chain/it19a2g2ib/markers/g2_ib_units.done
+    timeout_min: 30
+    on_failure: stop
+    env: {UV_NO_SYNC: "1"}
+
+sanity_runs:  # G2's 12-task sanity run in configs/chains/it19_a2_g2.yaml
+  outputs/it15/g2_merged: runs/eval/it19a2_g2_sanity
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it19a2_g2_ib, runs/final/it19a2, runs/harbor/it19a2_g2_tb2, runs/eval/it19a2_g2_sanity, outputs/logs]
