@@ -38,12 +38,13 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   5,141 tests pass. The prereg was approved 2026-11-02 under the owner's delegation; the c_rep lower clip was amended to
   1e-4 before any method-arm step, after the node measured a gradient ratio of 352 (c_rep 0.00213)
   (`docs/iteration-19-prereg-crgrpo.md`).
+- **it19c: CR-GRPO does not beat G2.** The ablation (no report term) ran 30 steps with every guard passing but made
+  more false claims than G2 (+3.8 points [+0.8, +6.8], 90 %) (`docs/iteration-19-results-crgrpo.md`).
 - **it19c: the method arm stopped at step 7 on the pre-registered stall guard**: it learned to report `incomplete` on
   tasks it had solved (pi(claim) 0.73 -> 0.08), because the status token is trained by the report term alone and the
   batch's push was net toward non-claims (`docs/iteration-19-research/badcase-it19c/method_stop.md`). No method
-  candidate exists. The ablation arm (no report term) is training normally on instance 58781495.
-- **Pending:** the ablation's rule 1b, select run and guards; the exploratory step-5 reading; the owner's decision on
-  the method arm (a re-run is a new pre-registered experiment); a2's G2 and base ImpossibleBench; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
+  candidate exists.
+- **Pending:** a2's ImpossibleBench for base and G2 (H2); the owner's decision on what follows; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
 ## Earlier summary (2026-10-14, after iteration 14)
@@ -1781,15 +1782,16 @@ No training step of either arm had run before attempt 3.
   correct-claim rows, so the push to lower the claim logit spread to every context
   (`docs/iteration-19-research/badcase-it19c/method_stop.md`). Under the pre-registration the arm ends: no method
   candidate, no final benchmark, and P1 cannot be computed as registered.
-- Ablation arm (no report term): steps 1-5 normal (10 min per step, feasible decline 0.075-0.20, false-claim rate per
-  step 0.225 -> 0.05-0.075); still running.
+- **Ablation arm (no report term): ran all 30 steps (re-run after the host outage), every guard passes, but more false
+  claims than G2**: false claims per feasible episode 15.9 -> 19.7 %, +3.8 [+0.8, +6.8] (90 %, p 0.045); verified
+  success −3.4 [−6.9, +0.1]; feasible claim rate unchanged (+0.4); infeasible claims +1.9 (n.s.); G6 does not fire
+  (`docs/iteration-19-results-crgrpo.md`). Read as the candidate, P1 would fail.
 - Exploratory (not pre-registered): the method's step-5 checkpoint on the select split (S = 2) against the G2 reference:
   false claims per feasible episode −2.3 [−5.6, +0.9], verified success −8.3 [−12.1, −4.4], feasible claim rate −10.6
   [−14.5, −6.7], claims on infeasible variants +0.8 [−5.0, +6.5]. The drift was under way by step 5 and did not
   discriminate between solved and failed tasks.
 
-Pending: the ablation's rule 1b at step 15, its steps 16-30, select run and guards; what
-the owner decides about the method arm (any re-run is a new pre-registered experiment).
+Pending: what the owner decides next (a re-run of either arm is a new pre-registered experiment).
 
 **a2 G2: running.**
 - Base TB2: done (above).
