@@ -1791,6 +1791,13 @@ No training step of either arm had run before attempt 3.
   [−14.5, −6.7], claims on infeasible variants +0.8 [−5.0, +6.5]. The drift was under way by step 5 and did not
   discriminate between solved and failed tasks.
 
+- **Offline check of a visible-verification reward ($0, 2026-11-02): NO-GO.** A detector of the agent's own passing
+  checks, built on the it17a bank and tested on the it19a held-out rows and the it19c select runs, does not separate
+  true claims from false ones (AUROC 0.42-0.52); 84-92 % of false claims already carry a passing check (the agent
+  checks its own copy or its own expectation); and fake checks would win
+  (`docs/iteration-19-research/evidence_reward_offline_check.md`). Left open: give the agent a public subset of each
+  task's tests and reward running it, which needs its own offline check first.
+
 Pending: what the owner decides next (a re-run of either arm is a new pre-registered experiment).
 
 **a2 G2: running.**
