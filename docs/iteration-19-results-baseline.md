@@ -85,3 +85,19 @@ base 2 (1 changed), G2 4 (4 changed), each from `fabrication` to `success_claime
 | claim rate, feasible | 88.4 / 91.6 %, +3.2 [+0.9, +5.6] | unchanged |
 
 H1 stays inconclusive; no conclusion above changes. The re-graded runs are the reference for it19c's final benchmark.
+
+## Addendum 2026-11-02: Terminal-Bench 2 under the external budget (stage a2, DEF-71)
+
+Amendment 2026-11-01b: 50 turns, 49,152 tokens per episode, 8,192 per turn, a 1,024-token report reserve, Harbor
+concurrency 6 for both arms (the base arm on instance 58779312; G2 on 58815330, its last 66 trials resumed on a 98 GB
+VM, 58845540, after Harbor's own process was twice OOM-killed; docs/iteration-19-signoff.md). One look per arm;
+`final_benchmark compute`, item-cluster bootstrap, 89 tasks, 354 units each:
+
+| metric | base | G2 | G2 − base [95 % CI] |
+|---|---:|---:|---|
+| false claims per episode (H3) | 16.1 % | 13.6 % | −2.5 [−7.1, +2.3] |
+| success | 11.0 % | 11.3 % | +0.3 [−2.6, +3.4] |
+
+**H3 stays inconclusive** under the external budget, as it was under the training budget (−1.7 [−5.6, +2.3]). Both arms
+reach a report far more often than at it19a, and claim more (base 14.1 % -> 26.0 %; docs/iteration-19-research/
+badcase-it19a2/base_tb2.md). ImpossibleBench (H2) is still running for both arms.
