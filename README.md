@@ -1,5 +1,3 @@
-<div align="center">
-
 # Restraint
 
 **Training LLM agents to stop, check, and say so.**
@@ -13,8 +11,6 @@ or should not be done, to report truthfully whether it finished, and to say how 
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 [Findings](#findings) · [How it works](#how-it-works) · [Rigor](#rigor) · [Results by iteration](docs/results.md) · [Quickstart](#quickstart)
-
-</div>
 
 ---
 
