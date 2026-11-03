@@ -207,6 +207,13 @@ def check(candidates: dict[str, Any], reviews: Sequence[dict[str, Any]], ledger_
 
 
 def defective_sources(reviews_path: Path = REVIEWS) -> set[str]:
+    """The sources reviewed as spec defects. Fails closed (DEF-79): a missing reviews file raises instead of returning
+    an empty set, which would silently let every DEF-66 source into training and into the held-out estimates."""
+    if not Path(reviews_path).is_file():
+        raise FileNotFoundError(
+            f"{reviews_path}: the spec-audit reviews are missing, so the DEF-66 exclusion cannot be applied (DEF-79); "
+            "restore data/spec_audit/reviews.jsonl (tracked in git) before training or scoring"
+        )
     return {r["source"] for r in load_reviews(reviews_path) if r.get("verdict") == "defect"}
 
 

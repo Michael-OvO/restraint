@@ -86,6 +86,7 @@ section 7 critique) and from re-checks against the code and the archive on that 
 | DEF-76 | infrastructure / grading | closed 2026-11-02 | four G2 TB2 verifiers of stage a2 ran out of disk ("No space left on device") on a 200 GB node holding 127 GB of TB2 images; their rewards graded nothing, and one was scored as a false claim |
 | DEF-77 | harness / external eval | closed 2026-11-02 | the Harbor agent ran commands without the training path's in-sandbox output cap (DEF-65's `capture_script`); Harbor reads a command's whole output into memory, and output floods twice OOM-killed the Harbor process of G2's TB2 job on a 47 GB VM |
 | DEF-78 | infrastructure | closed 2026-11-02 | the watcher reported "STOP FAILED" after every successful stop: vastai 0.13 prints only "stopping instance N." and may answer `show instance --raw` with a one-element list |
+| DEF-79 | infrastructure / data integrity | closed 2026-11-03 | `spec_audit.defective_sources()` returned an empty set when `data/spec_audit/reviews.jsonl` was missing, so any checkout or bundle without that file would silently re-admit the 76 defective sources (latent: the file has been tracked in git since `2780157`) |
 
 ---
 
@@ -3655,3 +3656,14 @@ section 7 critique) and from re-checks against the code and the archive on that 
 - **Impact:** a false alarm only (each instance was stopped); a real failure would have read the same.
 - **Fix:** both parsers accept the new forms and stay fail-closed otherwise (`tests/test_node_watch.py`).
 
+### DEF-79: the DEF-66 spec-defect list failed open when its file was missing
+- **Area:** infrastructure / data integrity (`tasks.spec_audit.defective_sources`). **Status:** closed 2026-11-03.
+  **Found:** 2026-11-03, while auditing what an external agent needs to run iteration 20 from the repository alone.
+- **Evidence:** `load_reviews` returns `[]` for a missing file, so without `data/spec_audit/reviews.jsonl`
+  `defective_sources()` returned 0 sources instead of 76. Every consumer would then drop nothing: `check_rows`,
+  `refuse_defective`, `drop_defective` in `analysis.power`, `final_benchmark` and the iteration-20 pool's legality rule.
+  The file has been tracked in git since `2780157` (`data/` is gitignored, but this file was force-added), so a clone
+  has it. The failure needed a checkout, node sync or data bundle that dropped the file.
+- **Impact:** none observed; latent.
+- **Fix:** `defective_sources` raises `FileNotFoundError` naming DEF-79 when the reviews file is missing
+  (`tests/test_spec_audit.py::test_defective_sources_fails_closed_without_the_reviews_file`).

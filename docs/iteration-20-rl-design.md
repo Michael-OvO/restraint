@@ -14,6 +14,33 @@ Supporting analyses:
 - the scripts are archived at `~/Documents/honest-agents-archive/staging/analysis/it20_design/` and must be ported to the
   CLI in §10, item 10, before they are relied on.
 
+**Getting the data (do this first).** `data/` and `runs/` are gitignored, so a clone has only the code, the configs,
+the docs, the frozen benchmark files and `data/spec_audit/`. Everything else is in a private Hugging Face dataset
+bundle. Ask the owner for its id and a read token. Then:
+
+```bash
+uv sync --frozen --extra train --extra eval
+hf auth login                                    # the token from the owner
+env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.data_bundle fetch --repo <owner>/restraint-data
+```
+
+`fetch` downloads, verifies the sha256 of every part and every file against `MANIFEST.json`, keeps mtimes (DEF-25
+depends on them) and refuses to overwrite existing files.
+
+| part | contents | restored to |
+|---|---|---|
+| tasks | data/tasks (8,904 task dirs) | data/tasks |
+| decision | surface tasks and decision data | data/decision |
+| weights | the SFT-v2 and G2 LoRA adapters (G2 = Qwen/Qwen3.5-4B + both, `sft.merge`) | data/weights/it14, data/weights/it15 |
+| data | the rest of data/ (splits, split_seeds, validation, probes, pools, banks, ImpossibleBench, def74) except data/rts | data/ |
+| runs | runs/def74 (DEF-74 re-graded runs), the it19c select runs, runs/final/it19a2 | runs/ |
+| archive | the analyses this design cites (u_checks, legal pool, power, evidence check), a2/it19c results, the it19a baseline archive | archive/ |
+
+Paths in this design of the form `~/Documents/honest-agents-archive/<x>` are `archive/<x>` after `fetch`. The
+scratchpad paths of the design session are under `archive/staging/analysis/`. Qwen/Qwen3.5-4B itself comes from the Hub
+at the revision pinned in the code (DEF-51). TB2 and ImpossibleBench images come from their registries. The
+spec-audit reviews are tracked in git: `defective_sources()` refuses to run without them (DEF-79).
+
 **For the executing agent, read in this order:**
 1. This file. Sections 12 (checklist) and 10 (code) are the work list.
 2. [iteration-20-design.md](iteration-20-design.md) §2, the metric system adopted here.

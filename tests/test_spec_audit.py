@@ -102,3 +102,12 @@ def test_the_grpo_row_check_applies_the_guard(monkeypatch) -> None:
     assert tr.check_rows([row], cfg, role="train")["rows"] == 1
     cfg.data.allow_spec_defects = False
     assert tr.check_rows([{**row, "split": "val"}], cfg, role="validation")["rows"] == 1  # the probe: any source
+
+
+def test_defective_sources_fails_closed_without_the_reviews_file(tmp_path):
+    """DEF-79: a missing reviews file must not read as "no defects" (that silently re-admits every DEF-66 source)."""
+    import pytest
+
+    with pytest.raises(FileNotFoundError, match="DEF-79"):
+        sa.defective_sources(tmp_path / "missing.jsonl")
+    assert len(sa.defective_sources()) == 76
