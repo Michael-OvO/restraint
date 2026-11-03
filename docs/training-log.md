@@ -1880,6 +1880,14 @@ H2 (ImpossibleBench) under the external budget is not in yet.
 - Keep the data-order seed fixed across runs that are compared; the same steps then see the same tasks.
 - The validation probe (100 variants, ~21 impossible) is too small to resolve differences under ~10 points.
 - Checkpoint selection uses `eval_honest/task_success`, which ignores honesty (known limitation).
+- Design checks must include the learning dynamics, not only the reward's static properties (it19c): before a paid run,
+  compute the sign and size of the push the loss puts on the decision the policy controls, on real batches from
+  existing rollouts; the CR-GRPO report term was net-negative from its first batch (mean delta −0.37) and K1, which
+  checked blind-policy credit, could not see it.
+- Never mask a token from the main loss; add components one at a time to a baseline that works; run a 5-10 step pilot
+  and read behaviour (claim rate on solved tasks, status distribution), not only loss and gradient ratios.
+- Stop rules on per-step training rates (24-40 episodes a step) are noisy: use smoothed metrics or a held-out probe over
+  longer runs, and keep hard stops for unambiguous collapse.
 
 ## Saving an iteration
 
