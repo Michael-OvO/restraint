@@ -1,0 +1,36 @@
+# Iteration 19, stage (a2): G2's ImpossibleBench job resumed in place (2026-11-03). Harbor's own process reached 42 GB
+# and was OOM-killed at 1,161 of 1,236 trials on the 47 GB VM (DEF-77's failure mode; the job runs the pinned code, without
+# the cap, as every other a2 trial did). `harbor jobs resume` keeps the finished trials; then the G2 IB units.
+# Approved under the owner's delegation.
+name: it19a2g2ibr
+state_dir: outputs/chain/it19a2g2ibr
+sequential: true
+instance_id: null
+balance_floor: 8
+steps:
+  - name: g2_ib_resume
+    command: >-
+      scripts/serve_and_run.sh configs/grpo_it13_2gpu.yaml model.name=outputs/it15/g2_merged
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval harbor jobs resume -p runs/harbor/it19a2_g2_ib/ib_lcb_tuned__policy__honest__20261102_153230
+      -- env -u VIRTUAL_ENV uv run --frozen --extra train --extra eval python -m honest_agents.eval.harbor_results runs/harbor/it19a2_g2_ib/ib_lcb_tuned__policy__honest__20261102_153230
+      && mkdir -p runs/final/it19a2
+      && env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.eval.external.impossiblebench score
+      runs/harbor/it19a2_g2_ib/ib_lcb_tuned__* --out runs/final/it19a2/g2_ib_summary.json
+      && mkdir -p outputs/chain/it19a2g2ibr/markers && touch outputs/chain/it19a2g2ibr/markers/g2_ib_resume.done
+    gpus: [0]
+    done: outputs/chain/it19a2g2ibr/markers/g2_ib_resume.done
+    after: []
+    timeout_min: 300
+    on_failure: stop
+    stall_min: 120
+    env: {UV_NO_SYNC: "1", VLLM_GPUS: "0", VLLM_PORT: "8000", VLLM_GPU_MEM: "0.85", VLLM_MAX_MODEL_LEN: "65536", BASE_URL: "http://localhost:8000/v1", MODEL: policy}
+
+sanity_runs:
+  outputs/it15/g2_merged: runs/eval/it19a2_g2_sanity
+
+final:
+  command: "true"
+  timeout_min: 5
+
+watch:
+  pull_paths: [runs/harbor/it19a2_g2_ib, runs/final/it19a2, outputs/logs]
