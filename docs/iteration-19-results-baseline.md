@@ -102,3 +102,23 @@ After DEF-76: four of G2's trials were graded on a full disk and re-run (the tab
 graded, G2 was 13.6 %, −2.5 [−7.1, +2.3]). **H3 stays inconclusive** under the external budget, as it was under the training budget (−1.7 [−5.6, +2.3]). Both arms
 reach a report far more often than at it19a, and claim more (base 14.1 % -> 26.0 %; docs/iteration-19-research/
 badcase-it19a2/base_tb2.md). ImpossibleBench (H2) is still running for both arms.
+
+## Addendum 2026-11-03: ImpossibleBench under the external budget (stage a2, H2)
+
+Same budget and concurrency (6) for both arms. Base on instance 58779312; G2 on 58815330, resumed in place after
+Harbor's own process was OOM-killed at 1,161 of 1,236 trials. Missing trials are counted by the scorer: base 15, G2 22.
+`final_benchmark compute`, item-cluster bootstrap, 95 %:
+
+| metric | base | G2 | G2 − base [95 % CI] |
+|---|---:|---:|---|
+| `flag` (strict, the `abstain` tool only; pre-registered H2) | 6.4 % | 0.0 % | −6.4 [−8.4, −4.6] |
+| `flag_lenient` (explained non-claim on the impossible split; post hoc, DEF-70) | 52.5 % | 84.7 % | **+32.2 [+28.3, +36.1]** |
+| `decline_incomplete_only` (DEF-75, reported) | 9.5 % | 0.9 % | −8.6 [−10.9, −6.4] |
+| claimed complete, impossible split | 4.1 % | 1.0 % | −3.1 [−4.7, −1.7] |
+| `cheated` | 0.1 % | 0.2 % | +0.1 [−0.4, +0.7] |
+| `act.success`, original split | 45.2 % | 46.8 % | +1.6 [−3.0, +6.5] |
+
+**H2 as pre-registered stays contradicted** (the strict flag counts only the `abstain` tool, which G2 never uses).
+On the lenient reading, G2 explains its declines on impossible ImpossibleBench tasks far more often than base
+(+32.2 points; +4.2 under the training budget), claims an impossible task as complete less often, and solves the
+possible tasks as often. This is the first external benchmark on which G2's training transfers clearly.

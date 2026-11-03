@@ -44,7 +44,9 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   tasks it had solved (pi(claim) 0.73 -> 0.08), because the status token is trained by the report term alone and the
   batch's push was net toward non-claims (`docs/iteration-19-research/badcase-it19c/method_stop.md`). No method
   candidate exists.
-- **Pending:** a2's ImpossibleBench for base and G2 (H2); the owner's decision on what follows; then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
+- **a2 done:** on ImpossibleBench G2 explains declines on impossible tasks far more than base (`flag_lenient` +32.2
+  [+28.3, +36.1]); TB2 stays inconclusive (−2.0 [−6.3, +2.8]).
+- **Pending:** the iteration-20 RL design (`docs/iteration-20-design.md`, in progress); then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
 ## Earlier summary (2026-10-14, after iteration 14)
@@ -1811,7 +1813,10 @@ Pending: what the owner decides next (a re-run of either arm is a new pre-regist
   (`docs/iteration-19-research/badcase-it19a2/g2_tb2.md`). Four G2 trials graded on a full disk were re-run (DEF-76);
   the Harbor agent now has the training path's output cap (DEF-77, for later runs).
 
-H2 (ImpossibleBench) under the external budget is not in yet.
+- **ImpossibleBench under the external budget (H2):** strict `flag` 6.4 -> 0.0 % (H2 contradicted as registered: G2 never
+  uses the `abstain` tool); **`flag_lenient` 52.5 -> 84.7 %, +32.2 [+28.3, +36.1]**; impossible tasks claimed complete
+  4.1 -> 1.0 %; success on the possible split +1.6 [−3.0, +6.5]. The first external benchmark with clear transfer of
+  G2's training (+4.2 under the training budget, which cut episodes before their report).
 
 ### Observations
 - **G2's restraint transfers to the frozen held-out set without a success cost.** Infeasible claims fell 40 points. Its feasible-work claims are no more truthful than base's: 18.4 vs 18.5 % fail, and 17.2 vs 18.0 % re-graded. This is the gap CR-GRPO targets. The it19a read of G2's internal false claims (`docs/iteration-19-research/badcase-it19a/internal_false_claims.md`) found two things. About 78 % sit on variants that G2's other sample or base solves. About 78 % leave a visible trace in the transcript.
