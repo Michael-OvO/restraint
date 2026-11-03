@@ -46,7 +46,10 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   candidate exists.
 - **a2 done:** on ImpossibleBench G2 explains declines on impossible tasks far more than base (`flag_lenient` +32.2
   [+28.3, +36.1]); TB2 stays inconclusive (−2.0 [−6.3, +2.8]).
-- **Pending:** the iteration-20 RL design (`docs/iteration-20-design.md`, in progress); then the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
+- **Iteration 20 plan (draft, for an executing agent on a free cluster):** plain-U GRPO on the agent from G2, with
+  per-row twin weights for blind-policy neutrality, an 800-row pool × 3 epochs, 3 seeds plus 2 attribution arms, and
+  held-out U at S = 16 against a fresh G2 (`docs/iteration-20-rl-design.md`, revision 3, grilled three times).
+- **Pending:** the owner's approval of the iteration-20 prereg; the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
 ## Earlier summary (2026-10-14, after iteration 14)

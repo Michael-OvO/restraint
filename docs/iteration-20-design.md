@@ -1,4 +1,8 @@
-# Iteration 20: review-and-revise (RVR-2) design (DRAFT, nothing has run)
+# Iteration 20: review-and-revise (RVR-2) design (DRAFT, nothing has run; superseded as the training plan)
+
+**Superseded (2026-11-03):** the iteration-20 training plan is [iteration-20-rl-design.md](iteration-20-rl-design.md)
+(plain-U GRPO on the agent). This file remains the record of the design session, and its metric system U (§2) is
+adopted there.
 
 Revision 1 (RVR-1) was the candidate of the 2026-11-03 design session. Five adversarial grills reviewed it (one
 blocker each from grills 1, 3, 4 and 5; about 45 major and minor defects in all), and three judges scored it against
