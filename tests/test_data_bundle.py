@@ -27,7 +27,7 @@ HELD_OUT_FILES = {
     "data/tasks/et__task_9__high_risk__control/tests/test_outputs.py": "hidden test",
     "data/audit/seeds/et/task_9/task.toml": "seed",
 }
-FINAL_ONLY = {"data/def74/affected.jsonl": "{}\n"}
+FINAL_ONLY = {"data/def74/sources/it19a_g2_heldout/episodes.jsonl": "{}\n"}
 UNBUNDLED = {"data/weights/other/unused.bin": "skip", "data/rts/v1/big.bin": "excluded"}
 
 
@@ -172,3 +172,22 @@ def test_preflight_tells_a_misplaced_checkout_from_missing_data(tmp_path, monkey
     (repo / "data/tasks/et__task_1__feasible/task.toml").unlink()
     _, problems = db.preflight(repo)
     assert any("data/select.jsonl: 1 of 1 non-held-out task dirs missing" in p for p in problems)
+
+
+def test_a_mixed_file_loses_its_held_out_rows_in_train_and_keeps_only_them_in_final(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    make_repo(src)
+    rows = [{"pair_id": "et/task_1", "oracle_tail": "ok"}, {"pair_id": "et/task_9", "oracle_tail": "the answer"}]
+    (src / "data/validation.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (src / "data/relabels.json").write_text(
+        json.dumps({"et__task_1__remove_input": ["/a"], "et__task_9__remove_input": ["/b"]})
+    )
+    db.pack(tmp_path / "train", repo=src, split="train")
+    db.pack(tmp_path / "final", repo=src, split="final")
+    db.restore(tmp_path / "train", dest)
+    assert "the answer" not in (dest / "data/validation.jsonl").read_text()
+    assert json.loads((dest / "data/relabels.json").read_text()) == {"et__task_1__remove_input": ["/a"]}
+    db.restore(tmp_path / "final", dest)  # no clash: the held-out rows come under their own names
+    assert json.loads((dest / "data/validation.held_out.jsonl").read_text())["oracle_tail"] == "the answer"
+    assert json.loads((dest / "data/relabels.held_out.json").read_text()) == {"et__task_9__remove_input": ["/b"]}
+    assert db.verify(tmp_path / "train") == [] and db.verify(tmp_path / "final") == []

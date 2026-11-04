@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import re
 import sys
@@ -50,11 +51,10 @@ EXCLUDED_DATA = ("data/rts",)  # benchmark-scale data no iteration-20 step reads
 HELD_OUT_IDS = "data/test_ids.txt"  # the held-out sources (split groups); the final benchmark's internal side
 WEIGHTS = ("data/weights/it14/sft-v2-e3-final", "data/weights/it15/g2-s1-final")
 # data/def74 and runs/def74 hold the DEF-74 re-grade of two banks: G2's it17 training-pool rollouts (train) and the
-# it19a held-out runs (final). affected.jsonl lists both, so it goes to final.
-TRAIN_DATA = ("data/def74/sources/it17_rollouts_feasible",)
+# it19a held-out runs (final). affected.jsonl lists both, and is split by row (MIXED_FILES).
+TRAIN_DATA = ("data/def74/sources/it17_rollouts_feasible", "data/def74/affected.jsonl")
 FINAL_DATA = (
     "data/ext",  # the pinned ImpossibleBench copy the evaluation chains materialize from
-    "data/def74/affected.jsonl",
     "data/def74/sources/it19a_base_heldout",
     "data/def74/sources/it19a_g2_heldout",
 )
@@ -96,6 +96,10 @@ FINAL_RUNS = (
     "runs/def74/regrade_it19a_g2_heldout.summary.json",
     "runs/final/it19a2",
 )
+# Files that mix held-out rows into otherwise train-side data, with answer-level content in those rows (oracle
+# output, test logs, protected paths, blocker targets): the train bundle gets them without the held-out rows, the final
+# bundle gets only those rows, as `held_out_name(path)`.
+MIXED_FILES = {"data/validation.jsonl": "jsonl", "data/relabels.json": "dict", "data/def74/affected.jsonl": "jsonl"}
 _TASK_HASH = re.compile(r"task_\d+_[0-9a-f]{8}")
 Split = Literal["train", "final"]
 
@@ -233,23 +237,63 @@ def part_files(part: Part, sources: frozenset[str]) -> list[Path]:
     return [f for f in files if names_held_out(str(f.relative_to(part.base)), sources) == want]
 
 
+def held_out_name(rel: str) -> str:
+    """Where a mixed file's held-out rows go in the final bundle: data/validation.jsonl -> data/validation.held_out.jsonl."""
+    p = Path(rel)
+    return str(p.with_name(f"{p.stem}.held_out{p.suffix}"))
+
+
+def split_rows(path: Path, rel: str, sources: frozenset[str]) -> tuple[bytes, bytes]:
+    """A mixed file (`MIXED_FILES`) as (its rows without held-out sources, its held-out rows), each as file bytes."""
+    if MIXED_FILES[rel] == "jsonl":
+        keep: list[str] = []
+        held: list[str] = []
+        for line in path.read_text().splitlines(keepends=True):
+            if line.strip():
+                row = json.loads(line)
+                is_held = row.get("pair_id") in sources or any(
+                    names_held_out(row.get(k) or "", sources) for k in ("variant_id", "task_id")
+                )
+                (held if is_held else keep).append(line)
+        return "".join(keep).encode(), "".join(held).encode()
+    data = json.loads(path.read_text())  # a dict keyed by variant id
+    keep_d = {k: v for k, v in data.items() if not names_held_out(k, sources)}
+    held_d = {k: v for k, v in data.items() if names_held_out(k, sources)}
+    return (json.dumps(keep_d, indent=1).encode() + b"\n", json.dumps(held_d, indent=1).encode() + b"\n")
+
+
 def pack(out_dir: Path, repo: Path = REPO, archive: Path | None = None, split: Split = "train") -> dict:
     sources = held_out_sources(repo)
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict = {"format": 1, "split": split, "parts": {}}
-    for part in parts(repo, archive, split, sources):
-        files = part_files(part, sources)
+    plan = [(part, part_files(part, sources)) for part in parts(repo, archive, split, sources)]
+    if split == "final":  # the held-out rows of the mixed files, under their own names
+        plan.append(
+            (Part("held_out_rows", tuple(MIXED_FILES), repo), [repo / r for r in MIXED_FILES if (repo / r).is_file()])
+        )
+    for part, files in plan:
         if not files:
             continue
         tar_path = out_dir / f"{part.name}.tar.gz"
+        hashes: dict[str, str] = {}
         with tarfile.open(tar_path, "w:gz") as tar:
             for f in files:
-                tar.add(f, arcname=str(f.relative_to(part.base)), recursive=False)
+                arc = str(f.relative_to(part.base))
+                if part.base == repo and arc in MIXED_FILES:
+                    keep, held = split_rows(f, arc, sources)
+                    body, arc = (keep, arc) if split == "train" else (held, held_out_name(arc))
+                    info = tar.gettarinfo(str(f), arcname=arc)
+                    info.size = len(body)
+                    tar.addfile(info, io.BytesIO(body))
+                    hashes[arc] = hashlib.sha256(body).hexdigest()
+                    continue
+                tar.add(f, arcname=arc, recursive=False)
+                hashes[arc] = sha256_file(f)
         manifest["parts"][part.name] = {
             "archive": tar_path.name,
             "sha256": sha256_file(tar_path),
             "prefix": part.prefix,
-            "files": {str(f.relative_to(part.base)): sha256_file(f) for f in files},
+            "files": hashes,
         }
     (out_dir / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True))
     return manifest

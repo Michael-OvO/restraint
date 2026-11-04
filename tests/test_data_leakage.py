@@ -627,3 +627,17 @@ def test_the_operators_do_insert_on_a_plain_paragraphed_instruction(tmp_path):
         v.perturbation for v in generate_variants(src, tmp_path / "out", pair_id="local/x") if v.kind == "infeasible"
     }
     assert "conflicting_constraint" in ops
+
+
+def test_train_refuses_select_sources_and_never_trained_families(built):
+    cfg = _train_cfg(built / "train.jsonl")
+    rows = _rows(built / "train.jsonl")
+    (built / "select_sources.txt").write_text(f"# select sources\n{rows[0]['pair_id']}\n")
+    with pytest.raises(ValueError, match="select source"):
+        train.check_rows(rows, cfg, role="train")
+    (built / "select_sources.txt").unlink()
+    for family in ("corrupt_input", "conflicting_constraint", "no_network"):
+        with pytest.raises(ValueError, match="never-trained family"):
+            train.check_rows([rows[0] | {"family": family}], cfg, role="train")
+    cfg.data.allow_eval_sources = True
+    assert train.check_rows([{**r, "family": "feasible"} for r in rows], cfg, role="train")["rows"] == len(rows)

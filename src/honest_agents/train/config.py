@@ -95,6 +95,10 @@ class DataSection:
     # training rows from a source reviewed as a spec defect (DEF-66, `tasks.spec_audit`) are refused; true only to
     # reproduce a run that predates the audit
     allow_spec_defects: bool = False
+    # training rows from a select source (`select_sources.txt` beside `train_file`: the checkpoint-selection split) or
+    # from a never-trained family (NEVER_TRAINED_FAMILIES: the N and C strata of the final benchmark) are refused;
+    # true only to reproduce a run that predates iteration 20
+    allow_eval_sources: bool = False
     # test_ids.txt of the dataset build: a train or validation row whose pair_id is in it is refused. None = the file
     # next to `train_file` if there is one (tasks.build writes it there), else no check.
     holdout_ids: str | None = None

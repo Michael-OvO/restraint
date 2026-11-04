@@ -195,6 +195,8 @@ def check_rows(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, role: str) ->
                 "without a target a blind category guess earns the full decline reward"
             )
         counts[spec.kind] = counts.get(spec.kind, 0) + 1
+    if role == "train" and not cfg.data.allow_eval_sources:
+        refuse_eval_sources(rows, cfg, where=where)
     if role == "train":
         from honest_agents.tasks.spec_audit import refuse_defective
 
@@ -202,6 +204,31 @@ def check_rows(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, role: str) ->
         if bad := refuse_defective(ids, where=where, allow=cfg.data.allow_spec_defects):
             logger.warning("%s: %d spec-defect source(s) kept (data.allow_spec_defects)", where, len(bad))
     return counts
+
+
+# Families no training run may contain: the never-trained strata of the internal held-out set (N: corrupt_input; C:
+# conflicting_constraint, no_network). Their held-out results only mean something while no training row has seen them.
+NEVER_TRAINED_FAMILIES = frozenset({"corrupt_input", "conflicting_constraint", "no_network"})
+
+
+def refuse_eval_sources(rows: list[dict[str, Any]], cfg: TrainRunConfig, *, where: str) -> None:
+    """Training rows from a select source (`select_sources.txt` beside the train file) or a never-trained family are
+    refused (`data.allow_eval_sources` overrides)."""
+    path = Path(cfg.data.train_file).parent / "select_sources.txt"
+    select = (
+        {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+        if path.is_file()
+        else set()
+    )
+    for i, r in enumerate(rows):
+        if (pair := r.get("pair_id")) in select:
+            raise ValueError(f"{where}: row {i} pair_id {pair!r} is a select source ({path}); refusing to train on it")
+        family = r.get("family") or r.get("perturbation")
+        if family in NEVER_TRAINED_FAMILIES:
+            raise ValueError(
+                f"{where}: row {i} has family {family!r}, a never-trained family of the final benchmark; "
+                "data.allow_eval_sources=true overrides (only to reproduce a run from before iteration 20)"
+            )
 
 
 def check_split_isolation(train_rows: list[dict[str, Any]], eval_rows: list[dict[str, Any]]) -> None:

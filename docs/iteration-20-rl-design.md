@@ -42,12 +42,12 @@ they share no file, and together they are the full data.
 | train | decision | surface tasks and decision data | data/decision |
 | train | weights | the SFT-v2 and G2 LoRA adapters (G2 = Qwen/Qwen3.5-4B + both, `sft.merge`) | data/weights/it14, data/weights/it15 |
 | train | data | the rest of data/ (splits, split_seeds, validation, probes, pools, banks) except data/rts and data/def74 | data/ |
-| train | runs | the it19c select runs | runs/ |
-| train | archive | the it20 design analyses (u_checks, legal pool, power), the it19c ablation | archive/ |
+| train | runs | the it19c select runs, G2's it17 training-pool bank and its DEF-74 re-grade | runs/ |
+| train | archive | the it20 design analyses (u_checks, legal pool, power), the it19c ablation, and the 105 archived eval banks on train, select, probe and surface tasks | archive/ |
 | train | builds | every archived training build `never-trained` scans (629 files) | archive/ |
 | final | held_out | the 2,047 held-out task dirs and their audit seeds (environments and hidden tests) | data/ |
-| final | data, runs | the DEF-74 re-grade, runs/final/it19a2 | data/def74, runs/ |
-| final | archive | the pinned ImpossibleBench and MASK downloads, the benchmark texts, the it19a baseline and a2 archives, the evidence check (run on held-out episodes) | archive/ |
+| final | data, runs | data/ext (ImpossibleBench), the DEF-74 re-grade of it19a, runs/final/it19a2 | data/, runs/ |
+| final | archive | the pinned ImpossibleBench and MASK downloads, the benchmark texts, every archived eval run on a held-out source (iteration 2, iteration-12 transfer, it19a, it19a2), the evidence check | archive/ |
 
 The held-out ids and prompts (data/test_ids.txt, data/test.jsonl, data/benchmarks/) stay in the train bundle: the
 legality rule needs them, and the prompts are tracked in git anyway. What the split withholds is the environments, the
@@ -58,27 +58,34 @@ scratchpad paths of the design session are under `archive/staging/analysis/`. Qw
 at the revision pinned in the code (DEF-51). TB2 and ImpossibleBench images come from their registries. The
 spec-audit reviews are tracked in git: `defective_sources()` refuses to run without them (DEF-79).
 
-**Who runs what.** The executing agent writes all the code (§10) and runs everything on the train bundle: the
-prescreen, the pool, the pilot, the arms, the probe and the select split. The evaluator, who holds the final bundle,
-runs these steps and returns only aggregate numbers:
+**Who runs what** (commands in [iteration-20-handoff.md](iteration-20-handoff.md)). The executing agent writes all
+the code (§10) and runs everything on the train bundle: the prescreen, the pool, the pilot, the arms, the probe, the
+select split and G5 (select twins). The evaluator holds the final bundle, runs these steps, and returns only aggregate
+numbers:
 - §4.5, the DEF-25 rebuild of the held-out corrupt_input pairs, and the refreeze (§10, item 4);
 - §10, item 8, `final_benchmark never-trained --archive archive --record` (it reads the benchmark texts);
-- §12, item 6, the fresh G2 held-out run at S = 16: the evaluator returns the power inputs (SEs, clone-failure rate),
-  not episodes;
-- §8, items 1 and 3: the internal held-out and the external runs, one look per submitted checkpoint.
+- §12, item 6, the fresh G2 and base held-out run at S = 16, and the held-out half of the clone check. The evaluator
+  returns the power inputs (SEs, clone-failure rate) and no episodes. The executor fixes k and the bars from them,
+  together with G5's clone check on select;
+- §8, items 1 and 3: the internal held-out runs for every arm, G5 re-run for the verdict, and the external runs for
+  A1, G2 and base. Every arm is submitted first, then the evaluator returns one combined table.
 
 Known contamination of this design, for the record: the headroom numbers in §1 (`u_checks`, check 1) and the evidence
 reward check were computed on it19a held-out episodes before the split existed. They shaped the method, so the
 internal held-out is not fully untouched for iteration 20. The bad-case reads of TB2 and ImpossibleBench episodes
 (docs/iteration-19-research/badcase-it19a2) were also in view during the design. A clean claim needs a benchmark
-nobody has read.
+nobody has read. Git history also holds held-out specifics committed before the split:
+data/def74/affected.jsonl (failing test names of held-out episodes; untracked 2026-11-04), data/spec_audit/
+(reviews and per-source pass rates of held-out sources, which `defective_sources()` needs), and the per-episode
+evidence in some docs/defects.md entries. The executor is told not to read them (handoff §A3, rule 3).
 
 **For the executing agent, read in this order:**
-1. This file. Sections 12 (checklist) and 10 (code) are the work list.
-2. [iteration-20-design.md](iteration-20-design.md) §2, the metric system adopted here.
-3. docs/training-log.md: the Latest section, the method notes, and the infrastructure incident table.
-4. docs/defects.md (DEF-25, 26, 35, 36, 37, 63, 66, 71, 74, 76, 77).
-5. docs/integrity-gate.md.
+1. [iteration-20-handoff.md](iteration-20-handoff.md): setup, the rules, what you may evaluate, how to submit.
+2. This file. Sections 12 (checklist) and 10 (code) are the work list.
+3. [iteration-20-design.md](iteration-20-design.md) §2, the metric system adopted here.
+4. docs/training-log.md: the Latest section, the method notes, and the infrastructure incident table.
+5. docs/defects.md (DEF-25, 26, 35, 36, 37, 63, 66, 71, 74, 76, 77).
+6. docs/integrity-gate.md.
 
 Nothing here has run. Pre-register and get the owner's approval before any training (§12, item 8).
 
@@ -173,7 +180,7 @@ T dominates the pooled P ∪ T, so macro U (equal weight on P and T) is reported
 
 ### 3.4 Estimator, significance and power
 
-- **Estimator:** `analysis.power.paired_estimate` as implemented (src/honest_agents/analysis/power.py, lines 661-669).
+- **Estimator:** `analysis.power.paired_estimate` as implemented (src/honest_agents/analysis/power.py, `paired_estimate`, line 687 at `c2fcb01`).
   - Units are variants.
   - The variance is two-way, source × pair, when the units carry `pair`; it is one-way by source otherwise.
   - df = min(sources, pairs) − 1.
@@ -635,7 +642,7 @@ falls" stop. Revisit-slope U is reported as a diagnostic only.
 | Data M1: power holds only with no interaction | both scenarios; S = 16 |
 | Data M2: significance rule disagreed with the code | the lower bound only; the `significant` flag not used |
 | Data M3: pool arithmetic and duplicates | 800 unique × 3 epochs; per-seed files |
-| Data M4: prescreen size, twins at S = 4 | about 25k episodes; S = 8 everywhere |
+| Data M4: prescreen size, twins at S = 4 | S = 8 everywhere; about 38.5k episodes (§4.3; the grill's first estimate, 25k, predates the surface rows) |
 | Data M5: build-fault twins in held-out T | frozen voids (§3.3) |
 | Data M6: N depends on the snapshotter; twins-only rebuild | both members rebuilt; driver pinned; N in H3 only |
 | Data M7: guard clone failure; stale G5 baseline | fresh G2 on select; G5 at S = 4 with +6; joint clone check ≤ 0.10 |
