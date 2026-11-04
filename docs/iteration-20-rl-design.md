@@ -16,12 +16,13 @@ Supporting analyses:
 
 **Getting the data (do this first).** `data/` and `runs/` are gitignored, so a clone has only the code, the configs,
 the docs, the frozen benchmark files and `data/spec_audit/`. Everything else is in a private Hugging Face dataset
-bundle. Ask the owner for its id and a read token. Then:
+bundle, `restraint-lab/restraint-data`, readable by members of the `restraint-lab` organization. Ask the owner to
+add your Hugging Face account to the organization with the read role, then log in with a read token of your own:
 
 ```bash
 uv sync --frozen --extra train --extra eval
-hf auth login                                    # the token from the owner
-env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.data_bundle fetch --repo <owner>/restraint-data
+hf auth login                                    # your own token; never the owner's
+env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.data_bundle fetch --repo restraint-lab/restraint-data
 ```
 
 `fetch` downloads, verifies the sha256 of every part and every file against `MANIFEST.json`, keeps mtimes (DEF-25
