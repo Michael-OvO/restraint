@@ -534,3 +534,11 @@ def test_abstentionbench_run_with_fake_endpoints(tmp_path):
 def _write(p: Path, text: str) -> Path:
     p.write_text(text)
     return p
+
+
+def test_run_eval_refuses_a_split_whose_task_dirs_are_missing(tmp_path):
+    split = tmp_path / "heldout.jsonl"
+    split.write_text(json.dumps({"task_dir": "tasks/absent__feasible"}) + "\n")
+    with pytest.raises(SystemExit, match="evaluator"):
+        run_eval.main(["--split", str(split), "--model", "policy", "--out", str(tmp_path / "out")])
+    assert not (tmp_path / "out/episodes.jsonl").exists()

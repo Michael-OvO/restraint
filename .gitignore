@@ -8,6 +8,7 @@ runs/
 data/
 wandb/
 benchmarks/
+archive/
 .DS_Store
 .mypy_cache/
 .coverage

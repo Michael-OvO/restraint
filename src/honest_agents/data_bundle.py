@@ -15,13 +15,16 @@ sha256 of every file inside it. `fetch` verifies both before it writes anything 
 Two splits, so that a method can be trained by someone who cannot see the final benchmark.
 - `train` (for the executor): `tasks` (data/tasks), `decision` (data/decision), `weights` (the SFT-v2 and G2 adapters
   G2 is merged from), `data` (the rest of data/ except data/rts, which no iteration-20 step reads), `runs` (the select
-  runs the iteration-20 analyses read) and, with `--archive`, `archive` (the archived analyses and runs the design
-  cites) and `builds` (every archived training build `final_benchmark never-trained` scans), both under `archive/`.
-  Every file whose path names a held-out source (data/test_ids.txt) is left out, whatever part it would be in.
+  runs and G2's it17 training-pool bank with its DEF-74 re-grade) and, with `--archive`, `archive` (the design's
+  analyses and every archived eval run on train, select, probe or surface tasks) and `builds` (every archived training
+  build `final_benchmark never-trained` scans), both under `archive/`. Every file whose path names a held-out source
+  (data/test_ids.txt) is left out, whatever part it would be in.
 - `final` (for the evaluator only): exactly those held-out files (the test-split task dirs and their audit seeds),
-  the held-out result runs (DEF-74 re-grade, it19a, it19a2) and, with `--archive`, the pinned benchmark downloads and
-  texts `final_benchmark check --archive` and `never-trained --archive` read, plus the analyses made on held-out
-  episodes. Restored over a `train` checkout it clashes with nothing; the two together are the full data.
+  the held-out runs (every archived eval run whose episodes name a held-out source: the iteration-2 test baseline, the
+  iteration-12 transfer runs, it19a, it19a2, the DEF-74 re-grade of it19a) and, with `--archive`, the pinned benchmark
+  downloads and texts `final_benchmark check --archive` and `never-trained --archive` read, plus the analysis made on
+  held-out episodes. Restored over a `train` checkout it shares no file; the two together are the full data. The Harbor
+  job dirs (TB2 and ImpossibleBench trials) are in neither.
 The held-out ids and prompts themselves (data/test_ids.txt, data/test.jsonl, data/benchmarks/) stay in `train`: the
 legality rule needs them, and data/benchmarks/internal_heldout.jsonl is tracked in git anyway. What `final` withholds
 is the environments and hidden tests, and every episode run on them.
@@ -30,8 +33,10 @@ is the environments and hidden tests, and every episode run on them.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
+import re
 import sys
 import tarfile
 from collections.abc import Sequence
@@ -44,11 +49,17 @@ MANIFEST = "MANIFEST.json"
 EXCLUDED_DATA = ("data/rts",)  # benchmark-scale data no iteration-20 step reads (2.5 GB)
 HELD_OUT_IDS = "data/test_ids.txt"  # the held-out sources (split groups); the final benchmark's internal side
 WEIGHTS = ("data/weights/it14/sft-v2-e3-final", "data/weights/it15/g2-s1-final")
-FINAL_DATA = ("data/def74",)  # the DEF-74 re-grade of held-out episodes
+# data/def74 and runs/def74 hold the DEF-74 re-grade of two banks: G2's it17 training-pool rollouts (train) and the
+# it19a held-out runs (final). affected.jsonl lists both, so it goes to final.
+TRAIN_DATA = ("data/def74/sources/it17_rollouts_feasible",)
+FINAL_DATA = (
+    "data/def74/affected.jsonl",
+    "data/def74/sources/it19a_base_heldout",
+    "data/def74/sources/it19a_g2_heldout",
+)
 # Archive paths (relative to the archive root) that docs/iteration-20-*.md cite; restored under archive/.
 TRAIN_ARCHIVE = (
     "staging/analysis/it20_design",
-    "staging/runs/eval/it19c_ablation_select",
     "staging/outputs/it19/it19-crgrpo-ablation-r2/train_log.jsonl",
     "staging/outputs/it19/it19-crgrpo-ablation-r2/crgrpo_state.jsonl",
     "staging/outputs/it19/it19-crgrpo-ablation-r2/completions",
@@ -59,13 +70,32 @@ FINAL_ARCHIVE = (
     "benchmarks",  # the pinned ImpossibleBench and MASK downloads (final_benchmark.ARCHIVE_IB, ARCHIVE_MASK)
     "2026-10-06-node1/repo-files/benchmarks",  # final_benchmark.ARCHIVE_TEXTS
     "staging/analysis/evidence_reward_offline_check",  # run on it19a held-out episodes
-    "staging/runs/final/it19a2",
+    "staging/runs/final",
     "staging/runs/harbor/it19a2_g2_tb2_def76_invalid",
-    "iterations/19-it19a-baseline",
+    "iterations/19-it19a-baseline",  # its two sanity runs (train tasks) go to train: see `parts`
 )
+# Archived eval runs, each sorted by its contents (`archived_runs`): one that ran any held-out source goes to final.
+# The Harbor job dirs (staging/runs/harbor, 1.2 GB of TB2 / ImpossibleBench trials) are in neither bundle.
+ARCHIVE_RUNS = ("iterations/*/eval/*", "staging/runs/eval/*", "staging/runs/def74/*", "staging/runs/it1[0-9]/*")
 # Result runs kept in this checkout's runs/ (gitignored); restored in place.
-TRAIN_RUNS = ("runs/eval/it19c_g2_select", "runs/eval/it19c_method_c5_select", "runs/eval/it19c_ablation_select")
-FINAL_RUNS = ("runs/def74", "runs/final/it19a2")
+TRAIN_RUNS = (
+    "runs/eval/it19c_g2_select",
+    "runs/eval/it19c_method_c5_select",
+    "runs/eval/it19c_ablation_select",
+    "runs/def74/it17_rollouts_feasible",
+    "runs/def74/regrade_it17_rollouts_feasible.jsonl",
+    "runs/def74/regrade_it17_rollouts_feasible.summary.json",
+)
+FINAL_RUNS = (
+    "runs/def74/it19a_base_heldout",
+    "runs/def74/it19a_g2_heldout",
+    "runs/def74/regrade_it19a_base_heldout.jsonl",
+    "runs/def74/regrade_it19a_base_heldout.summary.json",
+    "runs/def74/regrade_it19a_g2_heldout.jsonl",
+    "runs/def74/regrade_it19a_g2_heldout.summary.json",
+    "runs/final/it19a2",
+)
+_TASK_HASH = re.compile(r"task_\d+_[0-9a-f]{8}")
 Split = Literal["train", "final"]
 
 
@@ -129,34 +159,68 @@ def archived_builds(archive: Path) -> tuple[str, ...]:
                          if p.is_relative_to(archive)}))  # fmt: skip
 
 
-def parts(repo: Path = REPO, archive: Path | None = None, split: Split = "train") -> list[Part]:
+def _mentions_held_out(path: Path, hashes: frozenset[str]) -> bool:
+    """Whether a run (file or dir) ran a held-out source: any task hash in its episodes (or, without an episodes file,
+    in any of its files) is a held-out one."""
+    if path.is_file():
+        files = [path]
+    else:
+        files = sorted(path.glob("episodes.jsonl*")) or sorted(f for f in path.rglob("*") if f.is_file())
+    for f in files:
+        opener = gzip.open if f.suffix == ".gz" else open
+        try:
+            with opener(f, "rt", errors="replace") as fh:
+                if any(m in hashes for line in fh for m in _TASK_HASH.findall(line)):
+                    return True
+        except (OSError, EOFError):  # a binary file (an adapter, a parquet) names no task
+            continue
+    return False
+
+
+def archived_runs(archive: Path, sources: frozenset[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The archived eval runs (`ARCHIVE_RUNS`), split by contents: (train, final)."""
+    hashes = frozenset(s.rsplit("/", 1)[-1] for s in sources)
+    train: list[str] = []
+    final: list[str] = []
+    for pattern in ARCHIVE_RUNS:
+        for p in sorted(archive.glob(pattern)):
+            (final if _mentions_held_out(p, hashes) else train).append(str(p.relative_to(archive)))
+    return tuple(train), tuple(final)
+
+
+def parts(repo: Path = REPO, archive: Path | None = None, split: Split = "train",
+          sources: frozenset[str] = frozenset()) -> list[Part]:  # fmt: skip
     data_rest = tuple(sorted(
         str(p.relative_to(repo))
         for p in (repo / "data").iterdir()
-        if str(p.relative_to(repo)) not in ("data/tasks", "data/decision", "data/weights", *EXCLUDED_DATA, *FINAL_DATA)
+        if str(p.relative_to(repo)) not in ("data/tasks", "data/decision", "data/weights", "data/def74", *EXCLUDED_DATA)
     ))  # fmt: skip
+    present = lambda paths, base=repo: tuple(r for r in paths if (base / r).exists())
+    train_repo = ("data/tasks", "data/decision", *WEIGHTS, *data_rest, *present(TRAIN_DATA), *present(TRAIN_RUNS))
+    if archive is not None:
+        builds = archived_builds(archive)
+        runs_train, runs_final = archived_runs(archive, sources)
+        train_archive = (*TRAIN_ARCHIVE, *runs_train)
     if split == "train":
         out = [
             Part("tasks", ("data/tasks",), repo, keep="train"),
             Part("decision", ("data/decision",), repo, keep="train"),
             Part("weights", WEIGHTS, repo, keep="train"),
-            Part("data", data_rest, repo, keep="train"),
+            Part("data", (*data_rest, *present(TRAIN_DATA)), repo, keep="train"),
+            Part("runs", present(TRAIN_RUNS), repo, keep="train"),
         ]
-        if runs := tuple(r for r in TRAIN_RUNS if (repo / r).exists()):
-            out.append(Part("runs", runs, repo, keep="train"))
         if archive is not None:
-            out.append(Part("archive", TRAIN_ARCHIVE, archive, prefix="archive", keep="train"))
-            out.append(Part("builds", archived_builds(archive), archive, prefix="archive", keep="train"))
+            out.append(Part("archive", train_archive, archive, prefix="archive", keep="train", exclude=builds))
+            out.append(Part("builds", builds, archive, prefix="archive", keep="train"))
         return out
-    train_roots = ("data/tasks", "data/decision", *data_rest, *(r for r in TRAIN_RUNS if (repo / r).exists()))
-    out = [Part("held_out", train_roots, repo, keep="held_out"), Part("data", FINAL_DATA, repo)]
-    if runs := tuple(r for r in FINAL_RUNS if (repo / r).exists()):
-        out.append(Part("runs", runs, repo))
+    out = [
+        Part("held_out", train_repo, repo, keep="held_out"),  # files of the train roots that name a held-out source
+        Part("data", present(FINAL_DATA), repo),
+        Part("runs", present(FINAL_RUNS), repo),
+    ]
     if archive is not None:
-        out.append(Part("archive", FINAL_ARCHIVE, archive, prefix="archive"))
-        # files of the train archive roots that name a held-out source belong here
-        out.append(Part("archive_held_out", (*TRAIN_ARCHIVE, *archived_builds(archive)), archive, prefix="archive",
-                        keep="held_out"))  # fmt: skip
+        out.append(Part("archive", (*FINAL_ARCHIVE, *runs_final), archive, prefix="archive", exclude=runs_train))
+        out.append(Part("archive_held_out", (*train_archive, *builds), archive, prefix="archive", keep="held_out"))
     return out
 
 
@@ -172,7 +236,7 @@ def pack(out_dir: Path, repo: Path = REPO, archive: Path | None = None, split: S
     sources = held_out_sources(repo)
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict = {"format": 1, "split": split, "parts": {}}
-    for part in parts(repo, archive, split):
+    for part in parts(repo, archive, split, sources):
         files = part_files(part, sources)
         if not files:
             continue
@@ -215,21 +279,33 @@ def verify(bundle: Path) -> list[str]:
 
 
 def restore(bundle: Path, dest: Path, *, force: bool = False) -> int:
-    """Extract every part into `dest` after `verify`; returns the number of files written. Refuses to overwrite an
-    existing file unless `force`; keeps mtimes."""
+    """Extract every part into `dest` after `verify`; returns the number of files written. A file that already exists
+    with the same bytes is left alone (a fresh clone tracks some of data/ in git); one with different bytes is a clash,
+    and any clash refuses the whole restore before anything is written, unless `force`. Keeps mtimes."""
     problems = verify(bundle)
     if problems:
         raise ValueError("bundle failed verification: " + "; ".join(problems[:5]))
     manifest = json.loads((bundle / MANIFEST).read_text())
-    written = 0
+    todo: list[tuple[Path, dict, set[str]]] = []
+    clashes: list[Path] = []
     for info in manifest["parts"].values():
         root = dest / info["prefix"] if info["prefix"] else dest
-        clashes = [a for a in info["files"] if (root / a).exists()]
-        if clashes and not force:
-            raise FileExistsError(f"{len(clashes)} file(s) already exist, e.g. {root / clashes[0]}; use --force")
+        same = set()
+        for arc, want in info["files"].items():
+            if (root / arc).exists():
+                if sha256_file(root / arc) == want:
+                    same.add(arc)
+                else:
+                    clashes.append(root / arc)
+        todo.append((root, info, same))
+    if clashes and not force:
+        raise FileExistsError(f"{len(clashes)} file(s) exist with different contents, e.g. {clashes[0]}; use --force")
+    written = 0
+    for root, info, same in todo:
         with tarfile.open(bundle / info["archive"], "r:gz") as tar:
-            tar.extractall(root, members=[m for m in tar.getmembers() if m.isfile()], filter="tar")
-        written += len(info["files"])
+            members = [m for m in tar.getmembers() if m.isfile() and m.name not in same]
+            tar.extractall(root, members=members, filter="tar")
+        written += len(members)
     return written
 
 

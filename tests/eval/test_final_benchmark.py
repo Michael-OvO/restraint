@@ -646,3 +646,8 @@ def test_a_commit_check_build_is_in_the_never_trained_scope(tmp_path):
         "repo:data/commit_checks/builds/x/dpo_pairs.jsonl",
     }
     assert fb.never_trained(builds, fb.load_index())["verdict"] == "fail"
+
+
+def test_never_trained_without_the_benchmark_texts_points_at_the_final_bundle(tmp_path, capsys):
+    assert fb.main(["never-trained", "--archive", str(tmp_path)]) == 2
+    assert "evaluator's bundle" in capsys.readouterr().out

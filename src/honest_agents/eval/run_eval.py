@@ -582,6 +582,11 @@ def evaluate(args: argparse.Namespace) -> dict:
     rollout_cfg, reward_cfg, budget = resolve_configs(args)
     proto = _protocol(args, out if args.resume else None)  # a resumed run keeps the protocol it started under
     tasks = load_split(args.split)[: args.limit]
+    if missing := [t.task_dir for t in tasks if not (Path(t.task_dir) / "task.toml").is_file()]:
+        raise SystemExit(
+            f"{len(missing)} of {len(tasks)} task dirs in {args.split} are missing, e.g. {missing[0]}. The held-out "
+            "task dirs are not in the train bundle: only the evaluator holds them (data_bundle --split final)."
+        )
     n_skipped_infeasible = 0
     if rollout_cfg.forced_attempt:
         # Capability is measured on the feasible tasks (plain and controls) only: requiring completion of an

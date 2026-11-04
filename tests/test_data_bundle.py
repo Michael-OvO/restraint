@@ -20,7 +20,7 @@ TRAIN_FILES = {
     "data/weights/it15/g2-s1-final/adapter_config.json": "{}",
     "data/split_seeds.json": "{}",
     "data/spec_audit/reviews.jsonl": "{}\n",
-    "data/test_ids.txt": "# held-out sources\net/task_9\n",
+    "data/test_ids.txt": "# held-out sources\net/task_9\net/task_000000_0000aaaa\n",
 }
 HELD_OUT_FILES = {
     "data/tasks/et__task_9__feasible/task.toml": "held",
@@ -94,7 +94,7 @@ def test_a_tampered_part_or_member_fails_verification(tmp_path):
     assert any("tasks" in p for p in db.verify(bundle))
 
 
-def test_restore_refuses_to_overwrite_without_force(tmp_path):
+def test_restore_refuses_to_overwrite_a_different_file_without_force_and_writes_nothing(tmp_path):
     src, bundle, dest = tmp_path / "src", tmp_path / "bundle", tmp_path / "dest"
     make_repo(src)
     db.pack(bundle, repo=src)
@@ -102,7 +102,17 @@ def test_restore_refuses_to_overwrite_without_force(tmp_path):
     (dest / "data/split_seeds.json").write_text("local")
     with pytest.raises(FileExistsError):
         db.restore(bundle, dest)
+    assert not (dest / "data/tasks").exists()  # refused before any part was extracted
     assert db.restore(bundle, dest, force=True) == len(TRAIN_FILES)
+
+
+def test_restore_into_a_fresh_clone_skips_files_git_already_has(tmp_path):
+    src, bundle, dest = tmp_path / "src", tmp_path / "bundle", tmp_path / "dest"
+    make_repo(src)
+    db.pack(bundle, repo=src)
+    (dest / "data/spec_audit").mkdir(parents=True)
+    (dest / "data/spec_audit/reviews.jsonl").write_text("{}\n")  # tracked in git, same bytes
+    assert db.restore(bundle, dest) == len(TRAIN_FILES) - 1
 
 
 def test_archive_parts_split_by_root_and_restore_under_archive(tmp_path, monkeypatch):
@@ -115,6 +125,11 @@ def test_archive_parts_split_by_root_and_restore_under_archive(tmp_path, monkeyp
     (arch / "staging/analysis/it20_design/et__task_9__feasible.json").write_text("held")
     (arch / "iterations/x/run/r").mkdir(parents=True)
     (arch / "iterations/x/run/r/examples.jsonl").write_text("{}\n")
+    for run, task in (("select_run", "task_000000_0000bbbb"), ("heldout_run", "task_000000_0000aaaa")):
+        (arch / "iterations/x/eval" / run).mkdir(parents=True)
+        (arch / "iterations/x/eval" / run / "episodes.jsonl").write_text(
+            json.dumps({"variant_id": f"et/{task}"}) + "\n"
+        )
     db.pack(tmp_path / "train", repo=src, archive=arch, split="train")
     db.pack(tmp_path / "final", repo=src, archive=arch, split="final")
     db.restore(tmp_path / "train", dest)
@@ -122,6 +137,9 @@ def test_archive_parts_split_by_root_and_restore_under_archive(tmp_path, monkeyp
     assert (dest / "archive/iterations/x/run/r/examples.jsonl").is_file()
     assert not (dest / "archive/benchmarks").exists()
     assert not (dest / "archive/staging/analysis/it20_design/et__task_9__feasible.json").exists()
+    assert (dest / "archive/iterations/x/eval/select_run/episodes.jsonl").is_file()
+    assert not (dest / "archive/iterations/x/eval/heldout_run").exists()  # its episodes name a held-out source
     db.restore(tmp_path / "final", dest)
+    assert (dest / "archive/iterations/x/eval/heldout_run/episodes.jsonl").is_file()
     assert (dest / "archive/benchmarks/f.txt").read_text() == "benchmarks"
     assert (dest / "archive/staging/analysis/it20_design/et__task_9__feasible.json").read_text() == "held"

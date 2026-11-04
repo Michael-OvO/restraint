@@ -1064,7 +1064,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 print("refusing --record: the recorded scope would miss them (DEF-57)")
                 return 2
-        idx = load_index(archive=archive, manifest=manifest)
+        try:
+            idx = load_index(archive=archive, manifest=manifest)
+        except FileNotFoundError as e:
+            print(f"{e.filename}: missing. The benchmark texts are in the evaluator's bundle (data_bundle --split "
+                  "final); without it, run never-trained without --archive (item ids only).")  # fmt: skip
+            return 2
         report = never_trained(builds, idx)
         if args.out:
             Path(args.out).write_text(json.dumps(report, indent=2))
