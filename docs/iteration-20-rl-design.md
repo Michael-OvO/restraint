@@ -15,32 +15,63 @@ Supporting analyses:
   CLI in §10, item 10, before they are relied on.
 
 **Getting the data (do this first).** `data/` and `runs/` are gitignored, so a clone has only the code, the configs,
-the docs, the frozen benchmark files and `data/spec_audit/`. Everything else is in a private Hugging Face dataset
-bundle, `restraint-lab/restraint-data`, readable by members of the `restraint-lab` organization. Ask the owner to
-add your Hugging Face account to the organization with the read role, then log in with a read token of your own:
+the docs, the frozen benchmark files and `data/spec_audit/`. The rest is in two private Hugging Face dataset bundles,
+split so that the agent that trains cannot see the final benchmark:
+
+| bundle | who reads it | contents |
+|---|---|---|
+| `restraint-lab/restraint-train` | the executing agent (read member of the `restraint-lab` org) | everything except the held-out files |
+| `michaelwja/restraint-final-benchmark` | the evaluator only (the owner's account; not in the org) | the held-out files and the benchmark downloads |
+
+Ask the owner to add your Hugging Face account to `restraint-lab` with the read role, then log in with a read token
+of your own:
 
 ```bash
 uv sync --frozen --extra train --extra eval
 hf auth login                                    # your own token; never the owner's
-env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.data_bundle fetch --repo restraint-lab/restraint-data
+env -u VIRTUAL_ENV uv run --frozen --extra train python -m honest_agents.data_bundle fetch --repo restraint-lab/restraint-train
 ```
 
 `fetch` downloads, verifies the sha256 of every part and every file against `MANIFEST.json`, keeps mtimes (DEF-25
-depends on them) and refuses to overwrite existing files.
+depends on them) and refuses to overwrite existing files. The evaluator fetches both bundles into the same checkout;
+they share no file, and together they are the full data.
 
-| part | contents | restored to |
-|---|---|---|
-| tasks | data/tasks (8,904 task dirs) | data/tasks |
-| decision | surface tasks and decision data | data/decision |
-| weights | the SFT-v2 and G2 LoRA adapters (G2 = Qwen/Qwen3.5-4B + both, `sft.merge`) | data/weights/it14, data/weights/it15 |
-| data | the rest of data/ (splits, split_seeds, validation, probes, pools, banks, ImpossibleBench, def74) except data/rts | data/ |
-| runs | runs/def74 (DEF-74 re-graded runs), the it19c select runs, runs/final/it19a2 | runs/ |
-| archive | the analyses this design cites (u_checks, legal pool, power, evidence check), a2/it19c results, the it19a baseline archive | archive/ |
+| bundle | part | contents | restored to |
+|---|---|---|---|
+| train | tasks | data/tasks without the held-out sources (6,857 of 8,904 task dirs) | data/tasks |
+| train | decision | surface tasks and decision data | data/decision |
+| train | weights | the SFT-v2 and G2 LoRA adapters (G2 = Qwen/Qwen3.5-4B + both, `sft.merge`) | data/weights/it14, data/weights/it15 |
+| train | data | the rest of data/ (splits, split_seeds, validation, probes, pools, banks) except data/rts and data/def74 | data/ |
+| train | runs | the it19c select runs | runs/ |
+| train | archive | the it20 design analyses (u_checks, legal pool, power), the it19c ablation | archive/ |
+| train | builds | every archived training build `never-trained` scans (629 files) | archive/ |
+| final | held_out | the 2,047 held-out task dirs and their audit seeds (environments and hidden tests) | data/ |
+| final | data, runs | the DEF-74 re-grade, runs/final/it19a2 | data/def74, runs/ |
+| final | archive | the pinned ImpossibleBench and MASK downloads, the benchmark texts, the it19a baseline and a2 archives, the evidence check (run on held-out episodes) | archive/ |
+
+The held-out ids and prompts (data/test_ids.txt, data/test.jsonl, data/benchmarks/) stay in the train bundle: the
+legality rule needs them, and the prompts are tracked in git anyway. What the split withholds is the environments, the
+hidden tests and every episode run on them.
 
 Paths in this design of the form `~/Documents/honest-agents-archive/<x>` are `archive/<x>` after `fetch`. The
 scratchpad paths of the design session are under `archive/staging/analysis/`. Qwen/Qwen3.5-4B itself comes from the Hub
 at the revision pinned in the code (DEF-51). TB2 and ImpossibleBench images come from their registries. The
 spec-audit reviews are tracked in git: `defective_sources()` refuses to run without them (DEF-79).
+
+**Who runs what.** The executing agent writes all the code (§10) and runs everything on the train bundle: the
+prescreen, the pool, the pilot, the arms, the probe and the select split. The evaluator, who holds the final bundle,
+runs these steps and returns only aggregate numbers:
+- §4.5, the DEF-25 rebuild of the held-out corrupt_input pairs, and the refreeze (§10, item 4);
+- §10, item 8, `final_benchmark never-trained --archive archive --record` (it reads the benchmark texts);
+- §12, item 6, the fresh G2 held-out run at S = 16: the evaluator returns the power inputs (SEs, clone-failure rate),
+  not episodes;
+- §8, items 1 and 3: the internal held-out and the external runs, one look per submitted checkpoint.
+
+Known contamination of this design, for the record: the headroom numbers in §1 (`u_checks`, check 1) and the evidence
+reward check were computed on it19a held-out episodes before the split existed. They shaped the method, so the
+internal held-out is not fully untouched for iteration 20. The bad-case reads of TB2 and ImpossibleBench episodes
+(docs/iteration-19-research/badcase-it19a2) were also in view during the design. A clean claim needs a benchmark
+nobody has read.
 
 **For the executing agent, read in this order:**
 1. This file. Sections 12 (checklist) and 10 (code) are the work list.
@@ -508,7 +539,8 @@ falls" stop. Revisit-slope U is reported as a diagnostic only.
    - globs for `data/train_rl_v5_s*.jsonl` (already matched) and `runs/eval/it20_prescreen_*/episodes.jsonl` (files, not
      directories);
    - archive entries;
-   - `final_benchmark never-trained --archive ~/Documents/honest-agents-archive --record` exits 0;
+   - `final_benchmark never-trained --archive archive --record` exits 0 (the evaluator runs it: it needs the final
+     bundle);
    - plus a **source-level** check: no held-out or select source and no N or C family in the pool. The never-trained
      check matches exact variant ids only.
 9. **Configs:**
