@@ -53,6 +53,7 @@ WEIGHTS = ("data/weights/it14/sft-v2-e3-final", "data/weights/it15/g2-s1-final")
 # it19a held-out runs (final). affected.jsonl lists both, so it goes to final.
 TRAIN_DATA = ("data/def74/sources/it17_rollouts_feasible",)
 FINAL_DATA = (
+    "data/ext",  # the pinned ImpossibleBench copy the evaluation chains materialize from
     "data/def74/affected.jsonl",
     "data/def74/sources/it19a_base_heldout",
     "data/def74/sources/it19a_g2_heldout",
@@ -193,7 +194,7 @@ def parts(repo: Path = REPO, archive: Path | None = None, split: Split = "train"
     data_rest = tuple(sorted(
         str(p.relative_to(repo))
         for p in (repo / "data").iterdir()
-        if str(p.relative_to(repo)) not in ("data/tasks", "data/decision", "data/weights", "data/def74", *EXCLUDED_DATA)
+        if str(p.relative_to(repo)) not in ("data/tasks", "data/decision", "data/weights", "data/def74", "data/ext", *EXCLUDED_DATA)
     ))  # fmt: skip
     present = lambda paths, base=repo: tuple(r for r in paths if (base / r).exists())
     train_repo = ("data/tasks", "data/decision", *WEIGHTS, *data_rest, *present(TRAIN_DATA), *present(TRAIN_RUNS))
@@ -329,6 +330,62 @@ def fetch(repo_id: str, dest: Path, *, force: bool = False, staging: Path | None
     return restore(local, dest, force=force)
 
 
+NODE_ROOT = "/root/restraint"  # the checkout path every split file's `task_dir` was written with (node.DEFAULT_DEST)
+PREFLIGHT_SPLITS = ("data/select.jsonl", "data/probe_v1*.jsonl", "data/train_rl*.jsonl",
+                    "data/benchmarks/internal_heldout.jsonl")  # fmt: skip
+
+
+def preflight(repo: Path = REPO) -> tuple[list[str], list[str]]:
+    """Whether this checkout can run what its bundles hold: per split file, how many `task_dir`s resolve. Returns
+    (report lines, problems). The split files store absolute NODE_ROOT paths, so each row is also tried rebased onto
+    this checkout: a row found only that way means the checkout is in the wrong place, one found neither way means
+    missing data. A held-out row may be missing (a train-bundle checkout); any other missing row is a problem."""
+    sources = held_out_sources(repo)
+    lines: list[str] = []
+    problems: list[str] = []
+    held = {"present": 0, "missing": 0}
+    misplaced = 0
+    for pattern in PREFLIGHT_SPLITS:
+        for split in sorted(repo.glob(pattern)):
+            n = missing = 0
+            for line in split.read_text().splitlines():
+                if not line.strip():
+                    continue
+                td = Path(json.loads(line)["task_dir"])
+                td = td if td.is_absolute() else split.parent / td
+                ok = (td / "task.toml").is_file()
+                if (
+                    not ok
+                    and td.is_relative_to(NODE_ROOT)
+                    and (repo / td.relative_to(NODE_ROOT) / "task.toml").is_file()
+                ):
+                    misplaced += 1
+                    ok = True
+                if names_held_out(td.name, sources):
+                    held["present" if ok else "missing"] += 1
+                    continue
+                n += 1
+                missing += not ok
+            lines.append(f"{split.relative_to(repo)}: {n - missing} of {n} task dirs present (held-out rows aside)")
+            if missing:
+                problems.append(f"{split.relative_to(repo)}: {missing} of {n} non-held-out task dirs missing")
+    if misplaced:
+        problems.append(f"{misplaced} task dirs exist only under this checkout ({repo.resolve()}), and the split files "
+                        f"name them as {NODE_ROOT}/...: clone to {NODE_ROOT}, or `ln -s {repo.resolve()} {NODE_ROOT}`")  # fmt: skip
+    if held["present"] and held["missing"]:
+        problems.append(
+            f"held-out task dirs: {held['present']} present, {held['missing']} missing (partial final bundle)"
+        )
+    lines.append(
+        "held-out task dirs: "
+        + ("all present (evaluator checkout)" if not held["missing"] else "absent (train bundle only)")
+    )
+    for w in WEIGHTS:
+        if not (repo / w / "adapter_model.safetensors").is_file():
+            problems.append(f"{w}: adapter missing (train bundle, part weights)")
+    return lines, problems
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m honest_agents.data_bundle", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -347,7 +404,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     f.add_argument("--dest", type=Path, default=REPO)
     f.add_argument("--staging", type=Path, default=None, help="where the download is kept (default: the HF cache)")
     f.add_argument("--force", action="store_true", help="overwrite files that already exist")
+    c = sub.add_parser("preflight", help="check that this checkout's split files resolve (run after fetch)")
+    c.add_argument("--repo", type=Path, default=REPO)
     a = ap.parse_args(argv)
+    if a.cmd == "preflight":
+        lines, problems = preflight(a.repo)
+        print("\n".join([*lines, *(f"PROBLEM: {p}" for p in problems)] or ["ok"]))
+        return 1 if problems else 0
     if a.cmd == "pack":
         m = pack(a.out, archive=a.archive.expanduser() if a.archive else None, split=a.split)
         for name, info in m["parts"].items():

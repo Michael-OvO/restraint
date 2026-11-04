@@ -143,3 +143,32 @@ def test_archive_parts_split_by_root_and_restore_under_archive(tmp_path, monkeyp
     assert (dest / "archive/iterations/x/eval/heldout_run/episodes.jsonl").is_file()
     assert (dest / "archive/benchmarks/f.txt").read_text() == "benchmarks"
     assert (dest / "archive/staging/analysis/it20_design/et__task_9__feasible.json").read_text() == "held"
+
+
+def _split_repo(root: Path, node_root: Path) -> None:
+    make_repo(root)
+    rows = [{"task_dir": f"{node_root}/data/tasks/{d}"} for d in ("et__task_1__feasible", "et__task_9__feasible")]
+    (root / "data/select.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    for w in db.WEIGHTS:
+        (root / w / "adapter_model.safetensors").write_text("w")
+
+
+def test_preflight_passes_at_the_node_root_with_held_out_rows_absent(tmp_path, monkeypatch):
+    repo = tmp_path / "restraint"
+    monkeypatch.setattr(db, "NODE_ROOT", str(repo))
+    _split_repo(repo, repo)
+    for f in HELD_OUT_FILES:
+        (repo / f).unlink()  # a train-bundle checkout
+    lines, problems = db.preflight(repo)
+    assert problems == [] and "absent (train bundle only)" in lines[-1]
+
+
+def test_preflight_tells_a_misplaced_checkout_from_missing_data(tmp_path, monkeypatch):
+    repo = tmp_path / "elsewhere"
+    monkeypatch.setattr(db, "NODE_ROOT", str(tmp_path / "restraint"))
+    _split_repo(repo, tmp_path / "restraint")
+    _, problems = db.preflight(repo)
+    assert len(problems) == 1 and "ln -s" in problems[0]
+    (repo / "data/tasks/et__task_1__feasible/task.toml").unlink()
+    _, problems = db.preflight(repo)
+    assert any("data/select.jsonl: 1 of 1 non-held-out task dirs missing" in p for p in problems)
