@@ -46,9 +46,17 @@ Node so far: Vast.ai VM, 1x RTX PRO 6000 Blackwell 96 GB, 23 vCPU, 73 GB RAM, 19
   candidate exists.
 - **a2 done:** on ImpossibleBench G2 explains declines on impossible tasks far more than base (`flag_lenient` +32.2
   [+28.3, +36.1]); TB2 stays inconclusive (−2.0 [−6.3, +2.8]).
-- **Iteration 20 plan (draft, for an executing agent on a free cluster):** plain-U GRPO on the agent from G2, with
-  per-row twin weights for blind-policy neutrality, an 800-row pool × 3 epochs, 3 seeds plus 2 attribution arms, and
-  held-out U at S = 16 against a fresh G2 (`docs/iteration-20-rl-design.md`, revision 3, grilled three times).
+- **Iteration 20 plan (draft, revision 4 of 2026-11-10, for an executing agent on a free cluster; nothing has
+  run):** plain-U GRPO on the agent from G2, trained as a consensus of K workers whose LoRA adapters are averaged
+  every 10 steps (76,800 or 153,600 episodes into one policy, against revision 3's 19,200). The run length is fixed
+  before training by a gradient signal-to-noise audit at learning rate 0. Twins are balanced by the row mix (2-3
+  controls per twin, weights 0.83-1.0). New instruments: a 440-source dev benchmark from unused validation sources,
+  a learning-rate-0 baseline run, a bf16 expression test, and a no-training kill test for decision-point groups,
+  which join only as a gated arm. The held-out look is spent only if the dev confirmation set rejects first.
+  Revision 3 was grilled by six lenses (the four that gave a number put its chance of a significant held-out
+  result at 7-20 %); the judges put revision 4 at about 14 % on held-out, and the designer's bet for at least one
+  pre-registered positive result on unseen sources is about 45 %
+  (`docs/iteration-20-rl-design.md`; research in `docs/iteration-20-research/rev4/`).
 - **Pending:** the owner's approval of the iteration-20 prereg; the write-up (`docs/roadmap.md` step 6). The ledger had 75 entries, all closed or
   waived, at the it19c launch.
 
